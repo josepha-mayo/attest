@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import secrets
+import sqlite3
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -21,6 +22,7 @@ from . import ledger
 from .config import Settings
 from .config import settings as default_settings
 from .engine import VisitEngine
+from .inbox import WebhookInbox
 from .ledger import Signer
 from .media import MediaStore
 from .models import Receipt, Schedule, Site, VisitState, Worker, utcnow
@@ -50,6 +52,21 @@ def create_app(
         s.summarizer, tz=s.timezone, model_id=s.bedrock_model_id, region=s.aws_region
     )
     engine = VisitEngine(store, ring, signer, media, summarizer, s)
+    inbox = WebhookInbox(s.data_dir / "webhooks.sqlite3")
+
+    def process_webhook() -> bool:
+        job = inbox.claim()
+        if job is None:
+            return False
+        try:
+            ev = webhooks.parse(job["raw_body"], signing_key=s.ring_webhook_key, signature=job["signature"])
+            outcome = engine.ingest(ev)
+            rejected = outcome.ignored_reason not in (None, "duplicate request_id")
+            inbox.complete(job, "rejected" if rejected else "done")
+        except Exception as exc:
+            inbox.fail(job, type(exc).__name__)
+            log.warning("queued webhook processing failed: %s", type(exc).__name__)
+        return True
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -75,14 +92,36 @@ def create_app(
                     log.exception("history poll failed")
                 await asyncio.sleep(s.poll_history_seconds)
 
+        stopping = asyncio.Event()
+
+        async def webhook_worker():
+            while not stopping.is_set():
+                try:
+                    worked = await asyncio.to_thread(process_webhook)
+                except Exception as exc:
+                    log.warning("webhook inbox unavailable: %s", type(exc).__name__)
+                    worked = False
+                if not worked:
+                    try:
+                        await asyncio.wait_for(stopping.wait(), timeout=0.25)
+                    except TimeoutError:
+                        pass
+
+        worker_task = asyncio.create_task(webhook_worker())
         tasks = []
         if sweep_interval_s > 0:
             tasks.append(asyncio.create_task(sweeper()))
         if s.poll_history_seconds > 0:
             tasks.append(asyncio.create_task(history_poller()))
-        yield
-        for t in tasks:
-            t.cancel()
+        try:
+            yield
+        finally:
+            stopping.set()
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            await worker_task
+            inbox.close()
 
     basic = HTTPBasic(auto_error=False)
 
@@ -128,6 +167,7 @@ def create_app(
         signer,
     )
     app.state.settings, app.state.media = s, media
+    app.state.inbox = inbox
     tz = ZoneInfo(s.timezone)
 
     def render(request: Request, name: str, **ctx) -> HTMLResponse:
@@ -147,11 +187,17 @@ def create_app(
 
     @app.post("/webhooks/ring")
     async def ring_webhook(request: Request) -> JSONResponse:
+        if s.poll_history_seconds > 0:
+            return JSONResponse(
+                {"error": "history polling is enabled; webhook intake disabled"}, status_code=409
+            )
+        if s.ring_base_url == "https://api.amazonvision.com" and s.ring_webhook_key == "attest-dev-hmac-key":
+            return JSONResponse({"error": "configure the issued Ring webhook signing key"}, status_code=503)
         chunks = bytearray()
         async for chunk in request.stream():
-            chunks.extend(chunk)
-            if len(chunks) > 256 * 1024:
+            if len(chunks) + len(chunk) > 256 * 1024:
                 return JSONResponse({"error": "payload too large"}, status_code=413)
+            chunks.extend(chunk)
         raw = bytes(chunks)
         try:
             ev = webhooks.parse(
@@ -161,18 +207,20 @@ def create_app(
             )
         except webhooks.SignatureError:
             return JSONResponse({"error": "invalid signature"}, status_code=401)
-        except ValueError as exc:
-            return JSONResponse({"error": f"bad payload: {exc}"}, status_code=400)
-        outcome = await asyncio.to_thread(engine.ingest, ev)
-        return JSONResponse(
-            {
-                "status": "processed",
-                "event": ev.event_type,
-                "visit": outcome.visit.id if outcome.visit else None,
-                "transitions": outcome.transitions,
-                "ignored": outcome.ignored_reason,
-            }
-        )
+        except ValueError:
+            return JSONResponse({"error": "invalid webhook payload"}, status_code=400)
+        try:
+            added = await asyncio.to_thread(
+                inbox.enqueue,
+                f"{ev.meta.account_id}:{ev.request_id}",
+                raw,
+                request.headers[webhooks.SIGNATURE_HEADER],
+            )
+        except ValueError:
+            return JSONResponse({"error": "conflicting delivery identifier"}, status_code=409)
+        except (sqlite3.Error, OverflowError):
+            return JSONResponse({"error": "webhook inbox unavailable; retry delivery"}, status_code=503)
+        return JSONResponse({"status": "queued" if added else "already_received"}, status_code=202)
 
     # ------------------------------------------------------------------ worker check-in
 
@@ -316,6 +364,15 @@ def create_app(
     async def api_sweep(now: datetime | None = None):
         changed = await asyncio.to_thread(engine.sweep, now)
         return {"changed": [v.id for v in changed]}
+
+    @app.post("/api/process-webhooks")
+    async def api_process_webhook():
+        processed = await asyncio.to_thread(process_webhook)
+        return {"processed": processed, "queue": inbox.counts()}
+
+    @app.get("/api/webhook-queue")
+    async def api_webhook_queue():
+        return inbox.counts()
 
     @app.post("/api/poll")
     async def api_poll():

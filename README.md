@@ -17,7 +17,7 @@ Attest is an early prototype for the Amazon Developer Hackathon's Ring track. It
 ## Implemented
 
 - Ring Partner API client via the companion [ring-sandbox](https://github.com/josepha-mayo/ring-sandbox) project.
-- HMAC-verified webhook intake, with account-to-site checks.
+- HMAC-verified webhook intake persisted in a separate SQLite inbox before a `202` acknowledgement. A background worker verifies the signature again and processes events with account-to-site checks. Leases recover interrupted deliveries; failures back off and move to a failed state after five attempts. Intake is tested independently of slow visit transactions.
 - Event History polling with human-motion and doorbell results merged in chronological order. History-derived observations are labelled as history, not authenticated webhook deliveries.
 - One ingestion source is bound per site. Switching between history and webhooks is rejected pending reconciliation; their identifiers are not interchangeable and cross-source deduplication is not yet implemented.
 - Atomic event processing, check-in consumption, and receipt issuance in SQLite. Failed processing rolls back the consumed marker and database changes. Out-of-order events are retained for review instead of rewriting an existing signed record.
@@ -82,7 +82,7 @@ Tests include rejected authentication, expired/reused check-in links, concurrent
 
 ## Before deployment or submission
 
-- Replace slow synchronous webhook processing with durable intake and background enrichment to meet Ring's response deadline.
+- Load-test durable webhook intake against Ring's response deadline, add failed-delivery diagnostics/replay tooling, and implement inbox retention. `/api/webhook-queue` exposes authenticated queue counts; `/api/process-webhooks` processes one eligible delivery for local diagnostics.
 - Add a worker/coordinator review and correction workflow without rewriting signed evidence.
 - Coordinate replay clocks and distinguish every local scenario from live data in the demo.
 - Complete OAuth/consent lifecycle, retention/deletion, multi-user authorization, token refresh, and deployment secret management. Local HTTP Basic is a development access boundary, not a complete production identity system. Use HTTPS outside loopback.

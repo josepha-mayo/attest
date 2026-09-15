@@ -18,7 +18,9 @@ def api(settings, store, ring_client, household, schedule):
     app = create_app(settings, store=store, ring=ring_client, signer=Signer.ephemeral(), sweep_interval_s=0)
     with _client(app) as c:
         c.auth = ("admin", settings.admin_token.get_secret_value())
+        c.attest_state = app.state
         yield c
+    app.state.inbox.close()
 
 
 def _client(app):
@@ -50,7 +52,7 @@ def _post_hook(api, device_id, etype, at, sub=None, key=KEY):
     body = webhooks.encode(
         webhooks.build_event(event_type=etype, device_id=device_id, occurred_at=at, sub_type=sub)
     )
-    return api.post(
+    response = api.post(
         "/webhooks/ring",
         content=body,
         headers={
@@ -58,6 +60,9 @@ def _post_hook(api, device_id, etype, at, sub=None, key=KEY):
             webhooks.SIGNATURE_HEADER: webhooks.sign(key, body),
         },
     )
+    if response.status_code == 202:
+        assert api.post("/api/process-webhooks").status_code == 200
+    return response
 
 
 @pytest.mark.parametrize(
@@ -88,8 +93,8 @@ def test_webhook_to_receipt(api, store, household, schedule, t0):
     site, worker, cam, sensor = household
     t = t0 + timedelta(minutes=1)
     r = _post_hook(api, cam.id, "motion_detected", t, "human")
-    assert r.status_code == 200 and r.json()["transitions"] == ["opened"]
-    vid = r.json()["visit"]
+    assert r.status_code == 202 and r.json()["status"] == "queued"
+    vid = store.active_visit(site.id).id
 
     claim_path = api.post(f"/api/visits/{vid}/checkin-link").json()["path"]
     page = api.get(claim_path, auth=None)
@@ -102,7 +107,7 @@ def test_webhook_to_receipt(api, store, household, schedule, t0):
     _post_hook(api, sensor.id, "contact_sensor_faulted", leave)
     _post_hook(api, sensor.id, "contact_sensor_cleared", leave + timedelta(seconds=10))
     r = _post_hook(api, cam.id, "motion_detected", leave + timedelta(seconds=20), "human")
-    assert r.json()["transitions"] == ["closed"]
+    assert r.status_code == 202 and store.visit(vid).state == VisitState.CLOSED
 
     dash = api.get("/")
     assert dash.status_code == 200 and "Maria Chen" in dash.text and "chain intact" in dash.text
@@ -127,3 +132,92 @@ def test_webhook_to_receipt(api, store, household, schedule, t0):
     assert len(export.json()) == 1
     ok = api.post("/verify", data={"text": export.text})
     assert "chain intact" in ok.text
+
+
+def test_webhook_ack_does_not_wait_for_enrichment(api, household, t0, monkeypatch):
+    called = []
+    monkeypatch.setattr(api.attest_state.engine, "ingest", lambda ev: called.append(ev))
+    body = webhooks.encode(
+        webhooks.build_event(
+            event_type="button_press",
+            device_id=household[2].id,
+            occurred_at=t0,
+        )
+    )
+    response = api.post(
+        "/webhooks/ring",
+        content=body,
+        auth=None,
+        headers={
+            "Content-Type": "application/json",
+            webhooks.SIGNATURE_HEADER: webhooks.sign(KEY, body),
+        },
+    )
+    assert response.status_code == 202
+    assert called == []
+    assert api.get("/api/webhook-queue").json() == {"pending": 1}
+
+
+def test_invalid_delivery_never_enters_queue(api, household, t0):
+    response = _post_hook(api, household[2].id, "button_press", t0, key="invalid")
+    assert response.status_code == 401
+    assert api.get("/api/webhook-queue").json() == {}
+
+
+def test_intake_is_not_blocked_by_a_visit_transaction(api, store, household, t0):
+    from concurrent.futures import ThreadPoolExecutor
+
+    body = webhooks.encode(
+        webhooks.build_event(
+            event_type="button_press",
+            device_id=household[2].id,
+            occurred_at=t0,
+        )
+    )
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with store.transaction():
+            pending = pool.submit(
+                api.post,
+                "/webhooks/ring",
+                content=body,
+                auth=None,
+                headers={webhooks.SIGNATURE_HEADER: webhooks.sign(KEY, body)},
+            )
+            assert pending.result(timeout=2).status_code == 202
+
+
+def test_lifespan_worker_processes_a_durable_delivery(settings, store, ring_client, household, schedule, t0):
+    import time
+
+    from fastapi.testclient import TestClient
+
+    from attest.inbox import WebhookInbox
+
+    app = create_app(settings, store=store, ring=ring_client, signer=Signer.ephemeral(), sweep_interval_s=0)
+    body = webhooks.encode(
+        webhooks.build_event(
+            event_type="button_press",
+            device_id=household[2].id,
+            occurred_at=t0,
+        )
+    )
+    with TestClient(app) as client:
+        assert (
+            client.post(
+                "/webhooks/ring",
+                content=body,
+                headers={
+                    webhooks.SIGNATURE_HEADER: webhooks.sign(KEY, body),
+                },
+            ).status_code
+            == 202
+        )
+        deadline = time.monotonic() + 3
+        while app.state.inbox.counts().get("done") != 1 and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert app.state.inbox.counts() == {"done": 1}
+        assert store.active_visit(household[0].id) is not None
+    recovered = WebhookInbox(settings.data_dir / "webhooks.sqlite3")
+    assert recovered.counts() == {"done": 1}
+    assert recovered.claim() is None
+    recovered.close()

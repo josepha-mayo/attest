@@ -27,4 +27,4 @@ Windows requires tzdata for zoneinfo. aws-login credentials require botocore[crt
 
 ## Known follow-up work
 
-Durable webhook intake/background enrichment, coordinated replay clock, review/correction workflow, deployment authentication and OAuth lifecycle, media redirect validation, retention, dependency locking/CI, official integrations, product feedback, and the submission video remain unfinished. Current engine transactions serialize correctness but include slow external calls; do not claim the webhook deadline has been solved.
+Coordinated replay clock, review/correction workflow, deployment authentication and OAuth lifecycle, media redirect validation, retention, dependency locking/CI, official integrations, product feedback, and the submission video remain unfinished. Webhook intake now acknowledges a durable separate inbox before background processing. Tests verify restart recovery, leasing, retry limits, and separation from the visit transaction; official deadline/load validation and failed-delivery replay tooling remain pending.
