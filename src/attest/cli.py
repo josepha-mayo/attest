@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
+import time
 from datetime import UTC, datetime, timedelta
+from urllib.parse import urlsplit
 
 import httpx
 from ring_sandbox import RingClient
@@ -33,9 +36,13 @@ def _seed(args: argparse.Namespace) -> dict:
     """Create a site bound to the sandbox's doorbell + contact sensor, a worker, and a schedule
     whose window starts now (so the very next arrival cue opens a matched visit)."""
     with RingClient(settings.ring_access_token, base_url=args.ring_url) as ring:
-        bundles = ring.devices(include=["capabilities"])
+        bundles = ring.devices(include=["capabilities", "status"])
     cam = next((b for b in bundles if b.capabilities and b.capabilities.is_camera), None)
-    sensor = next((b for b in bundles if b.name.lower().endswith("sensor")), None)
+    sensor = next(
+        (b for b in bundles if b.status and b.status.attributes.contact_detection is not None), None
+    )
+    if getattr(args, "camera_only", False) or getattr(args, "scenario", None) == "camera_only_visit":
+        sensor = None
     if cam is None:
         sys.exit("no camera device visible with this token")
 
@@ -58,12 +65,22 @@ def _seed(args: argparse.Namespace) -> dict:
         agency="Evergreen Home Care",
         phone="+1 555 0199",
     )
-    now = datetime.now(tz=UTC)
+    if settings.admin_token is None:
+        sys.exit("Set ATTEST_ADMIN_TOKEN to authenticate to Attest.")
+    with httpx.Client(
+        base_url=args.public_url, auth=("admin", settings.admin_token.get_secret_value())
+    ) as api:
+        response = api.get("/api/clock")
+        response.raise_for_status()
+        clock = response.json()
+    if not clock["ready"]:
+        sys.exit("Start the replay clock first, or use attest replay with a fresh runtime.")
+    now = datetime.fromisoformat(clock["now"])
     # Replayed scenarios are back-dated by their length + 60s, so open the window well before now.
     schedule = Schedule(
         site_id=site.id,
         worker_id=worker.id,
-        window_start=now - timedelta(hours=3),
+        window_start=now - (timedelta(minutes=5) if clock["mode"] == "replay" else timedelta(hours=3)),
         window_end=now + timedelta(minutes=args.window_minutes),
         expected_minutes=args.expected_minutes,
         service="Morning care visit",
@@ -113,6 +130,127 @@ def _demo(args: argparse.Namespace) -> None:
     )
 
 
+def _replay(args: argparse.Namespace) -> None:
+    from ring_sandbox import webhooks
+    from ring_sandbox.scenarios import BUILTIN
+
+    if not settings.admin_token or not math.isfinite(args.speed) or args.speed <= 0:
+        sys.exit("Replay requires admin authentication and a finite positive speed.")
+    for address in (args.ring_url, args.public_url):
+        parsed = urlsplit(address)
+        if (
+            parsed.scheme != "http"
+            or parsed.hostname not in ("127.0.0.1", "localhost", "::1")
+            or parsed.username
+            or parsed.password
+        ):
+            sys.exit("Replay only targets local HTTP services, never real Ring devices.")
+    scenario = BUILTIN[args.scenario]
+    with (
+        httpx.Client(
+            base_url=args.public_url, timeout=60, auth=("admin", settings.admin_token.get_secret_value())
+        ) as api,
+        httpx.Client(base_url=args.ring_url, timeout=10) as sandbox,
+    ):
+        deadline = time.monotonic() + 10
+        while True:
+            try:
+                clock_response = api.get("/api/clock")
+                sandbox.get("/_sandbox/health").raise_for_status()
+                break
+            except httpx.ConnectError:
+                if time.monotonic() >= deadline:
+                    sys.exit("Start the local Attest and emulator servers before replaying.")
+                time.sleep(0.1)
+        clock_response.raise_for_status()
+        clock = clock_response.json()
+        if clock["mode"] != "replay" or api.get("/api/state").json()["sites"]:
+            sys.exit("Start Attest with ATTEST_REPLAY_MODE=true and a fresh private data directory.")
+        if not clock["ready"]:
+            response = api.post(
+                "/api/replay/start", json={"at": (datetime.now(UTC) - timedelta(days=1)).isoformat()}
+            )
+            response.raise_for_status()
+            clock = response.json()
+        start = datetime.fromisoformat(clock["now"])
+        seeded = _seed(args)
+        state_response = sandbox.get("/_sandbox/state")
+        state_response.raise_for_status()
+        devices = state_response.json()["devices"]
+        previous_offset = 0
+        for index, step in enumerate(sorted(scenario.steps, key=lambda step: step.offset_s)):
+            time.sleep((step.offset_s - previous_offset) / args.speed)
+            at = start + timedelta(seconds=step.offset_s)
+            response = api.post("/api/replay/advance", json={"at": at.isoformat()})
+            response.raise_for_status()
+            device_id = (
+                seeded["camera"]
+                if step.device is None
+                else next(d["id"] for d in devices if step.device in (d["id"], d["name"]))
+            )
+            response = sandbox.post(
+                "/_sandbox/events",
+                json={
+                    "device_id": device_id,
+                    "type": step.type,
+                    "sub_type": step.sub_type,
+                    "at": at.isoformat(),
+                    "duration_ms": step.duration_ms,
+                    "deliver": False,
+                },
+            )
+            response.raise_for_status()
+            raw = webhooks.encode(response.json()["webhook"])
+            response = api.post(
+                "/webhooks/ring",
+                content=raw,
+                auth=None,
+                headers={
+                    "Content-Type": "application/json",
+                    webhooks.SIGNATURE_HEADER: webhooks.sign(settings.ring_webhook_key, raw),
+                },
+            )
+            response.raise_for_status()
+            deadline = time.monotonic() + 60
+            while True:
+                response = api.post("/api/process-webhooks")
+                response.raise_for_status()
+                queue = response.json()["queue"]
+                if queue.get("failed") or queue.get("rejected"):
+                    sys.exit("Replay delivery failed; inspect the queue before continuing.")
+                if not queue.get("pending") and not queue.get("processing"):
+                    break
+                if time.monotonic() > deadline:
+                    sys.exit("Replay stopped while waiting for persisted event processing.")
+                time.sleep(0.05)
+            if index == 0 and args.auto_checkin:
+                visits = api.get("/api/state").json()["visits"]
+                for visit in visits:
+                    if visit["state"] == "open" and visit["schedule_id"] == seeded["schedule"]:
+                        response = api.post(f"/api/visits/{visit['id']}/checkin-link")
+                        response.raise_for_status()
+                        if api.post(response.json()["path"], auth=None).status_code != 200:
+                            sys.exit(
+                                "Simulated check-in rejected. Inspect the record without exposing the link."
+                            )
+            print(f"Replayed {step.type} at {at.isoformat()} (local simulation)")
+            previous_offset = step.offset_s
+        visits = api.get("/api/state").json()["visits"]
+        for visit in visits:
+            if visit["state"] in ("open", "in_progress", "unmatched"):
+                api.post(f"/api/visits/{visit['id']}/close").raise_for_status()
+        if not visits:
+            end = max(
+                start + timedelta(seconds=scenario.length_s),
+                start + timedelta(minutes=args.window_minutes + settings.arrival_grace_minutes + 1),
+            )
+            api.post("/api/replay/advance", json={"at": end.isoformat()}).raise_for_status()
+            api.post("/api/sweep").raise_for_status()
+        print(
+            f"Replay records are ready for review at {args.public_url}; no live Ring attendance was verified."
+        )
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(
         prog="attest", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -124,7 +262,7 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--port", type=int, default=8000)
     s.set_defaults(fn=_serve)
 
-    for name, fn in (("seed", _seed), ("demo", _demo)):
+    for name, fn in (("seed", _seed), ("demo", _demo), ("replay", _replay)):
         s = sub.add_parser(name)
         s.add_argument("--ring-url", default=settings.ring_base_url)
         s.add_argument("--public-url", default=settings.public_base_url)
@@ -132,6 +270,15 @@ def main(argv: list[str] | None = None) -> None:
         s.add_argument("--worker-name", default="Maria Chen")
         s.add_argument("--window-minutes", type=int, default=120)
         s.add_argument("--expected-minutes", type=int, default=90)
+        s.add_argument("--camera-only", action="store_true", help="leave the optional contact sensor unbound")
+        if name == "replay":
+            from ring_sandbox.scenarios import BUILTIN
+
+            s.add_argument("scenario", choices=sorted(BUILTIN))
+            s.add_argument("--speed", type=float, default=60)
+            s.add_argument(
+                "--auto-checkin", action="store_true", help="simulate a worker self-report locally"
+            )
         s.set_defaults(fn=fn)
 
     args = p.parse_args(argv)

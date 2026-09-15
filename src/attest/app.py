@@ -12,11 +12,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import httpx
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, Response, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.security import HTTPBasic
 from fastapi.templating import Jinja2Templates
-from ring_sandbox import RingClient, webhooks
+from ring_sandbox import RingAPIError, RingClient, webhooks
 
 from . import ledger
 from .config import Settings
@@ -25,8 +26,10 @@ from .engine import VisitEngine
 from .inbox import WebhookInbox
 from .ledger import Signer
 from .media import MediaStore
-from .models import Receipt, Schedule, Site, VisitState, Worker, utcnow
+from .models import Receipt, ReplayTime, ReviewBundle, ReviewInput, Schedule, Site, VisitState, Worker, utcnow
 from .poller import HistoryPoller
+from .reviews import ReviewService, verify_bundle
+from .setup import SetupService
 from .store import Store
 from .summarize import build as build_summarizer
 
@@ -53,6 +56,8 @@ def create_app(
     )
     engine = VisitEngine(store, ring, signer, media, summarizer, s)
     inbox = WebhookInbox(s.data_dir / "webhooks.sqlite3")
+    reviews = ReviewService(store, signer, engine.clock)
+    setup = SetupService(store, ring, engine.clock, s.arrival_grace_minutes)
 
     def process_webhook() -> bool:
         job = inbox.claim()
@@ -61,7 +66,11 @@ def create_app(
         try:
             ev = webhooks.parse(job["raw_body"], signing_key=s.ring_webhook_key, signature=job["signature"])
             outcome = engine.ingest(ev)
-            rejected = outcome.ignored_reason not in (None, "duplicate request_id")
+            reason = outcome.ignored_reason or ""
+            rejected = reason in (
+                "account mismatch",
+                "ingestion source changed; reconciliation required",
+            ) or ("not bound to a site" in reason)
             inbox.complete(job, "rejected" if rejected else "done")
         except Exception as exc:
             inbox.fail(job, type(exc).__name__)
@@ -109,7 +118,7 @@ def create_app(
 
         worker_task = asyncio.create_task(webhook_worker())
         tasks = []
-        if sweep_interval_s > 0:
+        if sweep_interval_s > 0 and not s.replay_mode:
             tasks.append(asyncio.create_task(sweeper()))
         if s.poll_history_seconds > 0:
             tasks.append(asyncio.create_task(history_poller()))
@@ -135,7 +144,7 @@ def create_app(
                 origin is not None and origin != expected_origin
             ):
                 raise HTTPException(403, "cross-origin writes are not allowed")
-        if request.url.path.startswith("/checkin/"):
+        if request.url.path.startswith(("/checkin/", "/review/")):
             return
         if s.admin_token is None:
             raise HTTPException(503, "Configure ATTEST_ADMIN_TOKEN before using the application")
@@ -177,7 +186,8 @@ def create_app(
             {
                 "settings": s,
                 "tz": tz,
-                "now": utcnow(),
+                "now": engine.clock.now() if engine.clock.snapshot()["ready"] else utcnow(),
+                "clock": engine.clock.snapshot(),
                 "summarizer": summarizer.name,
                 **ctx,
             },
@@ -267,7 +277,7 @@ def create_app(
             sites={x.id: x for x in store.sites()},
             workers={w.id: w for w in store.workers()},
             schedules={x.id: x for x in store.schedules()},
-            upcoming=[x for x in store.schedules() if x.window_end > utcnow() - timedelta(hours=1)][:10],
+            upcoming=store.schedules()[:20],
             chain=ledger.verify_chain(store.receipts(), public_key=signer.public_key_b64),
         )
 
@@ -277,6 +287,7 @@ def create_app(
         if v is None:
             raise HTTPException(404)
         receipt = store.receipt_for_visit(visit_id)
+        bundle = reviews.bundle(visit_id) if receipt else None
         return render(
             request,
             "visit.html",
@@ -286,6 +297,9 @@ def create_app(
             schedule=store.schedule(v.schedule_id) if v.schedule_id else None,
             evidence=store.evidence_for(visit_id),
             receipt=receipt,
+            bundle=bundle,
+            reviews=bundle.reviews if bundle else [],
+            review_verification=verify_bundle(bundle, public_key=signer.public_key_b64) if bundle else None,
             verified=ledger.verify_receipt(receipt, public_key=signer.public_key_b64) if receipt else None,
         )
 
@@ -328,6 +342,8 @@ def create_app(
             pk = signer.public_key_b64
             if isinstance(data, list):
                 ok, why = ledger.verify_chain([Receipt.model_validate(d) for d in data], public_key=pk)
+            elif isinstance(data, dict) and data.get("kind") == "attest.review_bundle/1":
+                ok, why = verify_bundle(ReviewBundle.model_validate(data), public_key=pk)
             else:
                 ok, why = ledger.verify_receipt(data, public_key=pk)
         except Exception as exc:  # noqa: BLE001
@@ -338,15 +354,18 @@ def create_app(
 
     @app.post("/api/sites")
     async def api_site(site: Site):
-        return store.put_site(site)
+        return await action(
+            setup.register_site, site.name, site.door_camera_id, site.door_sensor_id, supplied=site
+        )
 
     @app.post("/api/workers")
     async def api_worker(worker: Worker):
-        return store.put_worker(worker).model_dump(exclude={"checkin_token"})
+        registered = await action(setup.register_worker, worker)
+        return registered.model_dump(exclude={"checkin_token"})
 
     @app.post("/api/schedules")
     async def api_schedule(schedule: Schedule):
-        return store.put_schedule(schedule)
+        return await action(setup.register_schedule, schedule)
 
     @app.post("/api/visits/{visit_id}/checkin-link")
     async def issue_checkin_link(visit_id: str):
@@ -355,6 +374,156 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
         return {"path": f"/checkin/{token}", "expires_in_seconds": 900}
+
+    async def action(function, *args, **kwargs):
+        try:
+            return await asyncio.to_thread(function, *args, **kwargs)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except RingAPIError as exc:
+            raise HTTPException(
+                502, f"Ring API returned HTTP {exc.status_code}; check access and retry"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise HTTPException(502, "Ring service unavailable; check connectivity and retry") from exc
+
+    def setup_view(request: Request, *, devices=None, error=None):
+        ready = engine.clock.snapshot()["ready"]
+        now = engine.clock.now() if ready else utcnow()
+        return render(
+            request,
+            "setup.html",
+            devices=devices or [],
+            error=error,
+            sites=store.sites(),
+            workers=store.workers(),
+            schedules=store.schedules(),
+            default_start=now.isoformat(timespec="minutes"),
+            default_end=(now + timedelta(minutes=30)).isoformat(timespec="minutes"),
+        )
+
+    async def setup_form(request: Request, function, *args, **kwargs):
+        try:
+            await action(function, *args, **kwargs)
+        except HTTPException as exc:
+            response = setup_view(request, error=exc.detail)
+            response.status_code = exc.status_code
+            return response
+        return RedirectResponse("/setup", status_code=303)
+
+    @app.get("/setup", response_class=HTMLResponse)
+    async def setup_page(request: Request, discover: bool = False):
+        try:
+            devices = await action(setup.discover) if discover else []
+            return setup_view(request, devices=devices)
+        except HTTPException as exc:
+            return setup_view(request, error=exc.detail)
+
+    @app.post("/setup/sites")
+    async def setup_site(
+        request: Request, name: str = Form(...), camera_id: str = Form(...), sensor_id: str = Form("")
+    ):
+        return await setup_form(request, setup.register_site, name, camera_id, sensor_id or None)
+
+    @app.post("/setup/workers")
+    async def setup_worker(
+        request: Request, name: str = Form(...), role: str = Form("other"), agency: str = Form("")
+    ):
+        return await setup_form(
+            request, lambda: setup.register_worker(Worker(name=name, role=role, agency=agency))
+        )
+
+    @app.post("/setup/schedules")
+    async def setup_schedule(
+        request: Request,
+        site_id: str = Form(...),
+        worker_id: str = Form(...),
+        window_start: str = Form(...),
+        window_end: str = Form(...),
+        expected_minutes: int = Form(...),
+        service: str = Form(""),
+    ):
+        return await setup_form(
+            request,
+            lambda: setup.register_schedule(
+                Schedule(
+                    site_id=site_id,
+                    worker_id=worker_id,
+                    window_start=window_start,
+                    window_end=window_end,
+                    expected_minutes=expected_minutes,
+                    service=service,
+                )
+            ),
+        )
+
+    @app.post("/setup/schedules/{schedule_id}/cancel")
+    async def cancel_schedule(request: Request, schedule_id: str):
+        return await setup_form(request, setup.cancel_schedule, schedule_id)
+
+    @app.get("/visits/{visit_id}/bundle.json")
+    async def review_bundle(visit_id: str):
+        return await action(reviews.bundle, visit_id)
+
+    @app.post("/api/visits/{visit_id}/reviews")
+    async def coordinator_review(visit_id: str, body: ReviewInput):
+        return await action(reviews.coordinator_review, visit_id, body)
+
+    @app.post("/api/visits/{visit_id}/review-link")
+    async def issue_review_link(visit_id: str):
+        token = await action(reviews.issue_worker_link, visit_id)
+        return {"path": f"/review/{token}", "expires_in_seconds": 86400}
+
+    @app.get("/review/{token}", response_class=HTMLResponse)
+    async def worker_review_page(request: Request, token: str):
+        target = await action(reviews.worker_target, token)
+        if target is None:
+            raise HTTPException(404, "invalid, expired, or used review link")
+        _, bundle = target
+        return render(
+            request, "worker_review.html", original=bundle.original.payload, token=token, done=False
+        )
+
+    @app.post("/review/{token}", response_class=HTMLResponse)
+    async def worker_review_submit(
+        request: Request,
+        token: str,
+        decision: str = Form(...),
+        statement: str = Form(...),
+        reported_start: str = Form(""),
+        reported_end: str = Form(""),
+    ):
+        try:
+            body = ReviewInput(
+                decision=decision,
+                statement=statement,
+                reported_start=reported_start or None,
+                reported_end=reported_end or None,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                422, "Use a valid decision, non-empty statement, and two ordered offset-aware times"
+            ) from exc
+        await action(reviews.worker_review, token, body)
+        return render(request, "worker_review.html", original=None, token=None, done=True)
+
+    @app.get("/api/clock")
+    async def clock_status():
+        return engine.clock.snapshot()
+
+    @app.post("/api/replay/start")
+    async def start_replay(body: ReplayTime):
+        return await action(engine.clock.start, body.at)
+
+    @app.post("/api/replay/advance")
+    async def advance_replay(body: ReplayTime):
+        if any(inbox.counts().get(status, 0) for status in ("pending", "processing", "failed")):
+            raise HTTPException(409, "process or resolve queued deliveries before advancing the clock")
+        return await action(engine.clock.advance, body.at)
+
+    @app.post("/api/visits/{visit_id}/close")
+    async def close_for_review(visit_id: str):
+        return await action(engine.close_for_review, visit_id)
 
     @app.get("/api/state")
     async def api_state():

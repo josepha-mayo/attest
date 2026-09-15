@@ -13,7 +13,7 @@
 </div>
 
 <div class="grid" style="margin-top:20px">
-  {% set closed = visits|selectattr("state","equalto","closed")|list %}
+  {% set closed = visits|selectattr("receipt_id")|list %}
   {% set active = visits|selectattr("state","in",["open","in_progress"])|list %}
   {% set flagged = visits|selectattr("flags")|list %}
   <div class="card"><div class="kpi">{{ active|length }}</div><div class="muted">visits in progress</div></div>
@@ -23,13 +23,13 @@
 </div>
 
 <h2>Recent visits</h2>
-<div class="card" style="padding:0">
+<div class="card table-wrap" style="padding:0">
 <table>
   <thead><tr><th>Site</th><th>Self-reported worker</th><th>First observed</th><th>Last observed</th><th>Observed interval</th><th>State</th><th>Review notes</th></tr></thead>
   <tbody>
   {% for v in visits %}
-  <tr class="link" onclick="location.href='/visits/{{ v.id }}'">
-    <td>{{ sites[v.site_id].name if v.site_id in sites else v.site_id }}</td>
+  <tr>
+    <td><a href="/visits/{{ v.id }}" style="color:var(--accent)">{{ sites[v.site_id].name if v.site_id in sites else v.site_id }}</a></td>
     <td>{{ workers[v.worker_id].name if v.checked_in_at and v.worker_id in workers else "Unknown" }}</td>
     <td>{{ t(v.arrived_at) if v.has_observations else "None received" }}</td>
     <td>{{ t(v.last_activity_at) if v.has_observations else "None received" }}</td>
@@ -38,14 +38,14 @@
     <td>{% for f in v.flags %}<span class="flag {{ f.severity }}">{{ f.code }}</span>{% endfor %}</td>
   </tr>
   {% else %}
-  <tr><td colspan="7" class="muted">No visits yet. Point a Ring webhook at <code>/webhooks/ring</code> or replay a scenario with <code>ring-sandbox play home_aide_visit</code>.</td></tr>
+  <tr><td colspan="7" class="muted">No observations yet. <a href="/setup" style="color:var(--accent)">Set up a site and schedule</a>, or use <code>attest replay home_aide_visit</code> in a fresh local replay runtime.</td></tr>
   {% endfor %}
   </tbody>
 </table>
 </div>
 
 <h2>Schedules</h2>
-<div class="card" style="padding:0">
+<div class="card table-wrap" style="padding:0">
 <table>
   <thead><tr><th>Site</th><th>Worker</th><th>Window</th><th>Expected</th><th>Service</th><th>Check-in link</th></tr></thead>
   <tbody>

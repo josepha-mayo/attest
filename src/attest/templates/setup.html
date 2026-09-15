@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Setup & schedules — Attest{% endblock %}
+{% block body %}
+<h1>Set up a reviewable visit</h1>
+<p class="muted">Connect a device you are authorized to use, add a worker, then define an arrival window. Identity and time worked are not inferred from scheduling.</p>
+{% if error %}<div class="card bad" role="alert">{{ error }}</div>{% endif %}
+{% if clock.mode == "replay" %}
+<div class="card" style="margin:14px 0">
+<h2>Local replay clock</h2>
+<p>This runtime is permanently labelled as a local replay. Times cannot rewind, and replay cannot target the real Ring API.</p>
+{% if not clock.ready %}
+<button class="btn" id="start-clock">Start a replay clock one day in the past</button>
+<script>
+document.getElementById('start-clock').onclick = async () => {
+  const response = await fetch('/api/replay/start', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({at:new Date(Date.now()-86400000).toISOString()})});
+  if (response.ok) { location.reload(); return; }
+  document.getElementById('clock-status').textContent = (await response.json()).detail;
+};
+</script>
+{% else %}
+<form id="advance-clock"><label>Advance to an offset-aware time<input name="at" value="{{ default_start }}" required></label><button class="btn secondary">Advance replay clock</button></form>
+<p class="muted small">Finish processing pending deliveries first. For scripted demos, use <code>attest replay</code> in a fresh runtime; it coordinates each advance with queued delivery.</p>
+<script>
+document.getElementById('advance-clock').onsubmit = async event => {
+  event.preventDefault();
+  const response = await fetch('/api/replay/advance', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({at:new FormData(event.target).get('at')})});
+  if (response.ok) { location.reload(); return; }
+  document.getElementById('clock-status').textContent = (await response.json()).detail;
+};
+</script>
+{% endif %}
+<p id="clock-status" role="status"></p>
+</div>
+{% endif %}
+<div class="grid">
+<section class="card">
+<h2>1. Bind a site</h2>
+<a class="btn secondary" href="/setup?discover=true">Discover accessible devices</a>
+{% if devices %}
+<form action="/setup/sites" method="post"><fieldset {% if not clock.ready %}disabled{% endif %}>
+<label>Site name<input name="name" maxlength="160" required placeholder="Household or service location"></label>
+<label>Door camera<select name="camera_id" required>{% for d in devices if d.camera %}<option value="{{ d.id }}">{{ d.name }} — {{ "online" if d.online else "offline / unknown" }}</option>{% endfor %}</select></label>
+<label>Contact sensor (optional)<select name="sensor_id"><option value="">Camera only</option>{% for d in devices if d.contact_signal %}<option value="{{ d.id }}">{{ d.name }}</option>{% endfor %}</select></label>
+<p class="small muted">Account binding is derived from the authorized Ring account. A missing sensor is not fabricated.</p>
+<button class="btn">Register site</button></fieldset></form>
+{% else %}<p class="muted">Discover devices to choose a camera. No device access is assumed until discovery succeeds.</p>{% endif %}
+{% for site in sites %}<p><strong>{{ site.name }}</strong><br><span class="muted small">{{ "Camera + contact sensor" if site.door_sensor_id else "Camera only" }}</span></p>{% endfor %}
+</section>
+<section class="card">
+<h2>2. Add a worker</h2>
+<form action="/setup/workers" method="post"><fieldset {% if not clock.ready %}disabled{% endif %}>
+<label>Name<input name="name" maxlength="160" required></label>
+<label>Role<select name="role"><option value="home_health_aide">Home health aide</option><option value="cleaner">Cleaner</option><option value="dog_walker">Dog walker</option><option value="contractor">Contractor</option><option value="other">Other</option></select></label>
+<label>Agency (optional)<input name="agency" maxlength="160"></label>
+<button class="btn">Add worker</button></fieldset></form>
+{% for worker in workers %}<p>{{ worker.name }} <span class="small muted">{{ worker.role.replace("_", " ") }}</span></p>{% endfor %}
+</section>
+<section class="card">
+<h2>3. Schedule an arrival</h2>
+<form action="/setup/schedules" method="post"><fieldset {% if not clock.ready or not sites or not workers %}disabled{% endif %}>
+<label>Site<select name="site_id" required>{% for site in sites %}<option value="{{ site.id }}">{{ site.name }}</option>{% endfor %}</select></label>
+<label>Worker<select name="worker_id" required>{% for worker in workers %}<option value="{{ worker.id }}">{{ worker.name }}</option>{% endfor %}</select></label>
+<label>Arrival window start (with UTC offset)<input name="window_start" value="{{ default_start }}" required></label>
+<label>Arrival window end (with UTC offset)<input name="window_end" value="{{ default_end }}" required></label>
+<label>Planned service minutes<input name="expected_minutes" type="number" min="1" max="1440" value="90" required></label>
+<label>Service description<input name="service" maxlength="500" placeholder="Morning care or scheduled service"></label>
+<button class="btn">Create schedule</button></fieldset></form>
+<p class="muted small">Overlapping arrival windows including the configured grace period are rejected rather than assigned ambiguously.</p>
+</section>
+</div>
+<h2>Schedules</h2>
+<div class="card table-wrap"><table>
+<thead><tr><th>Site / worker</th><th>Arrival window</th><th>Planned minutes</th><th>Status</th><th>Action</th></tr></thead><tbody>
+{% for schedule in schedules %}<tr>
+<td>{% for site in sites if site.id == schedule.site_id %}{{ site.name }}{% endfor %}<br>{% for worker in workers if worker.id == schedule.worker_id %}{{ worker.name }}{% endfor %}</td>
+<td>{{ schedule.window_start.isoformat() }}<br>{{ schedule.window_end.isoformat() }}</td>
+<td>{{ schedule.expected_minutes }}</td><td>{{ schedule.status }}</td>
+<td>{% if schedule.status == "scheduled" %}<form method="post" action="/setup/schedules/{{ schedule.id }}/cancel"><button class="btn secondary">Cancel unused schedule</button></form>{% else %}<span class="muted small">Preserved, not deleted</span>{% endif %}</td>
+</tr>{% else %}<tr><td colspan="5" class="muted">No schedules yet.</td></tr>{% endfor %}
+</tbody></table></div>
+<p class="muted small">Once a schedule has observations, use the record's review workflow instead of rewriting the schedule.</p>
+{% endblock %}

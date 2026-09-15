@@ -61,8 +61,69 @@ document.getElementById('issue-link').onclick = async () => {
 {% if e.ring_event_type %}<div class="small muted">{{ e.ingestion_source }}: <code>{{ e.ring_event_type }}</code> &middot; {{ e.ring_history_event_id or e.ring_request_id or "unavailable" }}</div>{% endif %}
 </div></li>{% endfor %}
 </ul></div>
+{% if not receipt %}
+<div class="card" style="margin-top:16px">
+<button class="btn secondary" id="close-record">Close observations for review</button>
+<p class="small muted">Freezes the current observation record. It does not assert that anyone departed.</p>
+<p id="close-status" role="status"></p>
+</div>
+<script>
+document.getElementById('close-record').onclick = async () => {
+  const response = await fetch('/api/visits/{{ visit.id }}/close', {method: 'POST'});
+  if (response.ok) { location.reload(); return; }
+  const data = await response.json();
+  document.getElementById('close-status').textContent = data.detail || 'Unable to close record';
+};
+</script>
+{% endif %}
 {% if receipt %}
-<h2>Signed record #{{ receipt.sequence }}</h2>
+<h2>Review and corrections</h2>
+<div class="card">
+<p class="{{ 'ok' if review_verification[0] else 'bad' }}">{{ review_verification[1] }}</p>
+<a class="btn secondary" href="/visits/{{ visit.id }}/bundle.json">Export original + review chain</a>
+{% if receipt.payload.scheduled_worker %}
+<button class="btn secondary" id="issue-review">Request worker's account</button>
+<a id="worker-review-link" style="display:block;overflow-wrap:anywhere;color:var(--accent)"></a>
+<p id="review-link-status" role="status" class="small muted"></p>
+{% endif %}
+{% for review in reviews %}
+{% set facts = review.receipt.payload %}
+<article style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
+<strong>Revision {{ review.revision }}: {{ facts.review.decision }} — {{ facts.actor.name }} ({{ facts.actor.role }})</strong>
+<p style="white-space:pre-wrap">{{ facts.review.statement }}</p>
+{% if facts.review.reported_start %}<p class="small">Reported interval: {{ facts.review.reported_start }} to {{ facts.review.reported_end }}</p>{% endif %}
+<div class="muted small">Received {{ facts.statement_received_at }} &middot; hash {{ review.receipt.payload_hash[:16] }}…</div>
+</article>
+{% else %}<p class="muted">No human review yet. A coordinator can record an assessment below or request the worker's account.</p>{% endfor %}
+</div>
+<form id="coordinator-review" class="card" style="margin-top:16px">
+<h2>Append coordinator statement</h2>
+{% include "review_fields.html" %}
+<button class="btn">Append signed review</button>
+<p id="review-status" role="status"></p>
+</form>
+<script>
+const requestReview = document.getElementById('issue-review');
+if (requestReview) requestReview.onclick = async () => {
+  const response = await fetch('/api/visits/{{ visit.id }}/review-link', {method: 'POST'});
+  const data = await response.json();
+  document.getElementById('review-link-status').textContent = response.ok ? 'Share privately. Expires in 24 hours; single use.' : data.detail;
+  if (response.ok) {
+    const link = document.getElementById('worker-review-link');
+    link.href = data.path; link.textContent = new URL(data.path, location.origin).href;
+  }
+};
+document.getElementById('coordinator-review').onsubmit = async event => {
+  event.preventDefault();
+  const body = Object.fromEntries(new FormData(event.target));
+  body.reported_start = body.reported_start || null; body.reported_end = body.reported_end || null;
+  const response = await fetch('/api/visits/{{ visit.id }}/reviews', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  if (response.ok) { location.reload(); return; }
+  const data = await response.json();
+  document.getElementById('review-status').textContent = typeof data.detail === 'string' ? data.detail : 'Check the required statement and reported time fields.';
+};
+</script>
+<h2>Original signed record #{{ receipt.sequence }}</h2>
 <div class="card">
 <div class="small">{% if verified[0] %}<span class="ok">Ed25519 signature valid — integrity only</span>{% else %}<span class="bad">{{ verified[1] }}</span>{% endif %}</div>
 <div class="muted small">sha256 {{ receipt.payload_hash }}<br>previous {{ receipt.prev_hash or "genesis" }}</div>

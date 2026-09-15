@@ -42,14 +42,22 @@
   .kpi { font-size:28px; font-weight:700 } .kpi + .muted { margin-top:-4px }
   textarea, input[type=file] { width:100%; background:#0b0d11; color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:10px; font:13px ui-monospace,monospace }
   .summary { font-size:16px; line-height:1.6; border-left:3px solid var(--accent); padding-left:14px }
+  label { display:block; margin:10px 0; font-size:13px; color:var(--muted) }
+  input:not([type=file]), select { display:block; width:100%; margin-top:5px; padding:10px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg) }
+  fieldset { border:0; padding:0; margin:0; min-width:0 }
+  button:disabled, fieldset:disabled { opacity:.5; cursor:not-allowed }
+  .table-wrap { overflow-x:auto }
+  .replay-banner { padding:10px 28px; background:#332810; color:var(--warn); font-size:13px }
+  @media(max-width:720px) { header { flex-wrap:wrap; padding:14px 16px } header .meta { margin-left:0; width:100% } main { padding:20px 16px } .row label { width:100% } }
 </style>
 </head>
 <body>
 <header>
   <div class="brand">Attest<span>.</span></div>
-  <nav><a href="/">Visits</a><a href="/verify">Verify a receipt</a><a href="/receipts.json">Export ledger</a></nav>
+  <nav><a href="/">Records</a><a href="/setup">Setup &amp; schedules</a><a href="/verify">Verify</a><a href="/receipts.json">Export originals</a></nav>
   <div class="meta">{% if settings.ring_base_url == "https://api.amazonvision.com" %}Ring API configured{% else %}Local / test data{% endif %} &middot; configured summary provider: {{ summarizer }}</div>
 </header>
+{% if clock.mode == "replay" %}<div class="replay-banner">LOCAL REPLAY — not a live visit. Event clock: {{ clock.now or "not started" }}. Security expiry and signature issuance use real time.</div>{% endif %}
 <main>{% block body %}{% endblock %}</main>
 </body>
 </html>

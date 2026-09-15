@@ -6,8 +6,9 @@ import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 
 def _id(prefix: str) -> str:
@@ -26,9 +27,15 @@ class Role(StrEnum):
     OTHER = "other"
 
 
+class ReplayTime(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    at: AwareDatetime
+
+
 class Site(BaseModel):
-    id: str = Field(default_factory=lambda: _id("site"))
-    name: str
+    model_config = ConfigDict(str_strip_whitespace=True)
+    id: str = Field(default_factory=lambda: _id("site"), pattern=r"^[A-Za-z0-9_-]{1,80}$")
+    name: str = Field(min_length=1, max_length=160)
     ring_account_id: str
     door_camera_id: str
     door_sensor_id: str | None = None
@@ -38,8 +45,9 @@ class Site(BaseModel):
 
 
 class Worker(BaseModel):
-    id: str = Field(default_factory=lambda: _id("wkr"))
-    name: str
+    model_config = ConfigDict(str_strip_whitespace=True)
+    id: str = Field(default_factory=lambda: _id("wkr"), pattern=r"^[A-Za-z0-9_-]{1,80}$")
+    name: str = Field(min_length=1, max_length=160)
     role: Role = Role.OTHER
     agency: str = ""
     phone: str = ""
@@ -56,14 +64,22 @@ class CheckinGrant(BaseModel):
 
 
 class Schedule(BaseModel):
-    id: str = Field(default_factory=lambda: _id("sch"))
+    id: str = Field(default_factory=lambda: _id("sch"), pattern=r"^[A-Za-z0-9_-]{1,80}$")
     site_id: str
     worker_id: str
-    window_start: datetime
-    window_end: datetime
-    expected_minutes: int
-    service: str = ""
+    window_start: AwareDatetime
+    window_end: AwareDatetime
+    expected_minutes: int = Field(gt=0, le=1440, strict=True)
+    service: str = Field(default="", max_length=500)
+    status: Literal["scheduled", "cancelled"] = "scheduled"
+    cancelled_at: datetime | None = None
     created_at: datetime = Field(default_factory=utcnow)
+
+    @model_validator(mode="after")
+    def ordered_window(self):
+        if self.window_end <= self.window_start:
+            raise ValueError("arrival window end must follow its start")
+        return self
 
     def matches(self, at: datetime, grace: timedelta) -> bool:
         return self.window_start - grace <= at <= self.window_end + grace
@@ -119,6 +135,9 @@ class Visit(BaseModel):
     state: VisitState = VisitState.OPEN
     arrived_at: datetime
     checked_in_at: datetime | None = None
+    checkin_received_at: datetime | None = None
+    clock_mode: str = "wall"
+    replay_id: str | None = None
     last_activity_at: datetime  # event time of the latest cue (from Ring timestamps)
     last_seen_at: datetime = Field(default_factory=utcnow)  # wall clock of the latest webhook we ingested
     departed_at: datetime | None = None
@@ -160,3 +179,41 @@ class Receipt(BaseModel):
     signature: str  # base64 Ed25519 over payload_hash bytes
     public_key: str  # base64 raw Ed25519 public key
     issued_at: datetime = Field(default_factory=utcnow)
+
+
+class ReviewInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    decision: Literal["confirm", "dispute", "correction", "inconclusive"]
+    statement: str = Field(min_length=1, max_length=2000)
+    reported_start: AwareDatetime | None = None
+    reported_end: AwareDatetime | None = None
+
+    @model_validator(mode="after")
+    def reported_window(self):
+        if (self.reported_start is None) != (self.reported_end is None):
+            raise ValueError("supply both reported times or neither")
+        if self.reported_start is not None:
+            duration = self.reported_end - self.reported_start
+            if not timedelta(0) < duration <= timedelta(days=1):
+                raise ValueError("reported interval must be positive and at most 24 hours")
+            if self.reported_end > utcnow():
+                raise ValueError("reported interval cannot end in the future")
+        return self
+
+
+class ReviewGrant(CheckinGrant):
+    original_hash: str
+
+
+class ReviewEntry(BaseModel):
+    id: str
+    visit_id: str
+    revision: int
+    receipt: Receipt
+
+
+class ReviewBundle(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["attest.review_bundle/1"] = "attest.review_bundle/1"
+    original: Receipt
+    reviews: list[ReviewEntry] = Field(default_factory=list, max_length=500)

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Worker's account — Attest{% endblock %}
+{% block body %}
+<div style="max-width:720px;margin:auto">
+<h1>Your account of the visit</h1>
+{% if done %}
+<div class="card"><h2>Statement recorded</h2><p>Your statement was appended and signed without changing the original observation record. This link has been consumed.</p></div>
+{% else %}
+<div class="card">
+<p>This link was issued to <b>{{ original.scheduled_worker.name }}</b> for the record at <b>{{ original.site.name }}</b>.</p>
+<p>First observation: {{ original.first_observed_at or "None received" }}<br>Last observation: {{ original.last_observed_at or "None received" }}</p>
+<p class="muted">A short observation interval does not mean you left or stopped working. You can explain missing context, dispute an interpretation, or report your own times.</p>
+{% if original.clock and original.clock.mode == "replay" %}<p class="flag warn">Local replay: event times use a simulated clock. This is not a live visit.</p>{% endif %}
+</div>
+<form class="card" method="post" action="/review/{{ token }}" style="margin-top:16px">
+{% include "review_fields.html" %}
+<button class="btn">Submit my statement once</button>
+</form>
+<p class="muted small">The link authorizes a statement for this record only. It does not independently verify the submitter's identity.</p>
+{% endif %}
+</div>
+{% endblock %}

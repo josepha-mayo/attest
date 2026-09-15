@@ -27,4 +27,8 @@ Windows requires tzdata for zoneinfo. aws-login credentials require botocore[crt
 
 ## Known follow-up work
 
-Coordinated replay clock, review/correction workflow, deployment authentication and OAuth lifecycle, media redirect validation, retention, dependency locking/CI, official integrations, product feedback, and the submission video remain unfinished. Webhook intake now acknowledges a durable separate inbox before background processing. Tests verify restart recovery, leasing, retry limits, and separation from the visit transaction; official deadline/load validation and failed-delivery replay tooling remain pending.
+Deployment authentication and OAuth lifecycle, media redirect validation, retention, dependency locking/CI, official integrations, customer validation, product feedback, and the submission video remain unfinished. Webhook intake acknowledges a durable separate inbox before background processing; official deadline/load validation and failed-delivery replay tooling remain pending.
+
+Coordinated replay is now explicit (`ATTEST_REPLAY_MODE=true`) and only accepts loopback Ring emulators in a fresh runtime. `attest replay home_aide_visit --speed 60 --auto-checkin` seeds a local case and waits for delivery processing before advancing its persisted event clock. Grant expiry, statement-received time, and signature issuance always use wall time. Do not convert an existing runtime between wall and replay modes.
+
+Worker/coordinator reviews append signed per-visit review chains anchored to the original receipt hash; never rewrite original visits/receipts when correcting an account. Worker review links bind to the scheduled worker captured in the original signed payload, not a later mutable schedule. Setup APIs are create-only, validate device access/relationships, and reject ambiguous arrival windows. Cancellation preserves an unused schedule; used schedules require review instead.

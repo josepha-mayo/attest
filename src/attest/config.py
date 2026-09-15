@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="ATTEST_", env_file=".env", extra="ignore")
 
     admin_token: SecretStr | None = Field(default=None, min_length=32)
+    replay_mode: bool = False
 
     # Ring
     ring_access_token: str = "sandbox-token"

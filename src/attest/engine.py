@@ -25,6 +25,7 @@ from datetime import datetime, timedelta
 
 from ring_sandbox import RingClient, WebhookEvent
 
+from .clock import ExecutionClock
 from .config import Settings
 from .ledger import Signer
 from .media import MediaStore
@@ -58,6 +59,7 @@ class VisitEngine:
     ):
         self.store, self.ring, self.signer, self.media = store, ring, signer, media
         self.summarizer, self.settings = summarizer, settings
+        self.clock = ExecutionClock(store, replay=settings.replay_mode, ring_base_url=ring.base_url)
 
     # ------------------------------------------------------------------ webhooks
 
@@ -76,6 +78,8 @@ class VisitEngine:
         if not self.store.mark_seen(f"{site.ring_account_id}:{ev.request_id}", utcnow()):
             return Outcome(ignored_reason="duplicate request_id")
         at = ev.occurred_at
+        if self.clock.replay and at > self.clock.now():
+            raise ValueError("advance the replay clock before submitting this event")
         if at > utcnow() + timedelta(seconds=30):
             raise ValueError("event timestamp is in the future")
         is_camera = ev.device_id == site.door_camera_id
@@ -145,6 +149,8 @@ class VisitEngine:
             state=VisitState.OPEN if schedule else VisitState.UNMATCHED,
             arrived_at=at,
             last_activity_at=at,
+            clock_mode=self.clock.snapshot()["mode"],
+            replay_id=self.clock.snapshot()["replay_id"],
         )
         if schedule and at < schedule.window_start:
             visit.flags.append(
@@ -212,7 +218,7 @@ class VisitEngine:
 
     @atomic
     def check_in(self, token: str, at: datetime | None = None) -> Visit | None:
-        at = at or utcnow()
+        at = at or self.clock.now()
         target = self.checkin_target(token)
         if target is None:
             return None
@@ -224,6 +230,7 @@ class VisitEngine:
         if visit is not None:
             visit.worker_id = worker.id
             visit.checked_in_at = at
+            visit.checkin_received_at = utcnow()
             # An UNMATCHED visit becomes a real one once a known worker claims it; the
             # "unscheduled" flag stays on the record.
             visit.state = VisitState.IN_PROGRESS
@@ -250,12 +257,12 @@ class VisitEngine:
         Idleness is *webhook silence* (wall clock since the last cue we ingested), not the
         event timestamp: Ring retries can deliver late, and replayed scenarios are back-dated.
         """
-        now = now or utcnow()
+        now = now or self.clock.now()
         changed: list[Visit] = []
         idle = timedelta(minutes=self.settings.idle_close_minutes)
         for site in self.store.sites():
             visit = self.store.active_visit(site.id)
-            if visit and now - visit.last_seen_at >= idle:
+            if visit and not self.clock.replay and now - visit.last_seen_at >= idle:
                 if site.door_sensor_id is None:
                     # Camera-only site: the last person seen at the door is the best departure evidence.
                     flag = Flag(
@@ -275,7 +282,11 @@ class VisitEngine:
                 changed.append(self._close(visit, site, visit.last_activity_at, reason="idle").visit)  # type: ignore[arg-type]
             grace = timedelta(minutes=self.settings.arrival_grace_minutes)
             for sch in self.store.schedules_for_site(site.id):
-                if sch.window_end + grace < now and self.store.visit_for_schedule(sch.id) is None:
+                if (
+                    sch.status == "scheduled"
+                    and sch.window_end + grace < now
+                    and self.store.visit_for_schedule(sch.id) is None
+                ):
                     ns = Visit(
                         site_id=site.id,
                         schedule_id=sch.id,
@@ -286,6 +297,8 @@ class VisitEngine:
                         closed_at=now,
                         close_reason="window_elapsed",
                         summary_source="template",
+                        clock_mode=self.clock.snapshot()["mode"],
+                        replay_id=self.clock.snapshot()["replay_id"],
                         flags=[
                             Flag(
                                 code="no_observation",
@@ -303,11 +316,20 @@ class VisitEngine:
 
     # ------------------------------------------------------------------ closing
 
+    @atomic
+    def close_for_review(self, visit_id: str) -> Visit:
+        visit = self.store.visit(visit_id)
+        if visit is None or visit.receipt_id:
+            raise ValueError("record is missing or already signed")
+        site = self.store.site(visit.site_id)
+        self._close(visit, site, visit.last_activity_at, reason="coordinator_review")
+        return visit
+
     def _close(self, visit: Visit, site: Site, at: datetime, *, reason: str) -> Outcome:
         visit.departed_at = None
         visit.departure_candidate_at = at if reason == "departure" else None
         visit.last_activity_at = max(visit.last_activity_at, at)
-        visit.closed_at = utcnow()
+        visit.closed_at = self.clock.now()
         visit.close_reason = reason
         visit.state = VisitState.CLOSED
         visit.flags.append(
@@ -318,7 +340,7 @@ class VisitEngine:
                 "direction, identity, and continuous presence are not established",
             )
         )
-        if visit.checked_in_at and visit.checked_in_at > at:
+        if reason == "departure" and visit.checked_in_at and visit.checked_in_at > at:
             visit.flags.append(
                 Flag(
                     code="clock_conflict",
@@ -378,9 +400,18 @@ class VisitEngine:
         prev = self.store.latest_receipt()
         sch = self._schedule(visit)
         evidence = self.store.evidence_for(visit.id)
+        scheduled_worker = self.store.worker(sch.worker_id) if sch else None
         facts = {
             "visit_id": visit.id,
             "state": visit.state.value,
+            "clock": {
+                "mode": visit.clock_mode,
+                "replay_id": visit.replay_id,
+                "checkin_received_at": visit.checkin_received_at.isoformat()
+                if visit.checkin_received_at
+                else None,
+                "issuance_uses_wall_clock": True,
+            },
             "data_origin": "ring_api"
             if self.ring.base_url == "https://api.amazonvision.com"
             else "local_or_test",
@@ -393,6 +424,9 @@ class VisitEngine:
             },
             "worker": self._worker_name(visit),
             "worker_id": visit.worker_id,
+            "scheduled_worker": (
+                {"id": scheduled_worker.id, "name": scheduled_worker.name} if scheduled_worker else None
+            ),
             "schedule": (
                 {
                     "id": sch.id,
@@ -557,7 +591,9 @@ class VisitEngine:
         candidates = [
             s
             for s in self.store.schedules_for_site(site.id)
-            if s.matches(at, grace) and self.store.visit_for_schedule(s.id) is None
+            if s.status == "scheduled"
+            and s.matches(at, grace)
+            and self.store.visit_for_schedule(s.id) is None
         ]
         return (
             min(candidates, key=lambda s: abs((s.window_start - at).total_seconds())) if candidates else None

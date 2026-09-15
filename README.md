@@ -27,6 +27,9 @@ Attest is an early prototype for the Amazon Developer Hackathon's Ring track. It
 - Insert-only signed receipts. Schema v2 binds the receipt ID, visit ID, issuance timestamp, sequence, and previous hash into the signed payload.
 - Authenticated dashboard, media, exports, and administration. Private responses are not cached. Cross-origin writes are rejected. URL access logging is disabled by the CLI to avoid logging check-in links.
 - Bedrock Converse integration with explicit per-record provenance: actual summary source, model when used, and fallback reason. A configured provider is not evidence of a successful model invocation.
+- Explicit local replay mode with a persistent, monotonic event clock. It refuses real Ring endpoints, existing non-replay data, clock rewinds, and future simulation times. Check-in event time and receipt closure use the replay clock; grant expiry, statement receipt, and signature issuance use real time and are recorded separately.
+- Worker/coordinator review and correction flow. Each statement is signed in a per-visit review chain anchored to the original receipt hash. Original observations and original signatures remain unchanged. Worker review links are hashed, single-use, scoped to the signed scheduled worker and visit, and expire after 24 hours.
+- Authenticated setup screens for device discovery, site binding, worker creation, and schedule creation/cancellation. Device permissions and camera/contact capabilities are checked. Duplicate identifiers and ambiguous arrival windows are rejected. Used schedules cannot be rewritten through cancellation.
 
 ## Local development on Windows
 
@@ -36,17 +39,33 @@ Clone Attest and ring-sandbox into sibling directories. From the Attest director
 python -m venv .venv
 .\.venv\Scripts\python -m pip install -e "../ring-sandbox[server]" -e ".[dev]"
 $env:ATTEST_ADMIN_TOKEN = [System.Net.NetworkCredential]::new("", (Read-Host "Private admin password (32+ characters)" -AsSecureString)).Password
+$env:ATTEST_REPLAY_MODE = "true"
+$env:ATTEST_DATA_DIR = ".\data-replay-" + [guid]::NewGuid().ToString("N")
+$env:ATTEST_RING_BASE_URL = "http://127.0.0.1:8787"
+$env:ATTEST_RING_ACCESS_TOKEN = "sandbox-token"
+$env:ATTEST_POLL_HISTORY_SECONDS = "0"
+$env:ATTEST_SUMMARIZER = "template"
 Start-Process .\.venv\Scripts\ring-sandbox.exe -ArgumentList "serve"
 Start-Process .\.venv\Scripts\attest.exe -ArgumentList "serve"
-.\.venv\Scripts\attest demo
-.\.venv\Scripts\ring-sandbox play short_visit --speed 20
+.\.venv\Scripts\attest replay home_aide_visit --speed 60 --auto-checkin
 ```
 
-Open `http://127.0.0.1:8000`. The browser's HTTP Basic login uses username `admin` and the private password configured above. Open an observation record and choose **Issue a check-in link** to obtain a link for the scheduled worker. Share it privately; never put it in a public demo recording.
+Open `http://127.0.0.1:8000`. The browser's HTTP Basic login uses username `admin` and the private password configured above. The replay runner seeds one demo site/worker/schedule, advances the shared clock, and sends signed simulated events through the durable inbox. `--auto-checkin` deliberately simulates a worker self-report; omit it to use **Issue a check-in link** manually during replay. A visible banner and signed clock metadata identify the simulation.
+
+Choose one setup path per fresh runtime: either let `attest replay` seed it, or use **Setup & schedules** to start the replay clock and register sites/workers/schedules yourself. The CLI will not overwrite an existing setup. For camera-only replay choose `camera_only_visit`; `no_show` tests the honest `no_observation` result. Use a fresh private runtime for each scripted scenario instead of deleting previous data.
 
 The emulator is an independent local test tool, not Amazon's official Playground. Its default images are generated placeholders and its default MP4 is not playable video. Local tests are not proof that the full official Ring integration works.
 
-Scenario timestamps currently use a back-dated virtual clock while a real check-in uses wall-clock time. A conflicting check-in is flagged, not silently presented as a successful clean visit. A coordinated replay clock and review workflow remain to be built.
+For coordinated demos, use `attest replay`, not the standalone `ring-sandbox play` command. The runner waits for each persisted delivery before advancing time. Automatic idle sweeping is disabled in replay mode; the runner closes remaining observations explicitly for review. Link expiry is never frozen or extended by the replay clock.
+
+## Reviewing and correcting a record
+
+1. Open a record; if it is still active, choose **Close observations for review**. Closing does not certify a departure.
+2. Choose **Request worker's account** to create a private, visit-scoped review link. The worker can confirm their account, dispute an interpretation, or add a correction and optional reported interval.
+3. Append a coordinator statement. The authenticated workspace administrator is recorded as the coordinator; this is not yet a multi-user identity system.
+4. Export **original + review chain**, then upload the bundle at `/verify`. Verification checks signatures, revision ordering, and links to the supplied original under the deployment's pinned public key.
+
+Corrections are separate human statements, not edits to camera evidence. Verification establishes integrity of the supplied chain, not attendance, truth of a statement, or completeness against a hidden/deleted tail. Never publish review/check-in links or personal records in the demo video.
 
 ## Ring integration status
 
@@ -56,6 +75,7 @@ The earlier live probe verified device discovery, user lookup, an empty history 
 
 To attempt live polling, set these variables in the process environment before starting Attest and running `attest seed`:
 
+- `ATTEST_REPLAY_MODE=false` in a separate non-replay runtime.
 - `ATTEST_RING_BASE_URL=https://api.amazonvision.com`
 - `ATTEST_RING_ACCESS_TOKEN` to a current authorized token, supplied locally rather than in a public command or chat.
 - `ATTEST_POLL_HISTORY_SECONDS=15`
@@ -83,8 +103,8 @@ Tests include rejected authentication, expired/reused check-in links, concurrent
 ## Before deployment or submission
 
 - Load-test durable webhook intake against Ring's response deadline, add failed-delivery diagnostics/replay tooling, and implement inbox retention. `/api/webhook-queue` exposes authenticated queue counts; `/api/process-webhooks` processes one eligible delivery for local diagnostics.
-- Add a worker/coordinator review and correction workflow without rewriting signed evidence.
-- Coordinate replay clocks and distinguish every local scenario from live data in the demo.
+- Validate the review workflow with actual households/workers, including disputed and missing observations, accessibility, and notification delivery.
+- Validate the coordinated demo visually and replace placeholder media with permitted, clearly labelled demonstration footage.
 - Complete OAuth/consent lifecycle, retention/deletion, multi-user authorization, token refresh, and deployment secret management. Local HTTP Basic is a development access boundary, not a complete production identity system. Use HTTPS outside loopback.
 - Finish runtime-input limits and media-redirect hardening, fresh-clone verification, and CI.
 - Verify live Ring events/media and an actual AWS invocation without fallback.

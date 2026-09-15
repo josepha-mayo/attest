@@ -1,0 +1,13 @@
+<label>Assessment
+<select name="decision" required>
+<option value="inconclusive">Inconclusive — more context needed</option>
+<option value="confirm">Confirm my account of the visit</option>
+<option value="dispute">Dispute the interpretation</option>
+<option value="correction">Add a correction or missing context</option>
+</select></label>
+<label>Statement <textarea name="statement" rows="4" maxlength="2000" required placeholder="Explain what you know and what should be corrected."></textarea></label>
+<div class="row">
+<label>Reported start (optional, include UTC offset)<input name="reported_start" placeholder="2026-09-15T09:00:00-07:00"></label>
+<label>Reported end (optional, include UTC offset)<input name="reported_end" placeholder="2026-09-15T10:30:00-07:00"></label>
+</div>
+<p class="muted small">Supply both times or neither. These are reported times, not independently measured work duration. Original observations will not change.</p>

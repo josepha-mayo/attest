@@ -14,7 +14,18 @@ from typing import TypeVar
 
 from pydantic import BaseModel
 
-from .models import CheckinGrant, Evidence, Receipt, Schedule, Site, Visit, VisitState, Worker
+from .models import (
+    CheckinGrant,
+    Evidence,
+    Receipt,
+    ReviewEntry,
+    ReviewGrant,
+    Schedule,
+    Site,
+    Visit,
+    VisitState,
+    Worker,
+)
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -33,6 +44,10 @@ CREATE TABLE IF NOT EXISTS seen_requests (request_id TEXT PRIMARY KEY, seen_at T
 CREATE TABLE IF NOT EXISTS checkin_grants (id TEXT PRIMARY KEY, token_hash TEXT UNIQUE, body TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS ingestion_sources (site_id TEXT PRIMARY KEY, source TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS late_events (id TEXT PRIMARY KEY, site_id TEXT NOT NULL, body TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS settings (name TEXT PRIMARY KEY, body TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS reviews (id TEXT PRIMARY KEY, visit_id TEXT NOT NULL, revision INTEGER NOT NULL,
+                                    body TEXT NOT NULL, UNIQUE(visit_id, revision));
+CREATE TABLE IF NOT EXISTS review_grants (id TEXT PRIMARY KEY, token_hash TEXT UNIQUE, body TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS ix_visits_site_state ON visits(site_id, state);
 CREATE INDEX IF NOT EXISTS ix_evidence_visit ON evidence(visit_id, at);
 CREATE INDEX IF NOT EXISTS ix_schedules_site ON schedules(site_id, window_start);
@@ -75,6 +90,19 @@ class Store:
             except BaseException:
                 self._conn.rollback()
                 raise
+
+    def setting(self, name: str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute("SELECT body FROM settings WHERE name=?", (name,)).fetchone()
+            return json.loads(row[0]) if row else None
+
+    def put_setting(self, name: str, value: dict) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO settings (name, body) VALUES (?, ?) "
+                "ON CONFLICT(name) DO UPDATE SET body=excluded.body",
+                (name, json.dumps(value)),
+            )
 
     def close(self) -> None:
         self._conn.close()
@@ -248,6 +276,24 @@ class Store:
 
     def receipts(self) -> list[Receipt]:
         return self._rows(Receipt, "SELECT body FROM receipts ORDER BY sequence")
+
+    def reviews_for(self, visit_id: str) -> list[ReviewEntry]:
+        return self._rows(
+            ReviewEntry, "SELECT body FROM reviews WHERE visit_id=? ORDER BY revision", (visit_id,)
+        )
+
+    def put_review(self, review: ReviewEntry) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO reviews (id, visit_id, revision, body) VALUES (?, ?, ?, ?)",
+                (review.id, review.visit_id, review.revision, review.model_dump_json()),
+            )
+
+    def put_review_grant(self, grant: ReviewGrant) -> None:
+        self._put("review_grants", grant, token_hash=grant.token_hash)
+
+    def review_grant(self, token_hash: str) -> ReviewGrant | None:
+        return self._one(ReviewGrant, "SELECT body FROM review_grants WHERE token_hash=?", (token_hash,))
 
     # ----------------------------------------------------------------- idempotency
 

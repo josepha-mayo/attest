@@ -221,3 +221,71 @@ def test_lifespan_worker_processes_a_durable_delivery(settings, store, ring_clie
     assert recovered.counts() == {"done": 1}
     assert recovered.claim() is None
     recovered.close()
+
+
+def test_worker_and_coordinator_review_flow_keeps_original(api, store, household, t0):
+    _post_hook(api, household[2].id, "button_press", t0)
+    visit = store.active_visit(household[0].id)
+    assert api.post(f"/api/visits/{visit.id}/close").status_code == 200
+    original = store.receipt_for_visit(visit.id).model_dump_json()
+    endpoint = f"/api/visits/{visit.id}/reviews"
+    assert api.post(endpoint, auth=None, json={"decision": "dispute", "statement": "x"}).status_code == 401
+    assert (
+        api.post(endpoint, json={"decision": "confirm", "statement": "x", "actor": "worker"}).status_code
+        == 422
+    )
+    response = api.post(
+        endpoint, json={"decision": "inconclusive", "statement": "Requesting worker context."}
+    )
+    assert response.status_code == 200
+    link = api.post(f"/api/visits/{visit.id}/review-link").json()["path"]
+    assert api.get(link, auth=None).status_code == 200
+    response = api.post(link, auth=None, data={"decision": "correction", "statement": "I remained inside."})
+    assert response.status_code == 200 and "Statement recorded" in response.text
+    assert api.post(link, auth=None, data={"decision": "confirm", "statement": "Again"}).status_code == 409
+    bundle = api.get(f"/visits/{visit.id}/bundle.json")
+    assert len(bundle.json()["reviews"]) == 2
+    assert bundle.json()["reviews"][1]["receipt"]["payload"]["actor"]["role"] == "worker"
+    assert "append-only reviews verified" in api.post("/verify", data={"text": bundle.text}).text
+    page = api.get(f"/visits/{visit.id}")
+    assert page.status_code == 200 and "I remained inside." in page.text
+    assert store.receipt_for_visit(visit.id).model_dump_json() == original
+
+
+def test_setup_forms_discover_create_and_cancel_without_cli(api, store, ring_world, t0):
+    assert api.get("/setup", auth=None).status_code == 401
+    page = api.get("/setup?discover=true")
+    assert page.status_code == 200 and "Backyard" in page.text
+    camera = ring_world.cameras()[1]
+    response = api.post(
+        "/setup/sites", data={"name": "Second residence", "camera_id": camera.id, "sensor_id": ""}
+    )
+    assert response.status_code == 303
+    site = next(s for s in store.sites() if s.name == "Second residence")
+    assert (
+        api.post("/setup/workers", data={"name": "Alex", "role": "cleaner", "agency": "Example"}).status_code
+        == 303
+    )
+    worker = next(w for w in store.workers() if w.name == "Alex")
+    response = api.post(
+        "/setup/schedules",
+        data={
+            "site_id": site.id,
+            "worker_id": worker.id,
+            "window_start": t0.isoformat(),
+            "window_end": (t0 + timedelta(hours=1)).isoformat(),
+            "expected_minutes": "60",
+            "service": "Cleaning",
+        },
+    )
+    assert response.status_code == 303
+    schedule = store.schedules_for_site(site.id)[0]
+    assert api.post(f"/setup/schedules/{schedule.id}/cancel").status_code == 303
+    assert store.schedule(schedule.id).status == "cancelled"
+    page = api.get("/setup")
+    assert "Second residence" in page.text and "Preserved, not deleted" in page.text
+
+
+def test_replay_controls_are_disabled_in_wall_clock_runtime(api, t0):
+    assert api.post("/api/replay/start", json={"at": t0.isoformat()}).status_code == 409
+    assert api.post("/api/replay/advance", json={"at": t0.isoformat()}).status_code == 409
