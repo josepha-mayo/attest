@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Visit {{ visit.id }}{% endblock %}
+{% block body %}
+{% macro t(dt) %}{{ dt.astimezone(tz).strftime("%I:%M:%S %p").lstrip("0") if dt else "—" }}{% endmacro %}
+<a href="/" class="muted small">&larr; all visits</a>
+<div class="row" style="justify-content:space-between;margin-top:8px">
+  <div>
+    <h1>{{ site.name }} <span class="pill {{ visit.state }}">{{ visit.state.replace("_"," ") }}</span></h1>
+    <div class="muted">{{ visit.arrived_at.astimezone(tz).strftime("%A, %B %d %Y") }} &middot;
+      {% if worker %}{{ worker.name }} <span class="small">({{ worker.role.replace("_"," ") }}{% if worker.agency %}, {{ worker.agency }}{% endif %})</span>{% else %}worker not identified{% endif %}</div>
+  </div>
+  {% if receipt %}<a class="btn secondary" href="/receipts/{{ receipt.id }}.json">Download signed receipt</a>{% endif %}
+</div>
+
+{% if visit.summary %}<p class="summary" style="margin:22px 0">{{ visit.summary }}</p>{% endif %}
+
+<div class="grid">
+  <div class="card"><div class="muted small">Arrived</div><div class="kpi" style="font-size:20px">{{ t(visit.arrived_at) }}</div>
+    {% if schedule %}<div class="muted small">window {{ schedule.window_start.astimezone(tz).strftime("%I:%M %p").lstrip("0") }}–{{ schedule.window_end.astimezone(tz).strftime("%I:%M %p").lstrip("0") }}</div>{% endif %}</div>
+  <div class="card"><div class="muted small">Checked in</div><div class="kpi" style="font-size:20px">{{ t(visit.checked_in_at) }}</div><div class="muted small">via one-time link, no biometrics</div></div>
+  <div class="card"><div class="muted small">Departed</div><div class="kpi" style="font-size:20px">{{ t(visit.departed_at) }}</div></div>
+  <div class="card"><div class="muted small">Duration</div><div class="kpi" style="font-size:20px">{% if visit.duration_minutes is not none %}{{ "%.0f"|format(visit.duration_minutes) }} min{% else %}—{% endif %}</div>
+    {% if schedule %}<div class="muted small">{{ schedule.expected_minutes }} min expected &middot; {{ schedule.service }}</div>{% endif %}</div>
+</div>
+
+{% if visit.flags %}
+<h2>Flags</h2>
+<div class="card">{% for f in visit.flags %}<div><span class="flag {{ f.severity }}">{{ f.code }}</span> {{ f.message }}</div>{% endfor %}</div>
+{% endif %}
+
+{% set snaps = evidence|selectattr("kind","equalto","snapshot")|list %}
+{% if snaps %}
+<h2>Door camera snapshots</h2>
+<div class="snap">
+  {% for e in snaps %}
+  <figure>
+    <img src="/visits/{{ visit.id }}/media/{{ e.media_path.replace('\\','/').split('/')[-1] }}" alt="{{ e.note }} snapshot">
+    <figcaption><b>{{ e.note }}</b> {{ t(e.at) }}<br>sha256 {{ e.media_sha256[:16] }}…</figcaption>
+  </figure>
+  {% endfor %}
+</div>
+{% endif %}
+
+<h2>Evidence timeline</h2>
+<div class="card">
+<ul class="timeline">
+  {% for e in evidence if e.kind != "snapshot" %}
+  <li><time>{{ t(e.at) }}</time>
+    <div>{{ e.kind.replace("_"," ") }}{% if e.ring_sub_type %} <span class="muted">({{ e.ring_sub_type }})</span>{% endif %}
+      {% if e.note %}<span class="muted">— {{ e.note }}</span>{% endif %}
+      {% if e.ring_event_type %}<div class="small muted">Ring <code>{{ e.ring_event_type }}</code> on <code>{{ e.source_device_id }}</code> &middot; request {{ e.ring_request_id[:8] }}…</div>{% endif %}
+    </div></li>
+  {% endfor %}
+</ul>
+</div>
+
+{% if receipt %}
+<h2>Signed receipt #{{ receipt.sequence }}</h2>
+<div class="card">
+  <div class="row small" style="margin-bottom:8px">
+    {% if verified[0] %}<span class="ok">&#10003; Ed25519 signature valid</span>{% else %}<span class="bad">&#10007; {{ verified[1] }}</span>{% endif %}
+    <span class="muted">payload sha256 {{ receipt.payload_hash[:20] }}…</span>
+    <span class="muted">prev {{ (receipt.prev_hash or "genesis")[:20] }}{% if receipt.prev_hash %}…{% endif %}</span>
+  </div>
+  <pre>{{ receipt.payload | tojson(indent=2) }}</pre>
+</div>
+{% endif %}
+{% if visit.state in ["open","in_progress","unmatched"] %}<script>setTimeout(()=>location.reload(), 4000)</script>{% endif %}
+{% endblock %}

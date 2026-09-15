@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Verify a receipt{% endblock %}
+{% block body %}
+<h1>Verify a receipt</h1>
+<p class="muted">Paste a single receipt or the full ledger export. Verification is offline: it recomputes the payload hash and checks the Ed25519 signature (and, for an export, the hash chain). Nothing is stored.</p>
+{% if result %}
+<div class="card" style="margin:14px 0;font-size:17px">{% if result[0] %}<span class="ok">&#10003; {{ result[1] }}</span>{% else %}<span class="bad">&#10007; {{ result[1] }}</span>{% endif %}</div>
+{% endif %}
+<form method="post" enctype="multipart/form-data" class="card">
+  <label class="muted small">Receipt JSON</label>
+  <textarea name="text" rows="12" placeholder='{"id": "rcpt_...", "payload": {...}, "signature": "..."}'></textarea>
+  <div class="row" style="margin-top:10px;justify-content:space-between">
+    <input type="file" name="file" accept="application/json" style="width:auto">
+    <button class="btn">Verify</button>
+  </div>
+</form>
+<h2>This deployment's public key</h2>
+<pre>{{ public_key }}</pre>
+<p class="muted small">Receipts embed this key; an agency or court can pin it and verify receipts without contacting this server.</p>
+{% endblock %}

@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Attest — visits{% endblock %}
+{% block body %}
+{% macro t(dt) %}{{ dt.astimezone(tz).strftime("%b %d, %I:%M %p").replace(" 0", " ") if dt else "—" }}{% endmacro %}
+<div class="row" style="justify-content:space-between;align-items:flex-end">
+  <div>
+    <h1>Proof of visit, from the door.</h1>
+    <div class="muted">Every scheduled visit becomes a signed, hash-chained receipt built from Ring doorbell, camera and sensor evidence.</div>
+  </div>
+  <div class="card small">
+    Ledger: {% if chain[0] %}<span class="ok">&#10003; {{ chain[1] }}</span>{% else %}<span class="bad">&#10007; {{ chain[1] }}</span>{% endif %}
+  </div>
+</div>
+
+<div class="grid" style="margin-top:20px">
+  {% set closed = visits|selectattr("state","equalto","closed")|list %}
+  {% set active = visits|selectattr("state","in",["open","in_progress"])|list %}
+  {% set flagged = visits|selectattr("flags")|list %}
+  <div class="card"><div class="kpi">{{ active|length }}</div><div class="muted">visits in progress</div></div>
+  <div class="card"><div class="kpi">{{ closed|length }}</div><div class="muted">receipts issued</div></div>
+  <div class="card"><div class="kpi">{{ flagged|length }}</div><div class="muted">visits with flags</div></div>
+  <div class="card"><div class="kpi">{{ sites|length }}</div><div class="muted">sites monitored</div></div>
+</div>
+
+<h2>Recent visits</h2>
+<div class="card" style="padding:0">
+<table>
+  <thead><tr><th>Site</th><th>Worker</th><th>Arrived</th><th>Departed</th><th>Duration</th><th>State</th><th>Flags</th></tr></thead>
+  <tbody>
+  {% for v in visits %}
+  <tr class="link" onclick="location.href='/visits/{{ v.id }}'">
+    <td>{{ sites[v.site_id].name if v.site_id in sites else v.site_id }}</td>
+    <td>{{ workers[v.worker_id].name if v.worker_id in workers else "—" }}</td>
+    <td>{{ t(v.arrived_at) }}</td>
+    <td>{{ t(v.departed_at) }}</td>
+    <td>{% if v.duration_minutes is not none %}{{ "%.0f"|format(v.duration_minutes) }} min{% if v.schedule_id in schedules %} <span class="muted">/ {{ schedules[v.schedule_id].expected_minutes }}</span>{% endif %}{% else %}—{% endif %}</td>
+    <td><span class="pill {{ v.state }}">{{ v.state.replace("_"," ") }}</span></td>
+    <td>{% for f in v.flags %}<span class="flag {{ f.severity }}">{{ f.code }}</span>{% endfor %}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="7" class="muted">No visits yet. Point a Ring webhook at <code>/webhooks/ring</code> or replay a scenario with <code>ring-sandbox play home_aide_visit</code>.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2>Schedules</h2>
+<div class="card" style="padding:0">
+<table>
+  <thead><tr><th>Site</th><th>Worker</th><th>Window</th><th>Expected</th><th>Service</th><th>Check-in link</th></tr></thead>
+  <tbody>
+  {% for s in upcoming %}
+  <tr>
+    <td>{{ sites[s.site_id].name if s.site_id in sites else s.site_id }}</td>
+    <td>{{ workers[s.worker_id].name if s.worker_id in workers else s.worker_id }}</td>
+    <td>{{ t(s.window_start) }} – {{ s.window_end.astimezone(tz).strftime("%I:%M %p").lstrip("0") }}</td>
+    <td>{{ s.expected_minutes }} min</td>
+    <td>{{ s.service }}</td>
+    <td class="small">{% if s.worker_id in workers %}<a href="/checkin/{{ workers[s.worker_id].checkin_token }}" style="color:var(--accent)">/checkin/{{ workers[s.worker_id].checkin_token }}</a>{% endif %}</td>
+  </tr>
+  {% else %}<tr><td colspan="6" class="muted">No schedules.</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+<script>setTimeout(()=>location.reload(), 5000)</script>
+{% endblock %}

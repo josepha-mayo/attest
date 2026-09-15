@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "attest"
+version = "0.1.0"
+description = "Proof-of-visit ledger for home-service work, built on Ring doorbells, cameras and sensors"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [{ name = "Joseph Mayo" }]
+dependencies = [
+  "ring-sandbox[server]",
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+  "jinja2>=3.1",
+  "httpx>=0.27",
+  "pydantic>=2.7",
+  "pydantic-settings>=2.4",
+  "cryptography>=43",
+  "python-multipart>=0.0.9",
+  "tzdata>=2024.1",
+]
+
+[project.optional-dependencies]
+aws = ["boto3>=1.35"]
+dev = ["attest[aws]", "pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.6"]
+
+[project.scripts]
+attest = "attest.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/attest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
