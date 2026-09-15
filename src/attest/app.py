@@ -27,7 +27,18 @@ from .engine import VisitEngine
 from .inbox import WebhookInbox
 from .ledger import Signer
 from .media import MediaStore
-from .models import Receipt, ReplayTime, ReviewBundle, ReviewInput, Schedule, Site, VisitState, Worker, utcnow
+from .models import (
+    Receipt,
+    ReplayTime,
+    RetentionApply,
+    ReviewBundle,
+    ReviewInput,
+    Schedule,
+    Site,
+    VisitState,
+    Worker,
+    utcnow,
+)
 from .poller import HistoryPoller
 from .reviews import ReviewService, verify_bundle
 from .setup import SetupService
@@ -53,11 +64,18 @@ def create_app(
     s = settings or default_settings
     s.data_dir.mkdir(parents=True, exist_ok=True)
     store = store or Store(s.data_dir / "attest.sqlite3")
-    ring = ring or RingClient(
-        s.ring_access_token,
-        base_url=s.ring_base_url,
-        media_origins=[o.strip() for o in s.ring_media_origins.split(",") if o.strip()],
-    )
+    if ring is None:
+        stored_auth = store.setting("ring_auth") or {}
+        ring = RingClient(
+            stored_auth.get("access_token") or s.ring_access_token,
+            base_url=s.ring_base_url,
+            media_origins=[o.strip() for o in s.ring_media_origins.split(",") if o.strip()],
+            refresh_token=stored_auth.get("refresh_token")
+            or (s.ring_refresh_token.get_secret_value() if s.ring_refresh_token else None),
+            token_url=s.ring_token_url,
+            client_id=s.ring_client_id,
+            on_token_refresh=lambda tokens: store.put_setting("ring_auth", tokens),
+        )
     signer = signer or Signer.load_or_create(s.key_path)
     media = MediaStore(s.data_dir / "media")
     summarizer = build_summarizer(
@@ -577,6 +595,30 @@ def create_app(
         return await asyncio.to_thread(
             retention.build_report, store, inbox, s.data_dir / "media", policy=policy
         )
+
+    @app.post("/api/retention/apply")
+    async def api_retention_apply(body: RetentionApply):
+        """Delete the previewed non-chain candidates. The confirm token must match the
+        current preview, so deletion only ever targets the set an operator just saw."""
+        policy = retention.RetentionPolicy(
+            visits_days=s.retention_visits_days,
+            media_days=s.retention_media_days,
+            deliveries_days=s.retention_deliveries_days,
+            grants_days=s.retention_grants_days,
+            seen_days=s.retention_seen_days,
+            late_events_days=s.retention_late_days,
+        )
+        try:
+            return await asyncio.to_thread(
+                retention.apply,
+                store,
+                inbox,
+                s.data_dir / "media",
+                policy=policy,
+                confirm=body.confirm,
+            )
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
 
     @app.post("/api/sweep")
     async def api_sweep(now: datetime | None = None):

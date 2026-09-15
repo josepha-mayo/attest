@@ -360,6 +360,30 @@ class Store:
             ]
             return total, ids
 
+    # ----------------------------------------------------------------- retention
+
+    def _delete_ids(self, table: str, column: str, ids: Iterable[str]) -> int:
+        ids = list(ids)
+        if not ids:
+            return 0
+        with self._lock:
+            cur = self._conn.execute(
+                f"DELETE FROM {table} WHERE {column} IN ({','.join('?' * len(ids))})", ids
+            )
+            return cur.rowcount
+
+    def delete_seen(self, ids: Iterable[str]) -> int:
+        return self._delete_ids("seen_requests", "request_id", ids)
+
+    def delete_late_events(self, ids: Iterable[str]) -> int:
+        return self._delete_ids("late_events", "id", ids)
+
+    def delete_checkin_grants(self, ids: Iterable[str]) -> int:
+        return self._delete_ids("checkin_grants", "id", ids)
+
+    def delete_review_grants(self, ids: Iterable[str]) -> int:
+        return self._delete_ids("review_grants", "id", ids)
+
     # ----------------------------------------------------------------- misc
 
     def stats(self) -> dict:

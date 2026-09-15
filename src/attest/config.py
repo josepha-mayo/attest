@@ -14,6 +14,9 @@ class Settings(BaseSettings):
 
     # Ring
     ring_access_token: str = "sandbox-token"
+    ring_refresh_token: SecretStr | None = None  # enables RFC 6749 refresh on 401
+    ring_client_id: str | None = None
+    ring_token_url: str = "https://oauth.ring.com/oauth/token"
     ring_base_url: str = "http://127.0.0.1:8787"
     ring_webhook_key: str = "attest-dev-hmac-key"
     # Comma-separated origins allowed to receive media downloads (Ring presigned URLs).

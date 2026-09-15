@@ -114,5 +114,18 @@ class WebhookInbox:
                 )
             ]
 
+    def delete(self, ids) -> int:
+        """Remove terminal deliveries by id. Pending/processing rows are never deleted."""
+        ids = list(ids)
+        if not ids:
+            return 0
+        with self._transaction():
+            cur = self._db.execute(
+                "DELETE FROM deliveries WHERE status IN ('done','rejected','failed') "
+                f"AND id IN ({','.join('?' * len(ids))})",
+                ids,
+            )
+            return cur.rowcount
+
     def close(self) -> None:
         self._db.close()

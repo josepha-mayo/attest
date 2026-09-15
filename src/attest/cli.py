@@ -268,13 +268,20 @@ def _retention(args: argparse.Namespace) -> None:
     store = Store(settings.data_dir / "attest.sqlite3")
     inbox_path = settings.data_dir / "webhooks.sqlite3"
     inbox = WebhookInbox(inbox_path) if inbox_path.exists() else None
+    media_dir = settings.data_dir / "media"
     try:
-        report = retention.build_report(store, inbox, settings.data_dir / "media", policy=policy)
+        if args.apply:
+            try:
+                result = retention.apply(store, inbox, media_dir, policy=policy, confirm=args.apply)
+            except ValueError as exc:
+                sys.exit(f"retention refused: {exc}")
+            print(json.dumps(result, indent=2))
+        else:
+            print(json.dumps(retention.build_report(store, inbox, media_dir, policy=policy), indent=2))
     finally:
         store.close()
         if inbox is not None:
             inbox.close()
-    print(json.dumps(report, indent=2))
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -288,7 +295,15 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--port", type=int, default=8000)
     s.set_defaults(fn=_serve)
 
-    s = sub.add_parser("retention", help="preview what the retention policy would touch (read-only)")
+    s = sub.add_parser(
+        "retention", help="preview lifecycle candidates, or apply with the preview's apply_token"
+    )
+    s.add_argument(
+        "--apply",
+        metavar="TOKEN",
+        default=None,
+        help="delete the previewed non-chain candidates; must equal the current apply_token",
+    )
     s.set_defaults(fn=_retention)
 
     for name, fn in (("seed", _seed), ("demo", _demo), ("replay", _replay)):

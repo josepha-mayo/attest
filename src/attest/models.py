@@ -32,6 +32,11 @@ class ReplayTime(BaseModel):
     at: AwareDatetime
 
 
+class RetentionApply(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirm: str = Field(min_length=1, max_length=64)
+
+
 class Site(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
     id: str = Field(default_factory=lambda: _id("site"), pattern=r"^[A-Za-z0-9_-]{1,80}$")

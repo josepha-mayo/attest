@@ -94,6 +94,76 @@ def test_report_identifies_candidates_without_deleting(store, tmp_path):
     inbox.close()
 
 
+def test_apply_deletes_only_the_reviewed_set(store, tmp_path):
+    import pytest
+
+    now = utcnow()
+    old = now - timedelta(days=400)
+    site = store.put_site(
+        Site(name="Demo", ring_account_id="ava1.ring.account.SANDBOX", door_camera_id="cam")
+    )
+    old_visit = _closed_visit(store, site.id, old)
+    store.put_checkin_grant(
+        CheckinGrant(id="g1", worker_id="w", token_hash="h1", expires_at=now - timedelta(days=30))
+    )
+    store.put_checkin_grant(
+        CheckinGrant(id="g2", worker_id="w", token_hash="h2", expires_at=now + timedelta(hours=1))
+    )
+    store.mark_seen("acct:req-old", now - timedelta(days=60))
+    store.mark_seen("acct:req-new", now)
+    media_root = tmp_path / "media"
+    (media_root / old_visit.id).mkdir(parents=True)
+    (media_root / old_visit.id / "arrival.abc.png").write_bytes(b"png")
+
+    inbox = WebhookInbox(tmp_path / "webhooks.sqlite3")
+    inbox.enqueue("acct:req-done", b"{}", "sig")
+    job = inbox.claim()
+    inbox.complete(job, "done")
+    inbox._db.execute("UPDATE deliveries SET received_at=?", (now.timestamp() - 40 * 86400,))
+    inbox.enqueue("acct:req-pending", b"{}", "sig2")  # stays pending, never deletable
+
+    report = retention.build_report(store, inbox, media_root, now=now)
+    token = report["apply_token"]
+
+    with pytest.raises(ValueError):
+        retention.apply(store, inbox, media_root, now=now, confirm="bogus")
+
+    # data changes invalidate the token before apply
+    store.mark_seen("acct:req-newer", now - timedelta(days=60))
+    with pytest.raises(ValueError):
+        retention.apply(store, inbox, media_root, now=now, confirm=token)
+
+    report = retention.build_report(store, inbox, media_root, now=now)
+    result = retention.apply(store, inbox, media_root, now=now, confirm=report["apply_token"])
+    d = result["deleted"]
+    assert d["deliveries"] == 1 and d["grants"] == 1
+    assert d["seen_requests"] == 2 and d["media_files"] == 1 and d["late_events"] == 0
+    assert result["kept"]["closed_visits"] == 1
+
+    assert store.checkin_grant("h1") is None and store.checkin_grant("h2") is not None
+    assert store.mark_seen("acct:req-old", now)  # deleted dedupe key re-registers as new
+    assert store.visit(old_visit.id) is not None  # chain-linked record preserved
+    assert inbox.counts() == {"pending": 1}  # pending delivery untouched
+    assert not list(media_root.rglob("*.*"))  # media file gone
+    inbox.close()
+
+
+def test_apply_endpoint_requires_matching_preview_token(settings, store, ring_client, household):
+    from fastapi.testclient import TestClient
+
+    from attest.app import create_app
+    from attest.ledger import Signer
+
+    app = create_app(settings, store=store, ring=ring_client, signer=Signer.ephemeral(), sweep_interval_s=0)
+    admin = ("admin", settings.admin_token.get_secret_value())
+    with TestClient(app) as client:
+        assert client.post("/api/retention/apply", json={"confirm": "x"}).status_code == 401
+        assert client.post("/api/retention/apply", json={"confirm": "bogus"}, auth=admin).status_code == 409
+        token = client.get("/api/retention", auth=admin).json()["apply_token"]
+        r = client.post("/api/retention/apply", json={"confirm": token}, auth=admin)
+        assert r.status_code == 200 and "deleted" in r.json()
+
+
 def test_retention_endpoint_reports_without_deleting(settings, store, ring_client, household):
     from fastapi.testclient import TestClient
 
