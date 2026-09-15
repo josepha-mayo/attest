@@ -87,3 +87,35 @@ def test_replay_checkin_uses_event_clock_but_grants_use_wall_clock(store, settin
     receipt = store.receipt_for_visit(visit.id)
     assert receipt.payload["clock"]["mode"] == "replay"
     assert "clock_conflict" not in {f.code for f in store.visit(visit.id).flags}
+
+
+def test_replay_media_window_uses_logical_clock(store, settings, ring_client, tmp_path, monkeypatch):
+    """In replay mode the snapshot window must clamp to the logical clock, not wall time."""
+    from attest.engine import VisitEngine
+    from attest.ledger import Signer
+    from attest.media import MediaStore
+    from attest.summarize import TemplateSummarizer
+
+    settings.replay_mode = True
+    ring_client.base_url = "http://127.0.0.1:8787"
+    engine = VisitEngine(
+        store, ring_client, Signer.ephemeral(), MediaStore(tmp_path / "media"), TemplateSummarizer(), settings
+    )
+    t0 = utcnow() - timedelta(days=1)
+    engine.clock.start(t0)
+    store.put_site(Site(name="Demo", ring_account_id="ava1.ring.account.SANDBOX", door_camera_id="cam"))
+
+    seen = []
+    real = ring_client.snapshot_latest
+
+    def spy(device_id, start, end=None, **kw):
+        seen.append((device_id, start, end))
+        return real(device_id, start, end, **kw)
+
+    monkeypatch.setattr(ring_client, "snapshot_latest", spy)
+    event = WebhookEvent.model_validate(
+        webhooks.build_event(event_type="button_press", device_id="cam", occurred_at=t0)
+    )
+    engine.ingest(event)
+    w = timedelta(seconds=settings.snapshot_window_seconds)
+    assert seen == [("cam", event.occurred_at - w, t0)]

@@ -64,8 +64,9 @@ def household(store: Store, ring_world):
 
 @pytest.fixture
 def t0() -> datetime:
-    """A schedule window start safely in the past (the emulator rejects future media timestamps)."""
-    return (datetime.now(tz=UTC) - timedelta(days=1)).replace(hour=16, minute=0, second=0, microsecond=0)
+    """A schedule window start safely in the past (the emulator rejects future media timestamps)
+    but inside HistoryPoller's 24-hour lookback floor at any time of day."""
+    return (datetime.now(tz=UTC) - timedelta(hours=6)).replace(microsecond=0)
 
 
 @pytest.fixture

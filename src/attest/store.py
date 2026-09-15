@@ -173,6 +173,9 @@ class Store:
     def checkin_grant(self, token_hash: str) -> CheckinGrant | None:
         return self._one(CheckinGrant, "SELECT body FROM checkin_grants WHERE token_hash=?", (token_hash,))
 
+    def checkin_grants(self) -> list[CheckinGrant]:
+        return self._rows(CheckinGrant, "SELECT body FROM checkin_grants ORDER BY id")
+
     # ----------------------------------------------------------------- schedules
 
     def put_schedule(self, s: Schedule) -> Schedule:
@@ -295,6 +298,9 @@ class Store:
     def review_grant(self, token_hash: str) -> ReviewGrant | None:
         return self._one(ReviewGrant, "SELECT body FROM review_grants WHERE token_hash=?", (token_hash,))
 
+    def review_grants(self) -> list[ReviewGrant]:
+        return self._rows(ReviewGrant, "SELECT body FROM review_grants ORDER BY id")
+
     # ----------------------------------------------------------------- idempotency
 
     def bind_source(self, site_id: str, source: str) -> bool:
@@ -319,6 +325,13 @@ class Store:
         with self._lock:
             return [json.loads(r[0]) for r in self._conn.execute("SELECT body FROM late_events ORDER BY id")]
 
+    def late_event_rows(self) -> list[dict]:
+        with self._lock:
+            return [
+                {"id": r[0], "site_id": r[1], "body": json.loads(r[2])}
+                for r in self._conn.execute("SELECT id, site_id, body FROM late_events ORDER BY id")
+            ]
+
     def mark_seen(self, request_id: str, at: datetime) -> bool:
         """Return True if new, False if this webhook request_id was already processed."""
         with self._lock:
@@ -331,7 +344,51 @@ class Store:
             except sqlite3.IntegrityError:
                 return False
 
+    def stale_seen(self, before: datetime, *, limit: int = 200) -> tuple[int, list[str]]:
+        """Count dedupe keys older than ``before`` and return up to ``limit`` ids."""
+        iso = _iso(before)
+        with self._lock:
+            total = self._conn.execute(
+                "SELECT COUNT(*) FROM seen_requests WHERE seen_at<?", (iso,)
+            ).fetchone()[0]
+            ids = [
+                r[0]
+                for r in self._conn.execute(
+                    "SELECT request_id FROM seen_requests WHERE seen_at<? ORDER BY seen_at LIMIT ?",
+                    (iso, limit),
+                )
+            ]
+            return total, ids
+
     # ----------------------------------------------------------------- misc
+
+    def stats(self) -> dict:
+        """Table counts and oldest timestamps for lifecycle reporting. No bodies."""
+        with self._lock:
+
+            def row(sql: str):
+                return self._conn.execute(sql).fetchone()
+
+            visits = row("SELECT COUNT(*), MIN(arrived_at) FROM visits")
+            by_state = dict(
+                self._conn.execute("SELECT state, COUNT(*) FROM visits GROUP BY state").fetchall()
+            )
+            evidence = row("SELECT COUNT(*), MIN(at) FROM evidence")
+            receipts = row("SELECT COUNT(*), MAX(sequence) FROM receipts")
+            seen = row("SELECT COUNT(*), MIN(seen_at) FROM seen_requests")
+            return {
+                "sites": row("SELECT COUNT(*) FROM sites")[0],
+                "workers": row("SELECT COUNT(*) FROM workers")[0],
+                "schedules": row("SELECT COUNT(*) FROM schedules")[0],
+                "reviews": row("SELECT COUNT(*) FROM reviews")[0],
+                "late_events": row("SELECT COUNT(*) FROM late_events")[0],
+                "checkin_grants": row("SELECT COUNT(*) FROM checkin_grants")[0],
+                "review_grants": row("SELECT COUNT(*) FROM review_grants")[0],
+                "visits": {"total": visits[0], "oldest_arrival": visits[1], "by_state": by_state},
+                "evidence": {"total": evidence[0], "oldest": evidence[1]},
+                "receipts": {"total": receipts[0], "latest_sequence": receipts[1]},
+                "seen_requests": {"total": seen[0], "oldest": seen[1]},
+            }
 
     def dump(self) -> dict:
         return {

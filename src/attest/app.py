@@ -14,12 +14,13 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, Response, UploadFile
+from fastapi import Path as PathParam
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.security import HTTPBasic
 from fastapi.templating import Jinja2Templates
 from ring_sandbox import RingAPIError, RingClient, webhooks
 
-from . import ledger
+from . import ledger, retention
 from .config import Settings
 from .config import settings as default_settings
 from .engine import VisitEngine
@@ -36,6 +37,10 @@ from .summarize import build as build_summarizer
 log = logging.getLogger("attest")
 _TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
+_MAX_WEBHOOK_BYTES = 256 * 1024
+_MAX_VERIFY_BYTES = 4 * 1024 * 1024
+_MAX_BODY_BYTES = 1024 * 1024
+
 
 def create_app(
     settings: Settings | None = None,
@@ -48,7 +53,11 @@ def create_app(
     s = settings or default_settings
     s.data_dir.mkdir(parents=True, exist_ok=True)
     store = store or Store(s.data_dir / "attest.sqlite3")
-    ring = ring or RingClient(s.ring_access_token, base_url=s.ring_base_url)
+    ring = ring or RingClient(
+        s.ring_access_token,
+        base_url=s.ring_base_url,
+        media_origins=[o.strip() for o in s.ring_media_origins.split(",") if o.strip()],
+    )
     signer = signer or Signer.load_or_create(s.key_path)
     media = MediaStore(s.data_dir / "media")
     summarizer = build_summarizer(
@@ -169,6 +178,23 @@ def create_app(
         response.headers["X-Frame-Options"] = "DENY"
         return response
 
+    @app.middleware("http")
+    async def bound_request_body(request: Request, call_next):
+        limit = (
+            _MAX_WEBHOOK_BYTES
+            if request.url.path == "/webhooks/ring"
+            else _MAX_VERIFY_BYTES
+            if request.url.path == "/verify"
+            else _MAX_BODY_BYTES
+        )
+        try:
+            declared = int(request.headers.get("content-length", "0"))
+        except ValueError:
+            declared = 0
+        if declared > limit:
+            return JSONResponse({"error": "request body too large"}, status_code=413)
+        return await call_next(request)
+
     app.state.store, app.state.engine, app.state.ring, app.state.signer = (
         store,
         engine,
@@ -205,7 +231,7 @@ def create_app(
             return JSONResponse({"error": "configure the issued Ring webhook signing key"}, status_code=503)
         chunks = bytearray()
         async for chunk in request.stream():
-            if len(chunks) + len(chunk) > 256 * 1024:
+            if len(chunks) + len(chunk) > _MAX_WEBHOOK_BYTES:
                 return JSONResponse({"error": "payload too large"}, status_code=413)
             chunks.extend(chunk)
         raw = bytes(chunks)
@@ -235,7 +261,7 @@ def create_app(
     # ------------------------------------------------------------------ worker check-in
 
     @app.get("/checkin/{token}", response_class=HTMLResponse)
-    async def checkin_page(request: Request, token: str):
+    async def checkin_page(request: Request, token: str = PathParam(max_length=128)):
         target = engine.checkin_target(token)
         if target is None:
             raise HTTPException(404, "invalid, expired, or used check-in link")
@@ -251,7 +277,7 @@ def create_app(
         )
 
     @app.post("/checkin/{token}")
-    async def checkin_submit(request: Request, token: str):
+    async def checkin_submit(request: Request, token: str = PathParam(max_length=128)):
         visit = await asyncio.to_thread(engine.check_in, token)
         if visit is None:
             raise HTTPException(409, "invalid, expired, or used check-in link")
@@ -282,7 +308,7 @@ def create_app(
         )
 
     @app.get("/visits/{visit_id}", response_class=HTMLResponse)
-    async def visit_page(request: Request, visit_id: str):
+    async def visit_page(request: Request, visit_id: str = PathParam(max_length=128)):
         v = store.visit(visit_id)
         if v is None:
             raise HTTPException(404)
@@ -304,7 +330,7 @@ def create_app(
         )
 
     @app.get("/visits/{visit_id}/media/{name}")
-    async def visit_media(visit_id: str, name: str):
+    async def visit_media(visit_id: str = PathParam(max_length=128), name: str = PathParam(max_length=255)):
         for e in store.evidence_for(visit_id):
             if e.media_path and Path(e.media_path).name == name:
                 data = media.read(e.media_path)
@@ -317,7 +343,7 @@ def create_app(
     # ------------------------------------------------------------------ receipts
 
     @app.get("/receipts/{receipt_id}.json")
-    async def receipt_json(receipt_id: str):
+    async def receipt_json(receipt_id: str = PathParam(max_length=128)):
         r = store.receipt(receipt_id)
         if r is None:
             raise HTTPException(404)
@@ -336,7 +362,15 @@ def create_app(
 
     @app.post("/verify", response_class=HTMLResponse)
     async def verify_submit(request: Request, file: UploadFile | None = None, text: str = Form("")):
-        raw = (await file.read()).decode() if file and file.filename else text
+        if file and file.filename:
+            data = await file.read(_MAX_VERIFY_BYTES + 1)
+            if len(data) > _MAX_VERIFY_BYTES:
+                raise HTTPException(413, "verification input too large")
+            raw = data.decode("utf-8", errors="replace")
+        else:
+            if len(text.encode("utf-8")) > _MAX_VERIFY_BYTES:
+                raise HTTPException(413, "verification input too large")
+            raw = text
         try:
             data = json.loads(raw)
             pk = signer.public_key_b64
@@ -368,7 +402,7 @@ def create_app(
         return await action(setup.register_schedule, schedule)
 
     @app.post("/api/visits/{visit_id}/checkin-link")
-    async def issue_checkin_link(visit_id: str):
+    async def issue_checkin_link(visit_id: str = PathParam(max_length=128)):
         try:
             token = await asyncio.to_thread(engine.issue_checkin, visit_id)
         except ValueError as exc:
@@ -458,24 +492,24 @@ def create_app(
         )
 
     @app.post("/setup/schedules/{schedule_id}/cancel")
-    async def cancel_schedule(request: Request, schedule_id: str):
+    async def cancel_schedule(request: Request, schedule_id: str = PathParam(max_length=128)):
         return await setup_form(request, setup.cancel_schedule, schedule_id)
 
     @app.get("/visits/{visit_id}/bundle.json")
-    async def review_bundle(visit_id: str):
+    async def review_bundle(visit_id: str = PathParam(max_length=128)):
         return await action(reviews.bundle, visit_id)
 
     @app.post("/api/visits/{visit_id}/reviews")
-    async def coordinator_review(visit_id: str, body: ReviewInput):
+    async def coordinator_review(body: ReviewInput, visit_id: str = PathParam(max_length=128)):
         return await action(reviews.coordinator_review, visit_id, body)
 
     @app.post("/api/visits/{visit_id}/review-link")
-    async def issue_review_link(visit_id: str):
+    async def issue_review_link(visit_id: str = PathParam(max_length=128)):
         token = await action(reviews.issue_worker_link, visit_id)
         return {"path": f"/review/{token}", "expires_in_seconds": 86400}
 
     @app.get("/review/{token}", response_class=HTMLResponse)
-    async def worker_review_page(request: Request, token: str):
+    async def worker_review_page(request: Request, token: str = PathParam(max_length=128)):
         target = await action(reviews.worker_target, token)
         if target is None:
             raise HTTPException(404, "invalid, expired, or used review link")
@@ -487,7 +521,7 @@ def create_app(
     @app.post("/review/{token}", response_class=HTMLResponse)
     async def worker_review_submit(
         request: Request,
-        token: str,
+        token: str = PathParam(max_length=128),
         decision: str = Form(...),
         statement: str = Form(...),
         reported_start: str = Form(""),
@@ -522,12 +556,27 @@ def create_app(
         return await action(engine.clock.advance, body.at)
 
     @app.post("/api/visits/{visit_id}/close")
-    async def close_for_review(visit_id: str):
+    async def close_for_review(visit_id: str = PathParam(max_length=128)):
         return await action(engine.close_for_review, visit_id)
 
     @app.get("/api/state")
     async def api_state():
         return store.dump()
+
+    @app.get("/api/retention")
+    async def api_retention():
+        """Non-destructive lifecycle report: what exists, its age, what policy would touch."""
+        policy = retention.RetentionPolicy(
+            visits_days=s.retention_visits_days,
+            media_days=s.retention_media_days,
+            deliveries_days=s.retention_deliveries_days,
+            grants_days=s.retention_grants_days,
+            seen_days=s.retention_seen_days,
+            late_events_days=s.retention_late_days,
+        )
+        return await asyncio.to_thread(
+            retention.build_report, store, inbox, s.data_dir / "media", policy=policy
+        )
 
     @app.post("/api/sweep")
     async def api_sweep(now: datetime | None = None):

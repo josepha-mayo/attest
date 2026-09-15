@@ -21,7 +21,7 @@ Run from this repository:
 
 The sibling ring-sandbox project has the same commands in its own environment. Its pytest fixtures auto-load through a pytest11 entry point; do not also register that plugin in conftest.py.
 
-Install both editable projects together: `.\.venv\Scripts\python -m pip install -e "../ring-sandbox[server]" -e ".[dev]"`.
+Install both editable projects together with the pinned tested set: `.\.venv\Scripts\python -m pip install -r requirements-dev.txt -e "../ring-sandbox[server]" -e ".[dev]"`. `requirements-dev.txt` is the reproducibility lock; regenerate it after deliberate dependency upgrades. The client's `send(stream=True)` and manual redirect handling require httpx>=0.28.
 
 Windows requires tzdata for zoneinfo. aws-login credentials require botocore[crt]. Availability of an inference profile does not imply model access or quota.
 
@@ -29,7 +29,7 @@ Fresh published source checkouts passed all 66 Attest and 12 companion tests in 
 
 ## Known follow-up work
 
-Deployment authentication and OAuth lifecycle, media redirect validation, retention, Python dependency locking, official integrations, customer validation, product feedback, and the submission video remain unfinished. Webhook intake acknowledges a durable separate inbox before background processing; official deadline/load validation and failed-delivery replay tooling remain pending.
+Deployment authentication and OAuth lifecycle, approved retention execution, official integrations, customer validation, product feedback, and the submission video remain unfinished. Media redirects are manually validated: JSON endpoints never follow redirects, media redirects only reach same-origin or `ring_media_origins` allowlisted HTTPS hosts, never carry credentials, and bodies are byte-capped. Request bodies, verification inputs, and link/ID path parameters are size-bounded. `attest retention` and `GET /api/retention` report lifecycle candidates without deleting; no retention execution exists yet. Webhook intake acknowledges a durable separate inbox before background processing; official deadline/load validation and failed-delivery replay tooling remain pending.
 
 Coordinated replay is now explicit (`ATTEST_REPLAY_MODE=true`) and only accepts loopback Ring emulators in a fresh runtime. `attest replay home_aide_visit --speed 60 --auto-checkin` seeds a local case and waits for delivery processing before advancing its persisted event clock. Grant expiry, statement-received time, and signature issuance always use wall time. Do not convert an existing runtime between wall and replay modes.
 

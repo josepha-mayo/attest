@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     ring_access_token: str = "sandbox-token"
     ring_base_url: str = "http://127.0.0.1:8787"
     ring_webhook_key: str = "attest-dev-hmac-key"
+    # Comma-separated origins allowed to receive media downloads (Ring presigned URLs).
+    # Entries are HTTPS origins like https://host or wildcard hosts like *.amazonaws.com.
+    ring_media_origins: str = ""
 
     # Storage
     data_dir: Path = Path("./data")
@@ -27,6 +30,14 @@ class Settings(BaseSettings):
     snapshot_window_seconds: int = 45
     # Poll GET /v1/history when webhooks can't reach us (Playground tokens). 0 disables.
     poll_history_seconds: int = 0
+
+    # Retention preview policy. Reporting only — deletion is a separate explicit action.
+    retention_visits_days: int = 180
+    retention_media_days: int = 180
+    retention_deliveries_days: int = 30
+    retention_grants_days: int = 7
+    retention_seen_days: int = 30
+    retention_late_days: int = 90
 
     # Summaries
     summarizer: str = "template"  # template | bedrock

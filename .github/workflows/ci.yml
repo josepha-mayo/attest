@@ -32,7 +32,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           repository: josepha-mayo/ring-sandbox
-          ref: ee6645722481a83267d308bb198b08a2f0c6ade9
+          ref: b3ef8fd6b0b20d53bc7d86daf43e11c82d50a791
           path: ring-sandbox
           persist-credentials: false
       - name: Set up Python
@@ -41,7 +41,9 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Install both source packages
         working-directory: attest
-        run: python -m pip install -e "../ring-sandbox[server]" -e ".[dev]"
+        run: >-
+          python -m pip install -r requirements-dev.txt
+          -e "../ring-sandbox[server]" -e ".[dev]"
       - name: Reject tracked runtime files
         working-directory: attest
         run: >-

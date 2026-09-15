@@ -102,5 +102,17 @@ class WebhookInbox:
         with self._lock:
             return dict(self._db.execute("SELECT status, COUNT(*) FROM deliveries GROUP BY status"))
 
+    def entries(self, *, limit: int = 1000) -> list[dict]:
+        """Delivery metadata for lifecycle reporting. Bodies are never returned."""
+        with self._lock:
+            return [
+                {k: r[k] for k in ("id", "status", "attempts", "error_code", "received_at")}
+                for r in self._db.execute(
+                    "SELECT id, status, attempts, error_code, received_at "
+                    "FROM deliveries ORDER BY received_at LIMIT ?",
+                    (limit,),
+                )
+            ]
+
     def close(self) -> None:
         self._db.close()

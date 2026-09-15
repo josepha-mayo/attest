@@ -251,6 +251,32 @@ def _replay(args: argparse.Namespace) -> None:
         )
 
 
+def _retention(args: argparse.Namespace) -> None:
+    """Print a non-destructive lifecycle report for the local runtime. Deletes nothing."""
+    from . import retention
+    from .inbox import WebhookInbox
+    from .store import Store
+
+    policy = retention.RetentionPolicy(
+        visits_days=settings.retention_visits_days,
+        media_days=settings.retention_media_days,
+        deliveries_days=settings.retention_deliveries_days,
+        grants_days=settings.retention_grants_days,
+        seen_days=settings.retention_seen_days,
+        late_events_days=settings.retention_late_days,
+    )
+    store = Store(settings.data_dir / "attest.sqlite3")
+    inbox_path = settings.data_dir / "webhooks.sqlite3"
+    inbox = WebhookInbox(inbox_path) if inbox_path.exists() else None
+    try:
+        report = retention.build_report(store, inbox, settings.data_dir / "media", policy=policy)
+    finally:
+        store.close()
+        if inbox is not None:
+            inbox.close()
+    print(json.dumps(report, indent=2))
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(
         prog="attest", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -261,6 +287,9 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8000)
     s.set_defaults(fn=_serve)
+
+    s = sub.add_parser("retention", help="preview what the retention policy would touch (read-only)")
+    s.set_defaults(fn=_retention)
 
     for name, fn in (("seed", _seed), ("demo", _demo), ("replay", _replay)):
         s = sub.add_parser(name)

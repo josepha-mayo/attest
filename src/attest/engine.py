@@ -544,12 +544,13 @@ class VisitEngine:
 
     def _snapshot(self, visit: Visit, site: Site, at: datetime, label: str) -> None:
         w = timedelta(seconds=self.settings.snapshot_window_seconds)
+        end = min(at + w, self.clock.now())
         try:
-            snap = self.ring.snapshot_latest(site.door_camera_id, at - w, min(at + w, utcnow()))
+            snap = self.ring.snapshot_latest(site.door_camera_id, at - w, end)
             if snap.timestamp is None or not snap.content:
                 raise ValueError("snapshot content or actual timestamp missing")
             actual_at = datetime.fromtimestamp(snap.timestamp / 1000, tz=at.tzinfo)
-            if not at - w <= actual_at <= min(at + w, utcnow()):
+            if not at - w <= actual_at <= end:
                 raise ValueError("snapshot timestamp outside requested window")
         except Exception as exc:  # noqa: BLE001 - Ring media is best-effort evidence
             log.warning("snapshot for %s (%s) failed: %s", visit.id, label, type(exc).__name__)

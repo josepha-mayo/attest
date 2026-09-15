@@ -289,3 +289,27 @@ def test_setup_forms_discover_create_and_cancel_without_cli(api, store, ring_wor
 def test_replay_controls_are_disabled_in_wall_clock_runtime(api, t0):
     assert api.post("/api/replay/start", json={"at": t0.isoformat()}).status_code == 409
     assert api.post("/api/replay/advance", json={"at": t0.isoformat()}).status_code == 409
+
+
+def test_declared_request_bodies_are_bounded(api):
+    assert api.post("/api/workers", content=b"x" * (1024 * 1024 + 1)).status_code == 413
+    body = b"x" * (256 * 1024 + 1)
+    assert (
+        api.post(
+            "/webhooks/ring",
+            content=body,
+            headers={webhooks.SIGNATURE_HEADER: webhooks.sign(KEY, body)},
+        ).status_code
+        == 413
+    )
+
+
+def test_verify_input_is_bounded(api):
+    oversized = "x" * (4 * 1024 * 1024 + 1)
+    assert api.post("/verify", data={"text": oversized}).status_code == 413
+
+
+def test_link_tokens_and_ids_have_bounded_length(api):
+    assert api.get("/checkin/" + "a" * 200, auth=None).status_code == 422
+    assert api.get("/review/" + "a" * 200, auth=None).status_code == 422
+    assert api.get("/visits/" + "v" * 200).status_code == 422

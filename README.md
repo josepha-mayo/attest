@@ -37,7 +37,7 @@ Clone Attest and ring-sandbox into sibling directories. From the Attest director
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python -m pip install -e "../ring-sandbox[server]" -e ".[dev]"
+.\.venv\Scripts\python -m pip install -r requirements-dev.txt -e "../ring-sandbox[server]" -e ".[dev]"
 $env:ATTEST_ADMIN_TOKEN = [System.Net.NetworkCredential]::new("", (Read-Host "Private admin password (32+ characters)" -AsSecureString)).Password
 $env:ATTEST_REPLAY_MODE = "true"
 $env:ATTEST_DATA_DIR = ".\data-replay-" + [guid]::NewGuid().ToString("N")
