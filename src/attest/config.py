@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     # Summaries
     summarizer: str = "template"  # template | bedrock
     aws_region: str = "us-east-1"
-    bedrock_model_id: str = "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+    bedrock_model_id: str = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 
     # Presentation
     public_base_url: str = "http://127.0.0.1:8000"
