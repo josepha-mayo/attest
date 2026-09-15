@@ -47,6 +47,14 @@ class Worker(BaseModel):
     created_at: datetime = Field(default_factory=utcnow)
 
 
+class CheckinGrant(BaseModel):
+    id: str
+    worker_id: str
+    token_hash: str
+    expires_at: datetime
+    used_at: datetime | None = None
+
+
 class Schedule(BaseModel):
     id: str = Field(default_factory=lambda: _id("sch"))
     site_id: str
@@ -67,6 +75,7 @@ class VisitState(StrEnum):
     CLOSED = "closed"  # departure evidence seen, receipt issued
     UNMATCHED = "unmatched"  # arrival with no schedule in window; kept for review
     NO_SHOW = "no_show"  # schedule window elapsed with no arrival
+    NO_OBSERVATION = "no_observation"
 
 
 class EvidenceKind(StrEnum):
@@ -90,6 +99,7 @@ class Evidence(BaseModel):
     ring_sub_type: str | None = None
     ring_request_id: str | None = None
     ring_history_event_id: str | None = None
+    ingestion_source: str = "unknown"
     media_sha256: str | None = None
     media_path: str | None = None
     note: str = ""
@@ -112,16 +122,30 @@ class Visit(BaseModel):
     last_activity_at: datetime  # event time of the latest cue (from Ring timestamps)
     last_seen_at: datetime = Field(default_factory=utcnow)  # wall clock of the latest webhook we ingested
     departed_at: datetime | None = None
+    departure_candidate_at: datetime | None = None
+    closed_at: datetime | None = None
+    close_reason: str | None = None
+    summary_source: str = "unknown"
+    summary_model: str | None = None
+    summary_fallback_reason: str | None = None
     summary: str | None = None
     flags: list[Flag] = Field(default_factory=list)
     receipt_id: str | None = None
     created_at: datetime = Field(default_factory=utcnow)
 
     @property
-    def duration_minutes(self) -> float | None:
-        if self.departed_at is None:
+    def has_observations(self) -> bool:
+        return self.state not in (VisitState.NO_SHOW, VisitState.NO_OBSERVATION)
+
+    @property
+    def observed_span_minutes(self) -> float | None:
+        if not self.has_observations:
             return None
-        return (self.departed_at - self.arrived_at).total_seconds() / 60
+        return max(0.0, (self.last_activity_at - self.arrived_at).total_seconds() / 60)
+
+    @property
+    def duration_minutes(self) -> float | None:
+        return None
 
 
 class Receipt(BaseModel):

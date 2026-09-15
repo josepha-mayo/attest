@@ -4,8 +4,8 @@
 {% macro t(dt) %}{{ dt.astimezone(tz).strftime("%b %d, %I:%M %p").replace(" 0", " ") if dt else "—" }}{% endmacro %}
 <div class="row" style="justify-content:space-between;align-items:flex-end">
   <div>
-    <h1>Proof of visit, from the door.</h1>
-    <div class="muted">Every scheduled visit becomes a signed, hash-chained receipt built from Ring doorbell, camera and sensor evidence.</div>
+    <h1>Visit observations. Clear limits.</h1>
+    <div class="muted">Review Ring observations and worker self-reports. Signed records preserve what was received; they do not certify identity, attendance, or time worked.</div>
   </div>
   <div class="card small">
     Ledger: {% if chain[0] %}<span class="ok">&#10003; {{ chain[1] }}</span>{% else %}<span class="bad">&#10007; {{ chain[1] }}</span>{% endif %}
@@ -25,15 +25,15 @@
 <h2>Recent visits</h2>
 <div class="card" style="padding:0">
 <table>
-  <thead><tr><th>Site</th><th>Worker</th><th>Arrived</th><th>Departed</th><th>Duration</th><th>State</th><th>Flags</th></tr></thead>
+  <thead><tr><th>Site</th><th>Self-reported worker</th><th>First observed</th><th>Last observed</th><th>Observed interval</th><th>State</th><th>Review notes</th></tr></thead>
   <tbody>
   {% for v in visits %}
   <tr class="link" onclick="location.href='/visits/{{ v.id }}'">
     <td>{{ sites[v.site_id].name if v.site_id in sites else v.site_id }}</td>
-    <td>{{ workers[v.worker_id].name if v.worker_id in workers else "—" }}</td>
-    <td>{{ t(v.arrived_at) }}</td>
-    <td>{{ t(v.departed_at) }}</td>
-    <td>{% if v.duration_minutes is not none %}{{ "%.0f"|format(v.duration_minutes) }} min{% if v.schedule_id in schedules %} <span class="muted">/ {{ schedules[v.schedule_id].expected_minutes }}</span>{% endif %}{% else %}—{% endif %}</td>
+    <td>{{ workers[v.worker_id].name if v.checked_in_at and v.worker_id in workers else "Unknown" }}</td>
+    <td>{{ t(v.arrived_at) if v.has_observations else "None received" }}</td>
+    <td>{{ t(v.last_activity_at) if v.has_observations else "None received" }}</td>
+    <td>{% if v.observed_span_minutes is not none %}{{ "%.0f"|format(v.observed_span_minutes) }} min{% else %}Unknown{% endif %}</td>
     <td><span class="pill {{ v.state }}">{{ v.state.replace("_"," ") }}</span></td>
     <td>{% for f in v.flags %}<span class="flag {{ f.severity }}">{{ f.code }}</span>{% endfor %}</td>
   </tr>
@@ -56,7 +56,7 @@
     <td>{{ t(s.window_start) }} – {{ s.window_end.astimezone(tz).strftime("%I:%M %p").lstrip("0") }}</td>
     <td>{{ s.expected_minutes }} min</td>
     <td>{{ s.service }}</td>
-    <td class="small">{% if s.worker_id in workers %}<a href="/checkin/{{ workers[s.worker_id].checkin_token }}" style="color:var(--accent)">/checkin/{{ workers[s.worker_id].checkin_token }}</a>{% endif %}</td>
+    <td class="small muted">Open the observation record to issue a single-use link.</td>
   </tr>
   {% else %}<tr><td colspan="6" class="muted">No schedules.</td></tr>{% endfor %}
   </tbody>

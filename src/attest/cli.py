@@ -24,7 +24,9 @@ def _serve(args: argparse.Namespace) -> None:
 
     from .app import create_app
 
-    uvicorn.run(create_app(), host=args.host, port=args.port, log_level="info")
+    if settings.admin_token is None:
+        sys.exit("Set ATTEST_ADMIN_TOKEN to at least 32 random characters before starting Attest.")
+    uvicorn.run(create_app(), host=args.host, port=args.port, log_level="info", access_log=False)
 
 
 def _seed(args: argparse.Namespace) -> dict:
@@ -55,7 +57,6 @@ def _seed(args: argparse.Namespace) -> dict:
         role=Role.HOME_HEALTH_AIDE,
         agency="Evergreen Home Care",
         phone="+1 555 0199",
-        checkin_token=args.token or Worker().checkin_token,
     )
     now = datetime.now(tz=UTC)
     # Replayed scenarios are back-dated by their length + 60s, so open the window well before now.
@@ -67,7 +68,13 @@ def _seed(args: argparse.Namespace) -> dict:
         expected_minutes=args.expected_minutes,
         service="Morning care visit",
     )
-    with httpx.Client(base_url=args.public_url, timeout=10) as api:
+    if settings.admin_token is None:
+        sys.exit("Set ATTEST_ADMIN_TOKEN to authenticate to Attest.")
+    with httpx.Client(
+        base_url=args.public_url,
+        timeout=10,
+        auth=("admin", settings.admin_token.get_secret_value()),
+    ) as api:
         for path, obj in (
             ("/api/sites", site),
             ("/api/workers", worker),
@@ -81,7 +88,7 @@ def _seed(args: argparse.Namespace) -> dict:
         "camera": cam.id,
         "sensor": sensor.id if sensor else None,
         "worker": worker.id,
-        "checkin_url": f"{args.public_url}/checkin/{worker.checkin_token}",
+        "dashboard_url": args.public_url,
         "schedule": schedule.id,
     }
     print(json.dumps(out, indent=2))
@@ -99,7 +106,7 @@ def _demo(args: argparse.Namespace) -> None:
     print(f"\nsandbox will deliver signed webhooks to {hook}")
     print("\nNext:")
     print(f"  open {args.public_url}/            (dashboard)")
-    print(f"  open {out['checkin_url']}          (worker's phone)")
+    print(f"  issue a visit-scoped check-in link from {out['dashboard_url']} after the first event")
     print(f"  ring-sandbox play home_aide_visit --url {args.ring_url} --speed 60   (90-min visit in ~90s)")
     print(
         f"  ring-sandbox play short_visit     --url {args.ring_url} --speed 20   (12-min visit -> shortfall)"
@@ -123,7 +130,6 @@ def main(argv: list[str] | None = None) -> None:
         s.add_argument("--public-url", default=settings.public_base_url)
         s.add_argument("--site-name", default="Alvarez residence")
         s.add_argument("--worker-name", default="Maria Chen")
-        s.add_argument("--token", help="fixed check-in token (handy for demos)")
         s.add_argument("--window-minutes", type=int, default=120)
         s.add_argument("--expected-minutes", type=int, default=90)
         s.set_defaults(fn=fn)

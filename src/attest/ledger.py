@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +18,7 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
-from .models import Receipt
+from .models import Receipt, utcnow
 
 
 def canonical(payload: dict[str, Any]) -> bytes:
@@ -67,15 +68,26 @@ class Signer:
         return cls(Ed25519PrivateKey.generate())
 
     def issue(self, *, visit_id: str, sequence: int, prev_hash: str | None, facts: dict[str, Any]) -> Receipt:
+        if {"schema", "sequence", "prev_hash", "receipt_id", "issued_at"} & facts.keys():
+            raise ValueError("facts contain reserved receipt fields")
+        if "visit_id" in facts and facts["visit_id"] != visit_id:
+            raise ValueError("facts contain a different visit id")
+        receipt_id = f"rcpt_{uuid.uuid4().hex}"
+        issued_at = utcnow()
         payload = {
-            "schema": "attest.receipt/1",
+            **facts,
+            "schema": "attest.receipt/2",
             "sequence": sequence,
             "prev_hash": prev_hash,
-            **facts,
+            "visit_id": visit_id,
+            "receipt_id": receipt_id,
+            "issued_at": issued_at.isoformat(),
         }
         h = payload_hash(payload)
         sig = self._sk.sign(bytes.fromhex(h))
         return Receipt(
+            id=receipt_id,
+            issued_at=issued_at,
             visit_id=visit_id,
             sequence=sequence,
             prev_hash=prev_hash,
@@ -99,6 +111,13 @@ def verify_receipt(receipt: Receipt | dict[str, Any], *, public_key: str | None 
         return False, "payload hash mismatch (payload was altered)"
     if r.payload.get("sequence") != r.sequence or r.payload.get("prev_hash") != r.prev_hash:
         return False, "envelope fields disagree with signed payload"
+    if r.payload.get("visit_id") != r.visit_id:
+        return False, "visit id disagrees with signed payload"
+    if r.payload.get("schema") == "attest.receipt/2":
+        if r.payload.get("receipt_id") != r.id or r.payload.get("issued_at") != r.issued_at.isoformat():
+            return False, "receipt envelope identity disagrees with signed payload"
+    elif r.payload.get("schema") != "attest.receipt/1":
+        return False, "unsupported receipt schema"
     try:
         Ed25519PublicKey.from_public_bytes(_unb64(r.public_key)).verify(
             _unb64(r.signature), bytes.fromhex(r.payload_hash)

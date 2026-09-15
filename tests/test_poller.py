@@ -31,9 +31,9 @@ def test_poller_ingests_history_idempotently(
     assert v.state == VisitState.OPEN and v.schedule_id == schedule.id
     kinds = [e.ring_event_type for e in store.evidence_for(v.id) if e.ring_event_type]
     assert kinds == ["motion_detected", "button_press"]
-    assert all(
-        e.ring_request_id.startswith("history:") for e in store.evidence_for(v.id) if e.ring_request_id
-    )
+    observations = [e for e in store.evidence_for(v.id) if e.ring_event_type]
+    assert all(e.ingestion_source == "history" and e.ring_history_event_id for e in observations)
+    assert all(e.ring_request_id is None for e in observations)
 
 
 def test_camera_only_site_infers_departure_and_reconciles_history(engine, store, household, ring_control, t0):
@@ -63,8 +63,8 @@ def test_camera_only_site_infers_departure_and_reconciles_history(engine, store,
     store.put_visit(v)
     (closed,) = engine.sweep()
     assert closed.state == VisitState.CLOSED
-    assert closed.departed_at == t + timedelta(minutes=88)
-    assert "inferred_departure" in {f.code for f in closed.flags}
+    assert closed.departed_at is None and closed.last_activity_at == t + timedelta(minutes=88)
+    assert "observation_gap" in {f.code for f in closed.flags}
     assert "idle_close" not in {f.code for f in closed.flags}
     snaps = [e for e in store.evidence_for(closed.id) if e.kind == "snapshot"]
     assert [s.note for s in snaps] == ["arrival", "departure"]

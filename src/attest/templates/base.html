@@ -48,7 +48,7 @@
 <header>
   <div class="brand">Attest<span>.</span></div>
   <nav><a href="/">Visits</a><a href="/verify">Verify a receipt</a><a href="/receipts.json">Export ledger</a></nav>
-  <div class="meta">Ring API: {{ settings.ring_base_url }} &middot; summaries: {{ summarizer }}</div>
+  <div class="meta">{% if settings.ring_base_url == "https://api.amazonvision.com" %}Ring API configured{% else %}Local / test data{% endif %} &middot; configured summary provider: {{ summarizer }}</div>
 </header>
 <main>{% block body %}{% endblock %}</main>
 </body>

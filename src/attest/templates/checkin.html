@@ -5,13 +5,13 @@
   <div class="card" style="padding:26px">
     <div class="muted small">Attest check-in</div>
     <h1 style="margin-top:4px">Hi {{ worker.name.split(" ")[0] }}.</h1>
-    {% if request.query_params.get("done") %}
+    {% if done %}
       <p class="ok" style="font-size:18px">&#10003; You're checked in{% if visit and visit.checked_in_at %} at {{ visit.checked_in_at.astimezone(tz).strftime("%I:%M %p").lstrip("0") }}{% endif %}.</p>
-      <p class="muted">The household and your agency will see your confirmed arrival on the visit record. You can close this page.</p>
+      <p class="muted">Your self-report has been recorded. This link is now used and cannot submit again. You can close this page.</p>
     {% elif visit %}
-      <p>The door camera at <b>{{ site.name }}</b> noticed an arrival at
-        <b>{{ visit.arrived_at.astimezone(tz).strftime("%I:%M %p").lstrip("0") }}</b>. Confirm that's you.</p>
-      <p class="muted small">Checking in links this visit to your name. No photo of you is analysed for identity — the record uses the time you arrived, the time you leave, and the door sensor.</p>
+      <p>Activity was observed at <b>{{ site.name }}</b> at
+        <b>{{ visit.arrived_at.astimezone(tz).strftime("%I:%M %p").lstrip("0") }}</b>. Are you there now?</p>
+      <p class="muted small">This records your self-report at the current time, not the time of the camera event. It does not independently verify identity or location. Submit only for yourself.</p>
       <form method="post" action="/checkin/{{ token }}"><button class="btn" style="width:100%">Yes, I'm here</button></form>
     {% else %}
       <p class="muted">There's no open visit at any of your sites right now. Ring the doorbell or open the door, then reload this page.</p>

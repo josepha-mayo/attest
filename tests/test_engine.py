@@ -35,7 +35,7 @@ def test_full_visit_matches_schedule_and_issues_receipt(engine, store, household
     out = engine.ingest(ev(cam.id, "motion_detected", t, "human"))
     v = out.visit
     assert out.transitions == ["opened"] and v.state == VisitState.OPEN
-    assert v.schedule_id == schedule.id and v.worker_id == worker.id
+    assert v.schedule_id == schedule.id and v.worker_id is None
     kinds = [e.kind for e in store.evidence_for(v.id)]
     assert EvidenceKind.ARRIVAL_MOTION in kinds and EvidenceKind.SNAPSHOT in kinds  # arrival snapshot pulled
 
@@ -43,7 +43,12 @@ def test_full_visit_matches_schedule_and_issues_receipt(engine, store, household
     engine.ingest(ev(sensor.id, "contact_sensor_faulted", t + timedelta(seconds=20)))
     engine.ingest(ev(sensor.id, "contact_sensor_cleared", t + timedelta(seconds=35)))
 
-    assert engine.check_in("tok123", at=t + timedelta(minutes=1)).state == VisitState.IN_PROGRESS
+    assert (
+        engine.check_in(
+            engine.issue_checkin(store.active_visit(site.id).id), at=t + timedelta(minutes=1)
+        ).state
+        == VisitState.IN_PROGRESS
+    )
 
     # 88 minutes later: door opens, closes, person walks away
     leave = t + timedelta(minutes=88)
@@ -54,8 +59,8 @@ def test_full_visit_matches_schedule_and_issues_receipt(engine, store, household
 
     v = out.visit
     assert out.transitions == ["closed"] and v.state == VisitState.CLOSED
-    assert 88 <= v.duration_minutes <= 89
-    assert [f.code for f in v.flags] == []  # on time, checked in, full duration
+    assert v.duration_minutes is None and 88 <= v.observed_span_minutes <= 89
+    assert [f.code for f in v.flags] == ["departure_unconfirmed"]  # on time, checked in, full duration
     assert "Maria Chen" in v.summary and "88 minutes" in v.summary
 
     r = store.receipt_for_visit(v.id)
@@ -70,14 +75,14 @@ def test_short_visit_is_flagged(engine, store, household, schedule, t0):
     site, worker, cam, sensor = household
     t = t0 + timedelta(minutes=10)
     engine.ingest(ev(cam.id, "motion_detected", t, "human"))
-    engine.check_in("tok123", at=t + timedelta(minutes=1))
+    engine.check_in(engine.issue_checkin(store.active_visit(site.id).id), at=t + timedelta(minutes=1))
     leave = t + timedelta(minutes=12)
     engine.ingest(ev(sensor.id, "contact_sensor_faulted", leave))
     engine.ingest(ev(sensor.id, "contact_sensor_cleared", leave + timedelta(seconds=8)))
     v = engine.ingest(ev(cam.id, "motion_detected", leave + timedelta(seconds=20), "human")).visit
     assert v.state == VisitState.CLOSED
-    assert {f.code for f in v.flags} == {"duration_shortfall"}
-    assert "12 of 90" in v.flags[0].message
+    assert {f.code for f in v.flags} == {"observed_interval_short", "departure_unconfirmed"}
+    assert any("Observations span 12 min; 90 min scheduled" in f.message for f in v.flags)
 
 
 def test_departure_requires_door_cycle_and_min_duration(engine, household, schedule, t0):
@@ -125,8 +130,10 @@ def test_sweep_closes_idle_visit_and_marks_no_show(engine, store, household, sch
     store.put_visit(v)
     changed = engine.sweep(now=utcnow())
     assert len(changed) == 1 and changed[0].state == VisitState.CLOSED
-    assert changed[0].departed_at == t + timedelta(minutes=6)  # closed at the last event time
-    assert {f.code for f in changed[0].flags} >= {"idle_close", "no_checkin", "duration_shortfall"}
+    assert changed[0].departed_at is None and changed[0].last_activity_at == t + timedelta(
+        minutes=6
+    )  # closed at the last event time
+    assert {f.code for f in changed[0].flags} >= {"idle_close", "no_checkin", "observed_interval_short"}
 
     # a second schedule nobody shows up for
     from attest.models import Schedule
@@ -142,6 +149,6 @@ def test_sweep_closes_idle_visit_and_marks_no_show(engine, store, household, sch
     )
     changed = engine.sweep(now=t0 + timedelta(hours=4, minutes=45))
     ns = next(v for v in changed if v.schedule_id == s2.id)
-    assert ns.state == VisitState.NO_SHOW and ns.flags[0].code == "no_show"
+    assert ns.state == VisitState.NO_OBSERVATION and ns.flags[0].code == "no_observation"
     receipts = store.receipts()
     assert [r.sequence for r in receipts] == [1, 2] and ledger.verify_chain(receipts)[0]

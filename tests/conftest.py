@@ -20,6 +20,7 @@ from attest.summarize import TemplateSummarizer
 def settings(tmp_path: Path) -> Settings:
     return Settings(
         data_dir=tmp_path,
+        admin_token="test-admin-token-only-" + "x" * 32,
         ring_webhook_key="k",
         summarizer="template",
         timezone="UTC",

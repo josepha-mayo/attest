@@ -59,3 +59,17 @@ def test_key_persistence(tmp_path):
     a = Signer.load_or_create(p)
     b = Signer.load_or_create(p)
     assert a.public_key_b64 == b.public_key_b64
+
+
+def test_envelope_identity_is_signed():
+    signer = Signer.ephemeral()
+    receipt = signer.issue(visit_id="visit-a", sequence=1, prev_hash=None, facts={})
+    assert not ledger.verify_receipt(receipt.model_copy(update={"visit_id": "visit-b"}))[0]
+    assert not ledger.verify_receipt(receipt.model_copy(update={"id": "other-receipt"}))[0]
+
+
+def test_reserved_fields_cannot_be_replaced_by_facts():
+    import pytest
+
+    with pytest.raises(ValueError):
+        Signer.ephemeral().issue(visit_id="visit-a", sequence=1, prev_hash=None, facts={"sequence": 100})

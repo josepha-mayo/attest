@@ -5,13 +5,15 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, Form, HTTPException, Request, Response, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import Depends, FastAPI, Form, HTTPException, Request, Response, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.security import HTTPBasic
 from fastapi.templating import Jinja2Templates
 from ring_sandbox import RingClient, webhooks
 
@@ -82,7 +84,43 @@ def create_app(
         for t in tasks:
             t.cancel()
 
-    app = FastAPI(title="Attest", version="0.1.0", lifespan=lifespan)
+    basic = HTTPBasic(auto_error=False)
+
+    async def authorize(request: Request):
+        if request.url.path in ("/webhooks/ring", "/healthz"):
+            return
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            origin = request.headers.get("origin")
+            expected_origin = str(request.base_url).rstrip("/")
+            if request.headers.get("sec-fetch-site") == "cross-site" or (
+                origin is not None and origin != expected_origin
+            ):
+                raise HTTPException(403, "cross-origin writes are not allowed")
+        if request.url.path.startswith("/checkin/"):
+            return
+        if s.admin_token is None:
+            raise HTTPException(503, "Configure ATTEST_ADMIN_TOKEN before using the application")
+        credentials = await basic(request)
+        if (
+            credentials is None
+            or not secrets.compare_digest(
+                credentials.password.encode(), s.admin_token.get_secret_value().encode()
+            )
+            or credentials.username != "admin"
+        ):
+            raise HTTPException(401, "authentication required", headers={"WWW-Authenticate": "Basic"})
+
+    app = FastAPI(title="Attest", version="0.1.0", lifespan=lifespan, dependencies=[Depends(authorize)])
+
+    @app.middleware("http")
+    async def privacy_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        return response
+
     app.state.store, app.state.engine, app.state.ring, app.state.signer = (
         store,
         engine,
@@ -109,7 +147,12 @@ def create_app(
 
     @app.post("/webhooks/ring")
     async def ring_webhook(request: Request) -> JSONResponse:
-        raw = await request.body()
+        chunks = bytearray()
+        async for chunk in request.stream():
+            chunks.extend(chunk)
+            if len(chunks) > 256 * 1024:
+                return JSONResponse({"error": "payload too large"}, status_code=413)
+        raw = bytes(chunks)
         try:
             ev = webhooks.parse(
                 raw,
@@ -135,26 +178,34 @@ def create_app(
 
     @app.get("/checkin/{token}", response_class=HTMLResponse)
     async def checkin_page(request: Request, token: str):
-        worker = store.worker_by_token(token)
-        if worker is None:
-            raise HTTPException(404, "unknown check-in link")
-        active = [store.active_visit(site.id) for site in store.sites()]
-        active = [v for v in active if v and v.worker_id in (None, worker.id)]
+        target = engine.checkin_target(token)
+        if target is None:
+            raise HTTPException(404, "invalid, expired, or used check-in link")
+        _, visit, worker = target
         return render(
             request,
             "checkin.html",
             worker=worker,
-            visit=active[0] if active else None,
-            site=store.site(active[0].site_id) if active else None,
+            visit=visit,
+            site=store.site(visit.site_id),
             token=token,
+            done=False,
         )
 
     @app.post("/checkin/{token}")
-    async def checkin_submit(token: str):
+    async def checkin_submit(request: Request, token: str):
         visit = await asyncio.to_thread(engine.check_in, token)
         if visit is None:
-            raise HTTPException(409, "no open visit to check in to")
-        return RedirectResponse(f"/checkin/{token}?done=1", status_code=303)
+            raise HTTPException(409, "invalid, expired, or used check-in link")
+        return render(
+            request,
+            "checkin.html",
+            visit=visit,
+            worker=store.worker(visit.worker_id),
+            site=store.site(visit.site_id),
+            token=None,
+            done=True,
+        )
 
     # ------------------------------------------------------------------ dashboard
 
@@ -243,11 +294,19 @@ def create_app(
 
     @app.post("/api/workers")
     async def api_worker(worker: Worker):
-        return store.put_worker(worker)
+        return store.put_worker(worker).model_dump(exclude={"checkin_token"})
 
     @app.post("/api/schedules")
     async def api_schedule(schedule: Schedule):
         return store.put_schedule(schedule)
+
+    @app.post("/api/visits/{visit_id}/checkin-link")
+    async def issue_checkin_link(visit_id: str):
+        try:
+            token = await asyncio.to_thread(engine.issue_checkin, visit_id)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {"path": f"/checkin/{token}", "expires_in_seconds": 900}
 
     @app.get("/api/state")
     async def api_state():

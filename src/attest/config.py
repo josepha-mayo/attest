@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="ATTEST_", env_file=".env", extra="ignore")
+
+    admin_token: SecretStr | None = Field(default=None, min_length=32)
 
     # Ring
     ring_access_token: str = "sandbox-token"

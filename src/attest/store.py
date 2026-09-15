@@ -6,13 +6,15 @@ import json
 import sqlite3
 import threading
 from collections.abc import Iterable
-from datetime import datetime
+from contextlib import contextmanager
+from datetime import UTC, datetime
+from functools import wraps
 from pathlib import Path
 from typing import TypeVar
 
 from pydantic import BaseModel
 
-from .models import Evidence, Receipt, Schedule, Site, Visit, VisitState, Worker
+from .models import CheckinGrant, Evidence, Receipt, Schedule, Site, Visit, VisitState, Worker
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -28,6 +30,9 @@ CREATE TABLE IF NOT EXISTS evidence  (id TEXT PRIMARY KEY, visit_id TEXT, at TEX
 CREATE TABLE IF NOT EXISTS receipts  (id TEXT PRIMARY KEY, visit_id TEXT UNIQUE, sequence INTEGER UNIQUE,
                                       body TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS seen_requests (request_id TEXT PRIMARY KEY, seen_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS checkin_grants (id TEXT PRIMARY KEY, token_hash TEXT UNIQUE, body TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS ingestion_sources (site_id TEXT PRIMARY KEY, source TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS late_events (id TEXT PRIMARY KEY, site_id TEXT NOT NULL, body TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS ix_visits_site_state ON visits(site_id, state);
 CREATE INDEX IF NOT EXISTS ix_evidence_visit ON evidence(visit_id, at);
 CREATE INDEX IF NOT EXISTS ix_schedules_site ON schedules(site_id, window_start);
@@ -35,7 +40,18 @@ CREATE INDEX IF NOT EXISTS ix_schedules_site ON schedules(site_id, window_start)
 
 
 def _iso(dt: datetime) -> str:
-    return dt.isoformat()
+    if dt.tzinfo is None or dt.utcoffset() is None:
+        raise ValueError("timezone-aware timestamp required")
+    return dt.astimezone(UTC).isoformat()
+
+
+def atomic(method):
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        with self.store.transaction():
+            return method(self, *args, **kwargs)
+
+    return wrapped
 
 
 class Store:
@@ -45,6 +61,20 @@ class Store:
         self._lock = threading.RLock()
         with self._lock:
             self._conn.executescript(_SCHEMA)
+
+    @contextmanager
+    def transaction(self):
+        with self._lock:
+            if self._conn.in_transaction:
+                yield
+                return
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                yield
+                self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
 
     def close(self) -> None:
         self._conn.close()
@@ -108,6 +138,12 @@ class Store:
 
     def workers(self) -> list[Worker]:
         return self._rows(Worker, "SELECT body FROM workers ORDER BY id")
+
+    def put_checkin_grant(self, grant: CheckinGrant) -> None:
+        self._put("checkin_grants", grant, token_hash=grant.token_hash)
+
+    def checkin_grant(self, token_hash: str) -> CheckinGrant | None:
+        return self._one(CheckinGrant, "SELECT body FROM checkin_grants WHERE token_hash=?", (token_hash,))
 
     # ----------------------------------------------------------------- schedules
 
@@ -194,7 +230,11 @@ class Store:
     # ----------------------------------------------------------------- receipts
 
     def put_receipt(self, r: Receipt) -> Receipt:
-        self._put("receipts", r, visit_id=r.visit_id, sequence=r.sequence)
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO receipts (id, visit_id, sequence, body) VALUES (?, ?, ?, ?)",
+                (r.id, r.visit_id, r.sequence, r.model_dump_json()),
+            )
         return r
 
     def receipt(self, receipt_id: str) -> Receipt | None:
@@ -210,6 +250,28 @@ class Store:
         return self._rows(Receipt, "SELECT body FROM receipts ORDER BY sequence")
 
     # ----------------------------------------------------------------- idempotency
+
+    def bind_source(self, site_id: str, source: str) -> bool:
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO ingestion_sources (site_id, source) VALUES (?, ?)", (site_id, source)
+            )
+            return (
+                self._conn.execute(
+                    "SELECT source FROM ingestion_sources WHERE site_id=?", (site_id,)
+                ).fetchone()[0]
+                == source
+            )
+
+    def record_late_event(self, event_id: str, site_id: str, body: str) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO late_events (id, site_id, body) VALUES (?, ?, ?)", (event_id, site_id, body)
+            )
+
+    def late_events(self) -> list[dict]:
+        with self._lock:
+            return [json.loads(r[0]) for r in self._conn.execute("SELECT body FROM late_events ORDER BY id")]
 
     def mark_seen(self, request_id: str, at: datetime) -> bool:
         """Return True if new, False if this webhook request_id was already processed."""
@@ -228,7 +290,8 @@ class Store:
     def dump(self) -> dict:
         return {
             "sites": [json.loads(s.model_dump_json()) for s in self.sites()],
-            "workers": [json.loads(w.model_dump_json()) for w in self.workers()],
+            "workers": [json.loads(w.model_dump_json(exclude={"checkin_token"})) for w in self.workers()],
+            "late_events": self.late_events(),
             "schedules": [json.loads(s.model_dump_json()) for s in self.schedules()],
             "visits": [json.loads(v.model_dump_json()) for v in self.visits()],
         }

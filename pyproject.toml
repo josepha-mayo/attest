@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "attest"
 version = "0.1.0"
-description = "Proof-of-visit ledger for home-service work, built on Ring doorbells, cameras and sensors"
+description = "Reviewable Ring observation records and visit-scoped worker self-reports"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"

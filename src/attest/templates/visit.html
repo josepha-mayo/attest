@@ -1,69 +1,72 @@
 {% extends "base.html" %}
-{% block title %}Visit {{ visit.id }}{% endblock %}
+{% block title %}Observation record {{ visit.id }}{% endblock %}
 {% block body %}
-{% macro t(dt) %}{{ dt.astimezone(tz).strftime("%I:%M:%S %p").lstrip("0") if dt else "—" }}{% endmacro %}
-<a href="/" class="muted small">&larr; all visits</a>
+{% macro t(dt) %}{{ dt.astimezone(tz).strftime("%I:%M:%S %p").lstrip("0") if dt else "Unknown" }}{% endmacro %}
+<a href="/" class="muted small">&larr; all records</a>
 <div class="row" style="justify-content:space-between;margin-top:8px">
   <div>
     <h1>{{ site.name }} <span class="pill {{ visit.state }}">{{ visit.state.replace("_"," ") }}</span></h1>
-    <div class="muted">{{ visit.arrived_at.astimezone(tz).strftime("%A, %B %d %Y") }} &middot;
-      {% if worker %}{{ worker.name }} <span class="small">({{ worker.role.replace("_"," ") }}{% if worker.agency %}, {{ worker.agency }}{% endif %})</span>{% else %}worker not identified{% endif %}</div>
+    <div class="muted">{% if worker and visit.checked_in_at %}Check-in self-reported using {{ worker.name }}'s link{% else %}No worker check-in received{% endif %}. Identity not verified.</div>
   </div>
-  {% if receipt %}<a class="btn secondary" href="/receipts/{{ receipt.id }}.json">Download signed receipt</a>{% endif %}
+  {% if receipt %}<a class="btn secondary" href="/receipts/{{ receipt.id }}.json">Download signed record</a>{% endif %}
 </div>
-
+<p class="muted">A valid signature proves record integrity, not identity, attendance, or time worked. Review observations alongside the worker's account.</p>
 {% if visit.summary %}<p class="summary" style="margin:22px 0">{{ visit.summary }}</p>{% endif %}
-
-<div class="grid">
-  <div class="card"><div class="muted small">Arrived</div><div class="kpi" style="font-size:20px">{{ t(visit.arrived_at) }}</div>
-    {% if schedule %}<div class="muted small">window {{ schedule.window_start.astimezone(tz).strftime("%I:%M %p").lstrip("0") }}–{{ schedule.window_end.astimezone(tz).strftime("%I:%M %p").lstrip("0") }}</div>{% endif %}</div>
-  <div class="card"><div class="muted small">Checked in</div><div class="kpi" style="font-size:20px">{{ t(visit.checked_in_at) }}</div><div class="muted small">via one-time link, no biometrics</div></div>
-  <div class="card"><div class="muted small">Departed</div><div class="kpi" style="font-size:20px">{{ t(visit.departed_at) }}</div></div>
-  <div class="card"><div class="muted small">Duration</div><div class="kpi" style="font-size:20px">{% if visit.duration_minutes is not none %}{{ "%.0f"|format(visit.duration_minutes) }} min{% else %}—{% endif %}</div>
-    {% if schedule %}<div class="muted small">{{ schedule.expected_minutes }} min expected &middot; {{ schedule.service }}</div>{% endif %}</div>
+<div class="small muted">Summary source: {{ visit.summary_source }}{% if visit.summary_model %} / {{ visit.summary_model }}{% endif %}{% if visit.summary_fallback_reason %} — fallback used: {{ visit.summary_fallback_reason }}{% endif %}</div>
+<div class="grid" style="margin-top:14px">
+  <div class="card"><div class="muted small">First observation</div><div class="kpi" style="font-size:20px">{{ t(visit.arrived_at) if visit.has_observations else "None received" }}</div></div>
+  <div class="card"><div class="muted small">Self-reported check-in</div><div class="kpi" style="font-size:20px">{{ t(visit.checked_in_at) }}</div></div>
+  <div class="card"><div class="muted small">Last observation</div><div class="kpi" style="font-size:20px">{{ t(visit.last_activity_at) if visit.has_observations else "None received" }}</div></div>
+  <div class="card"><div class="muted small">Observed interval, not time worked</div><div class="kpi" style="font-size:20px">{% if visit.observed_span_minutes is not none %}{{ "%.0f"|format(visit.observed_span_minutes) }} min{% else %}Unknown{% endif %}</div>
+    {% if schedule %}<div class="muted small">{{ schedule.expected_minutes }} min scheduled &middot; {{ schedule.service }}</div>{% endif %}</div>
 </div>
-
+{% if visit.state in ["open", "unmatched"] and schedule %}
+<div class="card" style="margin-top:14px">
+  <button class="btn" id="issue-link">Issue a check-in link</button>
+  <p class="small muted">Valid for this record only, expires after 15 minutes, usable once. Issuing a replacement invalidates the previous link.</p>
+  <a id="issued-link" style="color:var(--accent);overflow-wrap:anywhere"></a>
+  <p id="issue-status" role="status"></p>
+</div>
+<script>
+document.getElementById('issue-link').onclick = async () => {
+  const response = await fetch('/api/visits/{{ visit.id }}/checkin-link', {method: 'POST'});
+  const data = await response.json();
+  if (!response.ok) { document.getElementById('issue-status').textContent = data.detail || 'Unable to issue link'; return; }
+  const link = document.getElementById('issued-link');
+  link.href = data.path;
+  link.textContent = new URL(data.path, location.origin).href;
+  document.getElementById('issue-status').textContent = 'Share privately with the scheduled worker.';
+};
+</script>
+{% endif %}
 {% if visit.flags %}
-<h2>Flags</h2>
+<h2>Review notes</h2>
 <div class="card">{% for f in visit.flags %}<div><span class="flag {{ f.severity }}">{{ f.code }}</span> {{ f.message }}</div>{% endfor %}</div>
 {% endif %}
-
 {% set snaps = evidence|selectattr("kind","equalto","snapshot")|list %}
 {% if snaps %}
-<h2>Door camera snapshots</h2>
+<h2>Camera snapshots</h2>
 <div class="snap">
-  {% for e in snaps %}
-  <figure>
-    <img src="/visits/{{ visit.id }}/media/{{ e.media_path.replace('\\','/').split('/')[-1] }}" alt="{{ e.note }} snapshot">
-    <figcaption><b>{{ e.note }}</b> {{ t(e.at) }}<br>sha256 {{ e.media_sha256[:16] }}…</figcaption>
-  </figure>
-  {% endfor %}
+{% for e in snaps %}<figure>
+<img src="/visits/{{ visit.id }}/media/{{ e.media_path.replace('\\','/').split('/')[-1] }}" alt="Snapshot associated with {{ e.note }}">
+<figcaption>{{ e.note }} {{ t(e.at) }}<br>sha256 {{ e.media_sha256[:16] }}…</figcaption>
+</figure>{% endfor %}
 </div>
 {% endif %}
-
-<h2>Evidence timeline</h2>
-<div class="card">
-<ul class="timeline">
-  {% for e in evidence if e.kind != "snapshot" %}
-  <li><time>{{ t(e.at) }}</time>
-    <div>{{ e.kind.replace("_"," ") }}{% if e.ring_sub_type %} <span class="muted">({{ e.ring_sub_type }})</span>{% endif %}
-      {% if e.note %}<span class="muted">— {{ e.note }}</span>{% endif %}
-      {% if e.ring_event_type %}<div class="small muted">Ring <code>{{ e.ring_event_type }}</code> on <code>{{ e.source_device_id }}</code> &middot; request {{ e.ring_request_id[:8] }}…</div>{% endif %}
-    </div></li>
-  {% endfor %}
-</ul>
-</div>
-
+<h2>Observation timeline</h2>
+<div class="card"><ul class="timeline">
+{% for e in evidence if e.kind != "snapshot" %}
+<li><time>{{ t(e.at) }}</time><div>{{ e.kind.replace("_"," ") }}{% if e.ring_sub_type %} ({{ e.ring_sub_type }}){% endif %}
+{% if e.note %}<div class="muted">{{ e.note }}</div>{% endif %}
+{% if e.ring_event_type %}<div class="small muted">{{ e.ingestion_source }}: <code>{{ e.ring_event_type }}</code> &middot; {{ e.ring_history_event_id or e.ring_request_id or "unavailable" }}</div>{% endif %}
+</div></li>{% endfor %}
+</ul></div>
 {% if receipt %}
-<h2>Signed receipt #{{ receipt.sequence }}</h2>
+<h2>Signed record #{{ receipt.sequence }}</h2>
 <div class="card">
-  <div class="row small" style="margin-bottom:8px">
-    {% if verified[0] %}<span class="ok">&#10003; Ed25519 signature valid</span>{% else %}<span class="bad">&#10007; {{ verified[1] }}</span>{% endif %}
-    <span class="muted">payload sha256 {{ receipt.payload_hash[:20] }}…</span>
-    <span class="muted">prev {{ (receipt.prev_hash or "genesis")[:20] }}{% if receipt.prev_hash %}…{% endif %}</span>
-  </div>
-  <pre>{{ receipt.payload | tojson(indent=2) }}</pre>
+<div class="small">{% if verified[0] %}<span class="ok">Ed25519 signature valid — integrity only</span>{% else %}<span class="bad">{{ verified[1] }}</span>{% endif %}</div>
+<div class="muted small">sha256 {{ receipt.payload_hash }}<br>previous {{ receipt.prev_hash or "genesis" }}</div>
+<pre>{{ receipt.payload | tojson(indent=2) }}</pre>
 </div>
 {% endif %}
-{% if visit.state in ["open","in_progress","unmatched"] %}<script>setTimeout(()=>location.reload(), 4000)</script>{% endif %}
 {% endblock %}

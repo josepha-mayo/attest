@@ -40,17 +40,19 @@ class HistoryPoller:
         ingested = 0
         since = max(self._started - self.lookback, datetime.now(tz=UTC) - timedelta(hours=24))
         for site in self.store.sites():
-            for filt, (etype, sub) in _MAP.items():
-                try:
-                    events = list(self.ring.events(site.door_camera_id, event_types=[filt], since=since))
-                except RingAPIError as exc:
-                    log.warning("history poll failed for %s (%s): %s", site.name, filt, exc)
-                    continue
-                for ev in sorted(events, key=lambda e: e.attributes.start):  # oldest first
-                    if self.engine.ingest(
-                        _to_webhook(ev, site.ring_account_id, etype, sub)
-                    ).ignored_reason != ("duplicate request_id"):
-                        ingested += 1
+            pending = {}
+            try:
+                for filt, (etype, sub) in _MAP.items():
+                    for ev in self.ring.events(site.door_camera_id, event_types=[filt], since=since):
+                        if ev.device_id == site.door_camera_id:
+                            pending[ev.id] = _to_webhook(ev, site.ring_account_id, etype, sub)
+            except RingAPIError as exc:
+                log.warning("history poll failed for %s: HTTP %s", site.name, exc.status_code)
+                continue
+            for ev in sorted(pending.values(), key=lambda e: (e.occurred_at, e.request_id)):  # oldest first
+                outcome = self.engine.ingest(ev, source="history")
+                if outcome.ignored_reason is None:
+                    ingested += 1
         return ingested
 
 

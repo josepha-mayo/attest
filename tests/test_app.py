@@ -17,6 +17,7 @@ KEY = "k"
 def api(settings, store, ring_client, household, schedule):
     app = create_app(settings, store=store, ring=ring_client, signer=Signer.ephemeral(), sweep_interval_s=0)
     with _client(app) as c:
+        c.auth = ("admin", settings.admin_token.get_secret_value())
         yield c
 
 
@@ -59,6 +60,24 @@ def _post_hook(api, device_id, etype, at, sub=None, key=KEY):
     )
 
 
+@pytest.mark.parametrize(
+    "path", ["/", "/api/state", "/receipts.json", "/verify", "/visits/unknown/media/a.png"]
+)
+def test_records_require_auth(api, path):
+    assert api.get(path, auth=None).status_code == 401
+
+
+def test_admin_writes_require_auth_and_same_origin(api):
+    assert api.post("/api/sweep", auth=None).status_code == 401
+    assert api.post("/api/sweep", headers={"Origin": "https://untrusted.example"}).status_code == 403
+    assert api.get("/api/state").headers["Cache-Control"] == "no-store"
+
+
+def test_old_worker_tokens_no_longer_authenticate(api):
+    assert api.get("/checkin/tok123", auth=None).status_code == 404
+    assert api.post("/checkin/tok123", auth=None).status_code == 409
+
+
 def test_rejects_bad_signature(api, household, t0):
     _, _, cam, _ = household
     r = _post_hook(api, cam.id, "button_press", t0, key="wrong")
@@ -72,9 +91,11 @@ def test_webhook_to_receipt(api, store, household, schedule, t0):
     assert r.status_code == 200 and r.json()["transitions"] == ["opened"]
     vid = r.json()["visit"]
 
-    page = api.get("/checkin/tok123")
-    assert page.status_code == 200 and "Confirm that's you" in page.text
-    assert api.post("/checkin/tok123").status_code == 303
+    claim_path = api.post(f"/api/visits/{vid}/checkin-link").json()["path"]
+    page = api.get(claim_path, auth=None)
+    assert page.status_code == 200 and "Are you there now" in page.text
+    assert api.post(claim_path, auth=None).status_code == 200
+    assert api.post(claim_path, auth=None).status_code == 409
     assert store.visit(vid).state == VisitState.IN_PROGRESS
 
     leave = t + timedelta(minutes=85)

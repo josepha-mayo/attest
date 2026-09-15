@@ -17,7 +17,9 @@ Departure cue: door open->close, then motion_detected(human) within 2 min, once 
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import secrets
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -26,8 +28,8 @@ from ring_sandbox import RingClient, WebhookEvent
 from .config import Settings
 from .ledger import Signer
 from .media import MediaStore
-from .models import Evidence, EvidenceKind, Flag, Schedule, Site, Visit, VisitState, utcnow
-from .store import Store
+from .models import CheckinGrant, Evidence, EvidenceKind, Flag, Schedule, Site, Visit, VisitState, utcnow
+from .store import Store, atomic
 from .summarize import Summarizer
 
 log = logging.getLogger("attest.engine")
@@ -59,15 +61,37 @@ class VisitEngine:
 
     # ------------------------------------------------------------------ webhooks
 
-    def ingest(self, ev: WebhookEvent) -> Outcome:
-        if not self.store.mark_seen(ev.request_id, utcnow()):
-            return Outcome(ignored_reason="duplicate request_id")
+    @atomic
+    def ingest(self, ev: WebhookEvent, *, source: str = "webhook") -> Outcome:
+        if source not in ("webhook", "history"):
+            raise ValueError("invalid ingestion source")
+        ev = ev.model_copy(update={"meta": ev.meta.model_copy(update={"ingest_source": source})})
         site = self.store.site_for_device(ev.device_id)
         if site is None:
             return Outcome(ignored_reason=f"device {ev.device_id} not bound to a site")
+        if ev.meta.account_id != site.ring_account_id:
+            return Outcome(ignored_reason="account mismatch")
+        if not self.store.bind_source(site.id, source):
+            return Outcome(ignored_reason="ingestion source changed; reconciliation required")
+        if not self.store.mark_seen(f"{site.ring_account_id}:{ev.request_id}", utcnow()):
+            return Outcome(ignored_reason="duplicate request_id")
         at = ev.occurred_at
+        if at > utcnow() + timedelta(seconds=30):
+            raise ValueError("event timestamp is in the future")
         is_camera = ev.device_id == site.door_camera_id
         et, sub = ev.event_type, ev.sub_type
+        recent = self.store.visits(site_id=site.id, limit=1)
+        if recent and (
+            at < recent[0].last_activity_at
+            or (
+                recent[0].state in (VisitState.CLOSED, VisitState.NO_OBSERVATION)
+                and at == recent[0].last_activity_at
+            )
+        ):
+            self.store.record_late_event(
+                f"{site.ring_account_id}:{ev.request_id}", site.id, ev.model_dump_json()
+            )
+            return Outcome(ignored_reason="late event retained for review")
 
         if et == "motion_detected" and is_camera:
             return self._on_motion(site, at, ev, human=sub in _ARRIVAL_MOTION)
@@ -117,7 +141,7 @@ class VisitEngine:
         visit = Visit(
             site_id=site.id,
             schedule_id=schedule.id if schedule else None,
-            worker_id=schedule.worker_id if schedule else None,
+            worker_id=None,
             state=VisitState.OPEN if schedule else VisitState.UNMATCHED,
             arrived_at=at,
             last_activity_at=at,
@@ -154,29 +178,64 @@ class VisitEngine:
 
     # ------------------------------------------------------------------ check-in
 
+    @atomic
+    def issue_checkin(self, visit_id: str) -> str:
+        visit = self.store.visit(visit_id)
+        if not visit or visit.state not in (VisitState.OPEN, VisitState.UNMATCHED):
+            raise ValueError("visit is not awaiting check-in")
+        schedule = self._schedule(visit)
+        if not schedule or not self.store.worker(schedule.worker_id):
+            raise ValueError("a scheduled worker is required")
+        token = secrets.token_urlsafe(32)
+        self.store.put_checkin_grant(
+            CheckinGrant(
+                id=visit.id,
+                worker_id=schedule.worker_id,
+                token_hash=hashlib.sha256(token.encode()).hexdigest(),
+                expires_at=utcnow() + timedelta(minutes=15),
+            )
+        )
+        return token
+
+    def checkin_target(self, token: str):
+        grant = self.store.checkin_grant(hashlib.sha256(token.encode()).hexdigest())
+        if grant is None or grant.used_at or grant.expires_at <= utcnow():
+            return None
+        visit = self.store.visit(grant.id)
+        if not visit or visit.checked_in_at or visit.state not in (VisitState.OPEN, VisitState.UNMATCHED):
+            return None
+        schedule = self._schedule(visit)
+        worker = self.store.worker(grant.worker_id)
+        if not schedule or schedule.worker_id != grant.worker_id or worker is None:
+            return None
+        return grant, visit, worker
+
+    @atomic
     def check_in(self, token: str, at: datetime | None = None) -> Visit | None:
         at = at or utcnow()
-        worker = self.store.worker_by_token(token)
-        if worker is None:
+        target = self.checkin_target(token)
+        if target is None:
             return None
-        for site in self.store.sites():
-            visit = self.store.active_visit(site.id)
-            if visit is None or visit.state == VisitState.CLOSED:
-                continue
-            if visit.worker_id not in (None, worker.id):
-                continue
+        grant, visit, worker = target
+        if at < visit.arrived_at:
+            raise ValueError("check-in cannot precede first observation")
+        grant.used_at = utcnow()
+        self.store.put_checkin_grant(grant)
+        if visit is not None:
             visit.worker_id = worker.id
             visit.checked_in_at = at
             # An UNMATCHED visit becomes a real one once a known worker claims it; the
             # "unscheduled" flag stays on the record.
             visit.state = VisitState.IN_PROGRESS
-            self._touch(visit, at)
+            visit.last_seen_at = utcnow()
+            self.store.put_visit(visit)
             self.store.put_evidence(
                 Evidence(
                     visit_id=visit.id,
                     kind=EvidenceKind.CHECKIN,
                     at=at,
-                    note=f"{worker.name} confirmed presence via check-in link",
+                    note=f"Presence self-reported using the link issued to {worker.name}; "
+                    "not identity-verified",
                 )
             )
             return visit
@@ -184,6 +243,7 @@ class VisitEngine:
 
     # ------------------------------------------------------------------ sweeper
 
+    @atomic
     def sweep(self, now: datetime | None = None) -> list[Visit]:
         """Close idle visits and mark elapsed schedules as no-shows. Call periodically.
 
@@ -195,18 +255,14 @@ class VisitEngine:
         idle = timedelta(minutes=self.settings.idle_close_minutes)
         for site in self.store.sites():
             visit = self.store.active_visit(site.id)
-            if (
-                visit
-                and now - visit.last_seen_at >= idle
-                and visit.last_activity_at - visit.arrived_at >= _MIN_VISIT
-            ):
+            if visit and now - visit.last_seen_at >= idle:
                 if site.door_sensor_id is None:
                     # Camera-only site: the last person seen at the door is the best departure evidence.
                     flag = Flag(
-                        code="inferred_departure",
-                        severity="info",
-                        message="departure inferred from the last person seen at the camera "
-                        f"(no door sensor bound; {self.settings.idle_close_minutes} min of quiet)",
+                        code="observation_gap",
+                        severity="warn",
+                        message="No recent camera observations; departure and continued presence are unknown "
+                        f"({self.settings.idle_close_minutes} min without a new observation)",
                     )
                 else:
                     flag = Flag(
@@ -223,20 +279,23 @@ class VisitEngine:
                     ns = Visit(
                         site_id=site.id,
                         schedule_id=sch.id,
-                        worker_id=sch.worker_id,
-                        state=VisitState.NO_SHOW,
+                        worker_id=None,
+                        state=VisitState.NO_OBSERVATION,
                         arrived_at=sch.window_start,
                         last_activity_at=sch.window_end,
-                        departed_at=sch.window_end,
+                        closed_at=now,
+                        close_reason="window_elapsed",
+                        summary_source="template",
                         flags=[
                             Flag(
-                                code="no_show",
-                                severity="critical",
-                                message="no arrival detected during the scheduled window",
+                                code="no_observation",
+                                severity="warn",
+                                message="No matching observation was received; "
+                                "attendance and coverage are unknown",
                             )
                         ],
                     )
-                    ns.summary = "No arrival was detected at the door during the scheduled window."
+                    ns.summary = "No matching observation was received. This does not establish a no-show."
                     self.store.put_visit(ns)
                     self._issue_receipt(ns, site)
                     changed.append(ns)
@@ -245,8 +304,29 @@ class VisitEngine:
     # ------------------------------------------------------------------ closing
 
     def _close(self, visit: Visit, site: Site, at: datetime, *, reason: str) -> Outcome:
-        visit.departed_at = at
+        visit.departed_at = None
+        visit.departure_candidate_at = at if reason == "departure" else None
+        visit.last_activity_at = max(visit.last_activity_at, at)
+        visit.closed_at = utcnow()
+        visit.close_reason = reason
         visit.state = VisitState.CLOSED
+        visit.flags.append(
+            Flag(
+                code="departure_unconfirmed",
+                severity="warn",
+                message="Record closed for review; "
+                "direction, identity, and continuous presence are not established",
+            )
+        )
+        if visit.checked_in_at and visit.checked_in_at > at:
+            visit.flags.append(
+                Flag(
+                    code="clock_conflict",
+                    severity="warn",
+                    message="Check-in was received after the last observed event; "
+                    "review replay or delayed delivery",
+                )
+            )
         self._apply_duration_flags(visit)
         if visit.checked_in_at is None and visit.schedule_id:
             visit.flags.append(
@@ -262,28 +342,35 @@ class VisitEngine:
         )
         self.store.put_visit(visit)
         self._issue_receipt(visit, site)
-        log.info("visit %s closed (%s) after %.1f min", visit.id, reason, visit.duration_minutes or 0)
+        log.info(
+            "record %s closed (%s); observed interval %.1f min",
+            visit.id,
+            reason,
+            visit.observed_span_minutes or 0,
+        )
         return Outcome(visit, ["closed"])
 
     def _apply_duration_flags(self, visit: Visit) -> None:
         sch = self._schedule(visit)
-        if sch is None or visit.duration_minutes is None:
+        if sch is None or visit.observed_span_minutes is None:
             return
-        ratio = visit.duration_minutes / sch.expected_minutes if sch.expected_minutes else 1
+        ratio = visit.observed_span_minutes / sch.expected_minutes if sch.expected_minutes else 1
         if ratio < 0.5:
             visit.flags.append(
                 Flag(
-                    code="duration_shortfall",
-                    severity="critical",
-                    message=f"stayed {visit.duration_minutes:.0f} of {sch.expected_minutes} expected min",
+                    code="observed_interval_short",
+                    severity="warn",
+                    message=f"Observations span {visit.observed_span_minutes:.0f} min; "
+                    f"{sch.expected_minutes} min scheduled. Time worked is unknown",
                 )
             )
         elif ratio < 0.8:
             visit.flags.append(
                 Flag(
-                    code="duration_short",
+                    code="observed_interval_short",
                     severity="warn",
-                    message=f"stayed {visit.duration_minutes:.0f} of {sch.expected_minutes} expected min",
+                    message=f"Observations span {visit.observed_span_minutes:.0f} min; "
+                    f"{sch.expected_minutes} min scheduled. Time worked is unknown",
                 )
             )
 
@@ -294,6 +381,9 @@ class VisitEngine:
         facts = {
             "visit_id": visit.id,
             "state": visit.state.value,
+            "data_origin": "ring_api"
+            if self.ring.base_url == "https://api.amazonvision.com"
+            else "local_or_test",
             "site": {
                 "id": site.id,
                 "name": site.name,
@@ -314,14 +404,33 @@ class VisitEngine:
                 if sch
                 else None
             ),
-            "arrived_at": visit.arrived_at.isoformat(),
+            "first_observed_at": visit.arrived_at.isoformat() if visit.has_observations else None,
+            "last_observed_at": visit.last_activity_at.isoformat() if visit.has_observations else None,
             "checked_in_at": visit.checked_in_at.isoformat() if visit.checked_in_at else None,
-            "departed_at": visit.departed_at.isoformat() if visit.departed_at else None,
-            "duration_minutes": round(visit.duration_minutes, 1)
-            if visit.duration_minutes is not None
-            else None,
+            "departure_candidate_at": (
+                visit.departure_candidate_at.isoformat() if visit.departure_candidate_at else None
+            ),
+            "departed_at": None,
+            "duration_minutes": None,
+            "observed_span_minutes": visit.observed_span_minutes,
+            "assessment": {
+                "attendance": "self_reported" if visit.checked_in_at else "unknown",
+                "identity_verified": False,
+                "departure_verified": False,
+                "time_worked_minutes": None,
+                "requires_review": True,
+                "signature_scope": "record_integrity_only",
+            },
+            "closed_at": visit.closed_at.isoformat() if visit.closed_at else None,
+            "close_reason": visit.close_reason,
             "flags": [f.model_dump() for f in visit.flags],
             "summary": visit.summary,
+            "summary_provenance": {
+                "source": visit.summary_source,
+                "model": visit.summary_model,
+                "fallback_reason": visit.summary_fallback_reason,
+                "is_attendance_evidence": False,
+            },
             "evidence": [
                 {
                     "kind": e.kind.value,
@@ -330,6 +439,8 @@ class VisitEngine:
                     "ring_event": e.ring_event_type,
                     "ring_sub_type": e.ring_sub_type,
                     "ring_request_id": e.ring_request_id,
+                    "ring_history_event_id": e.ring_history_event_id,
+                    "ingestion_source": e.ingestion_source,
                     "media_sha256": e.media_sha256,
                 }
                 for e in evidence
@@ -354,7 +465,7 @@ class VisitEngine:
         Independent of webhook delivery: a receipt that cites history event ids can be
         re-checked against Ring later. Best-effort; ``None`` means history was unavailable.
         """
-        if visit.state == VisitState.NO_SHOW:
+        if not visit.has_observations:
             return None
         pad = timedelta(minutes=2)
         lo = visit.arrived_at - pad
@@ -389,24 +500,44 @@ class VisitEngine:
                 source_device_id=ev.device_id,
                 ring_event_type=ev.event_type,
                 ring_sub_type=ev.sub_type,
-                ring_request_id=ev.request_id,
+                ring_request_id=ev.request_id if ev.meta.ingest_source == "webhook" else None,
+                ring_history_event_id=(
+                    ev.request_id.removeprefix("history:") if ev.meta.ingest_source == "history" else None
+                ),
+                ingestion_source=ev.meta.ingest_source,
             )
         )
 
     def _snapshot(self, visit: Visit, site: Site, at: datetime, label: str) -> None:
         w = timedelta(seconds=self.settings.snapshot_window_seconds)
         try:
-            snap = self.ring.snapshot_latest(site.door_camera_id, at - w, at + w)
+            snap = self.ring.snapshot_latest(site.door_camera_id, at - w, min(at + w, utcnow()))
+            if snap.timestamp is None or not snap.content:
+                raise ValueError("snapshot content or actual timestamp missing")
+            actual_at = datetime.fromtimestamp(snap.timestamp / 1000, tz=at.tzinfo)
+            if not at - w <= actual_at <= min(at + w, utcnow()):
+                raise ValueError("snapshot timestamp outside requested window")
         except Exception as exc:  # noqa: BLE001 - Ring media is best-effort evidence
-            log.warning("snapshot for %s (%s) failed: %s", visit.id, label, exc)
+            log.warning("snapshot for %s (%s) failed: %s", visit.id, label, type(exc).__name__)
+            visit.flags.append(
+                Flag(
+                    code="media_unavailable",
+                    severity="info",
+                    message=f"No usable {label} snapshot was retrieved; imagery does not support this record",
+                )
+            )
+            self.store.put_visit(visit)
             return
         sha, path = self.media.save(visit.id, label, snap.content, snap.content_type)
         self.store.put_evidence(
             Evidence(
                 visit_id=visit.id,
                 kind=EvidenceKind.SNAPSHOT,
-                at=at,
+                at=actual_at,
                 source_device_id=site.door_camera_id,
+                ingestion_source="ring_media_api"
+                if self.ring.base_url == "https://api.amazonvision.com"
+                else "local_or_test",
                 media_sha256=sha,
                 media_path=str(path),
                 note=label,
