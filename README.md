@@ -65,6 +65,8 @@ ring-sandbox play short_visit --speed 20        # 12 minutes -> duration_shortfa
 
 Open `http://127.0.0.1:8000` for the dashboard and the printed `/checkin/...` link on a phone-sized window.
 
+Replayed scenarios carry back-dated Ring timestamps (a 90-minute visit spans 90 virtual minutes ending just before now) while the worker's check-in is stamped in real time, so in a compressed replay the check-in can read as later than the virtual departure. Against live Ring webhooks both clocks are the same clock.
+
 Environment (`.env` or `ATTEST_*`): `RING_ACCESS_TOKEN`, `RING_BASE_URL`, `RING_WEBHOOK_KEY`, `SUMMARIZER=template|bedrock`, `AWS_REGION`, `BEDROCK_MODEL_ID`, `TIMEZONE`, `DATA_DIR`.
 
 ## Tests
