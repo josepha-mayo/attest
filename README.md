@@ -88,7 +88,13 @@ The token must have access to the time range being queried. A successful empty p
 
 Install the `aws` extra for boto3 and `botocore[crt]`, which supports `aws login` credentials. Set `ATTEST_SUMMARIZER=bedrock`, `ATTEST_AWS_REGION`, and `ATTEST_BEDROCK_MODEL_ID` for a model your account is permitted to invoke.
 
-The previous live attempts failed: Anthropic required a use-case submission; Nova returned throttling. The cause of the Nova quota error has not been established. No successful AWS model invocation has been demonstrated. The application now identifies template fallback separately from successful Bedrock generation. Local fallback tests do not qualify as a live AWS integration demonstration.
+The default model is `us.amazon.nova-lite-v1:0`, a first-party multimodal model that needs no
+use-case form. Latest live check on this account: Anthropic models still require the Anthropic
+use-case submission, and Nova calls are authorized but return `ThrottlingException` (daily
+free-tier token cap reached — retry after the cap resets or the account is upgraded). No
+successful AWS model invocation has been demonstrated yet. The application identifies template
+fallback separately from successful Bedrock generation; local fallback tests do not qualify as a
+live AWS integration demonstration.
 
 ## Verification
 
@@ -100,7 +106,7 @@ The previous live attempts failed: Anthropic required a use-case submission; Nov
 
 Tests include rejected authentication, expired/reused links, concurrent arrivals, rollback after failure, source-switch rejection, late events, observation-versus-attendance semantics, history ordering, receipt/review tampering, setup validation, and fallback provenance. Socket-level tests run the CLI through real local emulator/Attest servers for sensor, camera-only, and no-observation scenarios, then append and verify worker/coordinator reviews.
 
-A fresh published checkout of both repositories passed 66 Attest tests and 12 companion tests in a new Windows Python 3.14 environment. The GitHub Actions workflow runs both suites, lint, format checks, a tracked-runtime-file guard, and wheel builds across Windows/Linux with Python 3.11/3.14. Actions and the companion commit are pinned; Python dependency locking is still pending. CI does not receive live Ring or AWS credentials.
+A fresh published checkout of both repositories passed 75 Attest tests and 30 companion tests in a new Windows Python 3.14 environment. The GitHub Actions workflow runs both suites, lint, format checks, a tracked-runtime-file guard, and wheel builds across Windows/Linux with Python 3.11/3.14. Actions, the companion commit, and `requirements-dev.txt` dependency pins make the run reproducible. CI does not receive live Ring or AWS credentials.
 
 ## Before deployment or submission
 

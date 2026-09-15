@@ -45,7 +45,8 @@ class Settings(BaseSettings):
     # Summaries
     summarizer: str = "template"  # template | bedrock
     aws_region: str = "us-east-1"
-    bedrock_model_id: str = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+    # Nova Lite is a first-party multimodal model (no Anthropic use-case form needed).
+    bedrock_model_id: str = "us.amazon.nova-lite-v1:0"
 
     # Presentation
     public_base_url: str = "http://127.0.0.1:8000"
