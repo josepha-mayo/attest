@@ -25,9 +25,11 @@ Install both editable projects together: `.\.venv\Scripts\python -m pip install 
 
 Windows requires tzdata for zoneinfo. aws-login credentials require botocore[crt]. Availability of an inference profile does not imply model access or quota.
 
+Fresh published source checkouts passed all 66 Attest and 12 companion tests in an isolated Windows Python 3.14 environment. CI runs Windows/Linux and Python 3.11/3.14 without live service credentials. Its companion revision and action versions are pinned; update the companion pin only with matching integration verification. The tracked-runtime-file guard is a publication safety control, not a comprehensive secret scanner.
+
 ## Known follow-up work
 
-Deployment authentication and OAuth lifecycle, media redirect validation, retention, dependency locking/CI, official integrations, customer validation, product feedback, and the submission video remain unfinished. Webhook intake acknowledges a durable separate inbox before background processing; official deadline/load validation and failed-delivery replay tooling remain pending.
+Deployment authentication and OAuth lifecycle, media redirect validation, retention, Python dependency locking, official integrations, customer validation, product feedback, and the submission video remain unfinished. Webhook intake acknowledges a durable separate inbox before background processing; official deadline/load validation and failed-delivery replay tooling remain pending.
 
 Coordinated replay is now explicit (`ATTEST_REPLAY_MODE=true`) and only accepts loopback Ring emulators in a fresh runtime. `attest replay home_aide_visit --speed 60 --auto-checkin` seeds a local case and waits for delivery processing before advancing its persisted event clock. Grant expiry, statement-received time, and signature issuance always use wall time. Do not convert an existing runtime between wall and replay modes.
 

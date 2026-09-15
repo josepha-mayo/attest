@@ -98,7 +98,9 @@ The previous live attempts failed: Anthropic required a use-case submission; Nov
 .\.venv\Scripts\ruff format --check src tests
 ```
 
-Tests include rejected authentication, expired/reused check-in links, concurrent arrivals, rollback after failure, source-switch rejection, late events, observation-versus-attendance semantics, history ordering, receipt tampering, and fallback provenance.
+Tests include rejected authentication, expired/reused links, concurrent arrivals, rollback after failure, source-switch rejection, late events, observation-versus-attendance semantics, history ordering, receipt/review tampering, setup validation, and fallback provenance. Socket-level tests run the CLI through real local emulator/Attest servers for sensor, camera-only, and no-observation scenarios, then append and verify worker/coordinator reviews.
+
+A fresh published checkout of both repositories passed 66 Attest tests and 12 companion tests in a new Windows Python 3.14 environment. The GitHub Actions workflow runs both suites, lint, format checks, a tracked-runtime-file guard, and wheel builds across Windows/Linux with Python 3.11/3.14. Actions and the companion commit are pinned; Python dependency locking is still pending. CI does not receive live Ring or AWS credentials.
 
 ## Before deployment or submission
 
@@ -106,7 +108,7 @@ Tests include rejected authentication, expired/reused check-in links, concurrent
 - Validate the review workflow with actual households/workers, including disputed and missing observations, accessibility, and notification delivery.
 - Validate the coordinated demo visually and replace placeholder media with permitted, clearly labelled demonstration footage.
 - Complete OAuth/consent lifecycle, retention/deletion, multi-user authorization, token refresh, and deployment secret management. Local HTTP Basic is a development access boundary, not a complete production identity system. Use HTTPS outside loopback.
-- Finish runtime-input limits and media-redirect hardening, fresh-clone verification, and CI.
+- Finish runtime-input limits, media-redirect hardening, and Python dependency locking; keep fresh-checkout and CI checks passing.
 - Verify live Ring events/media and an actual AWS invocation without fallback.
 - Validate customer usefulness and hackathon rules; prepare the separate open-source contribution, product feedback, friction log, and under-three-minute video.
 
