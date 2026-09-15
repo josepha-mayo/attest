@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     arrival_grace_minutes: int = 30  # how early/late an arrival still matches a schedule
     idle_close_minutes: int = 20  # close a visit after this much silence following departure cues
     snapshot_window_seconds: int = 45
+    # Poll GET /v1/history when webhooks can't reach us (Playground tokens). 0 disables.
+    poll_history_seconds: int = 0
 
     # Summaries
     summarizer: str = "template"  # template | bedrock

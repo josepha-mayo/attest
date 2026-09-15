@@ -200,13 +200,22 @@ class VisitEngine:
                 and now - visit.last_seen_at >= idle
                 and visit.last_activity_at - visit.arrived_at >= _MIN_VISIT
             ):
-                visit.flags.append(
-                    Flag(
+                if site.door_sensor_id is None:
+                    # Camera-only site: the last person seen at the door is the best departure evidence.
+                    flag = Flag(
+                        code="inferred_departure",
+                        severity="info",
+                        message="departure inferred from the last person seen at the camera "
+                        f"(no door sensor bound; {self.settings.idle_close_minutes} min of quiet)",
+                    )
+                else:
+                    flag = Flag(
                         code="idle_close",
                         severity="info",
                         message=f"closed after {self.settings.idle_close_minutes} min without activity",
                     )
-                )
+                visit.flags.append(flag)
+                self._snapshot(visit, site, visit.last_activity_at, "departure")
                 changed.append(self._close(visit, site, visit.last_activity_at, reason="idle").visit)  # type: ignore[arg-type]
             grace = timedelta(minutes=self.settings.arrival_grace_minutes)
             for sch in self.store.schedules_for_site(site.id):
@@ -325,6 +334,7 @@ class VisitEngine:
                 }
                 for e in evidence
             ],
+            "ring_history": self._reconcile_history(visit, site),
         }
         receipt = self.signer.issue(
             visit_id=visit.id,
@@ -337,6 +347,33 @@ class VisitEngine:
         self.store.put_visit(visit)
 
     # ------------------------------------------------------------------ helpers
+
+    def _reconcile_history(self, visit: Visit, site: Site) -> list[dict] | None:
+        """Corroborate webhook evidence with Ring's own Event History for the visit window.
+
+        Independent of webhook delivery: a receipt that cites history event ids can be
+        re-checked against Ring later. Best-effort; ``None`` means history was unavailable.
+        """
+        if visit.state == VisitState.NO_SHOW:
+            return None
+        pad = timedelta(minutes=2)
+        lo = visit.arrived_at - pad
+        hi = (visit.departed_at or visit.last_activity_at) + pad
+        try:
+            events = self.ring.events(site.door_camera_id, event_types=["motion", "ding"], since=lo)
+            return [
+                {
+                    "id": e.id,
+                    "event_type": e.attributes.event_type,
+                    "start": e.attributes.started_at.isoformat(),
+                    "end": e.attributes.ended_at.isoformat() if e.attributes.ended_at else None,
+                }
+                for e in events
+                if e.attributes.started_at <= hi
+            ]
+        except Exception as exc:  # noqa: BLE001 - never block the receipt on a read
+            log.warning("history reconciliation for %s failed: %s", visit.id, exc)
+            return None
 
     def _touch(self, visit: Visit, at: datetime) -> None:
         visit.last_activity_at = max(visit.last_activity_at, at)

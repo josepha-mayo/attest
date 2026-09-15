@@ -22,6 +22,7 @@ from .engine import VisitEngine
 from .ledger import Signer
 from .media import MediaStore
 from .models import Receipt, Schedule, Site, VisitState, Worker, utcnow
+from .poller import HistoryPoller
 from .store import Store
 from .summarize import build as build_summarizer
 
@@ -60,10 +61,26 @@ def create_app(
                 except Exception:  # noqa: BLE001
                     log.exception("sweep failed")
 
-        task = asyncio.create_task(sweeper()) if sweep_interval_s > 0 else None
+        async def history_poller():
+            poller = HistoryPoller(engine, store, ring)
+            log.info("history polling every %ss (webhook-less mode)", s.poll_history_seconds)
+            while True:
+                try:
+                    n = await asyncio.to_thread(poller.poll_once)
+                    if n:
+                        log.info("history poll ingested %d event(s)", n)
+                except Exception:  # noqa: BLE001
+                    log.exception("history poll failed")
+                await asyncio.sleep(s.poll_history_seconds)
+
+        tasks = []
+        if sweep_interval_s > 0:
+            tasks.append(asyncio.create_task(sweeper()))
+        if s.poll_history_seconds > 0:
+            tasks.append(asyncio.create_task(history_poller()))
         yield
-        if task:
-            task.cancel()
+        for t in tasks:
+            t.cancel()
 
     app = FastAPI(title="Attest", version="0.1.0", lifespan=lifespan)
     app.state.store, app.state.engine, app.state.ring, app.state.signer = (
@@ -240,6 +257,11 @@ def create_app(
     async def api_sweep(now: datetime | None = None):
         changed = await asyncio.to_thread(engine.sweep, now)
         return {"changed": [v.id for v in changed]}
+
+    @app.post("/api/poll")
+    async def api_poll():
+        n = await asyncio.to_thread(HistoryPoller(engine, store, ring).poll_once)
+        return {"ingested": n}
 
     @app.get("/healthz")
     async def healthz():

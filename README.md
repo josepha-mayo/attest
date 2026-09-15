@@ -27,7 +27,9 @@ Ring webhook ──► /webhooks/ring (HMAC verified) ──► VisitEngine ─�
 
 - **Arrival**: `motion_detected` with `sub_type=human` on the door camera, a `button_press`, or the door contact sensor faulting inside a scheduled window (± grace).
 - **Check-in**: the worker opens `/checkin/<token>` on their phone and confirms. Identity comes from consent, not face recognition. Snapshots are stored as evidence and hashed, never analysed for who someone is.
-- **Departure**: the door opens and closes, then a person is seen leaving; or the visit goes idle. Duration is compared to the schedule and flagged (`duration_shortfall`, `late`, `no_checkin`, `no_show`, `unscheduled`).
+- **Departure**: with a door contact sensor bound, the door opens and closes and then a person is seen leaving. On a camera-only site, the last person seen at the door followed by quiet is recorded as an *inferred* departure and flagged as such. Duration is compared to the schedule and flagged (`duration_shortfall`, `late`, `no_checkin`, `no_show`, `unscheduled`, `inferred_departure`).
+- **Two ingest paths**: signed webhooks at `/webhooks/ring`, or — for accounts that can't receive webhooks yet, like Playground tokens — a poller over `GET /v1/history/devices/{id}/events` that turns new `motion.human` / `ding` history events into the same v1.1 event shape (`ATTEST_POLL_HISTORY_SECONDS=15`). History event ids double as `request_id`, so switching from polling to webhooks later never double-counts.
+- **Corroboration**: every receipt also embeds the Ring Event History records for the visit window, so an auditor can re-check the webhook evidence against Ring's own record.
 - **Receipt**: canonical JSON of the facts and every piece of Ring evidence (event type, `request_id`, device, media sha256) → SHA-256 → Ed25519 signature, with `prev_hash` linking to the previous receipt. Verify offline at `/verify` or with `attest.ledger.verify_receipt`.
 
 ### Ring API surface used
@@ -38,7 +40,7 @@ Ring webhook ──► /webhooks/ring (HMAC verified) ──► VisitEngine ─�
 | `GET /v1/devices?include=capabilities` | bind a site to its door camera and contact sensor |
 | `POST /v1/devices/{id}/media/image/download` (`latest_in_range`) | arrival and departure snapshots; follows the 303 to the pre-signed URL |
 | `GET /v1/users/me` | account id recorded in the receipt |
-| `GET /v1/history/devices/{id}/events` | (via ring-sandbox) reconciliation of webhook evidence against history |
+| `GET /v1/history/devices/{id}/events` (`event_types=motion.human,ding`, cursor pagination) | webhook-less ingest (poller) and per-receipt reconciliation of evidence against Ring's own history |
 
 Ring calls go through [`ring-sandbox`](../ring-sandbox), a typed client + offline emulator built alongside this project and released separately under MIT.
 
@@ -46,7 +48,18 @@ Ring calls go through [`ring-sandbox`](../ring-sandbox), a typed client + offlin
 
 Summaries are produced by **Amazon Bedrock** through the Converse API (`ATTEST_SUMMARIZER=bedrock`), sending the visit facts plus the arrival/departure snapshots. The system prompt forbids identity, demographic, or emotional inference — the model describes the visit, not the person. If Bedrock is unavailable the receipt is still issued with a deterministic template summary; issuance never depends on the LLM.
 
-## Run the demo (no Ring hardware needed)
+## Run against the real Ring API (Playground)
+
+```bash
+# Generate a token at https://developer.amazon.com/ring/console/playground (30-minute lifetime)
+ATTEST_RING_BASE_URL=https://api.amazonvision.com ATTEST_RING_ACCESS_TOKEN=eyJ... \
+ATTEST_POLL_HISTORY_SECONDS=15 attest serve
+attest seed --ring-url https://api.amazonvision.com     # binds the Playground doorbell as a camera-only site
+```
+
+Then simulate Motion / doorbell events in the Playground UI; the poller picks them up from Event History and the visit opens. Snapshots are requested from the media endpoint and attached when Ring has a recording for that window (the Playground returns `416 MEDIA_NOT_FOUND` otherwise; receipts are issued either way). Device discovery, users, history and the media error paths were verified 2026-09-15 against the Playground's Doorbell Pro; recorded response shapes live in `ring-sandbox/fixtures/`.
+
+## Run the demo offline (no Ring hardware or token)
 
 ```bash
 # terminal 1 — Ring emulator (or point ATTEST_RING_BASE_URL at api.amazonvision.com with a Playground token)
