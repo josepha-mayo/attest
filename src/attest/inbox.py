@@ -114,6 +114,28 @@ class WebhookInbox:
                 )
             ]
 
+    def requeue(self, ids=None) -> int:
+        """Move terminal ``failed`` deliveries back to pending with a fresh attempt
+        budget. Only failed rows are touched — done/rejected stay terminal, and a
+        requeued delivery that keeps failing re-earns its five attempts."""
+        with self._transaction():
+            if ids is None:
+                cur = self._db.execute(
+                    "UPDATE deliveries SET status='pending', attempts=0, retry_at=0, "
+                    "lease=NULL, lease_until=NULL, error_code=NULL WHERE status='failed'"
+                )
+            else:
+                ids = list(ids)
+                if not ids:
+                    return 0
+                cur = self._db.execute(
+                    "UPDATE deliveries SET status='pending', attempts=0, retry_at=0, "
+                    "lease=NULL, lease_until=NULL, error_code=NULL "
+                    f"WHERE status='failed' AND id IN ({','.join('?' * len(ids))})",
+                    ids,
+                )
+            return cur.rowcount
+
     def delete(self, ids) -> int:
         """Remove terminal deliveries by id. Pending/processing rows are never deleted."""
         ids = list(ids)

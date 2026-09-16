@@ -251,6 +251,22 @@ def _replay(args: argparse.Namespace) -> None:
         )
 
 
+def _deliveries(args: argparse.Namespace) -> None:
+    from .inbox import WebhookInbox
+
+    inbox_path = settings.data_dir / "webhooks.sqlite3"
+    if not inbox_path.exists():
+        sys.exit(f"no webhook inbox at {inbox_path}")
+    inbox = WebhookInbox(inbox_path)
+    try:
+        if args.requeue:
+            print(json.dumps({"requeued": inbox.requeue(), "queue": inbox.counts()}))
+        else:
+            print(json.dumps({"counts": inbox.counts(), "entries": inbox.entries()}, indent=2))
+    finally:
+        inbox.close()
+
+
 def _retention(args: argparse.Namespace) -> None:
     """Print a non-destructive lifecycle report for the local runtime. Deletes nothing."""
     from . import retention
@@ -305,6 +321,14 @@ def main(argv: list[str] | None = None) -> None:
         help="delete the previewed non-chain candidates; must equal the current apply_token",
     )
     s.set_defaults(fn=_retention)
+
+    s = sub.add_parser("deliveries", help="show durable webhook inbox state, or requeue failed deliveries")
+    s.add_argument(
+        "--requeue",
+        action="store_true",
+        help="move all failed deliveries back to pending with a fresh attempt budget",
+    )
+    s.set_defaults(fn=_deliveries)
 
     for name, fn in (("seed", _seed), ("demo", _demo), ("replay", _replay)):
         s = sub.add_parser(name)

@@ -37,6 +37,11 @@ class RetentionApply(BaseModel):
     confirm: str = Field(min_length=1, max_length=64)
 
 
+class RequeueDeliveries(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    ids: list[str] | None = Field(default=None, max_length=500)
+
+
 class Site(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
     id: str = Field(default_factory=lambda: _id("site"), pattern=r"^[A-Za-z0-9_-]{1,80}$")

@@ -164,6 +164,21 @@ def test_invalid_delivery_never_enters_queue(api, household, t0):
     assert api.get("/api/webhook-queue").json() == {}
 
 
+def test_requeue_endpoint_revives_failed_deliveries(api):
+    inbox = api.attest_state.inbox
+    inbox.enqueue("acct:req1", b"{}", "sig")
+    for attempt in range(5):
+        now = 1000 + attempt * 1000
+        inbox.fail(inbox.claim(now=now), "RuntimeError", now=now)
+    assert api.get("/api/webhook-queue").json() == {"failed": 1}
+
+    r = api.post("/api/webhook-queue/requeue", json={})
+    assert r.status_code == 200 and r.json()["requeued"] == 1
+    assert r.json()["queue"] == {"pending": 1}
+    r = api.post("/api/webhook-queue/requeue", json={"ids": ["acct:req1"]})
+    assert r.json()["requeued"] == 0  # pending rows are not requeued
+
+
 def test_intake_is_not_blocked_by_a_visit_transaction(api, store, household, t0):
     from concurrent.futures import ThreadPoolExecutor
 

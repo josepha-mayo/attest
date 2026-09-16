@@ -30,6 +30,7 @@ from .media import MediaStore
 from .models import (
     Receipt,
     ReplayTime,
+    RequeueDeliveries,
     RetentionApply,
     ReviewBundle,
     ReviewInput,
@@ -633,6 +634,12 @@ def create_app(
     @app.get("/api/webhook-queue")
     async def api_webhook_queue():
         return inbox.counts()
+
+    @app.post("/api/webhook-queue/requeue")
+    async def api_requeue(body: RequeueDeliveries | None = None):
+        """Return failed deliveries to pending for another processing cycle."""
+        requeued = await asyncio.to_thread(inbox.requeue, body.ids if body else None)
+        return {"requeued": requeued, "queue": inbox.counts()}
 
     @app.post("/api/poll")
     async def api_poll():
