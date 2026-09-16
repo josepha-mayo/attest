@@ -131,13 +131,23 @@ def _demo(args: argparse.Namespace) -> None:
 
 
 def _replay(args: argparse.Namespace) -> None:
+    from pathlib import Path
+
     from ring_sandbox import webhooks
-    from ring_sandbox.scenarios import BUILTIN
+    from ring_sandbox.scenarios import BUILTIN, load_yaml
 
     if not settings.admin_token or not math.isfinite(args.speed) or args.speed <= 0:
         sys.exit("Replay requires admin authentication and a finite positive speed.")
     if args.days < 1:
         sys.exit("--days must be at least 1")
+    if args.scenario.endswith((".yml", ".yaml")):
+        if not Path(args.scenario).exists():
+            sys.exit(f"no scenario file at {args.scenario}")
+        scenario = load_yaml(args.scenario)
+    elif args.scenario in BUILTIN:
+        scenario = BUILTIN[args.scenario]
+    else:
+        sys.exit(f"unknown scenario {args.scenario!r}; built-ins: {', '.join(sorted(BUILTIN))}")
     for address in (args.ring_url, args.public_url):
         parsed = urlsplit(address)
         if (
@@ -147,7 +157,6 @@ def _replay(args: argparse.Namespace) -> None:
             or parsed.password
         ):
             sys.exit("Replay only targets local HTTP services, never real Ring devices.")
-    scenario = BUILTIN[args.scenario]
 
     def drain(api: httpx.Client) -> None:
         """Run the durable inbox to empty; a claim can still be in flight right after."""
@@ -416,6 +425,51 @@ def _journal(args: argparse.Namespace) -> None:
         store.close()
 
 
+def _status(args: argparse.Namespace) -> None:
+    """One-command self-audit: journal integrity, receipt chain, coverage, queue —
+    the integrity posture of the local runtime, checkable without the server."""
+    from .inbox import WebhookInbox
+    from .ledger import verify_chain
+    from .store import Store
+
+    db = settings.data_dir / "attest.sqlite3"
+    if not db.exists():
+        sys.exit(f"no store at {db} — run `attest serve` or `attest replay` first")
+    store = Store(db)
+    try:
+        stats = store.stats()
+        journal = store.verify_journal()
+        chain_ok, chain_detail = verify_chain(store.receipts())
+        inbox_path = settings.data_dir / "webhooks.sqlite3"
+        queue: dict = {}
+        if inbox_path.exists():
+            inbox = WebhookInbox(inbox_path)
+            try:
+                queue = inbox.counts()
+            finally:
+                inbox.close()
+        by_state = ", ".join(f"{k}={n}" for k, n in stats["visits"]["by_state"].items())
+        healthy = journal["intact"] and chain_ok
+        mode = (store.setting("execution_mode") or {}).get("mode", "wall")
+        print(f"store:    {db} ({mode} clock)")
+        print(f"visits:   {stats['visits']['total']} ({by_state or 'none'})")
+        print(f"receipts: {stats['receipts']['total']} — {chain_detail}")
+        line = f"journal:  {'intact' if journal['intact'] else 'VIOLATED'} — {journal['entries']} entries"
+        if journal["untracked_rows"]:
+            line += f", {len(journal['untracked_rows'])} untracked rows (run `attest journal --baseline`)"
+        if journal["mismatches"]:
+            line += f", {len(journal['mismatches'])} mismatches"
+        print(line)
+        print(f"coverage: {stats['poll_observations']} poll observations on record")
+        print(f"reviews:  {stats['reviews']}, late events retained: {stats['late_events']}")
+        print(f"inbox:    {queue if queue else 'empty'}")
+        print(f"status:   {'healthy' if healthy else 'ATTENTION — integrity check failed'}")
+        if not healthy:
+            sys.exit(1)
+    finally:
+        store.close()
+
+
 def _deliveries(args: argparse.Namespace) -> None:
     from .inbox import WebhookInbox
 
@@ -501,6 +555,9 @@ def main(argv: list[str] | None = None) -> None:
     )
     s.set_defaults(fn=_journal)
 
+    s = sub.add_parser("status", help="self-audit the local store: journal, receipt chain, coverage, inbox")
+    s.set_defaults(fn=_status)
+
     s = sub.add_parser("verify", help="verify a downloaded bundle.json offline")
     s.add_argument("bundle", help="path to the exported original + review chain JSON")
     s.add_argument("--key", default=None, help="issuer public key (base64) to pin against")
@@ -524,9 +581,11 @@ def main(argv: list[str] | None = None) -> None:
         s.add_argument("--expected-minutes", type=int, default=90)
         s.add_argument("--camera-only", action="store_true", help="leave the optional contact sensor unbound")
         if name == "replay":
-            from ring_sandbox.scenarios import BUILTIN
-
-            s.add_argument("scenario", choices=sorted(BUILTIN))
+            s.add_argument(
+                "scenario",
+                help="a ring_sandbox built-in name (home_aide_visit, short_visit, no_show, "
+                "device_flap, camera_only_visit, delivery) or a .yml/.yaml scenario file",
+            )
             s.add_argument("--speed", type=float, default=60)
             s.add_argument(
                 "--auto-checkin", action="store_true", help="simulate a worker self-report locally"
