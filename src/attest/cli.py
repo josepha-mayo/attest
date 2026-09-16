@@ -270,6 +270,61 @@ def _verify(args: argparse.Namespace) -> None:
     print("Note: a valid signature proves record integrity under that key, not physical truth.")
 
 
+def _tamper_demo(args: argparse.Namespace) -> None:
+    """Non-destructive: forge one row inside a transaction, show the journal catching
+    it, then roll back — the store is left exactly as it was."""
+    from .store import Store
+
+    store = Store(settings.data_dir / "attest.sqlite3")
+    try:
+        row = store._conn.execute("SELECT id, body FROM visits LIMIT 1").fetchone()
+        if not row:
+            sys.exit("no visits in this store — run `attest replay home_aide_visit` first")
+        visit_id, body = row
+        forged = json.loads(body)
+        forged["state"] = "attended_verified"  # the claim the record must refuse to carry
+
+        pre = store.verify_journal()
+        if pre["entries"] == 0 and pre["untracked_rows"]:
+            stamped = store.journal_baseline()
+            print(f"store predates journaling — stamped {stamped} rows as baseline")
+
+        class _Rollback(Exception):
+            pass
+
+        try:
+            with store.transaction():
+                store._conn.execute("UPDATE visits SET body=? WHERE id=?", (json.dumps(forged), visit_id))
+                report = store.verify_journal()
+                print(f"forged {visit_id}.state = 'attended_verified'")
+                print(f"intact: {report['intact']}")
+                for m in report["mismatches"]:
+                    print(f"  detected: {m}")
+                raise _Rollback  # roll back both the forged row and the check
+        except _Rollback:
+            pass
+        after = store.verify_journal()
+        print(f"after rollback — intact: {after['intact']}, entries: {after['entries']}")
+    finally:
+        store.close()
+
+
+def _journal(args: argparse.Namespace) -> None:
+    from .store import Store
+
+    store = Store(settings.data_dir / "attest.sqlite3")
+    try:
+        if args.baseline:
+            stamped = store.journal_baseline()
+            print(f"stamped {stamped} existing rows as journal baseline")
+        report = store.verify_journal()
+        print(json.dumps(report, indent=2))
+        if not report["intact"]:
+            sys.exit(1)
+    finally:
+        store.close()
+
+
 def _deliveries(args: argparse.Namespace) -> None:
     from .inbox import WebhookInbox
 
@@ -340,6 +395,20 @@ def main(argv: list[str] | None = None) -> None:
         help="delete the previewed non-chain candidates; must equal the current apply_token",
     )
     s.set_defaults(fn=_retention)
+
+    s = sub.add_parser(
+        "tamper-demo",
+        help="forge a row inside a transaction and show the journal catching it (rolls back)",
+    )
+    s.set_defaults(fn=_tamper_demo)
+
+    s = sub.add_parser("journal", help="verify the hash-chained mutation journal")
+    s.add_argument(
+        "--baseline",
+        action="store_true",
+        help="stamp all existing rows as the audit baseline (one-time, explicit)",
+    )
+    s.set_defaults(fn=_journal)
 
     s = sub.add_parser("verify", help="verify a downloaded bundle.json offline")
     s.add_argument("bundle", help="path to the exported original + review chain JSON")

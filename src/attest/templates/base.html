@@ -54,7 +54,7 @@
 <body>
 <header>
   <div class="brand">Attest<span>.</span></div>
-  <nav><a href="/">Records</a><a href="/setup">Setup &amp; schedules</a><a href="/verify">Verify</a><a href="/receipts.json">Export originals</a></nav>
+  <nav><a href="/">Records</a><a href="/setup">Setup &amp; schedules</a><a href="/verify">Verify</a><a href="/about">Claim boundary</a><a href="/receipts.json">Export originals</a></nav>
   <div class="meta">{% if settings.ring_base_url == "https://api.amazonvision.com" %}Ring API configured{% else %}Local / test data{% endif %} &middot; configured summary provider: {{ summarizer }}</div>
 </header>
 {% if clock.mode == "replay" %}<div class="replay-banner">LOCAL REPLAY — not a live visit. Event clock: {{ clock.now or "not started" }}. Security expiry and signature issuance use real time.</div>{% endif %}

@@ -140,6 +140,19 @@ def check_receipt(r, key):
         return False, "envelope fields disagree with signed payload"
     if payload.get("visit_id") != r["visit_id"]:
         return False, "visit id disagrees with signed payload"
+    if payload.get("schema") == "attest.receipt/2":
+        # issued_at serializes as "...Z" in the envelope but "+00:00" in the signed
+        # payload — compare parsed instants, not strings.
+        from datetime import datetime as _dt
+
+        same_instant = (
+            _dt.fromisoformat(payload.get("issued_at", ""))
+            == _dt.fromisoformat(r["issued_at"])
+        )
+        if payload.get("receipt_id") != r["id"] or not same_instant:
+            return False, "receipt envelope identity disagrees with signed payload"
+    elif payload.get("schema") != "attest.receipt/1":
+        return False, "unsupported receipt schema"
     if not ed25519_verify(
         base64.b64decode(r["signature"]), bytes.fromhex(r["payload_hash"]), base64.b64decode(key)
     ):

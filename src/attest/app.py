@@ -317,6 +317,15 @@ def create_app(
     @app.get("/", response_class=HTMLResponse)
     async def dashboard(request: Request):
         visits = store.visits(limit=50)
+        worker_stats: dict[str, dict] = {}
+        for v in visits:
+            if v.worker_id and v.checked_in_at and v.has_observations:
+                st = worker_stats.setdefault(v.worker_id, {"visits": 0, "lags": []})
+                st["visits"] += 1
+                st["lags"].append((v.checked_in_at - v.arrived_at).total_seconds() / 60)
+        for st in worker_stats.values():
+            lags = sorted(st["lags"])
+            st["median_lag"] = lags[len(lags) // 2] if lags else None
         return render(
             request,
             "dashboard.html",
@@ -326,6 +335,9 @@ def create_app(
             schedules={x.id: x for x in store.schedules()},
             upcoming=store.schedules()[:20],
             chain=ledger.verify_chain(store.receipts(), public_key=signer.public_key_b64),
+            journal=store.verify_journal(),
+            worker_stats=worker_stats,
+            queue=inbox.counts(),
             countersign={v.id: reviews.countersign(v.id) for v in visits if v.receipt_id},
         )
 
@@ -383,6 +395,10 @@ def create_app(
     async def receipts_export():
         return JSONResponse([json.loads(r.model_dump_json()) for r in store.receipts()])
 
+    @app.get("/about", response_class=HTMLResponse)
+    async def about_page(request: Request):
+        return render(request, "about.html")
+
     @app.get("/verify", response_class=HTMLResponse)
     async def verify_page(request: Request):
         return render(request, "verify.html", result=None, public_key=signer.public_key_b64)
@@ -393,6 +409,13 @@ def create_app(
             data = await file.read(_MAX_VERIFY_BYTES + 1)
             if len(data) > _MAX_VERIFY_BYTES:
                 raise HTTPException(413, "verification input too large")
+            if data[:2] == b"PK":
+                return render(
+                    request,
+                    "verify.html",
+                    result=_verify_pack(data, signer.public_key_b64),
+                    public_key=signer.public_key_b64,
+                )
             raw = data.decode("utf-8", errors="replace")
         else:
             if len(text.encode("utf-8")) > _MAX_VERIFY_BYTES:
@@ -654,6 +677,11 @@ def create_app(
     async def api_webhook_queue():
         return inbox.counts()
 
+    @app.get("/api/journal")
+    async def api_journal():
+        """Replay the mutation journal: every store write is hash-chained."""
+        return await asyncio.to_thread(store.verify_journal)
+
     @app.post("/api/webhook-queue/requeue")
     async def api_requeue(body: RequeueDeliveries | None = None):
         """Return failed deliveries to pending for another processing cycle."""
@@ -670,6 +698,32 @@ def create_app(
         return {"ok": True, "summarizer": summarizer.name, "ring_base_url": s.ring_base_url}
 
     return app
+
+
+def _verify_pack(data: bytes, public_key: str) -> tuple[bool, str]:
+    """Verify an exported dispute pack: bundle signatures + media digests."""
+    import hashlib
+    import io
+    import zipfile
+
+    try:
+        z = zipfile.ZipFile(io.BytesIO(data))
+        bundle = ReviewBundle.model_validate(json.loads(z.read("bundle.json")))
+    except Exception as exc:  # noqa: BLE001
+        return False, f"not a dispute pack: {exc}"
+    ok, why = verify_bundle(bundle, public_key=public_key)
+    if not ok:
+        return False, f"bundle: {why}"
+    digests = {
+        e.get("media_sha256") for e in bundle.original.payload.get("evidence", []) if e.get("media_sha256")
+    }
+    matched = 0
+    for name in z.namelist():
+        if name.startswith("media/") and not name.endswith("/"):
+            if hashlib.sha256(z.read(name)).hexdigest() in digests:
+                matched += 1
+    detail = f"{why}; {matched}/{len(digests)} signed media digests found in pack"
+    return (matched == len(digests), detail)
 
 
 __all__ = ["create_app", "VisitState"]

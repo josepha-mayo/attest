@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Attest — what this record does and does not claim{% endblock %}
+{% block body %}
+<h1>The claim boundary</h1>
+<p class="muted">Attest is a reviewable record of observations, not an authority on what physically happened. Every artifact states its own limits.</p>
+
+<div class="grid" style="margin-top:20px">
+<div class="card">
+<h2 style="margin-top:0">What a signed record DOES establish</h2>
+<ul class="small">
+  <li>These exact bytes were issued by this deployment's key, in this order, hash-chained.</li>
+  <li>Every review/correction is anchored to the original and append-only — nothing is silently rewritten.</li>
+  <li>The mutation journal makes post-hoc edits to stored rows detectable.</li>
+  <li>Poll coverage attests how much of a window the pipeline actually watched.</li>
+  <li>A worker's acknowledgment binds to the record's hash — agreement or dispute is on record.</li>
+</ul>
+</div>
+<div class="card">
+<h2 style="margin-top:0">What it does NOT establish</h2>
+<ul class="small">
+  <li><b>Identity.</b> No face match, no ID check. "Self-reported" means exactly that.</li>
+  <li><b>Attendance or time worked.</b> An observed interval is not a shift.</li>
+  <li><b>Absence.</b> A silent window means no events were received — never proof nobody came.</li>
+  <li><b>Departure.</b> Nobody certifies when anyone left, or that they stayed inside.</li>
+  <li><b>The model's word.</b> Summaries are labeled by source and never treated as evidence.</li>
+</ul>
+</div>
+</div>
+
+<div class="card" style="margin-top:16px">
+<h2 style="margin-top:0">Integrity surfaces</h2>
+<table>
+  <tr><td>Signed receipts</td><td class="small muted">Ed25519 over canonical payload; hash-chained; replay-clock and wall-clock provenance in every payload.</td></tr>
+  <tr><td>Review chain</td><td class="small muted">Each revision signs over the previous hash and anchors to the original receipt.</td></tr>
+  <tr><td>Mutation journal</td><td class="small muted">Every store write is a chained journal entry; <code>attest journal</code> or <code>/api/journal</code> replays it. Silent edits and row deletions surface as mismatches.</td></tr>
+  <tr><td>Dispute pack</td><td class="small muted"><code>pack.zip</code> ships the bundle, media, and a zero-dependency verifier — check it on any Python install, no trust in this service.</td></tr>
+  <tr><td>Honest silence</td><td class="small muted"><code>history_poll_coverage</code> states how much of the window was watched; blind gaps are shown, not hidden.</td></tr>
+</table>
+</div>
+{% endblock %}

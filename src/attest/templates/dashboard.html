@@ -9,6 +9,9 @@
   </div>
   <div class="card small">
     Ledger: {% if chain[0] %}<span class="ok">&#10003; {{ chain[1] }}</span>{% else %}<span class="bad">&#10007; {{ chain[1] }}</span>{% endif %}
+    <br>Audit log: {% if journal.intact %}<span class="ok">&#10003; {{ journal.entries }} entries, intact</span>{% else %}<span class="bad">&#10007; {{ journal.mismatches[0] }}</span>{% endif %}
+    {% if journal.untracked_rows %}<br><span class="muted">{{ journal.untracked_rows }} rows predate journaling</span>{% endif %}
+    <br><span class="muted">Queue: {{ queue.get('pending', 0) }} pending · {{ queue.get('processing', 0) }} in flight · {{ queue.get('failed', 0) }} failed</span>
   </div>
 </div>
 
@@ -52,6 +55,25 @@
   </tbody>
 </table>
 </div>
+
+{% if worker_stats %}
+<h2>Self-report reliability</h2>
+<div class="card table-wrap" style="padding:0">
+<table>
+  <thead><tr><th>Worker</th><th>Visits with self-report</th><th>Median lag vs first observation</th></tr></thead>
+  <tbody>
+  {% for wid, st in worker_stats.items() %}
+  <tr>
+    <td>{{ workers[wid].name if wid in workers else wid }}</td>
+    <td>{{ st.visits }}</td>
+    <td>{{ "%.0f"|format(st.median_lag) }} min {% if st.median_lag and st.median_lag > 10 %}<span class="flag warn">divergence</span>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="small muted">Lag = time between the first device observation and the worker's self-reported check-in. A pattern, not proof.</p>
+{% endif %}
 
 <h2>Schedules</h2>
 <div class="card table-wrap" style="padding:0">
