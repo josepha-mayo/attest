@@ -793,7 +793,13 @@ def _verify_case_pack(z, public_key: str) -> tuple[bool, str]:
             return False, f"{vid}: {detail}"
         if bundle.original.payload_hash != v.get("payload_hash"):
             return False, f"{vid}: manifest hash disagrees with signed original"
-        lines.append(f"{vid}: {v.get('state')} ({v.get('countersign', {}).get('state')})")
+        marker_name = f"visits/{vid}/redaction.json"
+        if marker_name in z.namelist():
+            marker = json.loads(z.read(marker_name))
+            if set(v.get("media_withheld", [])) != set(marker.get("withheld_digests", [])):
+                return False, f"{vid}: manifest redaction list disagrees with redaction.json"
+        media_detail = detail.split("; ", 1)[-1] if "; " in detail else detail
+        lines.append(f"{vid}: {v.get('state')} ({v.get('countersign', {}).get('state')}) — {media_detail}")
     total = len(manifest.get("visits", []))
     return True, f"case pack verified — {total} visit record(s) intact: " + "; ".join(lines)
 

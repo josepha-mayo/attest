@@ -134,6 +134,22 @@ def test_webhook_to_receipt(api, store, household, schedule, t0):
     assert "chain intact" in ok.text
 
 
+def test_redacted_case_pack_upload_verifies(api, household, t0):
+    site, _, cam, _ = household
+    r = _post_hook(api, cam.id, "motion_detected", t0, "human")
+    assert r.status_code == 202
+    vid = api.attest_state.store.active_visit(site.id).id
+    assert api.post(f"/api/visits/{vid}/close").status_code == 200
+
+    pack = api.get(f"/sites/{site.id}/pack.zip?redact_media=1")
+    assert pack.status_code == 200
+    from attest.app import _verify_pack
+
+    ok, detail = _verify_pack(pack.content, api.attest_state.signer.public_key_b64)
+    assert ok, detail
+    assert "withheld" in detail
+
+
 def test_webhook_ack_does_not_wait_for_enrichment(api, household, t0, monkeypatch):
     called = []
     monkeypatch.setattr(api.attest_state.engine, "ingest", lambda ev: called.append(ev))
