@@ -58,6 +58,8 @@ The emulator is an independent local test tool, not Amazon's official Playground
 
 For coordinated demos, use `attest replay`, not the standalone `ring-sandbox play` command. The runner waits for each persisted delivery before advancing time. Automatic idle sweeping is disabled in replay mode; the runner closes remaining observations explicitly for review. Link expiry is never frozen or extended by the replay clock.
 
+Multi-day demos: `attest replay home_aide_visit --days 3 --no-show-day 1 --worker-review dispute` produces a week-style dashboard — two observed visits, one honest `no_observation`, and a signed worker dispute — in one command. The replay clock only ever simulates the past, so `--days N` starts N days back.
+
 ## Reviewing and correcting a record
 
 1. Open a record; if it is still active, choose **Close observations for review**. Closing does not certify a departure.

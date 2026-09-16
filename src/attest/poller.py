@@ -15,7 +15,7 @@ honest "media was requested" evidence rather than mislabeling them as doorbell p
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 
 from ring_sandbox import RingAPIError, RingClient, WebhookEvent, webhooks
 from ring_sandbox.models import HistoryEvent
@@ -41,7 +41,9 @@ class HistoryPoller:
     ):
         self.engine, self.store, self.ring = engine, store, ring
         self.lookback = lookback or timedelta(minutes=30)
-        self._started = datetime.now(tz=UTC)
+        # The engine clock is wall time normally, the logical clock under replay —
+        # coverage rows must sit on the same timeline as the visits they describe.
+        self._started = engine.clock.now()
 
     def poll_once(self) -> int:
         """Fetch recent history events for every bound camera; ingest new ones.
@@ -50,7 +52,8 @@ class HistoryPoller:
         response's own ``attributes.event_type`` decides the mapping.
         """
         ingested = 0
-        since = max(self._started - self.lookback, datetime.now(tz=UTC) - timedelta(hours=24))
+        now = self.engine.clock.now()
+        since = max(self._started - self.lookback, now - timedelta(hours=24))
         for site in self.store.sites():
             pending = {}
             seen = 0
@@ -75,7 +78,7 @@ class HistoryPoller:
                     PollObservation(
                         site_id=site.id,
                         device_id=site.door_camera_id,
-                        polled_at=datetime.now(tz=UTC),
+                        polled_at=now,
                         since=since,
                         ok=False,
                         error=f"HTTP {exc.status_code}",
@@ -86,7 +89,7 @@ class HistoryPoller:
                 PollObservation(
                     site_id=site.id,
                     device_id=site.door_camera_id,
-                    polled_at=datetime.now(tz=UTC),
+                    polled_at=now,
                     since=since,
                     ok=True,
                     events_returned=seen,
