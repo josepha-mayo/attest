@@ -208,7 +208,7 @@ def main():
         i = args.index("--key")
         key = args[i + 1]
         del args[i : i + 2]
-    bundle = json.loads(Path(args[0]).read_text())
+    bundle = json.loads(Path(args[0]).read_text(encoding="utf-8"))
     key = key or bundle["original"]["public_key"]
     ok, why, n = check_bundle(bundle, key)
     if not ok:
@@ -232,12 +232,12 @@ _VERIFIER = _VERIFIER_LIB + _BUNDLE_MAIN
 _CASE_MAIN = """\
 def main():
     root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(".")
-    manifest = json.loads((root / "manifest.json").read_text())
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     key = manifest["issuer_key"]
     failed = 0
     for v in manifest["visits"]:
         vid = v["visit_id"]
-        bundle = json.loads((root / "visits" / vid / "bundle.json").read_text())
+        bundle = json.loads((root / "visits" / vid / "bundle.json").read_text(encoding="utf-8"))
         ok, why, n = check_bundle(bundle, key)
         if not ok:
             print(f"FAIL {vid}: {why}")

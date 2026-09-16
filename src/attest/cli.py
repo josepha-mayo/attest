@@ -358,7 +358,7 @@ def _verify(args: argparse.Namespace) -> None:
     from . import reviews
     from .models import ReviewBundle
 
-    bundle = ReviewBundle.model_validate(json.loads(Path(args.bundle).read_text()))
+    bundle = ReviewBundle.model_validate(json.loads(Path(args.bundle).read_text(encoding="utf-8")))
     key = args.key or bundle.original.public_key
     ok, reason = reviews.verify_bundle(bundle, public_key=key)
     if not ok:
@@ -470,6 +470,37 @@ def _status(args: argparse.Namespace) -> None:
         store.close()
 
 
+def _export(args: argparse.Namespace) -> None:
+    """Write a case pack for a site straight from the store — no server needed."""
+    from pathlib import Path
+
+    from .disputepack import build_case_pack
+    from .models import ReviewBundle
+    from .reviews import countersign_status
+    from .store import Store
+
+    store = Store(settings.data_dir / "attest.sqlite3")
+    try:
+        site = store.site(args.site) if args.site else (store.sites()[0] if store.sites() else None)
+        if site is None:
+            sys.exit("no site found — seed or run a replay first")
+        entries = []
+        for visit in store.visits(site_id=site.id):
+            receipt = store.receipt_for_visit(visit.id)
+            if receipt is None:
+                continue  # open visits have no signed record to export
+            bundle = ReviewBundle(original=receipt, reviews=store.reviews_for(visit.id))
+            entries.append((visit, bundle, countersign_status(bundle)))
+        if not entries:
+            sys.exit(f"no signed records for {site.name} yet")
+        data = build_case_pack(store, settings.data_dir / "media", site, entries)
+        out = Path(args.out or f"case-{site.id}.zip")
+        out.write_bytes(data)
+        print(f"wrote {out} — {len(entries)} visit record(s); verify with `python verify_case.py .`")
+    finally:
+        store.close()
+
+
 def _deliveries(args: argparse.Namespace) -> None:
     from .inbox import WebhookInbox
 
@@ -562,6 +593,13 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("bundle", help="path to the exported original + review chain JSON")
     s.add_argument("--key", default=None, help="issuer public key (base64) to pin against")
     s.set_defaults(fn=_verify)
+
+    s = sub.add_parser(
+        "export", help="write a site case pack (all signed visits + media + verifier) to a zip"
+    )
+    s.add_argument("--site", default=None, help="site id (defaults to the only site)")
+    s.add_argument("--out", default=None, help="output path (default case-<site>.zip)")
+    s.set_defaults(fn=_export)
 
     s = sub.add_parser("deliveries", help="show durable webhook inbox state, or requeue failed deliveries")
     s.add_argument(

@@ -70,6 +70,33 @@ def test_pack_verifier_rejects_key_swap(pack):
     assert "different key" in result.stderr
 
 
+def test_pack_verifier_handles_nonascii_statement(engine, store, household, t0, tmp_path):
+    """A signed statement containing non-ASCII text must verify offline — the
+    verifier's read_text must pin UTF-8 or Windows' cp1252 default mojibakes the
+    payload and the signature check fails on honest data."""
+    event = WebhookEvent.model_validate(
+        webhooks.build_event(
+            event_type="button_press",
+            device_id=household[2].id,
+            occurred_at=t0,
+        )
+    )
+    visit = engine.ingest(event).visit
+    engine.close_for_review(visit.id)
+    service = ReviewService(store, engine.signer, engine.clock)
+    service.coordinator_review(
+        visit.id,
+        ReviewInput(decision="confirm", statement="Correct — María was there; noé problems."),
+    )
+    bundle = service.bundle(visit.id)
+    data = build_pack(store, tmp_path / "media", bundle)
+    out = tmp_path / "pack-utf8"
+    zipfile.ZipFile(io.BytesIO(data)).extractall(out)
+    result = _run(out)
+    assert result.returncode == 0, result.stderr
+    assert "receipt(s) verified" in result.stdout
+
+
 def test_pack_verifier_rejects_broken_chain(pack):
     bundle_path = pack / "bundle.json"
     bundle = json.loads(bundle_path.read_text())
