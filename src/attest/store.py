@@ -193,12 +193,35 @@ class Store:
             r = self._conn.execute(f"SELECT body FROM {table} WHERE {key}=?", (row_id,)).fetchone()
             return _sha(r[0]) if r else None
 
+    def journal_head(self) -> str:
+        """Hash of the latest journal entry — the anchor receipts pin at issuance."""
+        with self._lock:
+            row = self._conn.execute("SELECT hash FROM journal ORDER BY seq DESC LIMIT 1").fetchone()
+            return row[0] if row else "0" * 64
+
+    def _pinned_journal_heads(self) -> list[str]:
+        """journal_head values signed into original and review receipts."""
+        with self._lock:
+            heads = []
+            for (body,) in self._conn.execute("SELECT body FROM receipts"):
+                head = json.loads(body).get("payload", {}).get("journal_head")
+                if head:
+                    heads.append(head)
+            for (body,) in self._conn.execute("SELECT body FROM reviews"):
+                head = json.loads(body).get("receipt", {}).get("payload", {}).get("journal_head")
+                if head:
+                    heads.append(head)
+            return heads
+
     def verify_journal(self) -> dict:
         """Replay the mutation journal: link integrity, then state-vs-log agreement.
 
         A row that was journaled 'put' must still exist with the same content; a
         journaled 'delete' must be gone. Rows never journaled (pre-journal data or
         out-of-band writes) are reported as untracked — visible, not silently trusted.
+        Receipts pin the journal head at issuance, so dropping the log's tail is as
+        detectable as forging a row: a pinned head that no longer appears in the
+        chain means entries were removed after a signature covered them.
         """
         with self._lock:
             entries = self._conn.execute(
@@ -249,11 +272,20 @@ class Store:
                 ids = [r[0] for r in self._conn.execute(f"SELECT {key} FROM {table}")]
                 untracked += sum(1 for rid in ids if (table, rid) not in tracked)
 
+            chain_hashes = {h for *_, h in entries}
+            pins = self._pinned_journal_heads()
+            missing_pins = [p for p in pins if p not in chain_hashes]
+            for p in missing_pins:
+                mismatches.append(f"journal tail removed: pinned head {p[:12]}... absent")
+
             return {
                 "entries": len(entries),
                 "intact": not mismatches,
                 "mismatches": mismatches[:50],
                 "untracked_rows": untracked,
+                "pinned_heads": len(pins),
+                "missing_pins": len(missing_pins),
+                "head": entries[-1][7] if entries else "0" * 64,
             }
 
     def journal_baseline(self) -> int:

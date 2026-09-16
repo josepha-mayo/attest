@@ -491,6 +491,7 @@ class VisitEngine:
             ],
             "history_poll_coverage": self._coverage(visit, site),
             "ring_history": self._reconcile_history(visit, site),
+            "journal_head": self.store.journal_head(),
         }
         receipt = self.signer.issue(
             visit_id=visit.id,

@@ -155,3 +155,61 @@ def test_case_pack_verifier_rejects_manifest_tamper(case_pack):
     result = _run_case(case_pack)
     assert result.returncode != 0
     assert "manifest hash disagrees" in result.stdout
+
+
+def test_case_pack_redacted_media_verifies(engine, store, household, schedule, t0, tmp_path):
+    """A redacted pack keeps signed digests but withholds bytes — the verifier
+    reports them withheld instead of failing on missing files."""
+    service = ReviewService(store, engine.signer, engine.clock)
+    event = WebhookEvent.model_validate(
+        webhooks.build_event(event_type="button_press", device_id=household[2].id, occurred_at=t0)
+    )
+    visit = engine.ingest(event).visit
+    engine.close_for_review(visit.id)
+    bundle = service.bundle(visit.id)
+    assert any(e.get("media_sha256") for e in bundle.original.payload["evidence"]), (
+        "fixture should produce at least one media digest"
+    )
+    site = store.sites()[0]
+    data = build_case_pack(
+        store,
+        tmp_path / "media",
+        site,
+        [(visit, bundle, countersign_status(bundle))],
+        redact_media=True,
+    )
+    out = tmp_path / "case-redacted"
+    zipfile.ZipFile(io.BytesIO(data)).extractall(out)
+    assert not (out / "visits" / visit.id / "media").exists()
+    assert json.loads((out / "manifest.json").read_text())["media_redacted"] is True
+    result = _run_case(out)
+    assert result.returncode == 0, result.stderr
+    assert "withheld" in result.stdout
+
+
+def test_case_pack_verifier_rejects_bogus_redaction(engine, store, household, schedule, t0, tmp_path):
+    """A redaction.json naming digests not in the signed evidence fails closed."""
+    service = ReviewService(store, engine.signer, engine.clock)
+    event = WebhookEvent.model_validate(
+        webhooks.build_event(event_type="button_press", device_id=household[2].id, occurred_at=t0)
+    )
+    visit = engine.ingest(event).visit
+    engine.close_for_review(visit.id)
+    bundle = service.bundle(visit.id)
+    site = store.sites()[0]
+    data = build_case_pack(
+        store,
+        tmp_path / "media",
+        site,
+        [(visit, bundle, countersign_status(bundle))],
+        redact_media=True,
+    )
+    out = tmp_path / "case-badredact"
+    zipfile.ZipFile(io.BytesIO(data)).extractall(out)
+    redact_path = out / "visits" / visit.id / "redaction.json"
+    marker = json.loads(redact_path.read_text())
+    marker["withheld_digests"] = ["f" * 64]
+    redact_path.write_text(json.dumps(marker))
+    result = _run_case(out)
+    assert result.returncode != 0
+    assert "not in the signed evidence" in result.stdout

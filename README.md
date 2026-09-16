@@ -67,6 +67,8 @@ Multi-day demos: `attest replay home_aide_visit --days 3 --no-show-day 1 --worke
 3. Append a coordinator statement. The authenticated workspace administrator is recorded as the coordinator; this is not yet a multi-user identity system.
 4. Export **original + review chain**, then upload the bundle at `/verify`. Verification checks signatures, revision ordering, and links to the supplied original under the deployment's pinned public key. The same check runs offline: `attest verify bundle.json --key <issuer-public-key>` (omit `--key` to verify against the key embedded in the receipt).
 
+Export surfaces: `GET /visits/{id}/pack.zip` (single-visit dispute pack), `GET /sites/{id}/pack.zip` (whole-site case pack), or `attest export` without a server. Every pack embeds a stdlib-only verifier. Add `?redact_media=1` (or `attest export --redact-media`) to withhold media bytes while preserving the signed sha256 digests — the pack stays verifiable and the verifier reports media as withheld. `attest diff old.zip new.zip` compares two exports: appended visits/reviews are reported as normal drift; a vanished visit, an altered signed payload, or a removed review is flagged as an anomaly. `attest attack-demo` runs real tamper attempts against the local store (forge a row, delete a row, erase/truncate the journal, re-sign under a foreign key, replay a webhook, insert out-of-band) and rolls each back — nothing persists.
+
 Corrections are separate human statements, not edits to camera evidence. Verification establishes integrity of the supplied chain, not attendance, truth of a statement, or completeness against a hidden/deleted tail. Never publish review/check-in links or personal records in the demo video.
 
 ## Ring integration status

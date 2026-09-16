@@ -67,6 +67,11 @@ class Signer:
     def ephemeral(cls) -> Signer:
         return cls(Ed25519PrivateKey.generate())
 
+    def sign_hash(self, hex_digest: str) -> str:
+        """Sign a payload hash directly — used by the attack demo to forge a
+        receipt under a different key."""
+        return _b64(self._sk.sign(bytes.fromhex(hex_digest)))
+
     def issue(self, *, visit_id: str, sequence: int, prev_hash: str | None, facts: dict[str, Any]) -> Receipt:
         if {"schema", "sequence", "prev_hash", "receipt_id", "issued_at"} & facts.keys():
             raise ValueError("facts contain reserved receipt fields")

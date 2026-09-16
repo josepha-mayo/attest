@@ -119,6 +119,7 @@ class ReviewService:
                 "clock": self.clock.snapshot(),
                 "original_assessment_unchanged": True,
                 "independently_verified_attendance": False,
+                "journal_head": self.store.journal_head(),
             },
         )
         entry = ReviewEntry(id=signed.id, visit_id=visit_id, revision=signed.sequence, receipt=signed)

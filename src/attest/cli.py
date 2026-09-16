@@ -455,6 +455,8 @@ def _status(args: argparse.Namespace) -> None:
         print(f"visits:   {stats['visits']['total']} ({by_state or 'none'})")
         print(f"receipts: {stats['receipts']['total']} — {chain_detail}")
         line = f"journal:  {'intact' if journal['intact'] else 'VIOLATED'} — {journal['entries']} entries"
+        if journal.get("pinned_heads"):
+            line += f", {journal['pinned_heads']} signature-pinned heads"
         if journal["untracked_rows"]:
             line += f", {len(journal['untracked_rows'])} untracked rows (run `attest journal --baseline`)"
         if journal["mismatches"]:
@@ -493,12 +495,62 @@ def _export(args: argparse.Namespace) -> None:
             entries.append((visit, bundle, countersign_status(bundle)))
         if not entries:
             sys.exit(f"no signed records for {site.name} yet")
-        data = build_case_pack(store, settings.data_dir / "media", site, entries)
+        data = build_case_pack(
+            store,
+            settings.data_dir / "media",
+            site,
+            entries,
+            redact_media=args.redact_media,
+        )
         out = Path(args.out or f"case-{site.id}.zip")
         out.write_bytes(data)
-        print(f"wrote {out} — {len(entries)} visit record(s); verify with `python verify_case.py .`")
+        note = " (media withheld — digests preserved)" if args.redact_media else ""
+        print(f"wrote {out}{note} — {len(entries)} visit record(s); verify with `python verify_case.py .`")
     finally:
         store.close()
+
+
+def _attack_demo(args: argparse.Namespace) -> None:
+    """Adversarial self-test: real tamper attempts, each caught then rolled back."""
+    from .attackdemo import run
+    from .store import Store
+
+    db = settings.data_dir / "attest.sqlite3"
+    if not db.exists():
+        sys.exit(f"no store at {db} — run `attest replay home_aide_visit` first")
+    store = Store(db)
+    try:
+        out = run(store)
+        if out.get("baseline_note"):
+            print(out["baseline_note"])
+        caught = 0
+        for r in out["results"]:
+            mark = "CAUGHT " if r["caught"] else "MISSED "
+            caught += r["caught"]
+            print(f"{mark} {r['attack']}\n        {r['detail']}")
+        print(
+            f"{caught}/{len(out['results'])} attacks caught — "
+            f"store {'unchanged' if out['unchanged'] else 'CHANGED (investigate)'}"
+        )
+        if not out["unchanged"]:
+            sys.exit(1)
+    finally:
+        store.close()
+
+
+def _diff(args: argparse.Namespace) -> None:
+    """Compare two exports (case pack, dispute pack, or bundle.json) — append-only
+    drift is normal; vanished or altered records are anomalies."""
+    from .packdiff import diff
+
+    try:
+        lines, anomalies = diff(args.old, args.new)
+    except (ValueError, OSError, KeyError) as exc:
+        sys.exit(f"cannot compare: {exc}")
+    for line in lines:
+        print(line)
+    if anomalies:
+        sys.exit(1)
 
 
 def _deliveries(args: argparse.Namespace) -> None:
@@ -599,7 +651,26 @@ def main(argv: list[str] | None = None) -> None:
     )
     s.add_argument("--site", default=None, help="site id (defaults to the only site)")
     s.add_argument("--out", default=None, help="output path (default case-<site>.zip)")
+    s.add_argument(
+        "--redact-media",
+        action="store_true",
+        help="withhold media bytes; signed digests are preserved and the verifier reports them withheld",
+    )
     s.set_defaults(fn=_export)
+
+    s = sub.add_parser(
+        "attack-demo",
+        help="run real tamper attempts (forge, delete, truncate, key swap, replay), all rolled back",
+    )
+    s.set_defaults(fn=_attack_demo)
+
+    s = sub.add_parser(
+        "diff",
+        help="compare two exports — appended records are normal; vanished or altered ones are anomalies",
+    )
+    s.add_argument("old", help="earlier export: case pack, pack.zip, or bundle.json")
+    s.add_argument("new", help="later export")
+    s.set_defaults(fn=_diff)
 
     s = sub.add_parser("deliveries", help="show durable webhook inbox state, or requeue failed deliveries")
     s.add_argument(

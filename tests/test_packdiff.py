@@ -1,0 +1,98 @@
+import io
+import json
+import zipfile
+from datetime import timedelta
+
+import pytest
+from ring_sandbox import WebhookEvent, webhooks
+
+from attest.disputepack import build_case_pack
+from attest.models import ReviewInput
+from attest.packdiff import diff
+from attest.reviews import ReviewService, countersign_status
+
+
+def _visit(engine, household, t0, offset=0):
+    event = WebhookEvent.model_validate(
+        webhooks.build_event(
+            event_type="button_press",
+            device_id=household[2].id,
+            occurred_at=t0 + timedelta(minutes=offset),
+        )
+    )
+    visit = engine.ingest(event).visit
+    engine.close_for_review(visit.id)
+    return visit
+
+
+def _case(store, tmp_path, site, service, entries):
+    data = build_case_pack(
+        store,
+        tmp_path / "media",
+        site,
+        [(v, service.bundle(v.id), countersign_status(service.bundle(v.id))) for v in entries],
+    )
+    out = tmp_path / f"case-{len(list(tmp_path.glob('case-*.zip')))}.zip"
+    out.write_bytes(data)
+    return out
+
+
+@pytest.fixture
+def exports(engine, store, household, schedule, t0, tmp_path):
+    service = ReviewService(store, engine.signer, engine.clock)
+    site = store.sites()[0]
+    v1 = _visit(engine, household, t0)
+    first = _case(store, tmp_path, site, service, [v1])
+    v2 = _visit(engine, household, t0, offset=90)
+    service.coordinator_review(v1.id, ReviewInput(decision="confirm", statement="Verified."))
+    second = _case(store, tmp_path, site, service, [v1, v2])
+    return first, second, v1.id, v2.id
+
+
+def test_diff_reports_append_only_drift(exports):
+    first, second, v1, v2 = exports
+    lines, anomalies = diff(first, second)
+    assert anomalies == 0, lines
+    text = "\n".join(lines)
+    assert f"+  {v2}: new visit" in text
+    assert f"~  {v1}: +1 appended review receipt(s)" in text
+    assert "clean" in text
+
+
+def test_diff_flags_a_vanished_record(exports):
+    first, second, v1, _ = exports
+    # tamper: drop v1 from the newer pack's manifest
+    zin = zipfile.ZipFile(second)
+    manifest = json.loads(zin.read("manifest.json"))
+    manifest["visits"] = [v for v in manifest["visits"] if v["visit_id"] != v1]
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zout:
+        for name in zin.namelist():
+            if name != "manifest.json":
+                zout.writestr(name, zin.read(name))
+        zout.writestr("manifest.json", json.dumps(manifest))
+    forged = second.with_name("forged.zip")
+    forged.write_bytes(buf.getvalue())
+    lines, anomalies = diff(first, forged)
+    assert anomalies >= 1
+    assert any("absent now" in line for line in lines)
+
+
+def test_diff_flags_an_altered_signed_record(exports, tmp_path):
+    first, second, v1, _ = exports
+    # tamper: same visit id, different payload hash inside the newer pack
+    zin = zipfile.ZipFile(second)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zout:
+        for name in zin.namelist():
+            data = zin.read(name)
+            if name == f"visits/{v1}/bundle.json":
+                b = json.loads(data)
+                b["original"]["payload_hash"] = "0" * 64
+                data = json.dumps(b)
+            zout.writestr(name, data)
+    forged = second.with_name("forged2.zip")
+    forged.write_bytes(buf.getvalue())
+    lines, anomalies = diff(first, forged)
+    assert anomalies >= 1
+    assert any("cannot change" in line for line in lines)

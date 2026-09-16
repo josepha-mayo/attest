@@ -181,9 +181,15 @@ def check_bundle(bundle, key):
     return True, "ok", n + 1
 
 
-def check_media(bundle, media_dir):
-    """Match each evidence media digest to a file under media_dir. Returns checked count."""
-    checked = 0
+def check_media(bundle, media_dir, withheld=None):
+    """Match each evidence media digest to a file under media_dir.
+
+    ``withheld`` lists digests deliberately redacted from the pack: they are
+    reported as withheld, not as missing. A digest that matches neither a file
+    nor the withheld list fails. Returns (checked, withheld_count, bad_digest).
+    """
+    withheld = set(withheld or [])
+    checked = held = 0
     for e in bundle["original"]["payload"].get("evidence", []):
         digest = e.get("media_sha256")
         if not digest:
@@ -193,8 +199,30 @@ def check_media(bundle, media_dir):
                 checked += 1
                 break
         else:
-            return -1, digest
-    return checked, None
+            if digest in withheld:
+                held += 1
+                continue
+            return checked, held, digest
+    return checked, held, None
+
+
+def redaction_for(bundle, pack_dir="."):
+    """Read redaction.json inside pack_dir, if present. Returns the withheld
+    digests or None. Fails closed: a redaction file naming digests absent from
+    the signed evidence is itself suspicious."""
+    marker = Path(pack_dir) / "redaction.json"
+    if not marker.is_file():
+        return None
+    data = json.loads(marker.read_text(encoding="utf-8"))
+    digests = set(data.get("withheld_digests", []))
+    signed = {
+        e.get("media_sha256")
+        for e in bundle["original"]["payload"].get("evidence", [])
+        if e.get("media_sha256")
+    }
+    if not digests <= signed:
+        raise ValueError("redaction.json lists digests not in the signed evidence")
+    return digests
 
 
 '''
@@ -213,10 +241,15 @@ def main():
     ok, why, n = check_bundle(bundle, key)
     if not ok:
         sys.exit(f"FAIL {why}")
-    checked, bad = check_media(bundle, Path("media"))
+    try:
+        withheld = redaction_for(bundle)
+    except ValueError as exc:
+        sys.exit(f"FAIL {exc}")
+    checked, held, bad = check_media(bundle, Path("media"), withheld)
     if bad:
         sys.exit(f"FAIL media digest not found in pack: {bad[:16]}...")
-    print(f"OK: {n} receipt(s) verified; {checked} media digests matched.")
+    redact_note = f", {held} withheld by redaction" if held else ""
+    print(f"OK: {n} receipt(s) verified; {checked} media digests matched{redact_note}.")
     print("Signature proves record integrity under the issuer key - not identity,")
     print("attendance, or absence.")
 
@@ -247,13 +280,25 @@ def main():
             print(f"FAIL {vid}: manifest hash disagrees with signed original")
             failed += 1
             continue
-        checked, bad = check_media(bundle, root / "visits" / vid / "media")
+        vdir = root / "visits" / vid
+        try:
+            withheld = redaction_for(bundle, vdir)
+        except ValueError as exc:
+            print(f"FAIL {vid}: {exc}")
+            failed += 1
+            continue
+        if set(v.get("media_withheld", [])) != set(withheld or []):
+            print(f"FAIL {vid}: manifest redaction list disagrees with redaction.json")
+            failed += 1
+            continue
+        checked, held, bad = check_media(bundle, vdir / "media", withheld)
         if bad:
             print(f"FAIL {vid}: media digest not found: {bad[:16]}...")
             failed += 1
             continue
+        redact_note = f", {held} withheld" if held else ""
         print(f"OK   {vid}: {v['state']} — {v['countersign']['state']}"
-              f" ({n} receipt(s), {checked} media digest(s))")
+              f" ({n} receipt(s), {checked} media digest(s){redact_note})")
     if failed:
         sys.exit(f"{failed} visit record(s) failed verification")
     print(f"OK: {len(manifest['visits'])} visit records verified under issuer key")
@@ -310,14 +355,48 @@ def _media_files(store: Store, media_root: Path, visit_id: str) -> list[tuple[Pa
     return out
 
 
-def build_pack(store: Store, media_root: Path, bundle: ReviewBundle, *, include_media: bool = True) -> bytes:
-    """Assemble the zip. Media is matched to evidence digests, not filenames."""
+def _withheld_digests(bundle: ReviewBundle) -> list[str]:
+    return sorted(
+        {e["media_sha256"] for e in bundle.original.payload.get("evidence", []) if e.get("media_sha256")}
+    )
+
+
+def _redaction_marker(bundle: ReviewBundle) -> str:
+    import json
+
+    return json.dumps(
+        {
+            "schema": "attest.redaction/1",
+            "media_redacted": True,
+            "withheld_digests": _withheld_digests(bundle),
+            "note": (
+                "Media bytes withheld for privacy. The sha256 digests remain inside "
+                "the signed payload — a later full pack can be compared against them."
+            ),
+        },
+        indent=2,
+    )
+
+
+def build_pack(
+    store: Store,
+    media_root: Path,
+    bundle: ReviewBundle,
+    *,
+    include_media: bool = True,
+    redact_media: bool = False,
+) -> bytes:
+    """Assemble the zip. Media is matched to evidence digests, not filenames.
+    With ``redact_media`` the bytes are withheld and a redaction.json marker is
+    written — the signed digests stay verifiable, the footage stays private."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("bundle.json", bundle.model_dump_json(indent=2))
         z.writestr("README.txt", _README)
         z.writestr("verify_bundle.py", _VERIFIER)
-        if include_media:
+        if redact_media:
+            z.writestr("redaction.json", _redaction_marker(bundle))
+        elif include_media:
             for p, rel in _media_files(store, media_root, bundle.original.visit_id):
                 z.write(p, f"media/{rel}")
     return buf.getvalue()
@@ -330,10 +409,13 @@ def build_case_pack(
     entries: list[tuple[Visit, ReviewBundle, dict]],
     *,
     include_media: bool = True,
+    redact_media: bool = False,
 ) -> bytes:
     """A whole-site export: every visit's signed bundle + media, one manifest of
     receipt hashes and worker stances, and a stdlib-only verifier that checks
-    all of it. For disputes about a pattern of visits, not a single record."""
+    all of it. For disputes about a pattern of visits, not a single record.
+    With ``redact_media``, media bytes are withheld per visit and the manifest
+    records the signed digests — shareable without handing over footage."""
     import json
     from datetime import UTC, datetime
 
@@ -342,6 +424,7 @@ def build_case_pack(
         "site": {"id": site.id, "name": site.name},
         "generated_at": datetime.now(tz=UTC).isoformat(),
         "issuer_key": entries[0][1].original.public_key if entries else None,
+        "media_redacted": redact_media,
         "visits": [
             {
                 "visit_id": visit.id,
@@ -352,6 +435,7 @@ def build_case_pack(
                 "last_activity_at": (visit.last_activity_at.isoformat() if visit.last_activity_at else None),
                 "countersign": {"state": cs["state"], "detail": cs["detail"]},
                 "reviews": len(bundle.reviews),
+                "media_withheld": _withheld_digests(bundle) if redact_media else [],
             }
             for visit, bundle, cs in entries
         ],
@@ -368,7 +452,9 @@ def build_case_pack(
         for visit, bundle, _ in entries:
             base = f"visits/{visit.id}"
             z.writestr(f"{base}/bundle.json", bundle.model_dump_json(indent=2))
-            if include_media:
+            if redact_media:
+                z.writestr(f"{base}/redaction.json", _redaction_marker(bundle))
+            elif include_media:
                 for p, rel in _media_files(store, media_root, visit.id):
                     z.write(p, f"{base}/media/{rel}")
     return buf.getvalue()

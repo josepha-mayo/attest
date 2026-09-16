@@ -551,10 +551,13 @@ def create_app(
         return await action(reviews.bundle, visit_id)
 
     @app.get("/visits/{visit_id}/pack.zip")
-    async def dispute_pack(visit_id: str = PathParam(max_length=128)):
-        """Portable dispute pack: bundle + media + a stdlib-only offline verifier."""
+    async def dispute_pack(visit_id: str = PathParam(max_length=128), redact_media: bool = False):
+        """Portable dispute pack: bundle + media + a stdlib-only offline verifier.
+        ?redact_media=1 withholds media bytes — signed digests stay verifiable."""
         bundle = await action(reviews.bundle, visit_id)
-        data = await asyncio.to_thread(build_pack, store, s.data_dir / "media", bundle)
+        data = await asyncio.to_thread(
+            build_pack, store, s.data_dir / "media", bundle, redact_media=redact_media
+        )
         return Response(
             data,
             media_type="application/zip",
@@ -562,9 +565,10 @@ def create_app(
         )
 
     @app.get("/sites/{site_id}/pack.zip")
-    async def case_pack(site_id: str = PathParam(max_length=128)):
+    async def case_pack(site_id: str = PathParam(max_length=128), redact_media: bool = False):
         """Site-level case pack: every visit's signed bundle, a manifest of receipt
-        hashes + worker stances, and a stdlib verifier — for pattern disputes."""
+        hashes + worker stances, and a stdlib verifier — for pattern disputes.
+        ?redact_media=1 withholds media bytes; digests are preserved."""
         site = store.site(site_id)
         if site is None:
             raise HTTPException(404, "unknown site")
@@ -578,7 +582,7 @@ def create_app(
                     continue
                 bundle = reviews.bundle(visit.id)
                 entries.append((visit, bundle, reviews.countersign(visit.id)))
-            return build_case_pack(store, s.data_dir / "media", site, entries)
+            return build_case_pack(store, s.data_dir / "media", site, entries, redact_media=redact_media)
 
         data = await asyncio.to_thread(build)
         return Response(
@@ -751,13 +755,23 @@ def _check_pack_bundle(z, bundle: ReviewBundle, public_key: str, *, media_prefix
     digests = {
         e.get("media_sha256") for e in bundle.original.payload.get("evidence", []) if e.get("media_sha256")
     }
+    withheld: set[str] = set()
+    marker_name = media_prefix.rsplit("media/", 1)[0] + "redaction.json"
+    if marker_name in z.namelist():
+        marker = json.loads(z.read(marker_name))
+        withheld = set(marker.get("withheld_digests", []))
+        if not withheld <= digests:
+            return False, "bundle: redaction.json lists digests not in the signed evidence"
     matched = 0
     for name in z.namelist():
         if name.startswith(media_prefix) and not name.endswith("/"):
             if hashlib.sha256(z.read(name)).hexdigest() in digests:
                 matched += 1
-    detail = f"{why}; {matched}/{len(digests)} signed media digests found in pack"
-    return (matched == len(digests), detail)
+    covered = matched + len(withheld & digests)
+    detail = f"{why}; {matched}/{len(digests)} signed media digests found in pack" + (
+        f", {len(withheld & digests)} withheld by redaction" if withheld else ""
+    )
+    return (covered == len(digests), detail)
 
 
 def _verify_case_pack(z, public_key: str) -> tuple[bool, str]:
