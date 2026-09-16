@@ -63,7 +63,7 @@ For coordinated demos, use `attest replay`, not the standalone `ring-sandbox pla
 1. Open a record; if it is still active, choose **Close observations for review**. Closing does not certify a departure.
 2. Choose **Request worker's account** to create a private, visit-scoped review link. The worker can confirm their account, dispute an interpretation, or add a correction and optional reported interval.
 3. Append a coordinator statement. The authenticated workspace administrator is recorded as the coordinator; this is not yet a multi-user identity system.
-4. Export **original + review chain**, then upload the bundle at `/verify`. Verification checks signatures, revision ordering, and links to the supplied original under the deployment's pinned public key.
+4. Export **original + review chain**, then upload the bundle at `/verify`. Verification checks signatures, revision ordering, and links to the supplied original under the deployment's pinned public key. The same check runs offline: `attest verify bundle.json --key <issuer-public-key>` (omit `--key` to verify against the key embedded in the receipt).
 
 Corrections are separate human statements, not edits to camera evidence. Verification establishes integrity of the supplied chain, not attendance, truth of a statement, or completeness against a hidden/deleted tail. Never publish review/check-in links or personal records in the demo video.
 

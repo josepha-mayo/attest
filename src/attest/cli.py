@@ -251,6 +251,23 @@ def _replay(args: argparse.Namespace) -> None:
         )
 
 
+def _verify(args: argparse.Namespace) -> None:
+    """Verify a downloaded bundle offline: signatures, revision order, chain anchoring."""
+    from pathlib import Path
+
+    from . import reviews
+    from .models import ReviewBundle
+
+    bundle = ReviewBundle.model_validate(json.loads(Path(args.bundle).read_text()))
+    key = args.key or bundle.original.public_key
+    ok, reason = reviews.verify_bundle(bundle, public_key=key)
+    if not ok:
+        sys.exit(f"verification failed: {reason}")
+    pinned = " (against the supplied issuer key)" if args.key else ""
+    print(f"OK{pinned}: {reason}.")
+    print("Note: a valid signature proves record integrity under that key, not physical truth.")
+
+
 def _deliveries(args: argparse.Namespace) -> None:
     from .inbox import WebhookInbox
 
@@ -321,6 +338,11 @@ def main(argv: list[str] | None = None) -> None:
         help="delete the previewed non-chain candidates; must equal the current apply_token",
     )
     s.set_defaults(fn=_retention)
+
+    s = sub.add_parser("verify", help="verify a downloaded bundle.json offline")
+    s.add_argument("bundle", help="path to the exported original + review chain JSON")
+    s.add_argument("--key", default=None, help="issuer public key (base64) to pin against")
+    s.set_defaults(fn=_verify)
 
     s = sub.add_parser("deliveries", help="show durable webhook inbox state, or requeue failed deliveries")
     s.add_argument(
