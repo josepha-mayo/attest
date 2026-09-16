@@ -3,13 +3,14 @@ import json
 import subprocess
 import sys
 import zipfile
+from datetime import timedelta
 
 import pytest
 from ring_sandbox import WebhookEvent, webhooks
 
-from attest.disputepack import build_pack
+from attest.disputepack import build_case_pack, build_pack
 from attest.models import ReviewInput
-from attest.reviews import ReviewService
+from attest.reviews import ReviewService, countersign_status
 
 
 @pytest.fixture
@@ -44,7 +45,7 @@ def _run(pack_dir, *args):
 def test_pack_verifies_offline_with_stdlib_only(pack):
     result = _run(pack)
     assert result.returncode == 0, result.stderr
-    assert "original + 1 reviews verified" in result.stdout
+    assert "2 receipt(s) verified" in result.stdout
     assert "media digests matched" in result.stdout
 
 
@@ -77,3 +78,53 @@ def test_pack_verifier_rejects_broken_chain(pack):
     result = _run(pack)
     assert result.returncode != 0
     assert "chain" in result.stderr
+
+
+@pytest.fixture
+def case_pack(engine, store, household, schedule, t0, tmp_path):
+    """Two closed visits for one site, packaged as a site-level case pack."""
+    service = ReviewService(store, engine.signer, engine.clock)
+    entries = []
+    for offset in (0, 60):
+        event = WebhookEvent.model_validate(
+            webhooks.build_event(
+                event_type="button_press",
+                device_id=household[2].id,
+                occurred_at=t0 + timedelta(minutes=offset),
+            )
+        )
+        visit = engine.ingest(event).visit
+        engine.close_for_review(visit.id)
+        bundle = service.bundle(visit.id)
+        entries.append((visit, bundle, countersign_status(bundle)))
+    site = store.sites()[0]
+    data = build_case_pack(store, tmp_path / "media", site, entries)
+    out = tmp_path / "case"
+    zipfile.ZipFile(io.BytesIO(data)).extractall(out)
+    return out
+
+
+def _run_case(pack_dir, *args):
+    return subprocess.run(
+        [sys.executable, "verify_case.py", *args],
+        cwd=pack_dir,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_case_pack_verifies_offline_with_stdlib_only(case_pack):
+    result = _run_case(case_pack)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.count("OK   ") == 2
+    assert "2 visit records verified" in result.stdout
+
+
+def test_case_pack_verifier_rejects_manifest_tamper(case_pack):
+    manifest_path = case_pack / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["visits"][0]["payload_hash"] = "0" * 64
+    manifest_path.write_text(json.dumps(manifest))
+    result = _run_case(case_pack)
+    assert result.returncode != 0
+    assert "manifest hash disagrees" in result.stdout

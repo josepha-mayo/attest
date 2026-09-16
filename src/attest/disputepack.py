@@ -13,7 +13,7 @@ import io
 import zipfile
 from pathlib import Path
 
-from .models import ReviewBundle
+from .models import ReviewBundle, Site, Visit
 from .store import Store
 
 _README = """\
@@ -43,17 +43,16 @@ each receipt verifies this pack; pin against a key you obtained out-of-band
 (verify_bundle.py --key <base64>) to rule out a pack that swapped keys.
 """
 
-# stdlib-only RFC 8032 verifier, generated into every pack. Kept in sync with
-# ledger.py's canonicalization (json sort_keys, compact separators) and receipt
-# checks (payload hash, envelope agreement, Ed25519 signature, chain links).
-_VERIFIER = '''\
+# stdlib-only RFC 8032 verifier library, generated into every pack. Kept in sync
+# with ledger.py's canonicalization (json sort_keys, compact separators) and
+# receipt checks (payload hash, envelope agreement, Ed25519 signature, chain links).
+_VERIFIER_LIB = '''\
 #!/usr/bin/env python3
-"""Verify an Attest bundle offline. Stdlib only — no pip, no attest install.
+"""Verify Attest records offline. Stdlib only — no pip, no attest install.
 
-Usage: python verify_bundle.py bundle.json [--key BASE64_ISSUER_KEY]
 Checks: payload sha256, envelope/payload agreement, Ed25519 signatures,
 revision ordering, and anchoring to the original receipt. Media digests are
-checked when media/ sits next to this script.
+checked against files inside the pack.
 """
 import base64
 import hashlib
@@ -160,6 +159,48 @@ def check_receipt(r, key):
     return True, "ok"
 
 
+def check_bundle(bundle, key):
+    """Verify one bundle's original + review chain. Returns (ok, detail, n_reviews)."""
+    original = bundle["original"]
+    ok, why = check_receipt(original, key)
+    if not ok:
+        return False, f"original: {why}", 0
+    prev = original["payload_hash"]
+    n = 0
+    for n, entry in enumerate(bundle.get("reviews", []), 1):
+        r = entry["receipt"]
+        ok, why = check_receipt(r, key)
+        if not ok:
+            return False, f"review {n}: {why}", n
+        if entry["revision"] != n or r["prev_hash"] != prev:
+            return False, f"review {n}: broken chain", n
+        anchor = r["payload"].get("original_receipt") or {}
+        if anchor.get("hash") != original["payload_hash"]:
+            return False, f"review {n}: not anchored to this original", n
+        prev = r["payload_hash"]
+    return True, "ok", n + 1
+
+
+def check_media(bundle, media_dir):
+    """Match each evidence media digest to a file under media_dir. Returns checked count."""
+    checked = 0
+    for e in bundle["original"]["payload"].get("evidence", []):
+        digest = e.get("media_sha256")
+        if not digest:
+            continue
+        for p in media_dir.rglob("*"):
+            if p.is_file() and hashlib.sha256(p.read_bytes()).hexdigest() == digest:
+                checked += 1
+                break
+        else:
+            return -1, digest
+    return checked, None
+
+
+'''
+
+# verify_bundle.py — verifies one pack's bundle.json (and media/ next to it).
+_BUNDLE_MAIN = """\
 def main():
     args = sys.argv[1:]
     key = None
@@ -169,44 +210,104 @@ def main():
         del args[i : i + 2]
     bundle = json.loads(Path(args[0]).read_text())
     key = key or bundle["original"]["public_key"]
-
-    original = bundle["original"]
-    ok, why = check_receipt(original, key)
+    ok, why, n = check_bundle(bundle, key)
     if not ok:
-        sys.exit(f"FAIL original: {why}")
-    prev = original["payload_hash"]
-    n = 0
-    for n, entry in enumerate(bundle.get("reviews", []), 1):
-        r = entry["receipt"]
-        ok, why = check_receipt(r, key)
-        if not ok:
-            sys.exit(f"FAIL review {n}: {why}")
-        if entry["revision"] != n or r["prev_hash"] != prev:
-            sys.exit(f"FAIL review {n}: broken chain")
-        anchor = r["payload"].get("original_receipt") or {}
-        if anchor.get("hash") != original["payload_hash"]:
-            sys.exit(f"FAIL review {n}: not anchored to this original")
-        prev = r["payload_hash"]
-
-    checked = 0
-    for e in original["payload"].get("evidence", []):
-        digest = e.get("media_sha256")
-        if not digest:
-            continue
-        for p in Path("media").rglob("*"):
-            if p.is_file() and hashlib.sha256(p.read_bytes()).hexdigest() == digest:
-                checked += 1
-                break
-        else:
-            sys.exit(f"FAIL media digest not found in pack: {digest[:16]}...")
-    print(f"OK: original + {n} reviews verified; {checked} media digests matched.")
+        sys.exit(f"FAIL {why}")
+    checked, bad = check_media(bundle, Path("media"))
+    if bad:
+        sys.exit(f"FAIL media digest not found in pack: {bad[:16]}...")
+    print(f"OK: {n} receipt(s) verified; {checked} media digests matched.")
     print("Signature proves record integrity under the issuer key - not identity,")
     print("attendance, or absence.")
 
 
 if __name__ == "__main__":
     main()
-'''
+"""
+
+_VERIFIER = _VERIFIER_LIB + _BUNDLE_MAIN
+
+# verify_case.py — verifies every visit bundle in a site case pack plus the
+# manifest's receipt hashes, under one pinned issuer key.
+_CASE_MAIN = """\
+def main():
+    root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(".")
+    manifest = json.loads((root / "manifest.json").read_text())
+    key = manifest["issuer_key"]
+    failed = 0
+    for v in manifest["visits"]:
+        vid = v["visit_id"]
+        bundle = json.loads((root / "visits" / vid / "bundle.json").read_text())
+        ok, why, n = check_bundle(bundle, key)
+        if not ok:
+            print(f"FAIL {vid}: {why}")
+            failed += 1
+            continue
+        if bundle["original"]["payload_hash"] != v["payload_hash"]:
+            print(f"FAIL {vid}: manifest hash disagrees with signed original")
+            failed += 1
+            continue
+        checked, bad = check_media(bundle, root / "visits" / vid / "media")
+        if bad:
+            print(f"FAIL {vid}: media digest not found: {bad[:16]}...")
+            failed += 1
+            continue
+        print(f"OK   {vid}: {v['state']} — {v['countersign']['state']}"
+              f" ({n} receipt(s), {checked} media digest(s))")
+    if failed:
+        sys.exit(f"{failed} visit record(s) failed verification")
+    print(f"OK: {len(manifest['visits'])} visit records verified under issuer key")
+    print(f"    {key[:16]}...")
+    print("Integrity only — not identity, attendance, or absence.")
+
+
+if __name__ == "__main__":
+    main()
+"""
+
+_CASE_VERIFIER = _VERIFIER_LIB + _CASE_MAIN
+
+_CASE_README = """\
+ATTEST CASE PACK — a site's signed visit records for third-party review
+=======================================================================
+
+manifest.json       Every visit's receipt hash, state, and worker stance.
+visits/<id>/        Per-visit bundle.json + the media bytes it references.
+verify_case.py      Offline verifier. Run:  python verify_case.py .
+
+WHAT A VALID VERIFICATION PROVES
+- Each bundle.json is byte-identical to what was signed, and every appended
+  review is hash-anchored to its original receipt.
+- manifest.json's receipt hashes match the signed originals — the case summary
+  cannot quietly describe different records than the signed ones.
+- Media files match the sha256 digests in each record's evidence list.
+
+WHAT IT DOES NOT PROVE
+- Identity. Signatures authenticate records, not who appears in media.
+- Attendance or time worked. Observations are events, not presence.
+- Absence. A silent window means nothing was observed — not that nobody came.
+- The worker's person. Worker statements arrive through scoped links; they are
+  the worker's account, recorded — not a verified identity.
+
+The private signing key stays with the deployment. The issuer public key in
+manifest.json verifies this pack; compare it to a key obtained out-of-band to
+rule out a pack that swapped keys.
+"""
+
+
+def _media_files(store: Store, media_root: Path, visit_id: str) -> list[tuple[Path, str]]:
+    """(absolute path, media-relative name) for evidence media — resolved under
+    media_root so a stored path can never escape the media directory."""
+    root = Path(media_root).resolve()
+    out = []
+    for e in store.evidence_for(visit_id):
+        if not e.media_path:
+            continue
+        p = Path(e.media_path)
+        p = p.resolve() if p.is_absolute() else (root / p).resolve()
+        if p.is_relative_to(root) and p.is_file():
+            out.append((p, p.relative_to(root).as_posix()))
+    return out
 
 
 def build_pack(store: Store, media_root: Path, bundle: ReviewBundle, *, include_media: bool = True) -> bytes:
@@ -217,13 +318,57 @@ def build_pack(store: Store, media_root: Path, bundle: ReviewBundle, *, include_
         z.writestr("README.txt", _README)
         z.writestr("verify_bundle.py", _VERIFIER)
         if include_media:
-            root = Path(media_root).resolve()
-            for e in store.evidence_for(bundle.original.visit_id):
-                if not e.media_path:
-                    continue
-                p = Path(e.media_path)
-                p = p.resolve() if p.is_absolute() else (root / p).resolve()
-                if p.is_relative_to(root) and p.is_file():
-                    rel = p.relative_to(root).as_posix()
-                    z.write(p, f"media/{rel}")
+            for p, rel in _media_files(store, media_root, bundle.original.visit_id):
+                z.write(p, f"media/{rel}")
+    return buf.getvalue()
+
+
+def build_case_pack(
+    store: Store,
+    media_root: Path,
+    site: Site,
+    entries: list[tuple[Visit, ReviewBundle, dict]],
+    *,
+    include_media: bool = True,
+) -> bytes:
+    """A whole-site export: every visit's signed bundle + media, one manifest of
+    receipt hashes and worker stances, and a stdlib-only verifier that checks
+    all of it. For disputes about a pattern of visits, not a single record."""
+    import json
+    from datetime import UTC, datetime
+
+    manifest = {
+        "schema": "attest.case-pack/1",
+        "site": {"id": site.id, "name": site.name},
+        "generated_at": datetime.now(tz=UTC).isoformat(),
+        "issuer_key": entries[0][1].original.public_key if entries else None,
+        "visits": [
+            {
+                "visit_id": visit.id,
+                "receipt_id": bundle.original.id,
+                "payload_hash": bundle.original.payload_hash,
+                "state": visit.state,
+                "arrived_at": visit.arrived_at.isoformat() if visit.arrived_at else None,
+                "last_activity_at": (visit.last_activity_at.isoformat() if visit.last_activity_at else None),
+                "countersign": {"state": cs["state"], "detail": cs["detail"]},
+                "reviews": len(bundle.reviews),
+            }
+            for visit, bundle, cs in entries
+        ],
+        "boundary": (
+            "Signatures prove record integrity under the issuer key — never "
+            "identity, attendance, time worked, or absence."
+        ),
+    }
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("manifest.json", json.dumps(manifest, indent=2))
+        z.writestr("README.txt", _CASE_README)
+        z.writestr("verify_case.py", _CASE_VERIFIER)
+        for visit, bundle, _ in entries:
+            base = f"visits/{visit.id}"
+            z.writestr(f"{base}/bundle.json", bundle.model_dump_json(indent=2))
+            if include_media:
+                for p, rel in _media_files(store, media_root, visit.id):
+                    z.write(p, f"{base}/media/{rel}")
     return buf.getvalue()

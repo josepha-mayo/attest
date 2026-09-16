@@ -12,6 +12,9 @@
     <br>Audit log: {% if journal.intact %}<span class="ok">&#10003; {{ journal.entries }} entries, intact</span>{% else %}<span class="bad">&#10007; {{ journal.mismatches[0] }}</span>{% endif %}
     {% if journal.untracked_rows %}<br><span class="muted">{{ journal.untracked_rows }} rows predate journaling</span>{% endif %}
     <br><span class="muted">Queue: {{ queue.get('pending', 0) }} pending · {{ queue.get('processing', 0) }} in flight · {{ queue.get('failed', 0) }} failed</span>
+    {% for sid, site in sites.items() %}
+    <br><a href="/sites/{{ sid }}/pack.zip" style="color:var(--accent)" title="Every signed record for this site, one manifest, offline verifier">Case pack: {{ site.name }}</a>
+    {% endfor %}
   </div>
 </div>
 

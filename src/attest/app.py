@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import secrets
@@ -24,7 +25,7 @@ from . import ledger, retention
 from .config import Settings
 from .config import settings as default_settings
 from .corroborate import corroboration
-from .disputepack import build_pack
+from .disputepack import build_case_pack, build_pack
 from .engine import VisitEngine
 from .inbox import WebhookInbox
 from .ledger import Signer
@@ -560,6 +561,32 @@ def create_app(
             headers={"Content-Disposition": f'attachment; filename="attest-{visit_id}.zip"'},
         )
 
+    @app.get("/sites/{site_id}/pack.zip")
+    async def case_pack(site_id: str = PathParam(max_length=128)):
+        """Site-level case pack: every visit's signed bundle, a manifest of receipt
+        hashes + worker stances, and a stdlib verifier — for pattern disputes."""
+        site = store.site(site_id)
+        if site is None:
+            raise HTTPException(404, "unknown site")
+
+        def build() -> bytes:
+            entries = []
+            for visit in store.visits(site_id=site.id):
+                # Only closed records carry signed receipts; open visits have
+                # nothing to verify and are skipped from the case export.
+                if store.receipt_for_visit(visit.id) is None:
+                    continue
+                bundle = reviews.bundle(visit.id)
+                entries.append((visit, bundle, reviews.countersign(visit.id)))
+            return build_case_pack(store, s.data_dir / "media", site, entries)
+
+        data = await asyncio.to_thread(build)
+        return Response(
+            data,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="attest-case-{site_id}.zip"'},
+        )
+
     @app.post("/api/visits/{visit_id}/reviews")
     async def coordinator_review(body: ReviewInput, visit_id: str = PathParam(max_length=128)):
         return await action(reviews.coordinator_review, visit_id, body)
@@ -701,16 +728,23 @@ def create_app(
 
 
 def _verify_pack(data: bytes, public_key: str) -> tuple[bool, str]:
-    """Verify an exported dispute pack: bundle signatures + media digests."""
-    import hashlib
+    """Verify an exported pack: dispute pack (bundle.json) or site case pack
+    (manifest.json + visits/<id>/bundle.json) — signatures + media digests."""
     import io
     import zipfile
 
     try:
         z = zipfile.ZipFile(io.BytesIO(data))
+        names = set(z.namelist())
+        if "manifest.json" in names:
+            return _verify_case_pack(z, public_key)
         bundle = ReviewBundle.model_validate(json.loads(z.read("bundle.json")))
     except Exception as exc:  # noqa: BLE001
         return False, f"not a dispute pack: {exc}"
+    return _check_pack_bundle(z, bundle, public_key, media_prefix="media/")
+
+
+def _check_pack_bundle(z, bundle: ReviewBundle, public_key: str, *, media_prefix: str) -> tuple[bool, str]:
     ok, why = verify_bundle(bundle, public_key=public_key)
     if not ok:
         return False, f"bundle: {why}"
@@ -719,11 +753,35 @@ def _verify_pack(data: bytes, public_key: str) -> tuple[bool, str]:
     }
     matched = 0
     for name in z.namelist():
-        if name.startswith("media/") and not name.endswith("/"):
+        if name.startswith(media_prefix) and not name.endswith("/"):
             if hashlib.sha256(z.read(name)).hexdigest() in digests:
                 matched += 1
     detail = f"{why}; {matched}/{len(digests)} signed media digests found in pack"
     return (matched == len(digests), detail)
+
+
+def _verify_case_pack(z, public_key: str) -> tuple[bool, str]:
+    """Verify every visit bundle in a case pack plus the manifest's hash list."""
+    manifest = json.loads(z.read("manifest.json"))
+    if manifest.get("schema") != "attest.case-pack/1":
+        return False, f"unsupported case pack schema {manifest.get('schema')!r}"
+    if manifest.get("issuer_key") != public_key:
+        return False, "case pack was not issued under this deployment's key"
+    lines = []
+    for v in manifest.get("visits", []):
+        vid = v.get("visit_id", "?")
+        try:
+            bundle = ReviewBundle.model_validate(json.loads(z.read(f"visits/{vid}/bundle.json")))
+        except Exception as exc:  # noqa: BLE001
+            return False, f"{vid}: missing or invalid bundle ({exc})"
+        ok, detail = _check_pack_bundle(z, bundle, public_key, media_prefix=f"visits/{vid}/media/")
+        if not ok:
+            return False, f"{vid}: {detail}"
+        if bundle.original.payload_hash != v.get("payload_hash"):
+            return False, f"{vid}: manifest hash disagrees with signed original"
+        lines.append(f"{vid}: {v.get('state')} ({v.get('countersign', {}).get('state')})")
+    total = len(manifest.get("visits", []))
+    return True, f"case pack verified — {total} visit record(s) intact: " + "; ".join(lines)
 
 
 __all__ = ["create_app", "VisitState"]

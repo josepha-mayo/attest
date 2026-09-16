@@ -34,6 +34,7 @@
   <tr><td>Review chain</td><td class="small muted">Each revision signs over the previous hash and anchors to the original receipt.</td></tr>
   <tr><td>Mutation journal</td><td class="small muted">Every store write is a chained journal entry; <code>attest journal</code> or <code>/api/journal</code> replays it. Silent edits and row deletions surface as mismatches.</td></tr>
   <tr><td>Dispute pack</td><td class="small muted"><code>pack.zip</code> ships the bundle, media, and a zero-dependency verifier — check it on any Python install, no trust in this service.</td></tr>
+  <tr><td>Case pack</td><td class="small muted"><code>/sites/{id}/pack.zip</code> exports every signed record for a site with a manifest of receipt hashes and worker stances — for disputes about a pattern, not one visit.</td></tr>
   <tr><td>Honest silence</td><td class="small muted"><code>history_poll_coverage</code> states how much of the window was watched; blind gaps are shown, not hidden.</td></tr>
 </table>
 </div>
