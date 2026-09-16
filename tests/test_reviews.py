@@ -91,6 +91,43 @@ def test_input_cannot_supply_identity_and_windows_are_validated(t0):
         )
 
 
+def test_countersign_tracks_worker_stance_and_link_state(review_case, store):
+    service, visit_id = review_case
+    assert service.countersign(visit_id)["state"] == "unrequested"
+
+    token = service.issue_worker_link(visit_id)
+    assert service.countersign(visit_id)["state"] == "awaiting"
+
+    service.worker_review(token, ReviewInput(decision="confirm", statement="Matches what happened."))
+    status = service.countersign(visit_id)
+    assert status["state"] == "acknowledged"
+    assert status["worker"] and status["revision"] == 1
+
+    # A later worker dispute supersedes the acknowledgment (new link, new revision)
+    token = service.issue_worker_link(visit_id)
+    service.worker_review(token, ReviewInput(decision="dispute", statement="Times are wrong."))
+    assert service.countersign(visit_id)["state"] == "contested"
+
+    # Coordinator reviews never count as the worker's stance
+    service.coordinator_review(visit_id, ReviewInput(decision="confirm", statement="Coordinator note."))
+    assert service.countersign(visit_id)["state"] == "contested"
+
+    # Derived state is pure: recomputes identically from an exported bundle
+    from attest.reviews import countersign_status
+
+    exported = service.bundle(visit_id)
+    assert countersign_status(exported)["state"] == "contested"
+
+
+def test_countersign_marks_expired_unused_links(review_case, store):
+    service, visit_id = review_case
+    token = service.issue_worker_link(visit_id)
+    grant = store.review_grant(hashlib.sha256(token.encode()).hexdigest())
+    grant.expires_at = utcnow() - timedelta(seconds=1)
+    store.put_review_grant(grant)
+    assert service.countersign(visit_id)["state"] == "unacknowledged"
+
+
 def test_review_failure_does_not_consume_grant(review_case, store, monkeypatch):
     service, visit_id = review_case
     token = service.issue_worker_link(visit_id)

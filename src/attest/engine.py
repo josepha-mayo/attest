@@ -489,6 +489,7 @@ class VisitEngine:
                 }
                 for e in evidence
             ],
+            "history_poll_coverage": self._coverage(visit, site),
             "ring_history": self._reconcile_history(visit, site),
         }
         receipt = self.signer.issue(
@@ -502,6 +503,24 @@ class VisitEngine:
         self.store.put_visit(visit)
 
     # ------------------------------------------------------------------ helpers
+
+    def _coverage(self, visit: Visit, site: Site) -> dict | None:
+        """How much of this visit's window Event History polling actually watched.
+
+        For a record with observations, this bounds what polling alone would have
+        corroborated. For a no-observation record it is the honest answer to "did
+        anyone come?": the pipeline can attest to checking, never to absence.
+        """
+        from .coverage import coverage_report
+
+        start = visit.arrived_at
+        end = visit.last_activity_at
+        sch = self._schedule(visit)
+        if not visit.has_observations and sch is not None:
+            start, end = sch.window_start, sch.window_end
+        if end <= start:
+            return None
+        return coverage_report(self.store, site.door_camera_id, start, end, now=utcnow())
 
     def _reconcile_history(self, visit: Visit, site: Site) -> list[dict] | None:
         """Corroborate webhook evidence with Ring's own Event History for the visit window.

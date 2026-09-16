@@ -25,7 +25,7 @@
 <h2>Recent visits</h2>
 <div class="card table-wrap" style="padding:0">
 <table>
-  <thead><tr><th>Site</th><th>Self-reported worker</th><th>First observed</th><th>Last observed</th><th>Observed interval</th><th>State</th><th>Review notes</th></tr></thead>
+  <thead><tr><th>Site</th><th>Self-reported worker</th><th>First observed</th><th>Last observed</th><th>Observed interval</th><th>State</th><th>Worker stance</th><th>Review notes</th></tr></thead>
   <tbody>
   {% for v in visits %}
   <tr>
@@ -35,10 +35,19 @@
     <td>{{ t(v.last_activity_at) if v.has_observations else "None received" }}</td>
     <td>{% if v.observed_span_minutes is not none %}{{ "%.0f"|format(v.observed_span_minutes) }} min{% else %}Unknown{% endif %}</td>
     <td><span class="pill {{ v.state }}">{{ v.state.replace("_"," ") }}</span></td>
+    <td>{% set cs = countersign.get(v.id) %}
+      {% if cs is none %}<span class="muted">—</span>
+      {% elif cs.state == "acknowledged" %}<span class="ok">Acknowledged</span>
+      {% elif cs.state == "contested" %}<span class="bad">Contested</span>
+      {% elif cs.state == "corrected" %}<span class="warn">Corrected</span>
+      {% elif cs.state == "inconclusive" %}<span class="warn">Inconclusive</span>
+      {% elif cs.state == "awaiting" %}<span class="muted">Awaiting</span>
+      {% elif cs.state == "unacknowledged" %}<span class="muted">Link expired</span>
+      {% else %}<span class="muted">Not requested</span>{% endif %}</td>
     <td>{% for f in v.flags %}<span class="flag {{ f.severity }}">{{ f.code }}</span>{% endfor %}</td>
   </tr>
   {% else %}
-  <tr><td colspan="7" class="muted">No observations yet. <a href="/setup" style="color:var(--accent)">Set up a site and schedule</a>, or use <code>attest replay home_aide_visit</code> in a fresh local replay runtime.</td></tr>
+  <tr><td colspan="8" class="muted">No observations yet. <a href="/setup" style="color:var(--accent)">Set up a site and schedule</a>, or use <code>attest replay home_aide_visit</code> in a fresh local replay runtime.</td></tr>
   {% endfor %}
   </tbody>
 </table>

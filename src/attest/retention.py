@@ -3,7 +3,8 @@
 ``build_report`` is non-destructive: it describes what exists, how old it is,
 and which records a retention policy would touch. ``apply`` deletes only the
 non-chain categories (terminal deliveries, expired/used grants, stale dedupe
-keys, old late events, and media files past retention) — and only when the
+keys, old late events, media files past retention, and old poll observations —
+the signed coverage claims in receipts survive their raw poll log) — and only when the
 caller supplies the ``apply_token`` from a matching preview, so deletion always
 targets exactly the set an operator just reviewed. Closed visits, evidence,
 receipts, and reviews are chain-linked records; removing them requires a future
@@ -35,6 +36,7 @@ class RetentionPolicy:
     grants_days: int = 7
     seen_days: int = 30
     late_events_days: int = 90
+    poll_observations_days: int = 90
 
 
 def build_report(
@@ -76,13 +78,24 @@ def build_report(
                 "items": cands["seen_requests"][:_CAP],
             },
             "late_events": _bucket(cands["late_events"]),
+            "poll_observations": _bucket(cands["poll_observations"]),
         },
         "apply_token": _apply_token(cands, policy),
-        "apply_scope": sorted({"deliveries", "grants", "seen_requests", "late_events", "media_files"}),
+        "apply_scope": sorted(
+            {
+                "deliveries",
+                "grants",
+                "seen_requests",
+                "late_events",
+                "media_files",
+                "poll_observations",
+            }
+        ),
         "note": "Preview only: nothing was deleted or modified. apply() deletes only the "
         "non-chain categories listed in apply_scope, and only for the exact set this token "
         "covers. Closed visits, evidence, receipts, and reviews are chain-linked and are not "
-        "deleted in place.",
+        "deleted in place. Signed history_poll_coverage claims persist in receipts after "
+        "their raw poll observations are purged.",
     }
 
 
@@ -110,6 +123,7 @@ def apply(
         "deliveries": inbox.delete([d["id"] for d in cands["deliveries"]]) if inbox is not None else 0,
         "seen_requests": store.delete_seen(cands["seen_requests"]),
         "late_events": store.delete_late_events([e["id"] for e in cands["late_events"]]),
+        "poll_observations": store.delete_poll_observations([o["id"] for o in cands["poll_observations"]]),
         "media_files": _delete_media(media_root, [f["path"] for f in cands["media_files"]]),
     }
     deleted["grants"] = store.delete_checkin_grants(
@@ -179,6 +193,13 @@ def _candidates(store: Store, inbox: Any | None, media_root: Path, now: datetime
         if at is None or at < now - timedelta(days=policy.late_events_days):
             late.append({"id": row["id"], "site_id": row["site_id"], "at": at and at.isoformat()})
 
+    poll_cutoff = now - timedelta(days=policy.poll_observations_days)
+    poll_obs = [
+        {"id": o.id, "device_id": o.device_id, "polled_at": o.polled_at.isoformat()}
+        for o in store.poll_observation_rows()
+        if o.polled_at < poll_cutoff
+    ]
+
     deliveries = []
     if inbox is not None:
         cutoff = (now - timedelta(days=policy.deliveries_days)).timestamp()
@@ -203,6 +224,7 @@ def _candidates(store: Store, inbox: Any | None, media_root: Path, now: datetime
         "seen_requests": seen_ids,
         "seen_total": seen_total,
         "late_events": late,
+        "poll_observations": poll_obs,
     }
 
 
@@ -214,6 +236,7 @@ def _apply_token(cands: dict, policy: RetentionPolicy) -> str:
         "grants": sorted(g["id"] for g in cands["grants"]),
         "seen_requests": sorted(cands["seen_requests"]),
         "late_events": sorted(e["id"] for e in cands["late_events"]),
+        "poll_observations": sorted(o["id"] for o in cands["poll_observations"]),
         "media_files": sorted(f["path"] for f in cands["media_files"]),
     }
     return hashlib.sha256(json.dumps(canonical, sort_keys=True).encode()).hexdigest()[:32]

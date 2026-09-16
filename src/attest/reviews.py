@@ -39,6 +39,36 @@ def verify_bundle(bundle: ReviewBundle, *, public_key: str) -> tuple[bool, str]:
     return True, f"original and {len(bundle.reviews)} append-only reviews verified (integrity only)"
 
 
+_WORKER_STANCE = {
+    "confirm": ("acknowledged", "Worker states the record matches their account"),
+    "dispute": ("contested", "Worker disputes this record"),
+    "correction": ("corrected", "Worker submitted a correction"),
+    "inconclusive": ("inconclusive", "Worker could not confirm or dispute"),
+}
+
+
+def countersign_status(bundle: ReviewBundle) -> dict:
+    """Derived bilateral state from the signed review chain. Not itself signed — it is
+    a computed view over the chain, and any exported bundle recomputes identically.
+
+    A worker ``confirm`` is an acknowledgment of the *record as issued* — bound to
+    the original receipt hash — not a certification of attendance or identity."""
+    worker_reviews = [r for r in bundle.reviews if r.receipt.payload.get("actor", {}).get("role") == "worker"]
+    if worker_reviews:
+        latest = worker_reviews[-1].receipt.payload
+        decision = latest["review"]["decision"]
+        state, detail = _WORKER_STANCE.get(decision, ("reviewed", "Worker left a statement"))
+        return {
+            "state": state,
+            "detail": detail,
+            "worker": latest["actor"].get("name"),
+            "decision": decision,
+            "at": latest.get("statement_received_at"),
+            "revision": worker_reviews[-1].revision,
+        }
+    return {"state": "no_statement", "detail": "No worker statement on this record"}
+
+
 class ReviewService:
     def __init__(self, store: Store, signer: Signer, clock: ExecutionClock):
         self.store, self.signer, self.clock = store, signer, clock
@@ -48,6 +78,20 @@ class ReviewService:
         if original is None:
             raise ValueError("close the observation record before reviewing it")
         return ReviewBundle(original=original, reviews=self.store.reviews_for(visit_id))
+
+    def countersign(self, visit_id: str) -> dict:
+        """Derived bilateral record state, including whether a worker link is outstanding."""
+        status = countersign_status(self.bundle(visit_id))
+        if status["state"] != "no_statement":
+            return status
+        grants = [g for g in self.store.review_grants() if g.id == visit_id]
+        if any(not g.used_at and g.expires_at > utcnow() for g in grants):
+            status.update(state="awaiting", detail="Worker statement requested — link outstanding")
+        elif grants:
+            status.update(state="unacknowledged", detail="Review link expired unused")
+        else:
+            status.update(state="unrequested", detail="No worker statement requested")
+        return status
 
     def _checked_bundle(self, visit_id: str) -> ReviewBundle:
         bundle = self.bundle(visit_id)

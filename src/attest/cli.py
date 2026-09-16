@@ -265,6 +265,8 @@ def _verify(args: argparse.Namespace) -> None:
         sys.exit(f"verification failed: {reason}")
     pinned = " (against the supplied issuer key)" if args.key else ""
     print(f"OK{pinned}: {reason}.")
+    stance = reviews.countersign_status(bundle)
+    print(f"Worker stance: {stance['state']} — {stance['detail']}")
     print("Note: a valid signature proves record integrity under that key, not physical truth.")
 
 

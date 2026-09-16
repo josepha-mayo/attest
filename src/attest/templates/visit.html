@@ -53,6 +53,22 @@ document.getElementById('issue-link').onclick = async () => {
 </figure>{% endfor %}
 </div>
 {% endif %}
+<h2>Source corroboration</h2>
+<div class="card table-wrap" style="padding:0;margin-bottom:18px">
+<table>
+  <thead><tr><th>Source</th><th>Status</th><th></th><th>Establishes</th></tr></thead>
+  <tbody>
+  {% for r in corroboration %}
+  <tr>
+    <td>{{ r.source }}</td>
+    <td>{% if r.source == "Source divergence" %}<span class="flag warn">{{ r.status }}</span>{% else %}{{ r.status }}{% endif %}</td>
+    <td class="small muted">{{ r.detail }}</td>
+    <td class="small muted">{{ r.establishes }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
 <h2>Observation timeline</h2>
 <div class="card"><ul class="timeline">
 {% for e in evidence if e.kind != "snapshot" %}
@@ -78,9 +94,25 @@ document.getElementById('close-record').onclick = async () => {
 {% endif %}
 {% if receipt %}
 <h2>Review and corrections</h2>
+{% if countersign %}
+<div class="card" style="margin-bottom:12px">
+  <div class="muted small">Record agreement</div>
+  <div style="font-size:20px;font-weight:600;margin:4px 0">
+    {% if countersign.state == "acknowledged" %}<span class="ok">Worker acknowledges this record</span>
+    {% elif countersign.state == "contested" %}<span class="bad">Worker disputes this record</span>
+    {% elif countersign.state == "corrected" %}<span class="warn">Worker submitted a correction</span>
+    {% elif countersign.state == "inconclusive" %}<span class="warn">Worker response inconclusive</span>
+    {% elif countersign.state == "awaiting" %}<span class="muted">Awaiting worker statement</span>
+    {% elif countersign.state == "unacknowledged" %}<span class="muted">Worker link expired unused</span>
+    {% else %}<span class="muted">No worker statement requested</span>{% endif %}
+  </div>
+  <div class="small muted">{{ countersign.detail }}{% if countersign.at %} — received {{ countersign.at }}{% endif %}. An acknowledgment binds to this record's hash; it does not certify identity or attendance.</div>
+</div>
+{% endif %}
 <div class="card">
 <p class="{{ 'ok' if review_verification[0] else 'bad' }}">{{ review_verification[1] }}</p>
 <a class="btn secondary" href="/visits/{{ visit.id }}/bundle.json">Export original + review chain</a>
+<a class="btn secondary" href="/visits/{{ visit.id }}/pack.zip" title="bundle + media + offline verifier in one zip">Download dispute pack</a>
 {% if receipt.payload.scheduled_worker %}
 <button class="btn secondary" id="issue-review">Request worker's account</button>
 <a id="worker-review-link" style="display:block;overflow-wrap:anywhere;color:var(--accent)"></a>
@@ -123,6 +155,33 @@ document.getElementById('coordinator-review').onsubmit = async event => {
   document.getElementById('review-status').textContent = typeof data.detail === 'string' ? data.detail : 'Check the required statement and reported time fields.';
 };
 </script>
+{% set cov = receipt.payload.history_poll_coverage %}
+{% if cov %}
+<h2>Observation coverage</h2>
+<div class="card">
+<div class="row" style="justify-content:space-between">
+  <div>
+    {% if cov.state == "observed" %}<span class="ok">Window fully observed</span>
+    {% elif cov.state == "observed_with_events" %}<span class="ok">Observed — events on record</span>
+    {% elif cov.state == "partial" %}<span class="warn">Partially observed — pipeline had blind gaps</span>
+    {% elif cov.state == "blind" %}<span class="bad">Blind — every poll failed in this window</span>
+    {% else %}<span class="muted">No Event History polling active for this window</span>{% endif %}
+    <div class="small muted" style="margin-top:6px">{{ cov.claim }}.</div>
+  </div>
+  <div class="kpi" style="font-size:26px">{{ "%.0f"|format((cov.fraction or 0) * 100) }}%</div>
+</div>
+<div class="small muted" style="margin-top:8px">
+  {{ cov.polls }} successful poll{{ "s" if cov.polls != 1 }}{% if cov.failed_polls %} · {{ cov.failed_polls }} failed{% endif %}
+  · {{ cov.events }} history event{{ "s" if cov.events != 1 }} returned for this device
+</div>
+{% if cov.gaps %}
+<div class="small" style="margin-top:8px">
+  <span class="flag warn">coverage gap</span>
+  {% for g in cov.gaps %}<div class="muted">{{ g.start[11:19] }} – {{ g.end[11:19] }} UTC not watched by any successful poll</div>{% endfor %}
+</div>
+{% endif %}
+</div>
+{% endif %}
 <h2>Original signed record #{{ receipt.sequence }}</h2>
 <div class="card">
 <div class="small">{% if verified[0] %}<span class="ok">Ed25519 signature valid — integrity only</span>{% else %}<span class="bad">{{ verified[1] }}</span>{% endif %}</div>

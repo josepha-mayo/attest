@@ -23,6 +23,8 @@ from ring_sandbox import RingAPIError, RingClient, webhooks
 from . import ledger, retention
 from .config import Settings
 from .config import settings as default_settings
+from .corroborate import corroboration
+from .disputepack import build_pack
 from .engine import VisitEngine
 from .inbox import WebhookInbox
 from .ledger import Signer
@@ -324,6 +326,7 @@ def create_app(
             schedules={x.id: x for x in store.schedules()},
             upcoming=store.schedules()[:20],
             chain=ledger.verify_chain(store.receipts(), public_key=signer.public_key_b64),
+            countersign={v.id: reviews.countersign(v.id) for v in visits if v.receipt_id},
         )
 
     @app.get("/visits/{visit_id}", response_class=HTMLResponse)
@@ -333,19 +336,24 @@ def create_app(
             raise HTTPException(404)
         receipt = store.receipt_for_visit(visit_id)
         bundle = reviews.bundle(visit_id) if receipt else None
+        site = store.site(v.site_id)
+        schedule = store.schedule(v.schedule_id) if v.schedule_id else None
+        evidence = store.evidence_for(visit_id)
         return render(
             request,
             "visit.html",
             visit=v,
-            site=store.site(v.site_id),
+            site=site,
             worker=store.worker(v.worker_id) if v.worker_id else None,
-            schedule=store.schedule(v.schedule_id) if v.schedule_id else None,
-            evidence=store.evidence_for(visit_id),
+            schedule=schedule,
+            evidence=evidence,
+            corroboration=corroboration(v, site, schedule, evidence, receipt),
             receipt=receipt,
             bundle=bundle,
             reviews=bundle.reviews if bundle else [],
             review_verification=verify_bundle(bundle, public_key=signer.public_key_b64) if bundle else None,
             verified=ledger.verify_receipt(receipt, public_key=signer.public_key_b64) if receipt else None,
+            countersign=reviews.countersign(visit_id) if bundle else None,
         )
 
     @app.get("/visits/{visit_id}/media/{name}")
@@ -517,6 +525,17 @@ def create_app(
     @app.get("/visits/{visit_id}/bundle.json")
     async def review_bundle(visit_id: str = PathParam(max_length=128)):
         return await action(reviews.bundle, visit_id)
+
+    @app.get("/visits/{visit_id}/pack.zip")
+    async def dispute_pack(visit_id: str = PathParam(max_length=128)):
+        """Portable dispute pack: bundle + media + a stdlib-only offline verifier."""
+        bundle = await action(reviews.bundle, visit_id)
+        data = await asyncio.to_thread(build_pack, store, s.data_dir / "media", bundle)
+        return Response(
+            data,
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="attest-{visit_id}.zip"'},
+        )
 
     @app.post("/api/visits/{visit_id}/reviews")
     async def coordinator_review(body: ReviewInput, visit_id: str = PathParam(max_length=128)):

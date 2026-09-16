@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from .models import (
     CheckinGrant,
     Evidence,
+    PollObservation,
     Receipt,
     ReviewEntry,
     ReviewGrant,
@@ -45,6 +46,10 @@ CREATE TABLE IF NOT EXISTS checkin_grants (id TEXT PRIMARY KEY, token_hash TEXT 
 CREATE TABLE IF NOT EXISTS ingestion_sources (site_id TEXT PRIMARY KEY, source TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS late_events (id TEXT PRIMARY KEY, site_id TEXT NOT NULL, body TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS settings (name TEXT PRIMARY KEY, body TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS poll_observations (id TEXT PRIMARY KEY, site_id TEXT NOT NULL,
+                                               device_id TEXT, polled_at TEXT NOT NULL,
+                                               body TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS ix_poll_obs_device ON poll_observations(device_id, polled_at);
 CREATE TABLE IF NOT EXISTS reviews (id TEXT PRIMARY KEY, visit_id TEXT NOT NULL, revision INTEGER NOT NULL,
                                     body TEXT NOT NULL, UNIQUE(visit_id, revision));
 CREATE TABLE IF NOT EXISTS review_grants (id TEXT PRIMARY KEY, token_hash TEXT UNIQUE, body TEXT NOT NULL);
@@ -301,6 +306,29 @@ class Store:
     def review_grants(self) -> list[ReviewGrant]:
         return self._rows(ReviewGrant, "SELECT body FROM review_grants ORDER BY id")
 
+    # ------------------------------------------------------------- poll coverage
+
+    def put_poll_observation(self, obs: PollObservation) -> None:
+        self._put(
+            "poll_observations",
+            obs,
+            site_id=obs.site_id,
+            device_id=obs.device_id,
+            polled_at=_iso(obs.polled_at),
+        )
+
+    def poll_observations(self, device_id: str, start: datetime, until: datetime) -> list[PollObservation]:
+        """Polls that could have seen events at or after ``start``, made before ``until``.
+
+        The upper bound is the report cutoff, not the window end — history is
+        retrospective, so a poll after the window can still cover it."""
+        return self._rows(
+            PollObservation,
+            "SELECT body FROM poll_observations WHERE device_id=? AND polled_at>=? "
+            "AND polled_at<=? ORDER BY polled_at",
+            (device_id, _iso(start), _iso(until)),
+        )
+
     # ----------------------------------------------------------------- idempotency
 
     def bind_source(self, site_id: str, source: str) -> bool:
@@ -384,6 +412,12 @@ class Store:
     def delete_review_grants(self, ids: Iterable[str]) -> int:
         return self._delete_ids("review_grants", "id", ids)
 
+    def delete_poll_observations(self, ids: Iterable[str]) -> int:
+        return self._delete_ids("poll_observations", "id", ids)
+
+    def poll_observation_rows(self) -> list[PollObservation]:
+        return self._rows(PollObservation, "SELECT body FROM poll_observations ORDER BY polled_at")
+
     # ----------------------------------------------------------------- misc
 
     def stats(self) -> dict:
@@ -406,6 +440,7 @@ class Store:
                 "schedules": row("SELECT COUNT(*) FROM schedules")[0],
                 "reviews": row("SELECT COUNT(*) FROM reviews")[0],
                 "late_events": row("SELECT COUNT(*) FROM late_events")[0],
+                "poll_observations": row("SELECT COUNT(*) FROM poll_observations")[0],
                 "checkin_grants": row("SELECT COUNT(*) FROM checkin_grants")[0],
                 "review_grants": row("SELECT COUNT(*) FROM review_grants")[0],
                 "visits": {"total": visits[0], "oldest_arrival": visits[1], "by_state": by_state},

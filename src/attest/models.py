@@ -42,6 +42,24 @@ class RequeueDeliveries(BaseModel):
     ids: list[str] | None = Field(default=None, max_length=500)
 
 
+class PollObservation(BaseModel):
+    """One Event History poll: what the pipeline asked Ring and what came back.
+
+    These rows let a closed record attest *record completeness* — how much of a
+    visit window the pipeline was actually watching — instead of implying that
+    silence means nobody came.
+    """
+
+    id: str = Field(default_factory=lambda: _id("poll"))
+    site_id: str
+    device_id: str
+    polled_at: AwareDatetime
+    since: AwareDatetime  # the history lower bound used for this request
+    ok: bool
+    events_returned: int = 0
+    error: str | None = Field(default=None, max_length=200)
+
+
 class Site(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
     id: str = Field(default_factory=lambda: _id("site"), pattern=r"^[A-Za-z0-9_-]{1,80}$")

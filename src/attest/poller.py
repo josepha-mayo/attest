@@ -21,6 +21,7 @@ from ring_sandbox import RingAPIError, RingClient, WebhookEvent, webhooks
 from ring_sandbox.models import HistoryEvent
 
 from .engine import VisitEngine
+from .models import PollObservation
 from .store import Store
 
 log = logging.getLogger("attest.poller")
@@ -52,10 +53,12 @@ class HistoryPoller:
         since = max(self._started - self.lookback, datetime.now(tz=UTC) - timedelta(hours=24))
         for site in self.store.sites():
             pending = {}
+            seen = 0
             try:
                 for ev in self.ring.events(site.door_camera_id, since=since):
                     if ev.device_id != site.door_camera_id:
                         continue
+                    seen += 1
                     mapped = _MAP.get(ev.attributes.event_type)
                     if mapped is None:
                         log.info(
@@ -68,7 +71,27 @@ class HistoryPoller:
                     pending[ev.id] = _to_webhook(ev, site.ring_account_id, etype, sub)
             except RingAPIError as exc:
                 log.warning("history poll failed for %s: HTTP %s", site.name, exc.status_code)
+                self.store.put_poll_observation(
+                    PollObservation(
+                        site_id=site.id,
+                        device_id=site.door_camera_id,
+                        polled_at=datetime.now(tz=UTC),
+                        since=since,
+                        ok=False,
+                        error=f"HTTP {exc.status_code}",
+                    )
+                )
                 continue
+            self.store.put_poll_observation(
+                PollObservation(
+                    site_id=site.id,
+                    device_id=site.door_camera_id,
+                    polled_at=datetime.now(tz=UTC),
+                    since=since,
+                    ok=True,
+                    events_returned=seen,
+                )
+            )
             for ev in sorted(pending.values(), key=lambda e: (e.occurred_at, e.request_id)):  # oldest first
                 outcome = self.engine.ingest(ev, source="history")
                 if outcome.ignored_reason is None:
