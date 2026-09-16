@@ -7,7 +7,7 @@
 - Keep observations, scheduled expectations, worker self-reports, model output, and human conclusions separate. Observed intervals are not time worked; missing events are not proof of absence. A signature authenticates record integrity under a trusted key, not physical truth.
 - Worker-wide check-in tokens are legacy data only. Authentication uses visit-scoped, hashed, expiring, single-use grants. Private routes require ATTEST_ADMIN_TOKEN; CLI access logging is disabled to avoid leaking URL tokens.
 - One ingestion source is bound per site. Cross-source deduplication is not implemented; switching requires explicit reconciliation. Late events must not silently mutate signed records.
-- Successful local emulator tests are not successful official Playground integration tests. No successful live AWS inference or complete Ring event/media/receipt flow has yet been verified.
+- Successful local emulator tests are not successful official Playground integration tests. Live Playground verification (2026-09-15) covered users/me, devices, Event History, media download via the phoenix.devices.amazon.dev redirect, and a poll → visit → snapshot → signed-receipt run. Still unverified: webhook delivery (Playground can't reach localhost), contact-sensor ingestion, real ding/motion events (Playground only surfaces on_demand), and live AWS inference.
 - Use PowerShell syntax on this Windows workspace. Do not use bash heredocs.
 
 ## Verification

@@ -105,6 +105,16 @@ class VisitEngine:
             return self._on_door(site, at, ev, opened=True)
         if et == "contact_sensor_cleared" and ev.device_id == site.door_sensor_id:
             return self._on_door(site, at, ev, opened=False)
+        if et == "on_demand" and is_camera:
+            # Media was requested from the camera (Ring history event_type=on_demand).
+            # Attest's own close-time snapshot requests surface here too — if this
+            # opened visits it would loop. Attach to an active visit only.
+            visit = self.store.active_visit(site.id)
+            if visit is None:
+                return Outcome(ignored_reason="on-demand media request with no active visit")
+            self._evidence(visit, EvidenceKind.ON_DEMAND, at, ev)
+            self._touch(visit, at)
+            return Outcome(visit, ["activity"])
         return Outcome(ignored_reason=f"{et}/{sub} not used by the visit engine")
 
     # ------------------------------------------------------------------ cues

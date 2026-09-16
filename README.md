@@ -69,9 +69,9 @@ Corrections are separate human statements, not edits to camera evidence. Verific
 
 ## Ring integration status
 
-The earlier live probe verified device discovery, user lookup, an empty history response, and media error responses against the official Playground. It exposed one camera and no contact sensor to the tested token. The typed client's nullable audio capabilities were fixed from that response.
+**Verified against the live Playground (2026-09-15):** `users/me`, `devices`, Event History (three real `on_demand` entries from Playground motion triggers), media download via the 303 redirect to `*.phoenix.devices.amazon.dev` (a real 68 KB JPEG), and the full poll → visit → snapshot → signed-receipt flow (receipt `rcpt_…` cites real Ring history event ids). Findings folded back into the product: the API ignores the `event_types` history filter so the poller maps `event_type` client-side, and `on_demand` records (media requests) are kept as their own evidence kind — never mislabeled as doorbell/motion, and never allowed to open a visit (our own snapshot fetches would otherwise loop). The emulator now also writes `on_demand` entries on media requests.
 
-**Not yet verified:** an official Playground event reaching Attest, a successful media download, or a full official event-to-receipt demo. Do not describe those paths as completed.
+**Not yet verified:** webhook delivery (a Playground token cannot reach a localhost URL), contact-sensor ingestion (no sensor exists in the Playground), and a live `ding`/`motion` event arriving through the real path — the Playground simulator only offers Package/Vehicle/Motion triggers, which history records as `on_demand`.
 
 To attempt live polling, set these variables in the process environment before starting Attest and running `attest seed`:
 
@@ -115,7 +115,7 @@ A fresh published checkout of both repositories passed 75 Attest tests and 30 co
 - Validate the coordinated demo visually and replace placeholder media with permitted, clearly labelled demonstration footage.
 - Complete OAuth/consent lifecycle, retention/deletion, multi-user authorization, token refresh, and deployment secret management. Local HTTP Basic is a development access boundary, not a complete production identity system. Use HTTPS outside loopback.
 - Finish runtime-input limits, media-redirect hardening, and Python dependency locking; keep fresh-checkout and CI checks passing.
-- Verify live Ring events/media and an actual AWS invocation without fallback.
+- Verify live webhook delivery, sensor ingestion, and a real `ding`/`motion` event (the Playground cannot generate them); plus an actual AWS invocation without fallback.
 - Validate customer usefulness and hackathon rules; prepare the separate open-source contribution, product feedback, friction log, and under-three-minute video.
 
 Runtime databases, media, private keys, tokens, and personal identifiers must not be published. Keep runtime folders out of Git. Changing ignore rules does not remove files already committed. Legacy demo records are preserved locally and may contain earlier unsupported claims; use a fresh private runtime directory when testing the corrected semantics.

@@ -1,10 +1,15 @@
 """Event History poller: an ingest path for accounts that cannot receive webhooks.
 
 Playground tokens (and any partner before webhook URLs are configured) get no webhook
-deliveries, but ``GET /v1/history/devices/{id}/events`` still returns motion and doorbell
-events. The poller turns new history events into the same v1.1 ``WebhookEvent`` shape the
-engine consumes, using the history event id as ``request_id`` so idempotency holds across
-restarts and across a later switch to real webhooks.
+deliveries, but ``GET /v1/history/devices/{id}/events`` still returns motion, doorbell,
+and on-demand media events. The poller turns new history events into the same v1.1
+``WebhookEvent`` shape the engine consumes, using the history event id as ``request_id``
+so idempotency holds across restarts and across a later switch to real webhooks.
+
+Verified against the live Playground: the server IGNORES the ``event_types`` filter, so
+the returned ``attributes.event_type`` must be trusted and mapped client-side — and
+Playground motion/doorbell triggers surface as ``on_demand`` entries, which we keep as
+honest "media was requested" evidence rather than mislabeling them as doorbell presses.
 """
 
 from __future__ import annotations
@@ -20,10 +25,12 @@ from .store import Store
 
 log = logging.getLogger("attest.poller")
 
-# history filter -> (webhook type, sub_type)
+# real history event_type -> (webhook event type, sub_type). Unknown types are skipped:
+# the record must carry what Ring actually reported, not a guess.
 _MAP = {
-    "motion.human": ("motion_detected", "human"),
     "ding": ("button_press", None),
+    "motion": ("motion_detected", None),
+    "on_demand": ("on_demand", None),
 }
 
 
@@ -36,16 +43,29 @@ class HistoryPoller:
         self._started = datetime.now(tz=UTC)
 
     def poll_once(self) -> int:
-        """Fetch recent human-motion and doorbell events for every bound camera; ingest new ones."""
+        """Fetch recent history events for every bound camera; ingest new ones.
+
+        Requests are unfiltered: the live API ignores ``event_types``, so the
+        response's own ``attributes.event_type`` decides the mapping.
+        """
         ingested = 0
         since = max(self._started - self.lookback, datetime.now(tz=UTC) - timedelta(hours=24))
         for site in self.store.sites():
             pending = {}
             try:
-                for filt, (etype, sub) in _MAP.items():
-                    for ev in self.ring.events(site.door_camera_id, event_types=[filt], since=since):
-                        if ev.device_id == site.door_camera_id:
-                            pending[ev.id] = _to_webhook(ev, site.ring_account_id, etype, sub)
+                for ev in self.ring.events(site.door_camera_id, since=since):
+                    if ev.device_id != site.door_camera_id:
+                        continue
+                    mapped = _MAP.get(ev.attributes.event_type)
+                    if mapped is None:
+                        log.info(
+                            "history event %s has unhandled type %r; skipped",
+                            ev.id,
+                            ev.attributes.event_type,
+                        )
+                        continue
+                    etype, sub = mapped
+                    pending[ev.id] = _to_webhook(ev, site.ring_account_id, etype, sub)
             except RingAPIError as exc:
                 log.warning("history poll failed for %s: HTTP %s", site.name, exc.status_code)
                 continue

@@ -19,21 +19,50 @@ def test_poller_ingests_history_idempotently(
 ):
     site, worker, cam, sensor = household
     t = t0 + timedelta(minutes=3)
-    _hist(ring_control, cam.id, "motion_detected", t, "vehicle")  # filtered out (not human)
+    _hist(ring_control, cam.id, "button_press", t)
+    # History events carry no sub_type (verified against the live API), so a polled
+    # motion has unknown classification — it attaches to an open visit as activity
+    # but can never open one.
     _hist(ring_control, cam.id, "motion_detected", t + timedelta(seconds=10), "human")
-    _hist(ring_control, cam.id, "button_press", t + timedelta(seconds=20))
 
     poller = HistoryPoller(engine, store, ring_client, lookback=timedelta(days=2))
     assert poller.poll_once() == 2
-    assert poller.poll_once() == 0  # same history ids -> duplicate request_ids
+    # The arrival-cue snapshot fetch wrote an on_demand history entry (emulator mirrors
+    # the real API); the next poll ingests it as on-demand evidence on the open visit.
+    assert poller.poll_once() == 1
+    assert poller.poll_once() == 0  # everything now dedupes on request_id
 
     v = store.active_visit(site.id)
     assert v.state == VisitState.OPEN and v.schedule_id == schedule.id
     kinds = [e.ring_event_type for e in store.evidence_for(v.id) if e.ring_event_type]
-    assert kinds == ["motion_detected", "button_press"]
+    assert kinds == ["button_press", "motion_detected", "on_demand"]
     observations = [e for e in store.evidence_for(v.id) if e.ring_event_type]
     assert all(e.ingestion_source == "history" and e.ring_history_event_id for e in observations)
     assert all(e.ring_request_id is None for e in observations)
+
+
+def test_poller_on_demand_is_activity_not_arrival(
+    engine, store, household, schedule, ring_client, ring_control, t0
+):
+    """Live-API verified: Playground triggers and media requests surface as on_demand
+    history entries. They record as on-demand evidence on an open visit — never as
+    doorbell/motion, and they never open a visit (our own snapshot fetches would loop)."""
+    site, worker, cam, sensor = household
+    t = t0 + timedelta(minutes=3)
+
+    poller = HistoryPoller(engine, store, ring_client, lookback=timedelta(days=2))
+    ring_client.snapshot_at(cam.id, int(t.timestamp() * 1000))  # media request -> on_demand entry
+    assert poller.poll_once() == 0  # no active visit: ignored, no visit opened
+    assert store.active_visit(site.id) is None
+
+    _hist(ring_control, cam.id, "button_press", t + timedelta(seconds=10))
+    ring_client.snapshot_at(cam.id, int((t + timedelta(seconds=20)).timestamp() * 1000))
+    assert poller.poll_once() == 2
+
+    v = store.active_visit(site.id)
+    kinds = [(e.ring_event_type, e.kind) for e in store.evidence_for(v.id) if e.ring_event_type]
+    assert ("button_press", "doorbell") in kinds
+    assert ("on_demand", "on_demand") in kinds  # honest label, not mislabeled as doorbell
 
 
 def test_camera_only_site_infers_departure_and_reconciles_history(engine, store, household, ring_control, t0):
@@ -52,9 +81,10 @@ def test_camera_only_site_infers_departure_and_reconciles_history(engine, store,
     )
     poller = HistoryPoller(engine, store, engine.ring, lookback=timedelta(days=2))
     t = t0 + timedelta(minutes=5)
-    _hist(ring_control, cam.id, "motion_detected", t, "human")
-    _hist(ring_control, cam.id, "button_press", t + timedelta(seconds=5))
+    _hist(ring_control, cam.id, "button_press", t)
+    _hist(ring_control, cam.id, "motion_detected", t + timedelta(seconds=5), "human")
     _hist(ring_control, cam.id, "motion_detected", t + timedelta(minutes=88), "human")
+    # ding opens the visit; history motions carry no sub_type so they attach as activity
     assert poller.poll_once() == 3
     v = store.active_visit(site.id)
     assert v.state == VisitState.OPEN  # camera-only: a person at the door is not yet a departure

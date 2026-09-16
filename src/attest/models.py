@@ -108,6 +108,10 @@ class EvidenceKind(StrEnum):
     ACTIVITY = "activity"
     DEPARTURE_MOTION = "departure_motion"
     SNAPSHOT = "snapshot"
+    # A camera recorded or served media on request. Real Ring history surfaces
+    # these as event_type=on_demand (Playground motion triggers included). It is
+    # camera-side activity, not a physical door cue — never an arrival trigger.
+    ON_DEMAND = "on_demand"
 
 
 class Evidence(BaseModel):
