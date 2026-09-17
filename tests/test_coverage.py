@@ -259,3 +259,34 @@ def test_day_strips_share_a_midnight_to_midnight_axis(store, household, t0):
     for s in strips:
         assert all(0 <= m["x"] <= 100 for m in s["strip"]["marks"])
         assert all(0 <= b["x"] and b["x"] + b["w"] <= 100.5 for b in s["strip"]["bands"])
+
+
+def test_publish_anchor_uploads_with_sha_metadata(tmp_path, monkeypatch):
+    """--publish s3://bucket/key uploads the anchor bytes and stamps the file's
+    sha256 + payload hash into object metadata — the checkpoint's integrity is
+    checkable against the object's own metadata."""
+    import sys
+    import types
+
+    from attest.cli import _publish_anchor
+
+    calls = {}
+
+    class _S3:
+        def put_object(self, **kw):
+            calls.update(kw)
+
+    fake = types.ModuleType("boto3")
+    fake.client = lambda svc, region_name=None: _S3()
+    monkeypatch.setitem(sys.modules, "boto3", fake)
+
+    f = tmp_path / "anchor.json"
+    f.write_bytes(b'{"signed": "anchor"}')
+    _publish_anchor("s3://bkt/path/anchor.json", f, "ph" * 10 + "0" * 14, "us-east-1")
+
+    import hashlib
+
+    assert calls["Bucket"] == "bkt" and calls["Key"] == "path/anchor.json"
+    assert calls["Body"] == f.read_bytes()
+    assert calls["Metadata"]["sha256"] == hashlib.sha256(f.read_bytes()).hexdigest()
+    assert calls["Metadata"]["attest-record-type"] == "anchor"

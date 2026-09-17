@@ -569,8 +569,41 @@ def _anchor(args: argparse.Namespace) -> None:
             f"wrote {out} — journal head {anchor.payload['journal_head'][:16]}…, "
             f"{entries} entries, {anchor.payload['receipt_count']} receipts pinned"
         )
+        if args.publish:
+            _publish_anchor(args.publish, out, anchor.payload_hash, settings.aws_region)
     finally:
         store.close()
+
+
+def _publish_anchor(uri: str, path, payload_hash: str, region: str) -> None:
+    """Upload a signed anchor to S3 — external custody for the checkpoint, so a
+    later-truncated journal or removed receipt is provable against an object
+    the deployment doesn't control."""
+    import hashlib
+
+    if not uri.startswith("s3://"):
+        sys.exit("--publish takes an s3://bucket/key URI")
+    bucket_key = uri[5:].split("/", 1)
+    if len(bucket_key) != 2 or not all(bucket_key):
+        sys.exit("--publish takes an s3://bucket/key URI")
+    bucket, key = bucket_key
+    try:
+        import boto3
+    except ImportError:
+        sys.exit("--publish s3://… requires boto3 (pip install 'attest[aws]')")
+    body = path.read_bytes()
+    sha = hashlib.sha256(body).hexdigest()
+    try:
+        boto3.client("s3", region_name=region).put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=body,
+            ContentType="application/json",
+            Metadata={"attest-record-type": "anchor", "sha256": sha, "payload-hash": payload_hash},
+        )
+    except Exception as exc:  # noqa: BLE001 — surface the AWS error verbatim
+        sys.exit(f"S3 publish failed: {exc}")
+    print(f"published {uri} (sha256 {sha[:16]}…) — the checkpoint now has external custody")
 
 
 def _coverage_cert(args: argparse.Namespace) -> None:
@@ -976,6 +1009,12 @@ def main(argv: list[str] | None = None) -> None:
         help="write a signed anchor pinning the journal head + receipt chain head — publish it anywhere",
     )
     s.add_argument("--out", default=None, help="output path (default attest-anchor.json)")
+    s.add_argument(
+        "--publish",
+        default=None,
+        metavar="s3://bucket/key",
+        help="also upload the anchor to S3 — external custody for the checkpoint",
+    )
     s.set_defaults(fn=_anchor)
 
     s = sub.add_parser(
