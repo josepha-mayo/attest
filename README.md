@@ -16,6 +16,8 @@ Built for the Amazon Developer Hackathon (Ring track; AWS Builder + Open Source 
 - No matching observations means attendance is unknown, not that the worker failed to show up. A missing event can reflect connectivity, consent, recording, or ingestion gaps.
 - Ed25519 signatures and a hash chain protect record integrity under an externally trusted issuer key. They do not prove the underlying observations or conclusions are true. A chain alone cannot detect deletion of its entire tail without an external checkpoint.
 
+The full trust model — every attack path and its detection — is in [THREATMODEL.md](THREATMODEL.md). `attest attack-demo` executes the tamper battery live.
+
 ## Implemented
 
 - Ring Partner API client via the companion [ring-sandbox](https://github.com/josepha-mayo/ring-sandbox) project.
