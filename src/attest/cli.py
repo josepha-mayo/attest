@@ -264,12 +264,16 @@ def _replay(args: argparse.Namespace) -> None:
             else:
                 schedule_id = seeded["schedule"]
             if pattern == "no_show":
-                print(f"Day {day}: no events replayed — the schedule will lapse to no_observation")
+                print(
+                    f"Day {day}: no events replayed — the schedule will lapse to no_observation", flush=True
+                )
                 continue
             if pattern == "unmatched":
                 # Events land past the window + grace: an unmatched observation
                 # AND a lapsed no-observation schedule — the honest ambiguous case.
-                print(f"Day {day}: events replayed outside the window — unmatched + lapsed schedule")
+                print(
+                    f"Day {day}: events replayed outside the window — unmatched + lapsed schedule", flush=True
+                )
             # Poll history once at window start so coverage rows bracket the visit
             # (poll observations sit on the same logical clock as the events).
             api.post("/api/poll").raise_for_status()
@@ -334,7 +338,7 @@ def _replay(args: argparse.Namespace) -> None:
                                     "Simulated check-in rejected. "
                                     "Inspect the record without exposing the link."
                                 )
-                print(f"Replayed {step.type} at {at.isoformat()} (local simulation)")
+                print(f"Replayed {step.type} at {at.isoformat()} (local simulation)", flush=True)
                 last_event_at = max(last_event_at, at)
                 previous_offset = step.offset_s
             # One active visit per site: close this day's before the next day's schedule.
@@ -384,10 +388,100 @@ def _replay(args: argparse.Namespace) -> None:
             )
             if posted.status_code != 200:
                 sys.exit("Simulated worker review rejected; inspect the record.")
-            print(f"Worker review posted on {target['id']} ({decision})")
+            print(f"Worker review posted on {target['id']} ({decision})", flush=True)
         print(
-            f"Replay records are ready for review at {args.public_url}; no live Ring attendance was verified."
+            f"Replay records are ready for review at {args.public_url}; "
+            "no live Ring attendance was verified.",
+            flush=True,
         )
+
+
+def _demo(args: argparse.Namespace) -> None:
+    """One-command demo: in-process emulator + server + story replay, then serve."""
+    import secrets
+    import socket
+    import tempfile
+    import threading
+    from pathlib import Path
+
+    import uvicorn
+    from pydantic import SecretStr
+    from ring_sandbox.emulator import create_app as sandbox_app
+
+    from .app import create_app
+    from .config import Settings
+
+    def serve(app, port: int = 0) -> tuple[str, uvicorn.Server, threading.Thread, socket.socket]:
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", port))
+        sock.listen(32)
+        server = uvicorn.Server(uvicorn.Config(app, log_level="warning", access_log=False))
+        thread = threading.Thread(target=lambda: server.run(sockets=[sock]), daemon=True)
+        thread.start()
+        deadline = time.monotonic() + 10
+        while not server.started:
+            if time.monotonic() > deadline:
+                sys.exit("demo server failed to start")
+            time.sleep(0.01)
+        return f"http://127.0.0.1:{sock.getsockname()[1]}", server, thread, sock
+
+    ring_url, ring_server, _ring_thread, ring_sock = serve(sandbox_app())
+
+    if args.data_dir:
+        data_dir = Path(args.data_dir)
+        if data_dir.exists() and any(data_dir.iterdir()):
+            sys.exit("--data-dir must be empty — the demo always starts a fresh runtime")
+        data_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        data_dir = Path(tempfile.mkdtemp(prefix="attest-demo-"))
+
+    token = secrets.token_urlsafe(32)
+    # The demo owns this CLI process; point the replay driver at the token it minted.
+    settings.admin_token = SecretStr(token)
+    demo = Settings(
+        _env_file=None,
+        admin_token=token,
+        replay_mode=True,
+        data_dir=data_dir,
+        ring_base_url=ring_url,
+        timezone="UTC",
+        summarizer="template",
+    )
+    app_url, app_server, _app_thread, app_sock = serve(create_app(demo), args.port)
+
+    replay = argparse.Namespace(
+        scenario="home_aide_visit",
+        days=args.days,
+        story=args.story,
+        no_show_day=None,
+        worker_review="dispute",
+        auto_checkin=True,
+        speed=args.speed,
+        ring_url=ring_url,
+        public_url=app_url,
+        window_minutes=args.window_minutes,
+        expected_minutes=args.expected_minutes,
+        site_name=args.site_name,
+        worker_name=args.worker_name,
+        camera_only=args.camera_only,
+    )
+    _replay(replay)
+    print()
+    print("Demo is live — simulated data only, no real Ring account involved.", flush=True)
+    print(f"  dashboard   http://admin:{token}@127.0.0.1:{app_sock.getsockname()[1]}/", flush=True)
+    print(f"  admin user  admin / {token}", flush=True)
+    print(f"  data dir    {data_dir}", flush=True)
+    print("Press Ctrl+C to stop.", flush=True)
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        app_server.should_exit = True
+        ring_server.should_exit = True
+        app_sock.close()
+        ring_sock.close()
 
 
 def _verify(args: argparse.Namespace) -> None:
@@ -861,6 +955,26 @@ def main(argv: list[str] | None = None) -> None:
         s.add_argument("--window-minutes", type=int, default=120)
         s.add_argument("--expected-minutes", type=int, default=90)
         s.add_argument("--camera-only", action="store_true", help="leave the optional contact sensor unbound")
+        if name == "demo":
+            s.add_argument(
+                "--port",
+                type=int,
+                default=0,
+                help="port for the demo dashboard (default: random)",
+            )
+            s.add_argument(
+                "--data-dir",
+                default=None,
+                help="persist the demo runtime here (must be empty); default is a temp dir",
+            )
+            s.add_argument("--days", type=int, default=5)
+            s.add_argument(
+                "--story",
+                default="observed,late,no_show,early_out,unmatched",
+                metavar="PATTERNS",
+                help="day-pattern cycle: observed,late,early_out,no_show,unmatched",
+            )
+            s.add_argument("--speed", type=float, default=10000)
         if name == "replay":
             s.add_argument(
                 "scenario",

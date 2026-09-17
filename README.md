@@ -31,6 +31,18 @@ Attest is an early prototype for the Amazon Developer Hackathon's Ring track. It
 - Worker/coordinator review and correction flow. Each statement is signed in a per-visit review chain anchored to the original receipt hash. Original observations and original signatures remain unchanged. Worker review links are hashed, single-use, scoped to the signed scheduled worker and visit, and expire after 24 hours.
 - Authenticated setup screens for device discovery, site binding, worker creation, and schedule creation/cancellation. Device permissions and camera/contact capabilities are checked. Duplicate identifiers and ambiguous arrival windows are rejected. Used schedules cannot be rewritten through cancellation.
 
+## 60-second demo
+
+Clone Attest and ring-sandbox into sibling directories. From the Attest directory:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python -m pip install -r requirements-dev.txt -e "../ring-sandbox[server]" -e ".[dev]"
+.\.venv\Scripts\attest demo
+```
+
+One command boots the in-process Ring emulator, the Attest server, and a 5-day `--story` replay — an on-time visit, a late arrival, a no-show, a departure-unconfirmed visit, an unmatched observation, and a signed worker dispute — then prints a ready Basic-auth dashboard URL. No Ring account, no credentials, no env vars; everything is clearly labeled simulated. `--data-dir DIR` keeps the runtime; `--days`/`--story` reshape it.
+
 ## Local development on Windows
 
 Clone Attest and ring-sandbox into sibling directories. From the Attest directory:

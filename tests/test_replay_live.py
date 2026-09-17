@@ -238,3 +238,44 @@ def test_replay_story_rejects_unknown_pattern(tmp_path):
             )
             assert result.returncode != 0
             assert "bogus" in result.stderr + result.stdout
+
+
+def test_demo_command_spins_up_full_stack(tmp_path):
+    """attest demo must boot emulator + server + story replay and leave a live dashboard."""
+    import re
+
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "attest.cli",
+            "demo",
+            "--days",
+            "2",
+            "--story",
+            "observed,no_show",
+            "--speed",
+            "100000",
+            "--data-dir",
+            str(tmp_path / "demo"),
+        ],
+        env={**os.environ, "ATTEST_SUMMARIZER": "template"},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    try:
+        out = ""
+        deadline = time.monotonic() + 60
+        while "Press Ctrl+C" not in out and time.monotonic() < deadline:
+            line = proc.stdout.readline()
+            if not line and proc.poll() is not None:
+                break
+            out += line
+        assert "Demo is live" in out, out
+        url = re.search(r"dashboard\s+(http://\S+)", out).group(1)
+        with httpx.Client() as client:
+            assert client.get(url).status_code == 200
+    finally:
+        proc.terminate()
+        proc.wait(timeout=15)
