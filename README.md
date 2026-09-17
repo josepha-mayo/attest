@@ -1,8 +1,10 @@
 # Attest
 
-**A reviewable record of doorstep observations and worker self-reports.**
+**Tamper-evident visit records for home services — what the Ring devices observed, what the worker reported, what a human concluded. Signed, reviewable, verifiable offline.**
 
-Attest is an early prototype for the Amazon Developer Hackathon's Ring track. It is not a completed submission, an EVV-compliant system, or proof of attendance. The proposed customer is a household or service coordinator reviewing a scheduled visit alongside the worker's own account.
+A caregiver says she was there Tuesday. The family says nobody came. Today that dispute is "he said / she said." Attest replaces it with a signed record that keeps the evidence apart from the conclusions: door-camera and contact-sensor observations, how much of the window the pipeline actually watched, the worker's own account, and the coordinator's review — each linkable, each checkable without trusting Attest itself.
+
+Built for the Amazon Developer Hackathon (Ring track; AWS Builder + Open Source mini-challenges). A working prototype with honest boundaries — not an EVV-compliant system, and never a claim of attendance. The proposed customer is a household or service coordinator reviewing a scheduled visit alongside the worker's own account.
 
 ## What the record means
 
