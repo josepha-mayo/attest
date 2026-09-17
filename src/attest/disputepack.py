@@ -25,6 +25,8 @@ media/         The media bytes the record references (when included).
 verify_bundle.py  Offline verifier. Run:  python verify_bundle.py bundle.json
 verify.html    Zero-install verifier — open in any browser and drop the pack
                files in. Same checks, pure JavaScript, works from file://.
+               Also renders each record's timeline (scheduled window, poll
+               coverage, observations) from the signed payload.
 
 WHAT A VALID VERIFICATION PROVES
 - Every receipt in bundle.json is byte-identical to what was signed: the payload
@@ -323,6 +325,7 @@ visits/<id>/        Per-visit bundle.json + the media bytes it references.
 verify_case.py      Offline verifier. Run:  python verify_case.py .
 verify.html         Zero-install verifier — open in any browser and drop the
                     pack files in. Same checks, pure JavaScript, works offline.
+                    Also renders each record's timeline from the signed payload.
 
 WHAT A VALID VERIFICATION PROVES
 - Each bundle.json is byte-identical to what was signed, and every appended

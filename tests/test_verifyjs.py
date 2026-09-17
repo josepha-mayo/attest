@@ -108,6 +108,62 @@ eval(src + `
     assert "broken" in proc.stdout
 
 
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_js_timeline_renders_marks_and_escapes_titles(tmp_path):
+    """The pack's embedded verifier draws the record's timeline from the signed
+    payload — and escapes payload text inside SVG titles (packs are untrusted)."""
+    (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
+    payload = {
+        "schedule": {
+            "window_start": "2026-09-12T15:00:00+00:00",
+            "window_end": "2026-09-12T17:00:00+00:00",
+        },
+        "evidence": [
+            {"kind": "arrival_motion", "at": "2026-09-12T15:05:00+00:00"},
+            {"kind": "departure_motion", "at": "2026-09-12T16:50:00+00:00"},
+            {"kind": 'x"><script>alert(1)</script>', "at": "2026-09-12T16:00:00+00:00"},
+        ],
+        "checked_in_at": "2026-09-12T15:06:00+00:00",
+        "history_poll_coverage": {
+            "covered": [{"start": "2026-09-12T15:00:00+00:00", "end": "2026-09-12T16:00:00+00:00"}],
+            "gaps": [{"start": "2026-09-12T16:00:00+00:00", "end": "2026-09-12T17:00:00+00:00"}],
+        },
+    }
+    (tmp_path / "p.json").write_text(__import__("json").dumps(payload), encoding="utf-8")
+    driver = """
+const fs=require('fs');
+let src=fs.readFileSync(process.argv[2],'utf8').replace(/const dz=[\\s\\S]*$/,'');
+const p=fs.readFileSync(process.argv[3],'utf8');
+eval(src + `
+const svg=timelineSVG(JSON.parse(p));
+console.log('has_svg:', svg.startsWith('<svg'));
+console.log('marks:', (svg.match(/<circle/g)||[]).length);
+console.log('checkin_col:', svg.includes('#e8b93e'));
+console.log('gap_band:', svg.includes('#9aa3b2'));
+console.log('escaped:', !svg.includes('<script') && svg.includes('&lt;'));
+console.log('empty:', timelineSVG({})==='');`);
+"""
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "verify.js", "p.json"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout
+    for expected in (
+        "has_svg: true",
+        "marks: 4",
+        "checkin_col: true",
+        "gap_band: true",
+        "escaped: true",
+        "empty: true",
+    ):
+        assert expected in out, out
+
+
 def test_packs_embed_browser_verifier(engine, store, household, schedule, t0, tmp_path):
     from ring_sandbox import WebhookEvent, webhooks
 

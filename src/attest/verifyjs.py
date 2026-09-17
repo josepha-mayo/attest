@@ -162,6 +162,59 @@ async function checkChain(rNodes,key){
     if(r.prev_hash!==prev)return{ok:false,why:`receipt #${r.sequence}: chain broken`};
     prev=r.payload_hash;seq++;}
   return{ok:true,why:`${rs.length} receipt(s), chain intact`};}
+/* ---------- timeline renderer (mirrors attest.timeline semantics) ---------- */
+const _ESC={"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"};
+function esc(s){return String(s).replace(/[&<>"']/g,c=>_ESC[c]);}
+function timelineSVG(p){
+  const iso=s=>s?Date.parse(s)/1000:null;
+  const pts=[];
+  const ws=p.schedule?iso(p.schedule.window_start):null,
+    we=p.schedule?iso(p.schedule.window_end):null;
+  if(ws)pts.push(ws,we);
+  for(const e of p.evidence||[])pts.push(iso(e.at));
+  const ci=iso(p.checked_in_at);if(ci)pts.push(ci);
+  const cov=p.history_poll_coverage;
+  for(const iv of(cov&&cov.covered)||[])pts.push(iso(iv.start),iso(iv.end));
+  if(!pts.length)return"";
+  let lo=Math.min.apply(null,pts),hi=Math.max.apply(null,pts);
+  if(hi-lo<600){const m=(lo+hi)/2;lo=m-300;hi=m+300;}
+  const pad=(hi-lo)*0.04;lo-=pad;hi+=pad;const span=hi-lo;
+  const x=t=>(Math.min(Math.max((t-lo)/span,0),1)*100).toFixed(2);
+  const w=(a,b)=>Math.max(0.4,x(b)-x(a)).toFixed(2);
+  let s='<svg viewBox="0 0 100 34" preserveAspectRatio="none" '
+    +'style="width:100%;height:64px;display:block;margin:4px 0">';
+  if(ws)s+=`<rect x="${x(ws)}" y="4" width="${w(ws,we)}" height="20" rx="1.5" `
+    +'fill="#3b4a63" opacity="0.55"><title>scheduled window</title></rect>';
+  if(cov){
+    const bands=(cov.covered||[]).map(i=>[i,true]).concat((cov.gaps||[]).map(i=>[i,false]));
+    for(const[iv,watched]of bands){
+      const a=iso(iv.start),b=iso(iv.end);
+      const fill=watched?"#2f9e63":"#9aa3b2",
+        title=watched?"watched by polling":"coverage gap — not watched";
+      s+=`<rect x="${x(a)}" y="25" width="${w(a,b)}" height="3.2" `
+        +`fill="${fill}"><title>${title}</title></rect>`;
+    }
+  }
+  const KIND={arrival_motion:"motion",doorbell:"doorbell",door_opened:"door opened",
+    door_closed:"door closed",activity:"activity",departure_motion:"departure cue",
+    on_demand:"on-demand media",snapshot:"snapshot",late:"late-arriving event",
+    checkin:"worker check-in"};
+  for(const e of p.evidence||[]){
+    const k=KIND[e.kind]||String(e.kind||"activity").replace(/_/g," ");
+    const col=String(e.kind).indexOf("departure")===0?"#c05a5a":"#5aa2e8";
+    const X=x(iso(e.at)),title=esc(k+" — "+e.at);
+    s+=`<line x1="${X}" y1="8" x2="${X}" y2="24" stroke="${col}" `
+      +`stroke-width="0.7"><title>${title}</title></line>`
+      +`<circle cx="${X}" cy="7" r="1.1" fill="${col}"><title>${title}</title></circle>`;
+  }
+  if(ci){
+    const X=x(ci),title=esc("worker check-in — "+p.checked_in_at);
+    s+=`<line x1="${X}" y1="8" x2="${X}" y2="24" stroke="#e8b93e" `
+      +`stroke-width="0.7"><title>${title}</title></line>`
+      +`<circle cx="${X}" cy="7" r="1.1" fill="#e8b93e"><title>${title}</title></circle>`;
+  }
+  return s+"</svg>";
+}
 /* ---------- pack driver ---------- */
 function digests(o,out=[]){
   if(Array.isArray(o))o.forEach(v=>digests(v,out));
@@ -202,6 +255,8 @@ async function verifyFiles(files){
     const js=toJS(root);
     const stance=js.countersign_status?` — worker: ${js.countersign_status.state}`:"";
     say(c.ok?"ok":"bad",`${vid}: ${c.why}${stance}`);
+    const svg=timelineSVG((js.original||{}).payload||{});
+    if(svg)out.push(svg);
     const redT=await text(vid==="visit"?"redaction.json":`visits/${vid}/redaction.json`);
     const withheld=new Set(redT?(JSON.parse(redT).withheld_media_sha256||[]):[]);
     for(const d of digests(js)){
