@@ -29,6 +29,12 @@ def _iso(s: Any) -> datetime:
     return s if isinstance(s, datetime) else datetime.fromisoformat(str(s))
 
 
+def _get(obj: Any, name: str) -> Any:
+    """Attribute-or-key access — evidence arrives as models on the visit page
+    and as signed-payload dicts on the worker review page."""
+    return obj.get(name) if isinstance(obj, dict) else getattr(obj, name, None)
+
+
 def timeline_strip(
     *,
     schedule: Any | None,
@@ -40,16 +46,16 @@ def timeline_strip(
     """Return positioned elements (percent coords) for the strip, or None when
     there is nothing worth drawing (no window and no observations)."""
     points: list[datetime] = []
-    win_start = _iso(schedule.window_start) if schedule else None
-    win_end = _iso(schedule.window_end) if schedule else None
+    win_start = _iso(_get(schedule, "window_start")) if schedule else None
+    win_end = _iso(_get(schedule, "window_end")) if schedule else None
     for e in evidence:
-        points.append(_iso(e.at))
+        points.append(_iso(_get(e, "at")))
     if checked_in_at:
         points.append(_iso(checked_in_at))
     for iv in (coverage or {}).get("covered", []):
         points.extend((_iso(iv["start"]), _iso(iv["end"])))
     for e in late_events or []:
-        at = getattr(e, "occurred_at", None) or getattr(e, "at", None)
+        at = _get(e, "occurred_at") or _get(e, "at")
         if at:
             points.append(_iso(at))
     if win_start:
@@ -83,14 +89,14 @@ def timeline_strip(
 
     marks = []
     for e in evidence:
-        kind = getattr(e, "kind", "activity")
+        kind = _get(e, "kind") or "activity"
         kind = getattr(kind, "value", kind)
         marks.append(
             {
-                "x": x(_iso(e.at)),
+                "x": x(_iso(_get(e, "at"))),
                 "kind": kind,
                 "label": _KIND_LABEL.get(kind, kind.replace("_", " ")),
-                "title": f"{_KIND_LABEL.get(kind, kind)} — {_iso(e.at).isoformat()}",
+                "title": f"{_KIND_LABEL.get(kind, kind)} — {_iso(_get(e, 'at')).isoformat()}",
             }
         )
     if checked_in_at:
@@ -103,7 +109,7 @@ def timeline_strip(
             }
         )
     for e in late_events or []:
-        at = getattr(e, "occurred_at", None) or getattr(e, "at", None)
+        at = _get(e, "occurred_at") or _get(e, "at")
         if at:
             marks.append(
                 {

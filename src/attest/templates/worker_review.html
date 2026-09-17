@@ -9,6 +9,9 @@
 <div class="card">
 <p>This link was issued to <b>{{ original.scheduled_worker.name }}</b> for the record at <b>{{ original.site.name }}</b>.</p>
 <p>First observation: {{ original.first_observed_at or "None received" }}<br>Last observation: {{ original.last_observed_at or "None received" }}</p>
+{% if timeline %}<div style="margin:10px 0;padding:8px 4px;background:#11131a;border-radius:8px">
+{% include "_timeline.html" %}
+</div>{% endif %}
 <p class="muted">A short observation interval does not mean you left or stopped working. You can explain missing context, dispute an interpretation, or report your own times.</p>
 {% if original.clock and original.clock.mode == "replay" %}<p class="flag warn">Local replay: event times use a simulated clock. This is not a live visit.</p>{% endif %}
 </div>

@@ -672,8 +672,24 @@ def create_app(
         if target is None:
             raise HTTPException(404, "invalid, expired, or used review link")
         _, bundle = target
+        # The worker sees the same visual the coordinator does — built from the
+        # signed payload itself, so the strip is exactly what they countersign.
+        from .timeline import timeline_strip
+
+        p = bundle.original.payload
+        strip = timeline_strip(
+            schedule=p.get("schedule"),
+            evidence=p.get("evidence") or [],
+            checked_in_at=p.get("checked_in_at"),
+            coverage=p.get("history_poll_coverage"),
+        )
         return render(
-            request, "worker_review.html", original=bundle.original.payload, token=token, done=False
+            request,
+            "worker_review.html",
+            original=p,
+            token=token,
+            done=False,
+            timeline=strip,
         )
 
     @app.post("/review/{token}", response_class=HTMLResponse)
