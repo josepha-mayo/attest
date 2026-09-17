@@ -80,7 +80,10 @@ def create_app(
             client_id=s.ring_client_id,
             on_token_refresh=lambda tokens: store.put_setting("ring_auth", tokens),
         )
-    signer = signer or Signer.load_or_create(s.key_path)
+    if signer is None:
+        from .keycustody import load_or_create_signer
+
+        signer = load_or_create_signer(s.key_path, kms_key_id=s.kms_key_id, aws_region=s.aws_region)
     media = MediaStore(s.data_dir / "media")
     summarizer = build_summarizer(
         s.summarizer, tz=s.timezone, model_id=s.bedrock_model_id, region=s.aws_region

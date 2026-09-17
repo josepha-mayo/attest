@@ -352,22 +352,139 @@ def _replay(args: argparse.Namespace) -> None:
 
 
 def _verify(args: argparse.Namespace) -> None:
-    """Verify a downloaded bundle offline: signatures, revision order, chain anchoring."""
+    """Verify a downloaded artifact offline: review bundle, bare receipt, anchor,
+    or a receipts.json export list."""
     from pathlib import Path
 
-    from . import reviews
-    from .models import ReviewBundle
+    from . import ledger, reviews
+    from .models import Receipt, ReviewBundle
 
-    bundle = ReviewBundle.model_validate(json.loads(Path(args.bundle).read_text(encoding="utf-8")))
+    data = json.loads(Path(args.bundle).read_text(encoding="utf-8"))
+    pinned = " (against the supplied issuer key)" if args.key else ""
+
+    if isinstance(data, list):
+        receipts = [Receipt.model_validate(r) for r in data]
+        ok, reason = ledger.verify_chain(receipts, public_key=args.key)
+        if not ok:
+            sys.exit(f"verification failed: {reason}")
+        print(f"OK{pinned}: {reason}.")
+        print("Note: a valid chain proves record integrity under that key, not physical truth.")
+        return
+
+    if isinstance(data, dict) and "payload" in data and "signature" in data:
+        receipt = Receipt.model_validate(data)
+        ok, reason = ledger.verify_receipt(receipt, public_key=args.key)
+        if not ok:
+            sys.exit(f"verification failed: {reason}")
+        kind = receipt.payload.get("record_type") or receipt.payload.get("schema")
+        print(f"OK{pinned}: {kind} {receipt.id} — {reason}.")
+        print("Note: a valid signature proves record integrity under that key, not physical truth.")
+        return
+
+    bundle = ReviewBundle.model_validate(data)
     key = args.key or bundle.original.public_key
     ok, reason = reviews.verify_bundle(bundle, public_key=key)
     if not ok:
         sys.exit(f"verification failed: {reason}")
-    pinned = " (against the supplied issuer key)" if args.key else ""
     print(f"OK{pinned}: {reason}.")
     stance = reviews.countersign_status(bundle)
     print(f"Worker stance: {stance['state']} — {stance['detail']}")
     print("Note: a valid signature proves record integrity under that key, not physical truth.")
+
+
+def _anchor(args: argparse.Namespace) -> None:
+    """Write a signed anchor: the journal head and receipt-chain head at this
+    instant. Publish it anywhere — later deletion of the log's tail or of
+    receipts is provable against the anchor."""
+    from pathlib import Path
+
+    from .keycustody import load_or_create_signer
+    from .store import Store
+
+    db = settings.data_dir / "attest.sqlite3"
+    if not db.exists():
+        sys.exit(f"no store at {db}")
+    store = Store(db)
+    try:
+        signer = load_or_create_signer(
+            settings.data_dir / "attest-ed25519.key",
+            kms_key_id=settings.kms_key_id,
+            aws_region=settings.aws_region,
+        )
+        prev = store.latest_receipt()
+        entries = store._conn.execute("SELECT COUNT(*) FROM journal").fetchone()[0]
+        anchor = signer.issue(
+            visit_id="anchor",
+            sequence=prev.sequence + 1 if prev else 1,
+            prev_hash=prev.payload_hash if prev else None,
+            facts={
+                "record_type": "anchor",
+                "journal_head": store.journal_head(),
+                "journal_entries": entries,
+                "receipt_head": prev.payload_hash if prev else None,
+                "receipt_count": len(store.receipts()),
+                "visit_count": store.stats()["visits"]["total"],
+                "boundary": (
+                    "Anchors that a record state existed at issuance. Truncating the "
+                    "journal or removing receipts after this anchor is provable."
+                ),
+            },
+        )
+        out = Path(args.out or "attest-anchor.json")
+        out.write_text(anchor.model_dump_json(indent=2), encoding="utf-8")
+        print(
+            f"wrote {out} — journal head {anchor.payload['journal_head'][:16]}…, "
+            f"{entries} entries, {anchor.payload['receipt_count']} receipts pinned"
+        )
+    finally:
+        store.close()
+
+
+def _coverage_cert(args: argparse.Namespace) -> None:
+    """Sign a coverage attestation for an interval: 'the pipeline checked K times,
+    Ring returned M events' — a standalone answer to 'was anyone watching?'."""
+    from datetime import datetime
+
+    from .engine import VisitEngine
+    from .keycustody import load_or_create_signer
+    from .media import MediaStore
+    from .store import Store
+    from .summarize import TemplateSummarizer
+
+    db = settings.data_dir / "attest.sqlite3"
+    if not db.exists():
+        sys.exit(f"no store at {db}")
+    store = Store(db)
+    try:
+        site = store.site(args.site) if args.site else (store.sites()[0] if store.sites() else None)
+        if site is None:
+            sys.exit("no site found — seed or run a replay first")
+        end = datetime.fromisoformat(args.to) if args.to else None
+        start = datetime.fromisoformat(args.start) if args.start else None
+        if end is None or start is None or start.tzinfo is None or end.tzinfo is None:
+            sys.exit("--from and --to must be ISO timestamps with timezone")
+        from ring_sandbox import RingClient
+
+        engine = VisitEngine(
+            store,
+            RingClient(settings.ring_access_token, base_url=settings.ring_base_url),
+            load_or_create_signer(
+                settings.data_dir / "attest-ed25519.key",
+                kms_key_id=settings.kms_key_id,
+                aws_region=settings.aws_region,
+            ),
+            MediaStore(settings.data_dir / "media"),
+            TemplateSummarizer(settings.timezone),
+            settings,
+        )
+        receipt = engine.issue_coverage_attestation(site, start, end)
+        cov = receipt.payload["coverage"]
+        print(
+            f"signed {receipt.id} — coverage {cov['state']} ({cov['fraction'] * 100:.1f}%), "
+            f"{cov['polls']} polls, {cov['events']} events, {len(cov['gaps'])} gap(s)"
+        )
+    finally:
+        store.close()
 
 
 def _tamper_demo(args: argparse.Namespace) -> None:
@@ -671,6 +788,22 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("old", help="earlier export: case pack, pack.zip, or bundle.json")
     s.add_argument("new", help="later export")
     s.set_defaults(fn=_diff)
+
+    s = sub.add_parser(
+        "anchor",
+        help="write a signed anchor pinning the journal head + receipt chain head — publish it anywhere",
+    )
+    s.add_argument("--out", default=None, help="output path (default attest-anchor.json)")
+    s.set_defaults(fn=_anchor)
+
+    s = sub.add_parser(
+        "coverage",
+        help="sign a coverage attestation for an interval — 'checked K times, saw M events', never absence",
+    )
+    s.add_argument("--site", default=None, help="site id (defaults to the only site)")
+    s.add_argument("--from", dest="start", required=True, help="interval start (ISO 8601, tz-aware)")
+    s.add_argument("--to", dest="to", required=True, help="interval end (ISO 8601, tz-aware)")
+    s.set_defaults(fn=_coverage_cert)
 
     s = sub.add_parser("deliveries", help="show durable webhook inbox state, or requeue failed deliveries")
     s.add_argument(

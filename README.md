@@ -67,7 +67,9 @@ Multi-day demos: `attest replay home_aide_visit --days 3 --no-show-day 1 --worke
 3. Append a coordinator statement. The authenticated workspace administrator is recorded as the coordinator; this is not yet a multi-user identity system.
 4. Export **original + review chain**, then upload the bundle at `/verify`. Verification checks signatures, revision ordering, and links to the supplied original under the deployment's pinned public key. The same check runs offline: `attest verify bundle.json --key <issuer-public-key>` (omit `--key` to verify against the key embedded in the receipt).
 
-Export surfaces: `GET /visits/{id}/pack.zip` (single-visit dispute pack), `GET /sites/{id}/pack.zip` (whole-site case pack), or `attest export` without a server. Every pack embeds a stdlib-only verifier. Add `?redact_media=1` (or `attest export --redact-media`) to withhold media bytes while preserving the signed sha256 digests — the pack stays verifiable and the verifier reports media as withheld. `attest diff old.zip new.zip` compares two exports: appended visits/reviews are reported as normal drift; a vanished visit, an altered signed payload, or a removed review is flagged as an anomaly. `attest attack-demo` runs real tamper attempts against the local store (forge a row, delete a row, erase/truncate the journal, re-sign under a foreign key, replay a webhook, insert out-of-band) and rolls each back — nothing persists.
+Export surfaces: `GET /visits/{id}/pack.zip` (single-visit dispute pack), `GET /sites/{id}/pack.zip` (whole-site case pack), or `attest export` without a server. Every pack embeds a stdlib-only verifier **and** `verify.html` — a zero-install browser verifier that re-implements the canonicalization, SHA-256, and Ed25519 checks in dependency-free JavaScript, so a reviewer can verify the pack by dragging files onto a page, offline. Add `?redact_media=1` (or `attest export --redact-media`) to withhold media bytes while preserving the signed sha256 digests — the pack stays verifiable and the verifier reports media as withheld. `attest diff old.zip new.zip` compares two exports: appended visits/reviews are reported as normal drift; a vanished visit, an altered signed payload, or a removed review is flagged as an anomaly. `attest attack-demo` runs real tamper attempts against the local store (forge a row, delete a row, erase/truncate the journal, re-sign under a foreign key, replay a webhook, insert out-of-band) and rolls each back — nothing persists.
+
+Two more integrity surfaces: `attest coverage --site S --from T0 --to T1` issues a signed coverage attestation for an arbitrary interval — poll count, fraction of the window actually watched, events seen, explicit gaps — so "silence" is never conflated with "unwatched". `attest anchor --out anchor.json` writes a standalone signed file pinning the journal head and receipt-chain head at that instant; `attest verify anchor.json` checks it. Anchors let a third party hold a checkpoint that later truncation can't silently bypass. `attest status` audits a whole runtime offline: journal integrity, receipt chain, coverage count, inbox — exits non-zero on failure.
 
 Corrections are separate human statements, not edits to camera evidence. Verification establishes integrity of the supplied chain, not attendance, truth of a statement, or completeness against a hidden/deleted tail. Never publish review/check-in links or personal records in the demo video.
 
@@ -99,6 +101,13 @@ free-tier token cap reached — retry after the cap resets or the account is upg
 successful AWS model invocation has been demonstrated yet. The application identifies template
 fallback separately from successful Bedrock generation; local fallback tests do not qualify as a
 live AWS integration demonstration.
+
+**KMS key custody (verified live):** `ATTEST_KMS_KEY_ID` envelope-encrypts the Ed25519
+signing key — the PEM on disk is AES-256-GCM wrapped under a KMS data key, and unwrapping
+requires a live `Decrypt` call with the matching encryption context, so every key use is a
+CloudTrail-audited event and a stolen data directory contains nothing signable. Verified
+end-to-end against a real CMK (GenerateDataKey → wrap → Decrypt → sign). Without the setting
+the key is stored as a plain PEM as before.
 
 ## Verification
 

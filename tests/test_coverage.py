@@ -1,3 +1,4 @@
+import json
 from datetime import timedelta
 
 from attest.coverage import coverage_report
@@ -78,3 +79,67 @@ def test_receipt_carries_signed_coverage(engine, store, household, schedule, t0)
     from attest.ledger import verify_receipt
 
     assert verify_receipt(receipt, public_key=engine.signer.public_key_b64)[0]
+
+
+def test_coverage_attestation_is_signed_chained_and_idempotent(engine, store, household, t0):
+    """`attest coverage` issues a standalone signed receipt: chain-linked,
+    journal-head pinned, and a re-issue for the same range returns the same receipt."""
+    from attest.ledger import verify_receipt
+
+    site = household[0]
+    device = household[2].id
+    _obs(store, device, t0 + timedelta(minutes=30), t0 - timedelta(minutes=30))
+    _obs(store, device, t0 + timedelta(hours=2), t0)
+
+    head_at_issue = store.journal_head()
+    receipt = engine.issue_coverage_attestation(site, t0, t0 + timedelta(hours=1))
+    assert receipt.payload["record_type"] == "coverage_attestation"
+    assert receipt.payload["coverage"]["state"] == "observed"
+    # the pin captures the journal tip at issuance — before this receipt's own
+    # journal writes — and is covered by the signature
+    assert receipt.payload["journal_head"] == head_at_issue
+    assert verify_receipt(receipt, public_key=engine.signer.public_key_b64)[0]
+
+    again = engine.issue_coverage_attestation(site, t0, t0 + timedelta(hours=1))
+    assert again.id == receipt.id  # idempotent per range
+
+
+def test_coverage_attestation_links_into_receipt_chain(engine, store, household, t0):
+    from attest.ledger import verify_chain
+
+    site = household[0]
+    r1 = engine.issue_coverage_attestation(site, t0, t0 + timedelta(hours=1))
+    r2 = engine.issue_coverage_attestation(site, t0 + timedelta(hours=1), t0 + timedelta(hours=2))
+    assert r2.prev_hash == r1.payload_hash and r2.sequence == r1.sequence + 1
+    ok, reason = verify_chain(store.receipts(), public_key=engine.signer.public_key_b64)
+    assert ok, reason
+
+
+def test_anchor_receipt_roundtrips_through_verify(store, t0):
+    """The `attest anchor` artifact is a bare signed receipt — `attest verify`
+    detects it via the payload+signature branch and checks the signature."""
+    from attest.ledger import Signer, verify_receipt
+    from attest.models import Receipt
+
+    signer = Signer.ephemeral()
+    anchor = signer.issue(
+        visit_id="anchor",
+        sequence=1,
+        prev_hash=None,
+        facts={
+            "record_type": "anchor",
+            "journal_head": store.journal_head(),
+            "journal_entries": 0,
+            "receipt_head": None,
+            "receipt_count": 0,
+            "boundary": "Anchors that a record state existed at issuance.",
+        },
+    )
+    data = json.loads(anchor.model_dump_json())
+    assert "payload" in data and "signature" in data  # the _verify detection branch
+    parsed = Receipt.model_validate(data)
+    ok, reason = verify_receipt(parsed, public_key=signer.public_key_b64)
+    assert ok, reason
+    # a foreign key must not verify an anchor
+    ok2, _ = verify_receipt(parsed, public_key=Signer.ephemeral().public_key_b64)
+    assert not ok2

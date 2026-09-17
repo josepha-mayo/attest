@@ -23,6 +23,8 @@ ATTEST DISPUTE PACK — what this is and is not
 bundle.json    The signed visit record plus every appended review, hash-chained.
 media/         The media bytes the record references (when included).
 verify_bundle.py  Offline verifier. Run:  python verify_bundle.py bundle.json
+verify.html    Zero-install verifier — open in any browser and drop the pack
+               files in. Same checks, pure JavaScript, works from file://.
 
 WHAT A VALID VERIFICATION PROVES
 - Every receipt in bundle.json is byte-identical to what was signed: the payload
@@ -319,6 +321,8 @@ ATTEST CASE PACK — a site's signed visit records for third-party review
 manifest.json       Every visit's receipt hash, state, and worker stance.
 visits/<id>/        Per-visit bundle.json + the media bytes it references.
 verify_case.py      Offline verifier. Run:  python verify_case.py .
+verify.html         Zero-install verifier — open in any browser and drop the
+                    pack files in. Same checks, pure JavaScript, works offline.
 
 WHAT A VALID VERIFICATION PROVES
 - Each bundle.json is byte-identical to what was signed, and every appended
@@ -389,11 +393,14 @@ def build_pack(
     """Assemble the zip. Media is matched to evidence digests, not filenames.
     With ``redact_media`` the bytes are withheld and a redaction.json marker is
     written — the signed digests stay verifiable, the footage stays private."""
+    from .verifyjs import VERIFY_HTML
+
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("bundle.json", bundle.model_dump_json(indent=2))
         z.writestr("README.txt", _README)
         z.writestr("verify_bundle.py", _VERIFIER)
+        z.writestr("verify.html", VERIFY_HTML)
         if redact_media:
             z.writestr("redaction.json", _redaction_marker(bundle))
         elif include_media:
@@ -444,11 +451,14 @@ def build_case_pack(
             "identity, attendance, time worked, or absence."
         ),
     }
+    from .verifyjs import VERIFY_HTML
+
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("manifest.json", json.dumps(manifest, indent=2))
         z.writestr("README.txt", _CASE_README)
         z.writestr("verify_case.py", _CASE_VERIFIER)
+        z.writestr("verify.html", VERIFY_HTML)
         for visit, bundle, _ in entries:
             base = f"visits/{visit.id}"
             z.writestr(f"{base}/bundle.json", bundle.model_dump_json(indent=2))

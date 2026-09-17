@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import secrets
+import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -29,7 +30,18 @@ from .clock import ExecutionClock
 from .config import Settings
 from .ledger import Signer
 from .media import MediaStore
-from .models import CheckinGrant, Evidence, EvidenceKind, Flag, Schedule, Site, Visit, VisitState, utcnow
+from .models import (
+    CheckinGrant,
+    Evidence,
+    EvidenceKind,
+    Flag,
+    Receipt,
+    Schedule,
+    Site,
+    Visit,
+    VisitState,
+    utcnow,
+)
 from .store import Store, atomic
 from .summarize import Summarizer
 
@@ -504,6 +516,41 @@ class VisitEngine:
         self.store.put_visit(visit)
 
     # ------------------------------------------------------------------ helpers
+
+    def issue_coverage_attestation(self, site: Site, start: datetime, end: datetime) -> Receipt:
+        """Sign a coverage attestation for an arbitrary interval — chain-linked but
+        visit-independent. "We polled K times and Ring returned M events" is a
+        standalone signed answer to "was anyone watching?" — never to absence."""
+        from .coverage import coverage_report
+
+        device = site.door_camera_id or site.door_sensor_id
+        report = coverage_report(self.store, device, start, end, now=self.clock.now())
+        pseudo_id = f"coverage:{site.id}:{start.isoformat()}:{end.isoformat()}"
+        existing = self.store.receipt_for_visit(pseudo_id)
+        if existing:
+            return existing
+        prev = self.store.latest_receipt()
+        receipt = self.signer.issue(
+            visit_id=pseudo_id,
+            sequence=prev.sequence + 1 if prev else 1,
+            prev_hash=prev.payload_hash if prev else None,
+            facts={
+                "record_type": "coverage_attestation",
+                "site": {"id": site.id, "name": site.name},
+                "device_id": device,
+                "coverage": report,
+                "boundary": (
+                    "Attests what the pipeline observed and when it was blind — "
+                    "never identity, attendance, or absence."
+                ),
+                "journal_head": self.store.journal_head(),
+            },
+        )
+        try:
+            self.store.put_receipt(receipt)
+        except sqlite3.IntegrityError:
+            return self.store.receipt_for_visit(pseudo_id)
+        return receipt
 
     def _coverage(self, visit: Visit, site: Site) -> dict | None:
         """How much of this visit's window Event History polling actually watched.
