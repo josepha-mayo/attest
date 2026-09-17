@@ -1,5 +1,5 @@
 {% if timeline %}
-<svg viewBox="0 0 100 34" preserveAspectRatio="none" style="width:100%;height:96px;display:block" role="img"
+<svg viewBox="0 0 100 34" preserveAspectRatio="none" style="width:100%;height:{{ timeline_h|default(96) }}px;display:block" role="img"
      aria-label="Timeline of scheduled window, polling coverage, and observations">
   {% if timeline.window %}
   <rect x="{{ timeline.window.x }}" y="4" width="{{ timeline.window.w }}" height="20" rx="1.5"
@@ -22,6 +22,7 @@
   </g>
   {% endfor %}
 </svg>
+{% if timeline_labels|default(true) %}
 <div class="row" style="justify-content:space-between;font-size:11px;color:var(--muted);margin-top:2px">
   {% for tk in timeline.ticks %}<span>{{ tk.label }}</span>{% endfor %}
 </div>
@@ -30,4 +31,5 @@
   {% if timeline.has_coverage %}<span><span style="color:#2f9e63">&#9632;</span> watched &nbsp;<span style="color:#9aa3b2">&#9632;</span> gap</span>{% endif %}
   <span><span style="color:#5aa2e8">&#9679;</span> observation &nbsp;<span style="color:#e8b93e">&#9679;</span> self-reported check-in</span>
 </div>
+{% endif %}
 {% endif %}

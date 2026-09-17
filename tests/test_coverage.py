@@ -186,3 +186,76 @@ def test_timeline_strip_positions_window_bands_and_marks(store, household, t0):
     assert len(strip["marks"]) == 4  # 3 events + check-in
     assert all(0 <= m["x"] <= 100 for m in strip["marks"])
     assert timeline_strip(schedule=None, evidence=[], checked_in_at=None, coverage=None) is None
+
+
+def test_day_strips_share_a_midnight_to_midnight_axis(store, household, t0):
+    """The site week view: one strip per local day on a fixed 24h axis, newest
+    first — schedules, evidence, check-ins, and coverage land on their own day."""
+    from datetime import UTC
+
+    from attest.timeline import day_strips
+
+    site, worker, cam, _sensor = household
+    mid2 = t0.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    mid1 = mid2 - timedelta(days=1)
+    day1, day2 = mid1, mid2
+
+    class _E:
+        pass
+
+    class _V:
+        def __init__(self, vid, ci=None):
+            self.id, self.checked_in_at = vid, ci
+
+    sch1 = Schedule(
+        site_id=site.id,
+        worker_id=worker.id,
+        window_start=day1,
+        window_end=day1 + timedelta(hours=2),
+        expected_minutes=90,
+        service="x",
+    )
+    sch2 = Schedule(
+        site_id=site.id,
+        worker_id=worker.id,
+        window_start=day2,
+        window_end=day2 + timedelta(hours=2),
+        expected_minutes=90,
+        service="x",
+    )
+    e1, e2 = _E(), _E()
+    e1.at, e1.kind = day1 + timedelta(minutes=30), "arrival_motion"
+    e2.at, e2.kind = day2 + timedelta(hours=3), "departure_motion"
+    v1, v2 = _V("v1", ci=day1 + timedelta(minutes=35)), _V("v2")
+    cov = {
+        "v2": {
+            "covered": [{"start": day2.isoformat(), "end": (day2 + timedelta(hours=1)).isoformat()}],
+            "gaps": [],
+        }
+    }
+    strips = day_strips(
+        visits=[v1, v2],
+        evidence_by_visit={"v1": [e1], "v2": [e2]},
+        schedules=[sch1, sch2],
+        coverage_by_visit=cov,
+        tz=UTC,
+    )
+    assert len(strips) == 2
+    newest, oldest = strips
+    assert newest["label"] == day2.strftime("%a %b %d")
+    # fixed 24h axis: bounds exactly midnight→midnight
+    assert newest["strip"]["start"] == day2.replace(hour=0, minute=0, second=0).isoformat()
+    assert (
+        newest["strip"]["end"] == (day2 + timedelta(days=1)).replace(hour=0, minute=0, second=0).isoformat()
+    )
+    # day2's mark: 3h in => ~12.5% across
+    mark = next(m for m in newest["strip"]["marks"] if m["kind"] == "departure_motion")
+    assert 11 < mark["x"] < 14
+    # day1 carries the check-in mark
+    assert any(m["kind"] == "checkin" for m in oldest["strip"]["marks"])
+    # coverage band only on day2
+    assert newest["strip"]["bands"] and not oldest["strip"]["bands"]
+    # every rendered element inside the axis
+    for s in strips:
+        assert all(0 <= m["x"] <= 100 for m in s["strip"]["marks"])
+        assert all(0 <= b["x"] and b["x"] + b["w"] <= 100.5 for b in s["strip"]["bands"])

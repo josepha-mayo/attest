@@ -619,6 +619,15 @@ def create_app(
         workers = {w.id: w for w in store.workers()}
         schedules = {x.id: x for x in store.schedules_for_site(site.id)}
         digests = [r for r in store.receipts() if r.visit_id.startswith(f"digest:{site.id}:")]
+        from .timeline import day_strips
+
+        days = day_strips(
+            visits=visits,
+            evidence_by_visit={v.id: store.evidence_for(v.id) for v in visits},
+            schedules=list(schedules.values()),
+            coverage_by_visit=coverage_summaries,
+            tz=tz,
+        )
         return render(
             request,
             "site.html",
@@ -630,6 +639,7 @@ def create_app(
             coverage=coverage_summaries,
             receipts={v.id: store.receipt_for_visit(v.id) for v in visits},
             digests=digests,
+            days=days,
         )
 
     @app.post("/api/sites/{site_id}/digest")

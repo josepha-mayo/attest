@@ -57,6 +57,30 @@ async function signDigest() {
   <div class="card"><div class="kpi">{{ contested|length }}</div><div class="muted">worker disputes</div></div>
 </div>
 
+{% if days %}
+<h2>Records by day</h2>
+<div class="card" style="padding:10px 14px">
+  {% for d in days %}
+  <div class="row" style="align-items:baseline;gap:12px;margin-top:{% if not loop.first %}10px{% else %}2px{% endif %}">
+    <div style="width:86px;flex:none" class="muted small">{{ d.label }}</div>
+    <div style="flex:1">
+      {% set timeline = d.strip %}
+      {% set timeline_h = 44 %}
+      {% set timeline_labels = false %}
+      {% include "_timeline.html" %}
+    </div>
+  </div>
+  {% endfor %}
+  <div class="row" style="gap:16px;font-size:11px;color:var(--muted);margin:10px 2px 0">
+    <span><span style="color:#8fa3c8">&#9632;</span> scheduled window</span>
+    <span><span style="color:#2f9e63">&#9632;</span> watched &nbsp;<span style="color:#9aa3b2">&#9632;</span> gap</span>
+    <span><span style="color:#5aa2e8">&#9679;</span> observation &nbsp;<span style="color:#e8b93e">&#9679;</span> self-reported check-in</span>
+  </div>
+  <p class="small muted" style="margin:8px 2px 0">Each row is one local day (midnight–midnight). Scheduled
+  windows, poll coverage, and observations — observed intervals are not time worked; gaps are blind spots, not absence.</p>
+</div>
+{% endif %}
+
 <h2>Visit records</h2>
 <div class="card table-wrap" style="padding:0">
 <table>
