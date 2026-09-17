@@ -618,6 +618,7 @@ def create_app(
                 coverage_summaries[v.id] = cov
         workers = {w.id: w for w in store.workers()}
         schedules = {x.id: x for x in store.schedules_for_site(site.id)}
+        digests = [r for r in store.receipts() if r.visit_id.startswith(f"digest:{site.id}:")]
         return render(
             request,
             "site.html",
@@ -628,7 +629,23 @@ def create_app(
             countersign=stances,
             coverage=coverage_summaries,
             receipts={v.id: store.receipt_for_visit(v.id) for v in visits},
+            digests=digests,
         )
+
+    @app.post("/api/sites/{site_id}/digest")
+    async def site_digest(site_id: str = PathParam(max_length=128)):
+        """Sign a period digest covering every record this site page shows —
+        counts of records, never claims about physical presence."""
+        site = store.site(site_id)
+        if site is None:
+            raise HTTPException(404, "unknown site")
+        visits = [v for v in store.visits(site_id=site.id, limit=10_000) if v.arrived_at]
+        if not visits:
+            raise HTTPException(409, "no records to digest")
+        start = min(v.arrived_at for v in visits)
+        end = max(v.last_activity_at for v in visits)
+        receipt = await asyncio.to_thread(engine.issue_period_digest, site, start, end)
+        return receipt.model_dump(mode="json")
 
     @app.get("/sites/{site_id}/pack.zip")
     async def case_pack(site_id: str = PathParam(max_length=128), redact_media: bool = False):

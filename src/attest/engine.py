@@ -552,6 +552,62 @@ class VisitEngine:
             return self.store.receipt_for_visit(pseudo_id)
         return receipt
 
+    def issue_period_digest(self, site: Site, start: datetime, end: datetime) -> Receipt:
+        """Sign a digest of the *records* written for an interval — visit counts by
+        outcome, review counts by stance, and exactly which receipts it summarizes.
+        Counts of signed records, never claims about physical presence."""
+        from .coverage import coverage_report
+
+        pseudo_id = f"digest:{site.id}:{start.isoformat()}:{end.isoformat()}"
+        existing = self.store.receipt_for_visit(pseudo_id)
+        if existing:
+            return existing
+        visits = [
+            v
+            for v in self.store.visits(site_id=site.id, limit=10_000)
+            if v.arrived_at is not None and start <= v.arrived_at <= end
+        ]
+        entries = [e for v in visits for e in self.store.reviews_for(v.id)]
+        worker_entries = [e for e in entries if e.receipt.payload.get("actor", {}).get("role") == "worker"]
+        receipts = {
+            r.visit_id: r.payload_hash for r in self.store.receipts() if r.visit_id in {v.id for v in visits}
+        }
+        counts = {
+            "visits_observed": sum(1 for v in visits if v.has_observations and v.schedule_id),
+            "visits_no_observation": sum(1 for v in visits if v.state == VisitState.NO_OBSERVATION),
+            "visits_unmatched": sum(1 for v in visits if not v.schedule_id),
+            "worker_statements": len(worker_entries),
+            "worker_disputes": sum(
+                1 for e in worker_entries if e.receipt.payload.get("review", {}).get("decision") == "dispute"
+            ),
+            "coordinator_statements": len(entries) - len(worker_entries),
+        }
+        device = site.door_camera_id or site.door_sensor_id
+        prev = self.store.latest_receipt()
+        receipt = self.signer.issue(
+            visit_id=pseudo_id,
+            sequence=prev.sequence + 1 if prev else 1,
+            prev_hash=prev.payload_hash if prev else None,
+            facts={
+                "record_type": "period_digest",
+                "site": {"id": site.id, "name": site.name},
+                "interval": {"start": start.isoformat(), "end": end.isoformat()},
+                "counts": counts,
+                "summarized_receipts": receipts,
+                "coverage": coverage_report(self.store, device, start, end, now=self.clock.now()),
+                "boundary": (
+                    "Counts the signed records this deployment wrote in the interval — "
+                    "a statement about the ledger, never about physical presence or absence."
+                ),
+                "journal_head": self.store.journal_head(),
+            },
+        )
+        try:
+            self.store.put_receipt(receipt)
+        except sqlite3.IntegrityError:
+            return self.store.receipt_for_visit(pseudo_id)
+        return receipt
+
     def _coverage(self, visit: Visit, site: Site) -> dict | None:
         """How much of this visit's window Event History polling actually watched.
 

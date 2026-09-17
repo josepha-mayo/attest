@@ -620,6 +620,55 @@ def _coverage_cert(args: argparse.Namespace) -> None:
         store.close()
 
 
+def _digest(args: argparse.Namespace) -> None:
+    """Sign a digest of the records written for an interval — counts by outcome,
+    review counts by stance, and the exact receipt set summarized."""
+    from datetime import datetime
+
+    from .engine import VisitEngine
+    from .keycustody import load_or_create_signer
+    from .media import MediaStore
+    from .store import Store
+    from .summarize import TemplateSummarizer
+
+    db = settings.data_dir / "attest.sqlite3"
+    if not db.exists():
+        sys.exit(f"no store at {db}")
+    store = Store(db)
+    try:
+        site = store.site(args.site) if args.site else (store.sites()[0] if store.sites() else None)
+        if site is None:
+            sys.exit("no site found — seed or run a replay first")
+        end = datetime.fromisoformat(args.to) if args.to else None
+        start = datetime.fromisoformat(args.start) if args.start else None
+        if end is None or start is None or start.tzinfo is None or end.tzinfo is None:
+            sys.exit("--from and --to must be ISO timestamps with timezone")
+        from ring_sandbox import RingClient
+
+        engine = VisitEngine(
+            store,
+            RingClient(settings.ring_access_token, base_url=settings.ring_base_url),
+            load_or_create_signer(
+                settings.data_dir / "attest-ed25519.key",
+                kms_key_id=settings.kms_key_id,
+                aws_region=settings.aws_region,
+            ),
+            MediaStore(settings.data_dir / "media"),
+            TemplateSummarizer(settings.timezone),
+            settings,
+        )
+        receipt = engine.issue_period_digest(site, start, end)
+        counts = receipt.payload["counts"]
+        print(
+            f"signed {receipt.id} — {counts['visits_observed']} observed, "
+            f"{counts['visits_no_observation']} no-observation, "
+            f"{counts['visits_unmatched']} unmatched, "
+            f"{counts['worker_disputes']}/{counts['worker_statements']} worker disputes/statements"
+        )
+    finally:
+        store.close()
+
+
 def _tamper_demo(args: argparse.Namespace) -> None:
     """Non-destructive: forge one row inside a transaction, show the journal catching
     it, then roll back — the store is left exactly as it was."""
@@ -937,6 +986,15 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--from", dest="start", required=True, help="interval start (ISO 8601, tz-aware)")
     s.add_argument("--to", dest="to", required=True, help="interval end (ISO 8601, tz-aware)")
     s.set_defaults(fn=_coverage_cert)
+
+    s = sub.add_parser(
+        "digest",
+        help="sign a period digest — counts of the records written, linked to every receipt summarized",
+    )
+    s.add_argument("--site", default=None, help="site id (defaults to the only site)")
+    s.add_argument("--from", dest="start", required=True, help="interval start (ISO 8601, tz-aware)")
+    s.add_argument("--to", dest="to", required=True, help="interval end (ISO 8601, tz-aware)")
+    s.set_defaults(fn=_digest)
 
     s = sub.add_parser("deliveries", help="show durable webhook inbox state, or requeue failed deliveries")
     s.add_argument(

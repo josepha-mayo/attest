@@ -85,6 +85,8 @@ Export surfaces: `GET /visits/{id}/pack.zip` (single-visit dispute pack), `GET /
 
 Two more integrity surfaces: `attest coverage --site S --from T0 --to T1` issues a signed coverage attestation for an arbitrary interval — poll count, fraction of the window actually watched, events seen, explicit gaps — so "silence" is never conflated with "unwatched". `attest anchor --out anchor.json` writes a standalone signed file pinning the journal head and receipt-chain head at that instant; `attest verify anchor.json` checks it. Anchors let a third party hold a checkpoint that later truncation can't silently bypass. `attest status` audits a whole runtime offline: journal integrity, receipt chain, coverage count, inbox — exits non-zero on failure.
 
+`attest digest --from T0 --to T1` (or **Sign records digest** on a site page) signs a *period digest* — a chain-linked receipt counting the records written in the interval (observed / no-observation / unmatched, worker statements and disputes) and pinning the exact receipt set summarized. It's a statement about the ledger, never about physical presence — the weekly report a coordinator can hand upstream without handing over footage.
+
 Corrections are separate human statements, not edits to camera evidence. Verification establishes integrity of the supplied chain, not attendance, truth of a statement, or completeness against a hidden/deleted tail. Never publish review/check-in links or personal records in the demo video.
 
 ## Ring integration status

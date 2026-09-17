@@ -14,8 +14,37 @@
   <div>
     <a class="btn secondary" href="/sites/{{ site.id }}/pack.zip">Export case pack</a>
     <a class="btn secondary" href="/sites/{{ site.id }}/pack.zip?redact_media=1">Privacy export</a>
+    <button class="btn secondary" onclick="signDigest()">Sign records digest</button>
   </div>
 </div>
+
+<div id="digest-result" class="muted small" style="margin-top:6px"></div>
+{% for d in digests %}
+<div class="muted small" style="margin-top:4px">
+  Digest <code>{{ d.id }}</code> — {{ d.payload.counts.visits_observed }} observed,
+  {{ d.payload.counts.visits_no_observation }} no-observation,
+  {{ d.payload.counts.visits_unmatched }} unmatched,
+  {{ d.payload.counts.worker_disputes }} worker dispute(s) over
+  {{ d.payload.summarized_receipts|length }} receipt(s) — verifies offline with the issuer key.
+</div>
+{% endfor %}
+<script>
+async function signDigest() {
+  const box = document.getElementById('digest-result');
+  box.textContent = 'Signing digest of the shown records…';
+  const response = await fetch('/api/sites/{{ site.id }}/digest', {method: 'POST'});
+  if (!response.ok) {
+    box.textContent = 'Digest refused: ' + (await response.json()).detail;
+    return;
+  }
+  const receipt = await response.json();
+  const c = receipt.payload.counts;
+  box.innerHTML = 'Signed <code>' + receipt.id + '</code> — ' + c.visits_observed +
+    ' observed, ' + c.visits_no_observation + ' no-observation, ' + c.visits_unmatched +
+    ' unmatched, ' + c.worker_disputes + '/' + c.worker_statements +
+    ' worker disputes/statements. Counts of records, not physical presence.';
+}
+</script>
 
 <div class="grid" style="margin-top:14px">
   {% set signed = visits|selectattr("receipt_id")|list %}
