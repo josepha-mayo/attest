@@ -70,6 +70,41 @@ document.getElementById('issue-link').onclick = async () => {
 </table>
 </div>
 <h2>Observation timeline</h2>
+{% if timeline %}
+<div class="card" style="padding:14px 10px 6px">
+<svg viewBox="0 0 100 34" preserveAspectRatio="none" style="width:100%;height:96px;display:block" role="img"
+     aria-label="Timeline of scheduled window, polling coverage, and observations">
+  {% if timeline.window %}
+  <rect x="{{ timeline.window.x }}" y="4" width="{{ timeline.window.w }}" height="20" rx="1.5"
+        fill="#3b4a63" opacity="0.55"><title>scheduled window</title></rect>
+  {% endif %}
+  {% for b in timeline.bands %}
+  <rect x="{{ b.x }}" y="25" width="{{ b.w }}" height="3.2"
+        fill="{{ '#2f9e63' if b.watched else '#9aa3b2' }}" opacity="0.9">
+    <title>{{ 'watched by polling' if b.watched else 'coverage gap — not watched' }}</title>
+  </rect>
+  {% endfor %}
+  {% for m in timeline.marks %}
+  <g>
+    <line x1="{{ m.x }}" y1="8" x2="{{ m.x }}" y2="24"
+          stroke="{{ '#e8b93e' if m.kind == 'checkin' else ('#c05a5a' if 'departure' in m.kind else '#5aa2e8') }}"
+          stroke-width="0.7"><title>{{ m.title }}</title></line>
+    <circle cx="{{ m.x }}" cy="7" r="1.1"
+            fill="{{ '#e8b93e' if m.kind == 'checkin' else ('#c05a5a' if 'departure' in m.kind else '#5aa2e8') }}">
+      <title>{{ m.title }}</title></circle>
+  </g>
+  {% endfor %}
+</svg>
+<div class="row" style="justify-content:space-between;font-size:11px;color:var(--muted);margin-top:2px">
+  {% for tk in timeline.ticks %}<span>{{ tk.label }}</span>{% endfor %}
+</div>
+<div class="row" style="gap:16px;font-size:11px;color:var(--muted);margin:6px 2px 4px">
+  {% if timeline.window %}<span><span style="color:#8fa3c8">&#9632;</span> scheduled window</span>{% endif %}
+  {% if timeline.has_coverage %}<span><span style="color:#2f9e63">&#9632;</span> watched &nbsp;<span style="color:#9aa3b2">&#9632;</span> gap</span>{% endif %}
+  <span><span style="color:#5aa2e8">&#9679;</span> observation &nbsp;<span style="color:#e8b93e">&#9679;</span> self-reported check-in</span>
+</div>
+</div>
+{% endif %}
 <div class="card"><ul class="timeline">
 {% for e in evidence if e.kind != "snapshot" %}
 <li><time>{{ t(e.at) }}</time><div>{{ e.kind.replace("_"," ") }}{% if e.ring_sub_type %} ({{ e.ring_sub_type }}){% endif %}

@@ -28,6 +28,24 @@
   <div class="card"><div class="kpi">{{ sites|length }}</div><div class="muted">sites monitored</div></div>
 </div>
 
+{% if attention %}
+<h2>Needs review</h2>
+<div class="card table-wrap" style="padding:0">
+<table>
+  <tbody>
+  {% for a in attention %}
+  <tr>
+    <td style="width:1rem"><span class="flag {{ 'warn' if a.level == 'warn' else a.level }}">&nbsp;</span></td>
+    <td><a href="/sites/{{ a.visit.site_id }}" style="color:var(--accent)">{{ sites[a.visit.site_id].name if a.visit.site_id in sites else a.visit.site_id }}</a>
+      <a href="/visits/{{ a.visit.id }}" class="muted small"> — {{ t(a.visit.arrived_at) if a.visit.has_observations else t(a.visit.created_at) }}</a></td>
+    <td>{{ a.why }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
 <h2>Recent visits</h2>
 <div class="card table-wrap" style="padding:0">
 <table>
@@ -35,12 +53,12 @@
   <tbody>
   {% for v in visits %}
   <tr>
-    <td><a href="/visits/{{ v.id }}" style="color:var(--accent)">{{ sites[v.site_id].name if v.site_id in sites else v.site_id }}</a></td>
+    <td><a href="/sites/{{ v.site_id }}" style="color:var(--accent)">{{ sites[v.site_id].name if v.site_id in sites else v.site_id }}</a></td>
     <td>{{ workers[v.worker_id].name if v.checked_in_at and v.worker_id in workers else "Unknown" }}</td>
     <td>{{ t(v.arrived_at) if v.has_observations else "None received" }}</td>
     <td>{{ t(v.last_activity_at) if v.has_observations else "None received" }}</td>
     <td>{% if v.observed_span_minutes is not none %}{{ "%.0f"|format(v.observed_span_minutes) }} min{% else %}Unknown{% endif %}</td>
-    <td><span class="pill {{ v.state }}">{{ v.state.replace("_"," ") }}</span></td>
+    <td><a href="/visits/{{ v.id }}" style="text-decoration:none"><span class="pill {{ v.state }}">{{ v.state.replace("_"," ") }}</span></a></td>
     <td>{% set cs = countersign.get(v.id) %}
       {% if cs is none %}<span class="muted">—</span>
       {% elif cs.state == "acknowledged" %}<span class="ok">Acknowledged</span>

@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}{{ site.name }} — Attest{% endblock %}
+{% block body %}
+{% macro t(dt) %}{{ dt.astimezone(tz).strftime("%b %d, %I:%M %p").replace(" 0", " ") if dt else "—" }}{% endmacro %}
+<a href="/" class="muted small">&larr; all records</a>
+<div class="row" style="justify-content:space-between;margin-top:8px">
+  <div>
+    <h1>{{ site.name }}</h1>
+    <div class="muted">
+      {{ site.owner_name }}{% if site.owner_contact %} · {{ site.owner_contact }}{% endif %}
+      <br>camera <code class="small">{{ site.door_camera_id }}</code>{% if site.door_sensor_id %} · sensor <code class="small">{{ site.door_sensor_id }}</code>{% endif %}
+    </div>
+  </div>
+  <div>
+    <a class="btn secondary" href="/sites/{{ site.id }}/pack.zip">Export case pack</a>
+    <a class="btn secondary" href="/sites/{{ site.id }}/pack.zip?redact_media=1">Privacy export</a>
+  </div>
+</div>
+
+<div class="grid" style="margin-top:14px">
+  {% set signed = visits|selectattr("receipt_id")|list %}
+  {% set observed = visits|selectattr("has_observations")|list %}
+  {% set no_obs = visits|selectattr("state","equalto","no_observation")|list %}
+  {% set contested = countersign.values()|selectattr("state","equalto","contested")|list %}
+  <div class="card"><div class="kpi">{{ visits|length }}</div><div class="muted">visit records</div></div>
+  <div class="card"><div class="kpi">{{ observed|length }}</div><div class="muted">with observations</div></div>
+  <div class="card"><div class="kpi">{{ no_obs|length }}</div><div class="muted">no observation (not absence)</div></div>
+  <div class="card"><div class="kpi">{{ contested|length }}</div><div class="muted">worker disputes</div></div>
+</div>
+
+<h2>Visit records</h2>
+<div class="card table-wrap" style="padding:0">
+<table>
+  <thead><tr><th>Visit</th><th>Worker</th><th>First observed</th><th>Observed interval</th><th>Coverage</th><th>State</th><th>Worker stance</th></tr></thead>
+  <tbody>
+  {% for v in visits %}
+  <tr>
+    <td><a href="/visits/{{ v.id }}" style="color:var(--accent)">{{ v.id[:14] }}…</a></td>
+    <td>{{ workers[v.worker_id].name if v.worker_id in workers else "—" }}</td>
+    <td>{{ t(v.arrived_at) if v.has_observations else "None" }}</td>
+    <td>{% if v.observed_span_minutes is not none %}{{ "%.0f"|format(v.observed_span_minutes) }} min{% else %}—{% endif %}</td>
+    <td class="small">{% set c = coverage.get(v.id) %}
+      {% if c %}<span class="{{ 'ok' if c.fraction > 0.8 else ('warn' if c.fraction > 0.3 else 'bad') }}">{{ "%.0f"|format(c.fraction * 100) }}%</span>
+      {% else %}<span class="muted">—</span>{% endif %}</td>
+    <td><span class="pill {{ v.state }}">{{ v.state.replace("_"," ") }}</span></td>
+    <td>{% set cs = countersign.get(v.id) %}
+      {% if cs is none %}<span class="muted">—</span>
+      {% elif cs.state == "acknowledged" %}<span class="ok">Acknowledged</span>
+      {% elif cs.state == "contested" %}<span class="bad">Contested</span>
+      {% elif cs.state == "corrected" %}<span class="warn">Corrected</span>
+      {% elif cs.state == "awaiting" %}<span class="muted">Awaiting</span>
+      {% else %}<span class="muted">{{ cs.state }}</span>{% endif %}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="7" class="muted">No visit records for this site yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2>Schedules</h2>
+<div class="card table-wrap" style="padding:0">
+<table>
+  <thead><tr><th>Worker</th><th>Window</th><th>Expected</th><th>Service</th><th>Status</th></tr></thead>
+  <tbody>
+  {% for s in schedules.values() %}
+  <tr>
+    <td>{{ workers[s.worker_id].name if s.worker_id in workers else s.worker_id }}</td>
+    <td>{{ t(s.window_start) }} – {{ s.window_end.astimezone(tz).strftime("%I:%M %p").lstrip("0") }}</td>
+    <td>{{ s.expected_minutes }} min</td>
+    <td>{{ s.service }}</td>
+    <td class="muted">{{ s.status }}</td>
+  </tr>
+  {% else %}<tr><td colspan="5" class="muted">No schedules.</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="small muted">A pattern of observations over time is context for review — it is not a
+certification of any individual visit. The case pack exports these records for independent verification.</p>
+{% endblock %}

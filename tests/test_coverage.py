@@ -2,7 +2,7 @@ import json
 from datetime import timedelta
 
 from attest.coverage import coverage_report
-from attest.models import PollObservation
+from attest.models import PollObservation, Schedule
 
 
 def _obs(store, device, polled_at, since, ok=True, events=0):
@@ -143,3 +143,46 @@ def test_anchor_receipt_roundtrips_through_verify(store, t0):
     # a foreign key must not verify an anchor
     ok2, _ = verify_receipt(parsed, public_key=Signer.ephemeral().public_key_b64)
     assert not ok2
+
+
+def test_timeline_strip_positions_window_bands_and_marks(store, household, t0):
+    """The visit-page strip places the scheduled window, watched/gap bands,
+    and each observation/check-in as percentage positions."""
+    from attest.timeline import timeline_strip
+
+    site, worker, cam, _sensor = household
+    sch = Schedule(
+        site_id=site.id,
+        worker_id=worker.id,
+        window_start=t0,
+        window_end=t0 + timedelta(hours=1),
+        expected_minutes=60,
+        service="x",
+    )
+
+    class _E:
+        pass
+
+    evs = []
+    for kind, off in [("arrival_motion", 10), ("snapshot", 22), ("departure_motion", 50)]:
+        e = _E()
+        e.at = t0 + timedelta(minutes=off)
+        e.kind = kind
+        evs.append(e)
+    cov = {
+        "covered": [{"start": t0.isoformat(), "end": (t0 + timedelta(minutes=40)).isoformat()}],
+        "gaps": [
+            {"start": (t0 + timedelta(minutes=40)).isoformat(), "end": (t0 + timedelta(hours=1)).isoformat()}
+        ],
+    }
+    strip = timeline_strip(
+        schedule=sch,
+        evidence=evs,
+        checked_in_at=t0 + timedelta(minutes=12),
+        coverage=cov,
+    )
+    assert strip["window"]["w"] > 50
+    assert [b["watched"] for b in strip["bands"]] == [True, False]
+    assert len(strip["marks"]) == 4  # 3 events + check-in
+    assert all(0 <= m["x"] <= 100 for m in strip["marks"])
+    assert timeline_strip(schedule=None, evidence=[], checked_in_at=None, coverage=None) is None

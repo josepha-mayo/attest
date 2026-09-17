@@ -330,6 +330,22 @@ def create_app(
         for st in worker_stats.values():
             lags = sorted(st["lags"])
             st["median_lag"] = lags[len(lags) // 2] if lags else None
+        stances = {v.id: reviews.countersign(v.id) for v in visits if v.receipt_id}
+        attention: list[dict] = []
+        for v in visits:
+            cs = stances.get(v.id)
+            if cs and cs["state"] == "contested":
+                attention.append({"visit": v, "why": "worker disputes this record", "level": "bad"})
+            elif cs and cs["state"] in ("corrected", "inconclusive"):
+                attention.append({"visit": v, "why": cs["detail"], "level": "warn"})
+            elif v.state == "unmatched":
+                attention.append({"visit": v, "why": "observation matched no schedule", "level": "warn"})
+            elif v.flags:
+                attention.append(
+                    {"visit": v, "why": f"{len(v.flags)} review note(s): {v.flags[0].code}", "level": "warn"}
+                )
+            elif cs and cs["state"] == "awaiting":
+                attention.append({"visit": v, "why": "worker statement pending", "level": "muted"})
         return render(
             request,
             "dashboard.html",
@@ -342,7 +358,8 @@ def create_app(
             journal=store.verify_journal(),
             worker_stats=worker_stats,
             queue=inbox.counts(),
-            countersign={v.id: reviews.countersign(v.id) for v in visits if v.receipt_id},
+            countersign=stances,
+            attention=attention,
         )
 
     @app.get("/visits/{visit_id}", response_class=HTMLResponse)
@@ -355,10 +372,27 @@ def create_app(
         site = store.site(v.site_id)
         schedule = store.schedule(v.schedule_id) if v.schedule_id else None
         evidence = store.evidence_for(visit_id)
+        from .coverage import coverage_report
+        from .timeline import timeline_strip
+
+        cov = receipt.payload.get("history_poll_coverage") if receipt else None
+        if cov is None and site and schedule:
+            device = site.door_camera_id or site.door_sensor_id
+            start = schedule.window_start
+            end = min(schedule.window_end, engine.clock.now())
+            if end > start:
+                cov = coverage_report(store, device, start, end, now=engine.clock.now())
+        strip = timeline_strip(
+            schedule=schedule,
+            evidence=evidence,
+            checked_in_at=v.checked_in_at,
+            coverage=cov,
+        )
         return render(
             request,
             "visit.html",
             visit=v,
+            timeline=strip,
             site=site,
             worker=store.worker(v.worker_id) if v.worker_id else None,
             schedule=schedule,
@@ -565,6 +599,35 @@ def create_app(
             data,
             media_type="application/zip",
             headers={"Content-Disposition": f'attachment; filename="attest-{visit_id}.zip"'},
+        )
+
+    @app.get("/sites/{site_id}", response_class=HTMLResponse)
+    async def site_page(request: Request, site_id: str = PathParam(max_length=128)):
+        """The longitudinal view — every visit at one site, worker stances,
+        and coverage, so a coordinator sees a pattern rather than incidents."""
+        site = store.site(site_id)
+        if site is None:
+            raise HTTPException(404)
+        visits = store.visits(site_id=site.id, limit=100)
+        stances = {v.id: reviews.countersign(v.id) for v in visits if v.receipt_id}
+        coverage_summaries = {}
+        for v in visits:
+            r = store.receipt_for_visit(v.id)
+            cov = (r.payload.get("history_poll_coverage") or {}) if r else {}
+            if cov:
+                coverage_summaries[v.id] = cov
+        workers = {w.id: w for w in store.workers()}
+        schedules = {x.id: x for x in store.schedules_for_site(site.id)}
+        return render(
+            request,
+            "site.html",
+            site=site,
+            visits=visits,
+            workers=workers,
+            schedules=schedules,
+            countersign=stances,
+            coverage=coverage_summaries,
+            receipts={v.id: store.receipt_for_visit(v.id) for v in visits},
         )
 
     @app.get("/sites/{site_id}/pack.zip")
