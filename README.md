@@ -60,6 +60,8 @@ For coordinated demos, use `attest replay`, not the standalone `ring-sandbox pla
 
 Multi-day demos: `attest replay home_aide_visit --days 3 --no-show-day 1 --worker-review dispute` produces a week-style dashboard — two observed visits, one honest `no_observation`, and a signed worker dispute — in one command. The replay clock only ever simulates the past, so `--days N` starts N days back.
 
+Story mode: `--days 5 --story observed,late,no_show,early_out,unmatched` cycles named day-patterns — on-time, late arrival (+25 min), no-show, departure-unconfirmed, and out-of-window activity that produces an unmatched visit *and* a lapsed schedule — yielding a realistic mixed-outcome week in one command.
+
 ## Reviewing and correcting a record
 
 1. Open a record; if it is still active, choose **Close observations for review**. Closing does not certify a departure.

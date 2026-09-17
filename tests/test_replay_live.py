@@ -137,3 +137,104 @@ def test_replay_cli_shares_clock_with_auto_checkin_and_signs_receipt(
                 assert verify_bundle(bundle, public_key=app.state.signer.public_key_b64)[0]
                 assert bundle.original.model_dump_json() == original
                 assert "Append coordinator statement" in client.get(f"/visits/{visit_id}").text
+
+
+def test_replay_story_cycles_patterns_and_survives_late_events(tmp_path):
+    """--story must produce the mixed dataset: observed, lapsed no-observation,
+    and an unmatched visit whose events land past the last schedule's window."""
+    token = secrets.token_urlsafe(32)
+    with serve(sandbox_app()) as ring_url:
+        settings = Settings(
+            _env_file=None,
+            admin_token=token,
+            replay_mode=True,
+            data_dir=tmp_path,
+            ring_base_url=ring_url,
+            timezone="UTC",
+            summarizer="template",
+        )
+        app = create_app(settings)
+        with serve(app) as app_url:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "attest.cli",
+                    "replay",
+                    "home_aide_visit",
+                    "--days",
+                    "3",
+                    "--story",
+                    "observed,no_show,unmatched",
+                    "--speed",
+                    "100000",
+                    "--ring-url",
+                    ring_url,
+                    "--public-url",
+                    app_url,
+                ],
+                env={
+                    **os.environ,
+                    "ATTEST_ADMIN_TOKEN": token,
+                    "ATTEST_REPLAY_MODE": "true",
+                    "ATTEST_RING_BASE_URL": ring_url,
+                    "ATTEST_SUMMARIZER": "template",
+                },
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            assert result.returncode == 0, result.stdout + result.stderr
+            with httpx.Client(base_url=app_url, auth=("admin", token)) as client:
+                visits = client.get("/api/state").json()["visits"]
+                states = sorted(v["state"] for v in visits)
+                # unmatched day yields both an unmatched observation and its
+                # displaced schedule lapsing to no_observation.
+                assert states == ["closed", "closed", "no_observation", "no_observation"]
+                unmatched = [v for v in visits if not v["schedule_id"]]
+                assert len(unmatched) == 1
+                receipts = [Receipt.model_validate(r) for r in client.get("/receipts.json").json()]
+                assert len(receipts) == 4
+                assert verify_chain(receipts, public_key=app.state.signer.public_key_b64)[0]
+
+
+def test_replay_story_rejects_unknown_pattern(tmp_path):
+    token = secrets.token_urlsafe(32)
+    with serve(sandbox_app()) as ring_url:
+        settings = Settings(
+            _env_file=None,
+            admin_token=token,
+            replay_mode=True,
+            data_dir=tmp_path,
+            ring_base_url=ring_url,
+            timezone="UTC",
+        )
+        with serve(create_app(settings)) as app_url:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "attest.cli",
+                    "replay",
+                    "home_aide_visit",
+                    "--story",
+                    "observed,bogus",
+                    "--speed",
+                    "100000",
+                    "--ring-url",
+                    ring_url,
+                    "--public-url",
+                    app_url,
+                ],
+                env={
+                    **os.environ,
+                    "ATTEST_ADMIN_TOKEN": token,
+                    "ATTEST_REPLAY_MODE": "true",
+                    "ATTEST_RING_BASE_URL": ring_url,
+                },
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            assert result.returncode != 0
+            assert "bogus" in result.stderr + result.stdout

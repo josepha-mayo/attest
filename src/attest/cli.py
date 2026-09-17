@@ -232,8 +232,19 @@ def _replay(args: argparse.Namespace) -> None:
         devices = state_response.json()["devices"]
         if args.no_show_day is not None and not 0 <= args.no_show_day < args.days:
             sys.exit("--no-show-day must be a day index within --days")
+        story_patterns = {"observed", "late", "early_out", "no_show", "unmatched"}
+        patterns = [p.strip() for p in args.story.split(",") if p.strip()] if args.story else []
+        if bad := set(patterns) - story_patterns:
+            sys.exit(f"unknown --story pattern(s) {sorted(bad)}; choose from {sorted(story_patterns)}")
+        last_event_at = start
         for day in range(args.days):
             day_start = start + timedelta(days=day)
+            pattern = (
+                patterns[day % len(patterns)]
+                if patterns
+                else ("no_show" if day == args.no_show_day else "observed")
+            )
+            schedule_id = None
             if day > 0:
                 schedule = Schedule(
                     site_id=seeded["site"],
@@ -252,14 +263,33 @@ def _replay(args: argparse.Namespace) -> None:
                 schedule_id = schedule.id
             else:
                 schedule_id = seeded["schedule"]
-            if day == args.no_show_day:
+            if pattern == "no_show":
                 print(f"Day {day}: no events replayed — the schedule will lapse to no_observation")
                 continue
+            if pattern == "unmatched":
+                # Events land past the window + grace: an unmatched observation
+                # AND a lapsed no-observation schedule — the honest ambiguous case.
+                print(f"Day {day}: events replayed outside the window — unmatched + lapsed schedule")
             # Poll history once at window start so coverage rows bracket the visit
             # (poll observations sit on the same logical clock as the events).
             api.post("/api/poll").raise_for_status()
+            import dataclasses
+
+            steps = sorted(scenario.steps, key=lambda step: step.offset_s)
+            if pattern == "late":
+                # arrival cluster shifts +25 min; departure stays on schedule
+                steps = [
+                    dataclasses.replace(s, offset_s=s.offset_s + 1500) if s.offset_s < 300 else s
+                    for s in steps
+                ]
+            elif pattern == "early_out":
+                # departure evidence never arrives — closes "departure unconfirmed"
+                steps = [s for s in steps if s.offset_s < 4800]
+            elif pattern == "unmatched":
+                shift = (args.window_minutes + settings.arrival_grace_minutes + 10) * 60
+                steps = [dataclasses.replace(s, offset_s=s.offset_s + shift) for s in steps]
             previous_offset = 0
-            for index, step in enumerate(sorted(scenario.steps, key=lambda step: step.offset_s)):
+            for index, step in enumerate(steps):
                 time.sleep((step.offset_s - previous_offset) / args.speed)
                 at = day_start + timedelta(seconds=step.offset_s)
                 advance(api, at)
@@ -305,15 +335,20 @@ def _replay(args: argparse.Namespace) -> None:
                                     "Inspect the record without exposing the link."
                                 )
                 print(f"Replayed {step.type} at {at.isoformat()} (local simulation)")
+                last_event_at = max(last_event_at, at)
                 previous_offset = step.offset_s
             # One active visit per site: close this day's before the next day's schedule.
             for visit in api.get("/api/state").json()["visits"]:
                 if visit["state"] in ("open", "in_progress", "unmatched"):
                     api.post(f"/api/visits/{visit['id']}/close").raise_for_status()
         # Push the clock past the last window + grace so elapsed schedules lapse to no_observation.
-        end = start + timedelta(
-            days=args.days - 1,
-            minutes=args.window_minutes + settings.arrival_grace_minutes + 1,
+        end = max(
+            start
+            + timedelta(
+                days=args.days - 1,
+                minutes=args.window_minutes + settings.arrival_grace_minutes + 1,
+            ),
+            last_event_at + timedelta(minutes=settings.arrival_grace_minutes + 1),
         )
         api.post("/api/poll").raise_for_status()
         advance(api, end)
@@ -323,7 +358,11 @@ def _replay(args: argparse.Namespace) -> None:
             if visit["state"] in ("open", "in_progress", "unmatched"):
                 api.post(f"/api/visits/{visit['id']}/close").raise_for_status()
         if args.worker_review:
-            targets = [v for v in api.get("/api/state").json()["visits"] if v["state"] != "no_observation"]
+            targets = [
+                v
+                for v in api.get("/api/state").json()["visits"]
+                if v["state"] != "no_observation" and v.get("schedule_id")
+            ]
             if not targets:
                 sys.exit("no observed visit to post the worker review against")
             # /api/state lists newest first — review the most recent observed visit.
@@ -850,6 +889,13 @@ def main(argv: list[str] | None = None) -> None:
                 choices=("confirm", "dispute"),
                 default=None,
                 help="auto-post a worker review on the final observed visit",
+            )
+            s.add_argument(
+                "--story",
+                default=None,
+                metavar="PATTERNS",
+                help="comma list cycled across --days: observed,late,early_out,no_show,unmatched "
+                "(e.g. --days 5 --story observed,late,no_show,early_out,observed)",
             )
         s.set_defaults(fn=fn)
 
