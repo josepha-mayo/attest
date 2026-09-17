@@ -675,7 +675,14 @@ def create_app(
                     continue
                 bundle = reviews.bundle(visit.id)
                 entries.append((visit, bundle, reviews.countersign(visit.id)))
-            return build_case_pack(store, s.data_dir / "media", site, entries, redact_media=redact_media)
+            return build_case_pack(
+                store,
+                s.data_dir / "media",
+                site,
+                entries,
+                redact_media=redact_media,
+                manifest_signer=lambda m: engine.issue_export_manifest(site, m),
+            )
 
         data = await asyncio.to_thread(build)
         return Response(
@@ -910,7 +917,21 @@ def _verify_case_pack(z, public_key: str) -> tuple[bool, str]:
         media_detail = detail.split("; ", 1)[-1] if "; " in detail else detail
         lines.append(f"{vid}: {v.get('state')} ({v.get('countersign', {}).get('state')}) — {media_detail}")
     total = len(manifest.get("visits", []))
-    return True, f"case pack verified — {total} visit record(s) intact: " + "; ".join(lines)
+    sig = manifest.get("signature_receipt")
+    manifest_note = "unsigned manifest (pre-signature pack)"
+    if sig is not None:
+        ok, why = ledger.verify_receipt(Receipt.model_validate(sig), public_key=public_key)
+        if not ok:
+            return False, f"manifest signature: {why}"
+        core = {k: v for k, v in manifest.items() if k != "signature_receipt"}
+        if ledger.payload_hash(core) != sig["payload"].get("manifest_sha256"):
+            return False, "manifest content hash mismatch (manifest was altered)"
+        signed_hashes = sig["payload"].get("receipt_hashes", {})
+        listed = {v["visit_id"]: v["payload_hash"] for v in manifest.get("visits", [])}
+        if listed != signed_hashes:
+            return False, "manifest visit list disagrees with the signed export"
+        manifest_note = f"export signed: {total} record(s)"
+    return True, f"case pack verified — {total} visit record(s) intact ({manifest_note}): " + "; ".join(lines)
 
 
 __all__ = ["create_app", "VisitState"]

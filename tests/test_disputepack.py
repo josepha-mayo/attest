@@ -143,8 +143,9 @@ def _run_case(pack_dir, *args):
 def test_case_pack_verifies_offline_with_stdlib_only(case_pack):
     result = _run_case(case_pack)
     assert result.returncode == 0, result.stderr
-    assert result.stdout.count("OK   ") == 2
+    assert result.stdout.count("OK   ") == 3  # 2 visits + the manifest line
     assert "2 visit records verified" in result.stdout
+    assert "manifest: unsigned manifest" in result.stdout
 
 
 def test_case_pack_verifier_rejects_manifest_tamper(case_pack):

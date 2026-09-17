@@ -608,6 +608,47 @@ class VisitEngine:
             return self.store.receipt_for_visit(pseudo_id)
         return receipt
 
+    def issue_export_manifest(self, site: Site, manifest: dict) -> Receipt:
+        """Sign a case-pack manifest: the export itself becomes a chain event
+        naming exactly which receipt hashes it carries. A pack that drops or
+        swaps a record then fails verification — not just a missing file.
+        Idempotent per identical manifest content via an ``export:`` pseudo
+        visit_id; never a statement about physical presence."""
+        import hashlib
+        import json as _json
+
+        canonical = _json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        digest = hashlib.sha256(canonical.encode()).hexdigest()
+        pseudo_id = f"export:{site.id}:{digest[:16]}"
+        existing = self.store.receipt_for_visit(pseudo_id)
+        if existing:
+            return existing
+        prev = self.store.latest_receipt()
+        receipt = self.signer.issue(
+            visit_id=pseudo_id,
+            sequence=prev.sequence + 1 if prev else 1,
+            prev_hash=prev.payload_hash if prev else None,
+            facts={
+                "record_type": "case_export",
+                "site": {"id": site.id, "name": site.name},
+                "generated_at": manifest["generated_at"],
+                "manifest_sha256": digest,
+                "visit_count": len(manifest["visits"]),
+                "receipt_hashes": {v["visit_id"]: v["payload_hash"] for v in manifest["visits"]},
+                "media_redacted": manifest["media_redacted"],
+                "boundary": (
+                    "A signed statement that exactly these records existed at export "
+                    "time — dropping or swapping one invalidates the pack."
+                ),
+                "journal_head": self.store.journal_head(),
+            },
+        )
+        try:
+            self.store.put_receipt(receipt)
+        except sqlite3.IntegrityError:
+            return self.store.receipt_for_visit(pseudo_id)
+        return receipt
+
     def _coverage(self, visit: Visit, site: Site) -> dict | None:
         """How much of this visit's window Event History polling actually watched.
 

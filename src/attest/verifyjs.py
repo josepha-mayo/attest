@@ -215,6 +215,32 @@ function timelineSVG(p){
   }
   return s+"</svg>";
 }
+/* ---------- signed export manifest (engine.issue_export_manifest) ---------- */
+function dropKey(node,k){
+  if(node.t!=="obj")return node;
+  return{t:"obj",v:node.v.filter(([kk])=>kk!==k)};}
+async function checkManifestNode(mNode,key){
+  /* A signed manifest makes the export itself a chain event: it names exactly
+     which receipt hashes it carries, so a pack that drops or swaps a record
+     fails here — not just on a missing file. Pre-signature packs report
+     unsigned rather than failing. */
+  const m=toJS(mNode);
+  const sig=get(mNode,"signature_receipt");
+  if(!sig)return{ok:true,why:"unsigned manifest (pre-signature pack)"};
+  const c=await checkReceipt(sig);
+  if(!c.ok)return{ok:false,why:"manifest signature: "+c.why};
+  const js=toJS(sig);
+  if(key&&js.public_key!==key)return{ok:false,why:"manifest signed by a different key"};
+  const p=js.payload;
+  const h=await sha256hex(enc(canonical(dropKey(mNode,"signature_receipt"))));
+  if(h!==p.manifest_sha256)
+    return{ok:false,why:"manifest content hash mismatch (manifest was altered)"};
+  const signed=p.receipt_hashes||{};
+  const listed={};for(const v of m.visits||[])listed[v.visit_id]=v.payload_hash;
+  const same=Object.keys(listed).length===Object.keys(signed).length
+    &&Object.keys(listed).every(k=>listed[k]===signed[k]);
+  if(!same)return{ok:false,why:"manifest visit list disagrees with the signed export"};
+  return{ok:true,why:`export signed: ${Object.keys(listed).length} record(s)`};}
 /* ---------- shared pack helpers ---------- */
 function digests(o,out=[]){
   if(Array.isArray(o))o.forEach(v=>digests(v,out));
@@ -234,10 +260,11 @@ async function verifyFiles(files){
   const byName={};for(const f of files)byName[f.name]=f;
   const out=[];const say=(c,m)=>out.push(`<div class="row ${c}">${m}</div>`);
   const text=async n=>byName[n]?await byName[n].text():null;
-  const bundles=[];
+  const bundles=[];let mNode=null;
   const mText=await text("manifest.json");
   if(mText){
-    const manifest=JSON.parse(mText);
+    mNode=parseKeep(mText);
+    const manifest=toJS(mNode);
     say("ok",`manifest: ${manifest.visits?.length||0} visit(s)`);
     for(const v of manifest.visits||[]){
       const t=await text(`visits/${v.visit_id}/bundle.json`);
@@ -263,7 +290,8 @@ async function verifyFiles(files){
     const svg=timelineSVG((js.original||{}).payload||{});
     if(svg)out.push(svg);
     const redT=await text(vid==="visit"?"redaction.json":`visits/${vid}/redaction.json`);
-    const withheld=new Set(redT?(JSON.parse(redT).withheld_media_sha256||[]):[]);
+    const rj=redT?JSON.parse(redT):{};
+    const withheld=new Set(rj.withheld_digests||rj.withheld_media_sha256||[]);
     for(const d of digests(js)){
       if(withheld.has(d)){say("warn",`  media ${d.slice(0,12)}… withheld by redaction`);continue;}
       const f=byName[`media/${d}`]||byName[`visits/${vid}/media/${d}`];
@@ -272,6 +300,11 @@ async function verifyFiles(files){
       if(hh!==d){say("bad",`  media ${d.slice(0,12)}… digest mismatch`);anyBad=true;}
       else say("ok",`  media ${d.slice(0,12)}… digest matches`);
     }
+  }
+  if(mNode){
+    const mc=await checkManifestNode(mNode,key);
+    if(!mc.ok)anyBad=true;
+    say(mc.ok?"ok":"bad",`manifest: ${mc.why}`);
   }
   say(anyBad?"bad":"ok",anyBad
     ?"FAILED — do not rely on this pack"
@@ -364,11 +397,18 @@ async function renderIndex(){
       +timelineSVG(p)+"</div>");
   }
   cards.innerHTML=rows.join("");
+  let mLine="";
+  const mtag=document.getElementById("packmanifest");
+  if(mtag){
+    const mc=await checkManifestNode(parseKeep(d64(mtag.textContent)),key);
+    if(!mc.ok)anyBad=true;
+    mLine=`<div class="row ${mc.ok?"ok":"bad"}">manifest: ${mc.why}</div>`;
+  }
   verdict.innerHTML=anyBad
     ?'<div class="row bad">FAILED — '+n
-     +" record(s), at least one does not verify. Do not rely on this pack.</div>"
+     +" record(s), at least one does not verify. Do not rely on this pack.</div>"+mLine
     :`<div class="row ok">VERIFIED — ${n} record(s), chains intact under issuer key `
-     +String(key||"").slice(0,16)+"…</div>"
+     +String(key||"").slice(0,16)+"…</div>"+mLine
      +`<small>${declared} declared media digest(s)`
      +(meta.media_redacted?" — media withheld by redaction; signed digests preserved":"")+"</small>";
 }
@@ -378,15 +418,16 @@ renderIndex().catch(e=>{
 """
 
 
-def case_index_html(meta: dict, bundles: list[tuple[str, str]]) -> str:
+def case_index_html(meta: dict, bundles: list[tuple[str, str]], manifest_text: str = "") -> str:
     """Self-contained offline case browser embedded in case packs.
 
     Each visit's bundle.json text is inlined base64-encoded — immune to
     ``</script>`` breakout inside signed statement text and decoded back to the
     exact bytes, so ``parseKeep`` still canonicalizes the original literal
-    spellings. ``meta`` (site, generated_at, issuer_key, site_id) is inlined the
-    same way. Everything else — Ed25519, canonicalization, the timeline — is the
-    shared ``_JS_LIB``, so the browser *is* the verifier.
+    spellings. ``meta`` (site, generated_at, issuer_key) and the raw
+    ``manifest.json`` text — so the signed export receipt is verified too —
+    are inlined the same way. Everything else — Ed25519, canonicalization,
+    the timeline — is the shared ``_JS_LIB``, so the browser *is* the verifier.
     """
     import base64
     import json as _json
@@ -394,6 +435,8 @@ def case_index_html(meta: dict, bundles: list[tuple[str, str]]) -> str:
     enc = lambda s: base64.b64encode(s.encode()).decode()  # noqa: E731
     tags = "".join(f'<script class="bundle" data-vid="{vid}">{enc(text)}</script>\n' for vid, text in bundles)
     meta_tag = f'<script id="packmeta">{enc(_json.dumps(meta))}</script>\n'
+    if manifest_text:
+        meta_tag += f'<script id="packmanifest">{enc(manifest_text)}</script>\n'
     return (
         _HEAD.replace("<title>Attest pack verifier</title>", "<title>Attest case record</title>")
         + _INDEX_BODY

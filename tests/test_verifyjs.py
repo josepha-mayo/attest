@@ -250,7 +250,9 @@ const fs=require('fs');
 const html=fs.readFileSync(process.argv[2],'utf8');
 const bundles=[...html.matchAll(/data-vid="([^"]+)">([A-Za-z0-9+/=]+)<\\/script>/g)]
   .map(m=>({dataset:{vid:m[1]},textContent:m[2]}));
+const mm=html.match(/id="packmanifest">([A-Za-z0-9+/=]+)<\\/script>/);
 const els={packmeta:{textContent:fs.readFileSync(process.argv[4],'utf8')}};
+if(mm)els.packmanifest={textContent:mm[1]};
 const get=id=>els[id]||(els[id]={textContent:'',innerHTML:''});
 global.document={querySelectorAll:s=>s==='script.bundle'?bundles:[],getElementById:get};
 let src=fs.readFileSync(process.argv[3],'utf8');

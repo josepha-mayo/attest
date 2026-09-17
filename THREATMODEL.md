@@ -54,6 +54,8 @@ against a live store:
 | Replay a delivered webhook | `seen_requests` dedupe; delivery lands rejected in the durable inbox |
 | Insert a row out-of-band | Journal continuity and receipt-pin mismatches |
 | Drop a file from an exported pack | Verifier reports missing media or missing bundle explicitly |
+| Drop or swap a record inside a case pack | Signed `case_export` manifest names the exact visit→hash map; mismatch fails closed |
+| Rewrite a signed case manifest | `manifest_sha256` inside the signed receipt no longer matches |
 | Forge a `redaction.json` naming undelivered digests | Fails closed — withheld digests must match signed evidence |
 | Swap issuer keys in a pack | Public key is inside every signed payload and the manifest; compare out-of-band |
 

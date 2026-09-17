@@ -229,6 +229,26 @@ def redaction_for(bundle, pack_dir="."):
     return digests
 
 
+def check_manifest(manifest, key):
+    """If the manifest carries a signature_receipt, verify it: the export was
+    signed at pack time and names exactly which receipt hashes it carries —
+    a pack that drops or swaps a record fails here, not just on a missing
+    file. Older packs without a signature are reported, not failed."""
+    sig = manifest.get("signature_receipt")
+    if sig is None:
+        return True, "unsigned manifest (pre-signature pack)"
+    ok, why = check_receipt(sig, key)
+    if not ok:
+        return False, f"manifest signature: {why}"
+    core = {k: v for k, v in manifest.items() if k != "signature_receipt"}
+    digest = hashlib.sha256(canonical(core)).hexdigest()
+    if digest != sig["payload"].get("manifest_sha256"):
+        return False, "manifest content hash mismatch (manifest was altered)"
+    signed_hashes = sig["payload"].get("receipt_hashes", {})
+    listed = {v["visit_id"]: v["payload_hash"] for v in manifest.get("visits", [])}
+    if listed != signed_hashes:
+        return False, "manifest visit list disagrees with the signed export"
+    return True, f"export signed: {len(listed)} record(s)"
 '''
 
 # verify_bundle.py — verifies one pack's bundle.json (and media/ next to it).
@@ -303,8 +323,12 @@ def main():
         redact_note = f", {held} withheld" if held else ""
         print(f"OK   {vid}: {v['state']} — {v['countersign']['state']}"
               f" ({n} receipt(s), {checked} media digest(s){redact_note})")
+    mok, mwhy = check_manifest(manifest, key)
+    print(f"{'OK  ' if mok else 'FAIL'} manifest: {mwhy}")
+    if not mok:
+        failed += 1
     if failed:
-        sys.exit(f"{failed} visit record(s) failed verification")
+        sys.exit(f"{failed} record(s) failed verification")
     print(f"OK: {len(manifest['visits'])} visit records verified under issuer key")
     print(f"    {key[:16]}...")
     print("Integrity only — not identity, attendance, or absence.")
@@ -423,12 +447,16 @@ def build_case_pack(
     *,
     include_media: bool = True,
     redact_media: bool = False,
+    manifest_signer=None,
 ) -> bytes:
     """A whole-site export: every visit's signed bundle + media, one manifest of
     receipt hashes and worker stances, and a stdlib-only verifier that checks
     all of it. For disputes about a pattern of visits, not a single record.
     With ``redact_media``, media bytes are withheld per visit and the manifest
-    records the signed digests — shareable without handing over footage."""
+    records the signed digests — shareable without handing over footage.
+    ``manifest_signer`` (e.g. ``engine.issue_export_manifest``) signs the
+    manifest itself — the export becomes a chain event naming exactly which
+    records it carries, so a pack that drops or swaps one fails verification."""
     import json
     from datetime import UTC, datetime
 
@@ -457,12 +485,17 @@ def build_case_pack(
             "identity, attendance, time worked, or absence."
         ),
     }
+    if manifest_signer is not None:
+        receipt = manifest_signer(manifest)
+        if receipt is not None:
+            manifest["signature_receipt"] = receipt.model_dump(mode="json")
     from .verifyjs import VERIFY_HTML, case_index_html
 
     bundle_texts = [(visit.id, bundle.model_dump_json(indent=2)) for visit, bundle, _ in entries]
+    manifest_text = json.dumps(manifest, indent=2)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr("manifest.json", json.dumps(manifest, indent=2))
+        z.writestr("manifest.json", manifest_text)
         z.writestr("README.txt", _CASE_README)
         z.writestr("verify_case.py", _CASE_VERIFIER)
         z.writestr("verify.html", VERIFY_HTML)
@@ -476,6 +509,7 @@ def build_case_pack(
                     "media_redacted": redact_media,
                 },
                 bundle_texts,
+                manifest_text,
             ),
         )
         for (vid, text), (visit, bundle, _) in zip(bundle_texts, entries, strict=True):

@@ -615,16 +615,36 @@ def _publish_anchor(uri: str, path, payload_hash: str, region: str) -> None:
     print(f"published {uri} (sha256 {sha[:16]}…) — the checkpoint now has external custody")
 
 
+def _cli_engine(store):
+    """A real VisitEngine over an existing store for offline issuance commands
+    (coverage/digest/export signing). The Ring client is never called."""
+    from ring_sandbox import RingClient
+
+    from .engine import VisitEngine
+    from .keycustody import load_or_create_signer
+    from .media import MediaStore
+    from .summarize import TemplateSummarizer
+
+    return VisitEngine(
+        store,
+        RingClient(settings.ring_access_token, base_url=settings.ring_base_url),
+        load_or_create_signer(
+            settings.data_dir / "attest-ed25519.key",
+            kms_key_id=settings.kms_key_id,
+            aws_region=settings.aws_region,
+        ),
+        MediaStore(settings.data_dir / "media"),
+        TemplateSummarizer(settings.timezone),
+        settings,
+    )
+
+
 def _coverage_cert(args: argparse.Namespace) -> None:
     """Sign a coverage attestation for an interval: 'the pipeline checked K times,
     Ring returned M events' — a standalone answer to 'was anyone watching?'."""
     from datetime import datetime
 
-    from .engine import VisitEngine
-    from .keycustody import load_or_create_signer
-    from .media import MediaStore
     from .store import Store
-    from .summarize import TemplateSummarizer
 
     db = settings.data_dir / "attest.sqlite3"
     if not db.exists():
@@ -638,21 +658,7 @@ def _coverage_cert(args: argparse.Namespace) -> None:
         start = datetime.fromisoformat(args.start) if args.start else None
         if end is None or start is None or start.tzinfo is None or end.tzinfo is None:
             sys.exit("--from and --to must be ISO timestamps with timezone")
-        from ring_sandbox import RingClient
-
-        engine = VisitEngine(
-            store,
-            RingClient(settings.ring_access_token, base_url=settings.ring_base_url),
-            load_or_create_signer(
-                settings.data_dir / "attest-ed25519.key",
-                kms_key_id=settings.kms_key_id,
-                aws_region=settings.aws_region,
-            ),
-            MediaStore(settings.data_dir / "media"),
-            TemplateSummarizer(settings.timezone),
-            settings,
-        )
-        receipt = engine.issue_coverage_attestation(site, start, end)
+        receipt = _cli_engine(store).issue_coverage_attestation(site, start, end)
         cov = receipt.payload["coverage"]
         print(
             f"signed {receipt.id} — coverage {cov['state']} ({cov['fraction'] * 100:.1f}%), "
@@ -667,11 +673,7 @@ def _digest(args: argparse.Namespace) -> None:
     review counts by stance, and the exact receipt set summarized."""
     from datetime import datetime
 
-    from .engine import VisitEngine
-    from .keycustody import load_or_create_signer
-    from .media import MediaStore
     from .store import Store
-    from .summarize import TemplateSummarizer
 
     db = settings.data_dir / "attest.sqlite3"
     if not db.exists():
@@ -685,21 +687,7 @@ def _digest(args: argparse.Namespace) -> None:
         start = datetime.fromisoformat(args.start) if args.start else None
         if end is None or start is None or start.tzinfo is None or end.tzinfo is None:
             sys.exit("--from and --to must be ISO timestamps with timezone")
-        from ring_sandbox import RingClient
-
-        engine = VisitEngine(
-            store,
-            RingClient(settings.ring_access_token, base_url=settings.ring_base_url),
-            load_or_create_signer(
-                settings.data_dir / "attest-ed25519.key",
-                kms_key_id=settings.kms_key_id,
-                aws_region=settings.aws_region,
-            ),
-            MediaStore(settings.data_dir / "media"),
-            TemplateSummarizer(settings.timezone),
-            settings,
-        )
-        receipt = engine.issue_period_digest(site, start, end)
+        receipt = _cli_engine(store).issue_period_digest(site, start, end)
         counts = receipt.payload["counts"]
         print(
             f"signed {receipt.id} — {counts['visits_observed']} observed, "
@@ -836,12 +824,14 @@ def _export(args: argparse.Namespace) -> None:
             entries.append((visit, bundle, countersign_status(bundle)))
         if not entries:
             sys.exit(f"no signed records for {site.name} yet")
+        engine = _cli_engine(store)
         data = build_case_pack(
             store,
             settings.data_dir / "media",
             site,
             entries,
             redact_media=args.redact_media,
+            manifest_signer=lambda m: engine.issue_export_manifest(site, m),
         )
         out = Path(args.out or f"case-{site.id}.zip")
         out.write_bytes(data)
