@@ -16,7 +16,7 @@ The node smoke test (tests/test_verifyjs.py) executes the same script block
 against a real signed receipt to prove the crypto, not just the packaging.
 """
 
-VERIFY_HTML = """<!doctype html>
+_HEAD = """<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -34,19 +34,11 @@ VERIFY_HTML = """<!doctype html>
 </style>
 </head>
 <body>
-<h1>Attest pack verifier</h1>
-<p>This page verifies an exported Attest pack <strong>in your browser</strong>. Nothing is
-uploaded — all hashing and signature checks run locally, offline. Select every file from the
-extracted pack, or just bundle.json for a single-visit pack.</p>
-<div class="drop" id="drop">Drop pack files here, or <input type="file" id="pick" multiple></div>
-<div id="out"></div>
-<h2>What this does and does not establish</h2>
-<p><small>A green result proves the signed records are intact and were issued under the pinned
-issuer key — integrity, not physical truth. It does not prove anyone was present, absent, or
-honest; it proves the evidence chain was not altered after signing. Media reported as
-"withheld" was deliberately redacted, not lost.</small></p>
-<script>
-"use strict";
+"""
+
+_JS_OPEN = '<script>\n"use strict";\n'
+
+_JS_LIB = """/* ---------- canonical JSON (mirrors attest.ledger.canonical) ----------
 /* ---------- canonical JSON (mirrors attest.ledger.canonical) ----------
    Parses the document keeping every string/number literal verbatim, then
    re-emits with sorted keys and no whitespace — identical bytes to
@@ -152,16 +144,24 @@ async function checkReceipt(rNode){
   const ok=await edVerify(b64d(r.signature),b64d(r.public_key),hex2b(r.payload_hash));
   return ok?{ok:true}:{ok:false,why:"signature invalid"};}
 async function checkChain(rNodes,key){
-  const rs=rNodes.map(n=>({n,js:toJS(n)})).sort((a,b)=>a.js.sequence-b.js.sequence);
-  let prev=null,seq=1;
-  for(const{n,js:r}of rs){
+  /* rNodes: [original, ...reviews] in bundle order — mirrors
+     attest.reviews.verify_bundle. The original's sequence is a GLOBAL chain
+     position that legitimately interleaves with other receipts (other visits,
+     coverage certs, anchors, digests) and its prev_hash may point outside the
+     bundle. Review receipts are numbered within this visit and each must link
+     its prev_hash to the previous receipt — rev1 anchored on the original. */
+  let prev=null;
+  for(let i=0;i<rNodes.length;i++){
+    const r=toJS(rNodes[i]);
     if(key&&r.public_key!==key)return{ok:false,why:`receipt #${r.sequence}: different issuer key`};
-    const c=await checkReceipt(n);
+    const c=await checkReceipt(rNodes[i]);
     if(!c.ok)return{ok:false,why:`receipt #${r.sequence}: ${c.why}`};
-    if(r.sequence!==seq)return{ok:false,why:`receipt #${r.sequence}: gap in sequence`};
-    if(r.prev_hash!==prev)return{ok:false,why:`receipt #${r.sequence}: chain broken`};
-    prev=r.payload_hash;seq++;}
-  return{ok:true,why:`${rs.length} receipt(s), chain intact`};}
+    if(i>0&&r.sequence!==i)
+      return{ok:false,why:`review #${r.sequence}: sequence disagrees with revision`};
+    if(prev!==null&&r.prev_hash!==prev)
+      return{ok:false,why:`receipt #${r.sequence}: review chain broken`};
+    prev=r.payload_hash;}
+  return{ok:true,why:`${rNodes.length} receipt(s), review chain intact`};}
 /* ---------- timeline renderer (mirrors attest.timeline semantics) ---------- */
 const _ESC={"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"};
 function esc(s){return String(s).replace(/[&<>"']/g,c=>_ESC[c]);}
@@ -215,13 +215,21 @@ function timelineSVG(p){
   }
   return s+"</svg>";
 }
-/* ---------- pack driver ---------- */
+/* ---------- shared pack helpers ---------- */
 function digests(o,out=[]){
   if(Array.isArray(o))o.forEach(v=>digests(v,out));
   else if(o&&typeof o==="object"){
     if(typeof o.media_sha256==="string")out.push(o.media_sha256);
     for(const v of Object.values(o))digests(v,out);}
   return out;}
+function receiptNodes(root){
+  const rNodes=[get(root,"original")];
+  const rev=get(root,"reviews");
+  if(rev&&rev.t==="arr")for(const e of rev.v)rNodes.push(get(e,"receipt")||e);
+  return rNodes.filter(Boolean);}
+"""
+
+_VERIFY_DRIVER = """/* ---------- pack driver ---------- */
 async function verifyFiles(files){
   const byName={};for(const f of files)byName[f.name]=f;
   const out=[];const say=(c,m)=>out.push(`<div class="row ${c}">${m}</div>`);
@@ -245,10 +253,7 @@ async function verifyFiles(files){
   }
   let anyBad=false,key=null;
   for(const[vid,root]of bundles){
-    const rNodes=[get(root,"original")];
-    const rev=get(root,"reviews");
-    if(rev&&rev.t==="arr")for(const e of rev.v)rNodes.push(get(e,"receipt")||e);
-    const filtered=rNodes.filter(Boolean);
+    const filtered=receiptNodes(root);
     if(!key)key=toJS(get(filtered[0],"public_key"));
     const c=await checkChain(filtered,key);
     if(!c.ok)anyBad=true;
@@ -283,10 +288,123 @@ dz.ondragover=e=>{e.preventDefault();dz.classList.add("over");};
 dz.ondragleave=()=>dz.classList.remove("over");
 dz.ondrop=e=>{e.preventDefault();dz.classList.remove("over");go(e.dataTransfer.files);};
 document.getElementById("pick").onchange=e=>go(e.target.files);
-</script>
-</body>
-</html>
 """
+
+_VERIFY_BODY = """<h1>Attest pack verifier</h1>
+<p>This page verifies an exported Attest pack <strong>in your browser</strong>. Nothing is
+uploaded — all hashing and signature checks run locally, offline. Select every file from the
+extracted pack, or just bundle.json for a single-visit pack.</p>
+<div class="drop" id="drop">Drop pack files here, or <input type="file" id="pick" multiple></div>
+<div id="out"></div>
+<h2>What this does and does not establish</h2>
+<p><small>A green result proves the signed records are intact and were issued under the pinned
+issuer key — integrity, not physical truth. It does not prove anyone was present, absent, or
+honest; it proves the evidence chain was not altered after signing. Media reported as
+"withheld" was deliberately redacted, not lost.</small></p>
+"""
+
+VERIFY_HTML = _HEAD + _VERIFY_BODY + _JS_OPEN + _JS_LIB + _VERIFY_DRIVER + "</script>\n</body>\n</html>\n"
+
+_INDEX_BODY = """<h1 id="site">Attest case record</h1>
+<p id="meta" class="muted"></p>
+<div id="verdict"></div>
+<div id="cards"></div>
+<h2>Verify the media bytes</h2>
+<p><small>This page verifies every signed record and renders its timeline offline.
+Signed media digests are listed per record; to check the media bytes themselves, open
+<code>verify.html</code> and drop every file from this extracted pack onto it.</small></p>
+<h2>What this does and does not establish</h2>
+<p><small>A green result proves the signed records are intact and were issued under the pinned
+issuer key — integrity, not physical truth. It does not prove anyone was present, absent, or
+honest; it proves the evidence chain was not altered after signing.</small></p>
+<style>
+ .card{border:1px solid #ddd;border-radius:10px;padding:.8rem 1rem;margin:0 0 1rem}
+ .muted{color:#666}
+ .pill{display:inline-block;border-radius:99px;padding:.05rem .6rem;font-size:.8rem;
+   background:#eef1f6;border:1px solid #ccd3df}
+</style>
+"""
+
+_INDEX_DRIVER = """/* ---------- index driver: inlined pack data ---------- */
+const d64=s=>new TextDecoder().decode(Uint8Array.from(atob(s),c=>c.charCodeAt(0)));
+const STATE_CLS={closed:"ok",no_observation:"warn",open:"warn",unmatched:"warn"};
+async function renderIndex(){
+  const meta=JSON.parse(d64(document.getElementById("packmeta").textContent));
+  document.getElementById("site").textContent=
+    "Attest case record — "+(meta.site&&meta.site.name||meta.site_id||"site");
+  document.getElementById("meta").textContent=
+    "Generated "+meta.generated_at+" · issuer key "+String(meta.issuer_key||"").slice(0,16)+"…";
+  const cards=document.getElementById("cards");
+  const verdict=document.getElementById("verdict");
+  let key=null,anyBad=false,n=0,declared=0;
+  const rows=[];
+  for(const tag of document.querySelectorAll("script.bundle")){
+    const root=parseKeep(d64(tag.textContent));
+    const js=toJS(root);
+    const filtered=receiptNodes(root);
+    if(!key)key=toJS(get(filtered[0],"public_key"));
+    const c=await checkChain(filtered,key);
+    if(!c.ok)anyBad=true;
+    n++;
+    const p=(js.original||{}).payload||{};
+    const stance=js.countersign_status?js.countersign_status.state:null;
+    const ds=digests(js);declared+=ds.length;
+    const cls=c.ok?(STATE_CLS[p.state]||"ok"):"bad";
+    const win=p.schedule
+      ?esc(p.schedule.window_start||"")+" → "+esc(p.schedule.window_end||"")
+      :"unscheduled";
+    rows.push(
+      `<div class="card"><div class="row ${cls}">`
+      +`<span class="pill">${esc(p.state||"?")}</span> `
+      +`<strong>${esc(tag.dataset.vid)}</strong>`
+      +(p.scheduled_worker?` · worker ${esc(p.scheduled_worker.name||"")}`:"")
+      +(stance?` · statement: ${esc(stance)}`:"")
+      +` — ${c.why}</div>`
+      +`<small>${win} · ${ds.length} media digest(s)</small>`
+      +timelineSVG(p)+"</div>");
+  }
+  cards.innerHTML=rows.join("");
+  verdict.innerHTML=anyBad
+    ?'<div class="row bad">FAILED — '+n
+     +" record(s), at least one does not verify. Do not rely on this pack.</div>"
+    :`<div class="row ok">VERIFIED — ${n} record(s), chains intact under issuer key `
+     +String(key||"").slice(0,16)+"…</div>"
+     +`<small>${declared} declared media digest(s)`
+     +(meta.media_redacted?" — media withheld by redaction; signed digests preserved":"")+"</small>";
+}
+renderIndex().catch(e=>{
+  document.getElementById("verdict").innerHTML=
+    "<div class='row bad'>index error: "+e.message+"</div>";});
+"""
+
+
+def case_index_html(meta: dict, bundles: list[tuple[str, str]]) -> str:
+    """Self-contained offline case browser embedded in case packs.
+
+    Each visit's bundle.json text is inlined base64-encoded — immune to
+    ``</script>`` breakout inside signed statement text and decoded back to the
+    exact bytes, so ``parseKeep`` still canonicalizes the original literal
+    spellings. ``meta`` (site, generated_at, issuer_key, site_id) is inlined the
+    same way. Everything else — Ed25519, canonicalization, the timeline — is the
+    shared ``_JS_LIB``, so the browser *is* the verifier.
+    """
+    import base64
+    import json as _json
+
+    enc = lambda s: base64.b64encode(s.encode()).decode()  # noqa: E731
+    tags = "".join(f'<script class="bundle" data-vid="{vid}">{enc(text)}</script>\n' for vid, text in bundles)
+    meta_tag = f'<script id="packmeta">{enc(_json.dumps(meta))}</script>\n'
+    return (
+        _HEAD.replace("<title>Attest pack verifier</title>", "<title>Attest case record</title>")
+        + _INDEX_BODY
+        + meta_tag
+        + tags
+        + _JS_OPEN
+        + _JS_LIB
+        + _INDEX_DRIVER
+        + "</script>\n</body>\n</html>\n"
+    )
+
 
 if __name__ == "__main__":  # pragma: no cover - developer tool
     import sys

@@ -118,6 +118,7 @@ document.getElementById('close-record').onclick = async () => {
 <p class="{{ 'ok' if review_verification[0] else 'bad' }}">{{ review_verification[1] }}</p>
 <a class="btn secondary" href="/visits/{{ visit.id }}/bundle.json">Export original + review chain</a>
 <a class="btn secondary" href="/visits/{{ visit.id }}/pack.zip" title="bundle + media + offline verifier in one zip">Download dispute pack</a>
+<a class="btn secondary" href="/visits/{{ visit.id }}/pack.zip?redact_media=1" title="media withheld, signed digests kept">Privacy export</a>
 {% if receipt.payload.scheduled_worker %}
 <button class="btn secondary" id="issue-review">Request worker's account</button>
 <a id="worker-review-link" style="display:block;overflow-wrap:anywhere;color:var(--accent)"></a>

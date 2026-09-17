@@ -27,16 +27,19 @@ def _script() -> str:
 
 
 def _chain():
+    """A bundle-shaped pair: the original carries a global chain sequence (it
+    legitimately interleaves with coverage certs/anchors/digests in the store)
+    while the review is numbered within the visit — sequence == revision."""
     s = Signer.ephemeral()
     r1 = s.issue(
         visit_id="vis_a",
-        sequence=1,
-        prev_hash=None,
+        sequence=7,
+        prev_hash="aa" * 32,
         facts={"record_type": "visit", "coverage": {"fraction": 0.047619047619047616}},
     )
     r2 = s.issue(
         visit_id="vis_a",
-        sequence=2,
+        sequence=1,
         prev_hash=r1.payload_hash,
         facts={"record_type": "review", "statement": "tést — non-ascii"},
     )
@@ -183,3 +186,93 @@ def test_verify_html_is_self_contained():
     assert "http://" not in VERIFY_HTML and "https://" not in VERIFY_HTML  # no CDN
     assert "crypto.subtle" in VERIFY_HTML  # real hashing, not a stub
     assert "BigInt" in VERIFY_HTML or "n<<" in VERIFY_HTML  # BigInt ed25519
+
+
+def _case_pack(engine, store, household, schedule, t0, tmp_path):
+    from ring_sandbox import WebhookEvent, webhooks
+
+    from attest.disputepack import build_case_pack
+    from attest.reviews import ReviewService, countersign_status
+
+    event = WebhookEvent.model_validate(
+        webhooks.build_event(
+            event_type="button_press",
+            device_id=household[2].id,
+            occurred_at=t0,
+        )
+    )
+    visit = engine.ingest(event).visit
+    engine.close_for_review(visit.id)
+    bundle = ReviewService(store, engine.signer, engine.clock).bundle(visit.id)
+    site = store.sites()[0]
+    data = build_case_pack(
+        store,
+        tmp_path / "m",
+        site,
+        [(visit, bundle, countersign_status(bundle))],
+    )
+    return zipfile.ZipFile(io.BytesIO(data))
+
+
+def test_case_pack_embeds_offline_record_browser(engine, store, household, schedule, t0, tmp_path):
+    """index.html is the pack's front page: inlined base64 bundles (immune to
+    </script> breakout inside signed statements) + the same verifier JS."""
+    import base64
+    import re
+
+    z = _case_pack(engine, store, household, schedule, t0, tmp_path)
+    names = z.namelist()
+    assert "index.html" in names
+    html = z.read("index.html").decode()
+    assert "http://" not in html and "https://" not in html
+    assert 'id="packmeta"' in html
+    tags = re.findall(r'data-vid="(vis_[0-9a-f]+)">([A-Za-z0-9+/=]+)</script>', html)
+    assert len(tags) == 1
+    vid, b64 = tags[0]
+    decoded = base64.b64decode(b64).decode()
+    assert decoded == z.read(f"visits/{vid}/bundle.json").decode()
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_case_pack_index_verifies_records_in_browser(engine, store, household, schedule, t0, tmp_path):
+    """Run index.html's own script under node with a minimal DOM stub — the
+    embedded driver must verify the real inlined bundle and report VERIFIED."""
+    import re
+
+    z = _case_pack(engine, store, household, schedule, t0, tmp_path)
+    html = z.read("index.html").decode()
+    meta = re.search(r'id="packmeta">([A-Za-z0-9+/=]+)</script>', html).group(1)
+    script = re.search(r'<script>\n("use strict";.*?)</script>', html, re.S).group(1)
+    (tmp_path / "idx.js").write_text(script, encoding="utf-8")
+    (tmp_path / "meta.b64").write_text(meta, encoding="utf-8")
+    driver = """
+const fs=require('fs');
+const html=fs.readFileSync(process.argv[2],'utf8');
+const bundles=[...html.matchAll(/data-vid="([^"]+)">([A-Za-z0-9+/=]+)<\\/script>/g)]
+  .map(m=>({dataset:{vid:m[1]},textContent:m[2]}));
+const els={packmeta:{textContent:fs.readFileSync(process.argv[4],'utf8')}};
+const get=id=>els[id]||(els[id]={textContent:'',innerHTML:''});
+global.document={querySelectorAll:s=>s==='script.bundle'?bundles:[],getElementById:get};
+let src=fs.readFileSync(process.argv[3],'utf8');
+src=src.replace(/renderIndex\\(\\)\\.catch[\\s\\S]*$/,'');
+eval(src+';globalThis.__r=renderIndex;');
+__r().then(()=>{
+  console.log('verdict:',els.verdict.innerHTML.slice(0,120));
+  console.log('cards:',(els.cards.innerHTML.match(/class="card"/g)||[]).length);
+  console.log('timeline:',els.cards.innerHTML.includes('<svg'));
+});
+"""
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+    (tmp_path / "index.html").write_text(html, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "index.html", "idx.js", "meta.b64"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout
+    assert "VERIFIED" in out, out
+    assert "cards: 1" in out, out
+    assert "timeline: true" in out, out

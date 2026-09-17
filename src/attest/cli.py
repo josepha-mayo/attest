@@ -471,6 +471,15 @@ def _demo(args: argparse.Namespace) -> None:
     print(f"  dashboard   http://admin:{token}@127.0.0.1:{app_sock.getsockname()[1]}/", flush=True)
     print(f"  admin user  admin / {token}", flush=True)
     print(f"  data dir    {data_dir}", flush=True)
+    print("", flush=True)
+    print("Three-minute tour:", flush=True)
+    print("  1. Open the dashboard — 'Needs review' triages the week.", flush=True)
+    print("  2. Click a visit — the strip shows schedule vs. coverage vs. evidence.", flush=True)
+    print("  3. Download the dispute pack, extract, open index.html", flush=True)
+    print("     or verify.html — they self-verify in the browser, no install.", flush=True)
+    print("  4. In another terminal: attest attack-demo  (7 tamper attempts, all caught)", flush=True)
+    print("  5. attest status  audits the whole runtime offline.", flush=True)
+    print("", flush=True)
     print("Press Ctrl+C to stop.", flush=True)
     try:
         while True:
