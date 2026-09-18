@@ -419,6 +419,7 @@ def _redaction_marker(bundle: ReviewBundle) -> str:
             ),
         },
         indent=2,
+        ensure_ascii=False,
     )
 
 
@@ -502,7 +503,7 @@ def build_case_pack(
     from .verifyjs import VERIFY_HTML, case_index_html
 
     bundle_texts = [(visit.id, bundle.model_dump_json(indent=2)) for visit, bundle, _ in entries]
-    manifest_text = json.dumps(manifest, indent=2)
+    manifest_text = json.dumps(manifest, indent=2, ensure_ascii=False)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("manifest.json", manifest_text)

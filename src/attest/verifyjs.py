@@ -81,7 +81,11 @@ function toJS(n){
   if(n.t==="arr")return n.v.map(toJS);
   const o={};for(const[k,v]of n.v)o[k]=toJS(v);return o;}
 function canonical(n){
-  if(n.t==="lit")return n.r;
+  /* Strings re-serialize through JSON.stringify — the decoded value's canonical
+     spelling — so `\u2014` and `—` in a file canonicalize identically, matching
+     Python's ensure_ascii=False. Non-string literals keep the file's verbatim
+     spelling (float spellings like 34.0 must survive). */
+  if(n.t==="lit")return n.str!==undefined?JSON.stringify(n.str):n.r;
   if(n.t==="arr")return "["+n.v.map(canonical).join(",")+"]";
   const keys=n.v.map(([k])=>k).sort();
   const m=new Map(n.v);
@@ -372,12 +376,55 @@ honest; it proves the evidence chain was not altered after signing.</small></p>
  .muted{color:#666}
  .pill{display:inline-block;border-radius:99px;padding:.05rem .6rem;font-size:.8rem;
    background:#eef1f6;border:1px solid #ccd3df}
+ .corr{width:100%;border-collapse:collapse;margin-top:.5rem;font-size:.85rem}
+ .corr td{border-top:1px solid #eee;padding:.15rem .4rem .15rem 0;vertical-align:top}
+ .corr td:first-child{white-space:nowrap;font-weight:600;width:1%}
 </style>
 """
 
 _INDEX_DRIVER = """/* ---------- index driver: inlined pack data ---------- */
 const d64=s=>new TextDecoder().decode(Uint8Array.from(atob(s),c=>c.charCodeAt(0)));
 const STATE_CLS={closed:"ok",no_observation:"warn",open:"warn",unmatched:"warn"};
+const hhmm=s=>s?String(s).slice(11,16):"";
+/* corroboration table — mirrors attest.corroborate semantics: each row says
+   what a source reported and what it establishes; silence is labelled. */
+function corroborationHTML(p){
+  const ev=p.evidence||[],site=p.site||{},cov=p.history_poll_coverage||{};
+  const cam=ev.filter(e=>e.device===site.door_camera_id);
+  const sen=ev.filter(e=>site.door_sensor_id&&e.device===site.door_sensor_id);
+  const snaps=ev.filter(e=>e.media_sha256);
+  const hist=p.ring_history||[];
+  const span=es=>es.length?hhmm(es[0].at)+"–"+hhmm(es[es.length-1].at)+" UTC":"";
+  const COV={observed:"fully watched",observed_with_events:"watched — events seen",
+    partial:"partially watched",blind:"blind — polls failed",no_polls:"not polled"};
+  const rows=[
+    ["Scheduled expectation",p.schedule
+      ?hhmm(p.schedule.window_start)+"–"+hhmm(p.schedule.window_end):"unscheduled",
+      "What was planned — never what happened"],
+    ["Camera/doorbell",cam.length?cam.length+" event(s) "+span(cam):"silent",
+      "Device-observed activity timestamps only"],
+    ["Contact sensor",!site.door_sensor_id?"not bound"
+      :sen.length?sen.length+" event(s) "+span(sen):"silent",
+      "Open/close transitions at the door"],
+    ["Worker self-report",p.checked_in_at?"check-in "+hhmm(p.checked_in_at):"none received",
+      "The worker's account — a claim, not verification"],
+    ["Media on record",snaps.length+" snapshot(s)",
+      snaps.length?"sha256 digests signed in receipt":"Bytes received at fetch time, hashed at ingest"],
+    ["Ring Event History",hist.length?hist.length+" corroborating entries":"none in payload",
+      "Ring-side record independent of delivery path"],
+    ["Pipeline coverage",(COV[cov.state]||"not polled")
+      +(cov.fraction!=null?" · "+Math.round(cov.fraction*100)+"%":""),
+      "How much silence is meaningful vs. unwatched"],
+  ];
+  if(p.checked_in_at&&cam.length){
+    const d=(new Date(p.checked_in_at)-new Date(cam[0].at))/60000;
+    if(Math.abs(d)>=10)rows.push(["Source divergence",Math.round(Math.abs(d))+" min apart",
+      "first device observation vs. worker check-in — neither source is authoritative"]);
+  }
+  return '<table class="corr">'+rows.map(r=>
+    `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td><td class="muted"><small>${esc(r[2])}</small></td></tr>`
+  ).join("")+"</table>";
+}
 async function renderIndex(){
   const meta=JSON.parse(d64(document.getElementById("packmeta").textContent));
   document.getElementById("site").textContent=
@@ -412,7 +459,7 @@ async function renderIndex(){
       +(stance?` · statement: ${esc(stance)}`:"")
       +` — ${c.why}</div>`
       +`<small>${win} · ${ds.length} media digest(s)</small>`
-      +timelineSVG(p)+"</div>");
+      +timelineSVG(p)+corroborationHTML(p)+"</div>");
   }
   cards.innerHTML=rows.join("");
   let mLine="";

@@ -51,9 +51,9 @@ def test_pack_verifies_offline_with_stdlib_only(pack):
 
 def test_pack_verifier_rejects_tampered_payload(pack):
     bundle_path = pack / "bundle.json"
-    bundle = json.loads(bundle_path.read_text())
+    bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
     bundle["original"]["payload"]["summary"] = "attendance confirmed"  # forged claim
-    bundle_path.write_text(json.dumps(bundle))
+    bundle_path.write_text(json.dumps(bundle), encoding="utf-8")
     result = _run(pack)
     assert result.returncode != 0
     assert "payload hash mismatch" in result.stderr
@@ -61,7 +61,7 @@ def test_pack_verifier_rejects_tampered_payload(pack):
 
 def test_pack_verifier_rejects_key_swap(pack):
     bundle_path = pack / "bundle.json"
-    bundle = json.loads(bundle_path.read_text())
+    bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
     result = _run(pack, "--key", bundle["reviews"][0]["receipt"]["public_key"])
     assert result.returncode == 0
     # a foreign key must fail pinning even though the pack is self-consistent
@@ -99,9 +99,9 @@ def test_pack_verifier_handles_nonascii_statement(engine, store, household, t0, 
 
 def test_pack_verifier_rejects_broken_chain(pack):
     bundle_path = pack / "bundle.json"
-    bundle = json.loads(bundle_path.read_text())
+    bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
     bundle["reviews"][0]["revision"] = 7
-    bundle_path.write_text(json.dumps(bundle))
+    bundle_path.write_text(json.dumps(bundle), encoding="utf-8")
     result = _run(pack)
     assert result.returncode != 0
     assert "sequence or previous hash mismatch" in result.stderr
@@ -150,9 +150,9 @@ def test_case_pack_verifies_offline_with_stdlib_only(case_pack):
 
 def test_case_pack_verifier_rejects_manifest_tamper(case_pack):
     manifest_path = case_pack / "manifest.json"
-    manifest = json.loads(manifest_path.read_text())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["visits"][0]["payload_hash"] = "0" * 64
-    manifest_path.write_text(json.dumps(manifest))
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     result = _run_case(case_pack)
     assert result.returncode != 0
     assert "manifest hash disagrees" in result.stdout
@@ -198,9 +198,9 @@ def test_signed_manifest_rejects_dropped_record(case_pack_signed):
     """Removing a visit entry rewrites the manifest — the content hash inside
     the signed export receipt must catch it even though every bundle is intact."""
     manifest_path = case_pack_signed / "manifest.json"
-    manifest = json.loads(manifest_path.read_text())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["visits"].pop()
-    manifest_path.write_text(json.dumps(manifest))
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     result = _run_case(case_pack_signed)
     assert result.returncode != 0
     assert "manifest content hash mismatch" in result.stdout
@@ -214,13 +214,13 @@ def test_signed_manifest_rejects_swapped_hash(case_pack_signed):
     import json as _json
 
     manifest_path = case_pack_signed / "manifest.json"
-    manifest = json.loads(manifest_path.read_text())
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["visits"][0]["payload_hash"] = "0" * 64
     sig = manifest["signature_receipt"]
     core = {k: v for k, v in manifest.items() if k != "signature_receipt"}
     canonical = _json.dumps(core, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     sig["payload"]["manifest_sha256"] = hashlib.sha256(canonical.encode()).hexdigest()
-    manifest_path.write_text(_json.dumps(manifest))
+    manifest_path.write_text(_json.dumps(manifest), encoding="utf-8")
     result = _run_case(case_pack_signed)
     assert result.returncode != 0
     assert "payload hash mismatch" in result.stdout or "disagrees" in result.stdout
@@ -229,14 +229,14 @@ def test_signed_manifest_rejects_swapped_hash(case_pack_signed):
 def test_case_verifier_parity_rejects_forged_entry(case_pack):
     """Parity with reviews.verify_bundle: an entry whose id/visit_id doesn't
     match its receipt fails, not just on revision/prev_hash."""
-    manifest = json.loads((case_pack / "manifest.json").read_text())
+    manifest = json.loads((case_pack / "manifest.json").read_text(encoding="utf-8"))
     vid = manifest["visits"][0]["visit_id"]
     bundle_path = case_pack / "visits" / vid / "bundle.json"
-    bundle = json.loads(bundle_path.read_text())
+    bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
     if not bundle["reviews"]:
         pytest.skip("fixture has no review entries")
     bundle["reviews"][0]["id"] = "rcpt_forged"
-    bundle_path.write_text(json.dumps(bundle))
+    bundle_path.write_text(json.dumps(bundle), encoding="utf-8")
     result = _run_case(case_pack)
     assert result.returncode != 0
     assert "identity does not match" in result.stdout
@@ -266,7 +266,7 @@ def test_case_pack_redacted_media_verifies(engine, store, household, schedule, t
     out = tmp_path / "case-redacted"
     zipfile.ZipFile(io.BytesIO(data)).extractall(out)
     assert not (out / "visits" / visit.id / "media").exists()
-    assert json.loads((out / "manifest.json").read_text())["media_redacted"] is True
+    assert json.loads((out / "manifest.json").read_text(encoding="utf-8"))["media_redacted"] is True
     result = _run_case(out)
     assert result.returncode == 0, result.stderr
     assert "withheld" in result.stdout
@@ -292,9 +292,9 @@ def test_case_pack_verifier_rejects_bogus_redaction(engine, store, household, sc
     out = tmp_path / "case-badredact"
     zipfile.ZipFile(io.BytesIO(data)).extractall(out)
     redact_path = out / "visits" / visit.id / "redaction.json"
-    marker = json.loads(redact_path.read_text())
+    marker = json.loads(redact_path.read_text(encoding="utf-8"))
     marker["withheld_digests"] = ["f" * 64]
-    redact_path.write_text(json.dumps(marker))
+    redact_path.write_text(json.dumps(marker), encoding="utf-8")
     result = _run_case(out)
     assert result.returncode != 0
     assert "not in the signed evidence" in result.stdout

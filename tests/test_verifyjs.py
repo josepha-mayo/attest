@@ -235,6 +235,7 @@ def _case_pack(engine, store, household, schedule, t0, tmp_path):
         tmp_path / "m",
         site,
         [(visit, bundle, countersign_status(bundle))],
+        manifest_signer=lambda m: engine.issue_export_manifest(site, m),
     )
     return zipfile.ZipFile(io.BytesIO(data))
 
@@ -287,6 +288,8 @@ __r().then(()=>{
   console.log('verdict:',els.verdict.innerHTML.slice(0,120));
   console.log('cards:',(els.cards.innerHTML.match(/class="card"/g)||[]).length);
   console.log('timeline:',els.cards.innerHTML.includes('<svg'));
+  console.log('corr:',(els.cards.innerHTML.match(/class="corr"/g)||[]).length);
+  console.log('corrrows:',els.cards.innerHTML.includes('Pipeline coverage'));
 });
 """
     (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
@@ -303,3 +306,5 @@ __r().then(()=>{
     assert "VERIFIED" in out, out
     assert "cards: 1" in out, out
     assert "timeline: true" in out, out
+    assert "corr: 1" in out, out
+    assert "corrrows: true" in out, out
