@@ -471,6 +471,7 @@ def _demo(args: argparse.Namespace) -> None:
     print("  5. attest status       — audits the whole runtime offline", flush=True)
     print("  6. attest triage       — the week's brief (agent when AWS is reachable)", flush=True)
     print("  7. attest verify <zip> — verifies a downloaded pack without unzipping", flush=True)
+    print("  8. attest explain <visit_id> — one record's full provenance, in words", flush=True)
     print("", flush=True)
     print("Press Ctrl+C to stop.", flush=True)
     try:
@@ -1047,6 +1048,70 @@ def _deliveries(args: argparse.Namespace) -> None:
         inbox.close()
 
 
+def _explain(args: argparse.Namespace) -> None:
+    """Explain one record in human terms: every source's account side by side,
+    the signed anchors, the review chain, and the derived stance — the visit
+    page as text for people who live in a terminal."""
+    from .corroborate import corroboration
+    from .reviews import ReviewService, verify_bundle
+    from .store import Store
+
+    db = settings.data_dir / "attest.sqlite3"
+    if not db.exists():
+        sys.exit(f"no store at {db}")
+    store = Store(db)
+    try:
+        visit = store.visit(args.visit)
+        if visit is None:
+            sys.exit(f"no visit {args.visit}")
+        site = store.site(visit.site_id)
+        schedule = store.schedule(visit.schedule_id) if visit.schedule_id else None
+        evidence = store.evidence_for(visit.id)
+        receipt = store.receipt_for_visit(visit.id)
+        engine = _cli_engine(store)
+        reviews = ReviewService(store, engine.signer, engine.clock)
+
+        print(f"{visit.id} — {visit.state.value} at {site.name if site else visit.site_id}")
+        if visit.arrived_at:
+            print(f"  observed {visit.arrived_at.isoformat()} -> {visit.last_activity_at.isoformat()}")
+        for f in visit.flags:
+            print(f"  review note: {f.code} ({f.severity})")
+        print()
+        print("Source-by-source:")
+        for row in corroboration(visit, site, schedule, evidence, receipt):
+            detail = f" — {row['detail']}" if row["detail"] else ""
+            print(f"  {row['source']:<28} {row['status']}{detail}")
+            print(f"  {'':<28} ({row['establishes']})")
+        print()
+        if receipt:
+            print(f"Signed receipt {receipt.id} · seq {receipt.sequence} · {receipt.payload_hash[:16]}…")
+            digests = receipt.payload.get("media_digests") or []
+            if digests:
+                print(f"  media digests signed: {len(digests)}")
+        else:
+            print("No signed receipt — record still open.")
+        bundle = reviews.bundle(visit.id) if receipt else None
+        if bundle:
+            ok, why = verify_bundle(bundle, public_key=bundle.original.public_key)
+            print(f"Review chain: {'OK' if ok else 'FAILED'} — {why}")
+            for r in bundle.reviews:
+                rv = r.receipt.payload["review"]
+                actor = r.receipt.payload["actor"]
+                label = (
+                    f"resolution: {rv['outcome'].replace('_', ' ')}"
+                    if rv.get("kind") == "resolution"
+                    else rv.get("decision", "statement")
+                )
+                print(f"  rev {r.revision}: {label} — {actor.get('name', '?')} ({actor.get('role')})")
+            status = reviews.countersign(visit.id)
+            print(f"Derived stance: {status['state']} — {status['detail']}")
+        print()
+        print("Boundary: sources establish what they reported; the signature proves")
+        print("the record is intact — never identity, attendance, or physical truth.")
+    finally:
+        store.close()
+
+
 def _retention(args: argparse.Namespace) -> None:
     """Print a non-destructive lifecycle report for the local runtime. Deletes nothing."""
     from . import retention
@@ -1081,6 +1146,12 @@ def _retention(args: argparse.Namespace) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
+    # Windows consoles default to cp1252 — em-dashes and ellipses in output
+    # would crash mid-print. UTF-8 bytes degrade to mojibake there instead of
+    # a UnicodeEncodeError, and stay correct when redirected to a file.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     p = argparse.ArgumentParser(
         prog="attest", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -1203,6 +1274,13 @@ def main(argv: list[str] | None = None) -> None:
         help="agentic weekly triage — a Strands agent reads the ledger via tools, or a deterministic brief",
     )
     s.set_defaults(fn=_triage)
+
+    s = sub.add_parser(
+        "explain",
+        help="explain one record in human terms — every source's account, anchors, and stance",
+    )
+    s.add_argument("visit", help="visit id")
+    s.set_defaults(fn=_explain)
 
     s = sub.add_parser("deliveries", help="show durable webhook inbox state, or requeue failed deliveries")
     s.add_argument(

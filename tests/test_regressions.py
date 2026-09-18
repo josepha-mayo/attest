@@ -256,3 +256,66 @@ def test_cli_verify_real_pack(tmp_path, engine, store, household, schedule, t0):
     )
     assert rc.returncode == 0, rc.stderr + rc.stdout
     assert "case pack verified" in rc.stdout
+
+
+def test_cli_explain_narrates_a_record(tmp_path, monkeypatch, ring_world, ring_client, settings, t0):
+    """`attest explain` renders source-by-source corroboration, the signed
+    anchor, the review chain, and the derived stance for one record."""
+    import argparse
+    from datetime import timedelta
+
+    from ring_sandbox.world import DeviceKind
+
+    from attest import cli
+    from attest.engine import VisitEngine
+    from attest.ledger import Signer
+    from attest.media import MediaStore
+    from attest.models import Role, Schedule, Site, Worker
+    from attest.store import Store
+    from attest.summarize import TemplateSummarizer
+
+    store = Store(tmp_path / "attest.sqlite3")
+    cam = next(d for d in ring_world.devices.values() if d.kind == DeviceKind.DOORBELL)
+    site = store.put_site(
+        Site(name="Alvarez residence", ring_account_id=ring_world.account_id, door_camera_id=cam.id)
+    )
+    worker = store.put_worker(Worker(name="Maria Chen", role=Role.HOME_HEALTH_AIDE, checkin_token="t"))
+    store.put_schedule(
+        Schedule(
+            site_id=site.id,
+            worker_id=worker.id,
+            window_start=t0,
+            window_end=t0 + timedelta(hours=1),
+            expected_minutes=60,
+        )
+    )
+    engine = VisitEngine(
+        store,
+        ring_client,
+        Signer.ephemeral(),
+        MediaStore(tmp_path / "media"),
+        TemplateSummarizer("UTC"),
+        settings,
+    )
+    visit = engine.ingest(event(cam, t0 + timedelta(minutes=2))).visit
+    engine.close_for_review(visit.id)
+
+    monkeypatch.setattr(cli.settings, "data_dir", tmp_path)
+    monkeypatch.setattr(cli.settings, "kms_key_id", None)
+
+    import contextlib
+    import io
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cli._explain(argparse.Namespace(visit=visit.id))
+    out = buf.getvalue()
+    assert visit.id in out
+    assert "Source-by-source" in out
+    assert "Pipeline coverage" in out
+    assert "Signed receipt" in out and "Review chain: OK" in out
+    assert "Derived stance" in out
+
+    with pytest.raises(SystemExit):
+        with contextlib.redirect_stdout(buf):
+            cli._explain(argparse.Namespace(visit="vis_nope"))
