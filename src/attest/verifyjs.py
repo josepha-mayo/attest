@@ -20,6 +20,7 @@ _HEAD = """<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Attest pack verifier</title>
 <style>
  body{font:15px/1.5 system-ui,sans-serif;max-width:760px;margin:2rem auto;padding:0 1rem;color:#1c1c1e}
@@ -406,8 +407,8 @@ uploaded — all hashing and signature checks run locally, offline. Drop the
 <strong>.zip pack itself</strong>, select every extracted file, or just bundle.json for a
 single-visit pack.</p>
 <div class="drop" id="drop">Drop the pack .zip (or extracted files) here,
-or <input type="file" id="pick" multiple></div>
-<div id="out"></div>
+or <input type="file" id="pick" multiple aria-label="Choose pack files"></div>
+<div id="out" role="status" aria-live="polite"></div>
 <h2>What this does and does not establish</h2>
 <p><small>A green result proves the signed records are intact and were issued under the pinned
 issuer key — integrity, not physical truth. It does not prove anyone was present, absent, or
@@ -419,7 +420,7 @@ VERIFY_HTML = _HEAD + _VERIFY_BODY + _JS_OPEN + _JS_LIB + _VERIFY_DRIVER + "</sc
 
 _INDEX_BODY = """<h1 id="site">Attest case record</h1>
 <p id="meta" class="muted"></p>
-<div id="verdict"></div>
+<div id="verdict" role="status" aria-live="polite"></div>
 <div id="cards"></div>
 <h2>Verify the media bytes</h2>
 <p><small>This page verifies every signed record and renders its timeline offline.
