@@ -81,7 +81,7 @@ document.getElementById("requeue-btn").addEventListener("click", async () => {
 <h2>Weekly triage brief</h2>
 <div class="card">
   <pre id="triage-brief" style="white-space:pre-wrap;font:inherit;margin:0">{{ triage_brief }}</pre>
-  <div class="muted small" id="triage-source" style="margin-top:.5rem">source: deterministic triage</div>
+  <div class="muted small" id="triage-source" style="margin-top:.5rem">{{ triage_source or "source: deterministic triage" }}</div>
   <button id="triage-run" class="btn" style="margin-top:.75rem" type="button">Run agent brief</button>
   <span class="muted small" style="margin-left:.5rem">Strands agent over Bedrock reads the ledger through tools; falls back honestly.</span>
 </div>
@@ -90,6 +90,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
   const btn = document.getElementById("triage-run");
   btn.disabled = true;
   btn.textContent = "Running…";
+  window.triageRunning = true;  // hold the auto-reload — it would kill this fetch
   try {
     const r = await fetch("/api/triage", {method: "POST"});
     const data = await r.json();
@@ -102,6 +103,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
   } catch (e) {
     document.getElementById("triage-source").textContent = "triage failed: " + e.message;
   } finally {
+    window.triageRunning = false;
     btn.disabled = false;
     btn.textContent = "Run agent brief";
   }
@@ -178,7 +180,8 @@ document.getElementById("triage-run").addEventListener("click", async () => {
 </table>
 </div>
 <script>
-setTimeout(() => {
+setInterval(() => {
+  if (window.triageRunning) return;  // don't kill an in-flight agent brief
   sessionStorage.setItem('dash-scroll', String(window.scrollY));
   location.reload();
 }, 5000);

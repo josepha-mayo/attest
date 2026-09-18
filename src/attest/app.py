@@ -358,7 +358,9 @@ def create_app(
             failed_deliveries=[e for e in inbox.entries(limit=50) if e["status"] == "failed"],
             countersign=stances,
             attention=attention,
-            triage_brief=deterministic_brief(store, reviews),
+            triage_brief=(getattr(app.state, "last_triage", None) or {}).get("brief")
+            or deterministic_brief(store, reviews),
+            triage_source=(getattr(app.state, "last_triage", None) or {}).get("source_label"),
         )
 
     @app.get("/visits/{visit_id}", response_class=HTMLResponse)
@@ -883,6 +885,14 @@ def create_app(
         result = await asyncio.to_thread(
             run_triage, store, reviews, model_id=s.bedrock_model_id, region=s.aws_region
         )
+        # Keep the last run so the dashboard's live-reload doesn't revert the
+        # brief to deterministic — the rendered label keeps its provenance.
+        label = (
+            f"source: Strands agent over Bedrock {result.model or ''}"
+            if result.source == "strands-agent"
+            else f"source: deterministic triage — agent unavailable ({result.fallback_reason or '?'})"
+        )
+        app.state.last_triage = {"brief": result.brief, "source_label": label}
         return {
             "brief": result.brief,
             "source": result.source,
