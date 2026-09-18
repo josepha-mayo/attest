@@ -20,6 +20,33 @@ Model limits worth stating plainly: **one active visit per site** — two overla
 
 The full trust model — every attack path and its detection — is in [THREATMODEL.md](THREATMODEL.md). `attest attack-demo` executes the tamper battery live.
 
+## How it fits together
+
+```text
+Ring Partner API                    ATTEST                              Human review
+────────────────                    ──────                              ────────────
+
+webhooks ────▶ durable inbox ──▶ HMAC verify ──▶ dedupe + bind ──▶ visit engine
+(camera, door,    (202 before                        │                │
+ contact sensor)   processing)                       │                ├─ snapshots → sha256 into receipt
+                                                   │                ├─ Ring History corroboration
+history poller ────┘  (Ring-side record,            │                ├─ coverage: % of window watched
+  labelled, never                                   │                └─ close → Ed25519 receipt
+  conflated with webhooks)                          │                     (schema-v2 payload, hash-chained)
+                                                   │
+worker link (24h, single-use, hashed) ──▶ statement ──▶ per-visit review chain ──▶ anchored to the
+coordinator ──▶ statement / signed resolution ──────▶ same chain ──▶ original receipt hash
+                                                                      (worker words never edited)
+
+attest anchor ──▶ signed checkpoint (journal head + chain head)
+              ──▶ S3 custody · OpenTimestamps ──▶ "the record existed before this Bitcoin block"
+
+pack.zip ──▶ signed manifest + per-visit bundles + media
+        ──▶ index.html / verify.html / verify_case.py / attest verify — checkable with no Attest install
+```
+
+The signing key itself can be wrapped under an AWS KMS CMK (`ATTEST_KMS_KEY_ID`); summaries and the weekly triage brief run on Bedrock/Strands when reachable and label their fallback honestly when not.
+
 ## Implemented
 
 - Ring Partner API client via the companion [ring-sandbox](https://github.com/josepha-mayo/ring-sandbox) project.
@@ -35,7 +62,10 @@ The full trust model — every attack path and its detection — is in [THREATMO
 - Bedrock Converse integration with explicit per-record provenance: actual summary source, model when used, and fallback reason. A configured provider is not evidence of a successful model invocation.
 - Explicit local replay mode with a persistent, monotonic event clock. It refuses real Ring endpoints, existing non-replay data, clock rewinds, and future simulation times. Check-in event time and receipt closure use the replay clock; grant expiry, statement receipt, and signature issuance use real time and are recorded separately.
 - Worker/coordinator review and correction flow. Each statement is signed in a per-visit review chain anchored to the original receipt hash. Original observations and original signatures remain unchanged. Worker review links are hashed, single-use, scoped to the signed scheduled worker and visit, and expire after 24 hours.
+- Signed coordinator resolutions close the loop: `record_upheld` / `account_accepted` / `inconclusive` append the terminal conclusion after the worker's words without editing them — a newer worker statement re-opens the record. Resolved records leave the attention queue.
+- Consent revocation: disconnecting a Ring source tombstones the binding, signs a `source_disconnected` receipt naming what was unbound, and stops both ingestion and Event History polling. One-way; reconnecting is a new site.
 - Authenticated setup screens for device discovery, site binding, worker creation, and schedule creation/cancellation. Device permissions and camera/contact capabilities are checked. Duplicate identifiers and ambiguous arrival windows are rejected. Used schedules cannot be rewritten through cancellation.
+- Strands agent triage over Bedrock: the weekly brief reads the ledger through real tools (sites, records, integrity) and labels whether the agent or the deterministic fallback wrote it.
 
 ## 60-second demo
 
@@ -158,11 +188,10 @@ A fresh published checkout of both repositories passed 145+ Attest tests and 37 
 
 ## Before deployment or submission
 
-- Load-test durable webhook intake against Ring's response deadline, add failed-delivery diagnostics/replay tooling, and implement inbox retention. `/api/webhook-queue` exposes authenticated queue counts; `/api/process-webhooks` processes one eligible delivery for local diagnostics.
+- Load-test durable webhook intake against Ring's response deadline in a networked deployment — intake ack + a 40-delivery burst are test-covered, but production latency is unmeasured. Failed deliveries surface on the dashboard and replay via `attest deliveries --requeue` or `/api/webhook-queue/requeue`; retention purges non-chain rows.
 - Validate the review workflow with actual households/workers, including disputed and missing observations, accessibility, and notification delivery.
 - Validate the coordinated demo visually and replace placeholder media with permitted, clearly labelled demonstration footage.
-- Complete OAuth/consent lifecycle, retention/deletion, multi-user authorization, token refresh, and deployment secret management. Local HTTP Basic is a development access boundary, not a complete production identity system. Use HTTPS outside loopback.
-- Finish runtime-input limits, media-redirect hardening, and Python dependency locking; keep fresh-checkout and CI checks passing.
+- Complete OAuth/consent lifecycle (source disconnect is shipped; account-level revocation is the deployer's OAuth action), multi-user authorization, and deployment secret management. Local HTTP Basic is a development access boundary, not a complete production identity system. Use HTTPS outside loopback.
 - Verify live webhook delivery, sensor ingestion, and a real `ding`/`motion` event (the Playground cannot generate them); plus an actual AWS invocation without fallback.
 - Validate customer usefulness and hackathon rules; prepare the separate open-source contribution, product feedback, friction log, and under-three-minute video.
 
