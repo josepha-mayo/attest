@@ -379,6 +379,7 @@ honest; it proves the evidence chain was not altered after signing.</small></p>
  .corr{width:100%;border-collapse:collapse;margin-top:.5rem;font-size:.85rem}
  .corr td{border-top:1px solid #eee;padding:.15rem .4rem .15rem 0;vertical-align:top}
  .corr td:first-child{white-space:nowrap;font-weight:600;width:1%}
+ .stmt{border-left:3px solid #ccd3df;padding:.15rem .6rem;margin:.4rem 0;font-size:.85rem}
 </style>
 """
 
@@ -425,6 +426,23 @@ function corroborationHTML(p){
     `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td><td class="muted"><small>${esc(r[2])}</small></td></tr>`
   ).join("")+"</table>";
 }
+/* signed statements — worker/coordinator words from the review chain,
+   verbatim with actor + honesty markers. */
+function statementsHTML(js){
+  const out=[];
+  for(const e of js.reviews||[]){
+    const p=((e||{}).receipt||{}).payload||{};
+    const a=p.actor||{},rv=p.review||{};
+    if(!rv.decision&&!rv.statement)continue;
+    const who=a.name?`${esc(a.name)} (${esc(a.role||"reviewer")})`:esc(a.role||"reviewer");
+    const note=a.identity_verified===false?" — identity not independently verified":"";
+    const window=rv.reported_start
+      ?` <small class="muted">reports ${hhmm(rv.reported_start)}–${hhmm(rv.reported_end)}</small>`:"";
+    out.push(`<div class="stmt"><strong>${esc(rv.decision||"statement")}</strong> by ${who}${note}:`
+      +` ${esc(rv.statement||"")}`+window+`</div>`);
+  }
+  return out.join("");
+}
 async function renderIndex(){
   const meta=JSON.parse(d64(document.getElementById("packmeta").textContent));
   document.getElementById("site").textContent=
@@ -459,7 +477,7 @@ async function renderIndex(){
       +(stance?` · statement: ${esc(stance)}`:"")
       +` — ${c.why}</div>`
       +`<small>${win} · ${ds.length} media digest(s)</small>`
-      +timelineSVG(p)+corroborationHTML(p)+"</div>");
+      +timelineSVG(p)+corroborationHTML(p)+statementsHTML(js)+"</div>");
   }
   cards.innerHTML=rows.join("");
   let mLine="";
