@@ -526,7 +526,7 @@ async function renderIndex(){
   cards.innerHTML=rows.join("");
   let mLine="";
   const mtag=document.getElementById("packmanifest");
-  if(mtag){
+  if(mtag&&mtag.textContent){
     const mNode=parseKeep(d64(mtag.textContent));
     const mc=await checkManifestNode(mNode,key);
     if(!mc.ok)anyBad=true;

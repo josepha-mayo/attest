@@ -311,6 +311,75 @@ __r().then(()=>{
 
 
 @pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_dispute_pack_index_verifies_in_browser(engine, store, household, schedule, t0, tmp_path):
+    """Single-visit packs get the same front page: index.html inlines the one
+    bundle, verifies it live, and renders timeline + corroboration."""
+    from ring_sandbox import WebhookEvent, webhooks
+
+    from attest.reviews import ReviewService
+
+    event = WebhookEvent.model_validate(
+        webhooks.build_event(
+            event_type="button_press",
+            device_id=household[2].id,
+            occurred_at=t0,
+        )
+    )
+    visit = engine.ingest(event).visit
+    engine.close_for_review(visit.id)
+    bundle = ReviewService(store, engine.signer, engine.clock).bundle(visit.id)
+    data = build_pack(store, tmp_path / "media", bundle)
+    z = zipfile.ZipFile(io.BytesIO(data))
+    assert "index.html" in z.namelist()
+    html = z.read("index.html").decode()
+    assert "http://" not in html and "https://" not in html
+    assert 'id="packmeta"' in html
+    import base64
+
+    tags = re.findall(r'data-vid="(vis_[0-9a-f]+)">([A-Za-z0-9+/=]+)</script>', html)
+    assert len(tags) == 1
+    assert base64.b64decode(tags[0][1]).decode() == z.read("bundle.json").decode()
+
+    meta = re.search(r'id="packmeta">([A-Za-z0-9+/=]+)</script>', html).group(1)
+    script = re.search(r'<script>\n("use strict";.*?)</script>', html, re.S).group(1)
+    (tmp_path / "idx.js").write_text(script, encoding="utf-8")
+    (tmp_path / "meta.b64").write_text(meta, encoding="utf-8")
+    driver = """
+const fs=require('fs');
+const html=fs.readFileSync(process.argv[2],'utf8');
+const bundles=[...html.matchAll(/data-vid="([^"]+)">([A-Za-z0-9+/=]+)<\\/script>/g)]
+  .map(m=>({dataset:{vid:m[1]},textContent:m[2]}));
+const mm=html.match(/id="packmanifest">([A-Za-z0-9+/=]+)<\\/script>/);
+const els={packmeta:{textContent:fs.readFileSync(process.argv[4],'utf8')}};
+if(mm)els.packmanifest={textContent:mm[1]};
+const get=id=>els[id]||(els[id]={textContent:'',innerHTML:''});
+global.document={querySelectorAll:s=>s==='script.bundle'?bundles:[],getElementById:get};
+let src=fs.readFileSync(process.argv[3],'utf8');
+src=src.replace(/renderIndex\\(\\)\\.catch[\\s\\S]*$/,'');
+eval(src+';globalThis.__r=renderIndex;');
+__r().then(()=>{
+  console.log('verdict:',els.verdict.innerHTML.slice(0,120));
+  console.log('cards:',(els.cards.innerHTML.match(/class="card"/g)||[]).length);
+  console.log('corr:',(els.cards.innerHTML.match(/class="corr"/g)||[]).length);
+});
+"""
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+    (tmp_path / "index.html").write_text(html, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "index.html", "idx.js", "meta.b64"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout
+    assert "VERIFIED" in out, out
+    assert "cards: 1" in out, out
+    assert "corr: 1" in out, out
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
 def test_verify_html_reads_the_zip_directly(engine, store, household, schedule, t0, tmp_path):
     """verify.html must verify a dropped .zip: readZipEntries parses stored +
     deflate entries (node's DecompressionStream stands in for the browser's),

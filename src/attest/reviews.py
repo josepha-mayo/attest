@@ -85,8 +85,13 @@ class ReviewService:
         if status["state"] != "no_statement":
             return status
         grants = [g for g in self.store.review_grants() if g.id == visit_id]
-        if any(not g.used_at and g.expires_at > utcnow() for g in grants):
-            status.update(state="awaiting", detail="Worker statement requested — link outstanding")
+        live = [g for g in grants if not g.used_at and g.expires_at > utcnow()]
+        if live:
+            expiry = min(g.expires_at for g in live)
+            status.update(
+                state="awaiting",
+                detail=f"Worker statement requested — link expires {expiry:%Y-%m-%d %H:%M} UTC",
+            )
         elif grants:
             status.update(state="unacknowledged", detail="Review link expired unused")
         else:

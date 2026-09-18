@@ -24,9 +24,12 @@ bundle.json    The signed visit record plus every appended review, hash-chained.
 media/         The media bytes the record references (when included).
 verify_bundle.py  Offline verifier. Run:  python verify_bundle.py bundle.json
 verify.html    Zero-install verifier — open in any browser and drop the pack
-               files in. Same checks, pure JavaScript, works from file://.
-               Also renders each record's timeline (scheduled window, poll
-               coverage, observations) from the signed payload.
+               files or the .zip itself in. Same checks, pure JavaScript,
+               works from file://. Also renders each record's timeline
+               (scheduled window, poll coverage, observations).
+index.html     Offline record browser — the record verified live in-browser
+               with its timeline, source-by-source corroboration, and any
+               signed worker/coordinator statements rendered verbatim.
 
 WHAT A VALID VERIFICATION PROVES
 - Every receipt in bundle.json is byte-identical to what was signed: the payload
@@ -434,14 +437,30 @@ def build_pack(
     """Assemble the zip. Media is matched to evidence digests, not filenames.
     With ``redact_media`` the bytes are withheld and a redaction.json marker is
     written — the signed digests stay verifiable, the footage stays private."""
-    from .verifyjs import VERIFY_HTML
+    from .verifyjs import VERIFY_HTML, case_index_html
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr("bundle.json", bundle.model_dump_json(indent=2))
+        bundle_text = bundle.model_dump_json(indent=2)
+        z.writestr("bundle.json", bundle_text)
         z.writestr("README.txt", _README)
         z.writestr("verify_bundle.py", _VERIFIER)
         z.writestr("verify.html", VERIFY_HTML)
+        from datetime import UTC, datetime
+
+        z.writestr(
+            "index.html",
+            case_index_html(
+                {
+                    "schema": "attest.dispute-pack/1",
+                    "site": bundle.original.payload.get("site") or {},
+                    "generated_at": datetime.now(tz=UTC).isoformat(),
+                    "issuer_key": bundle.original.public_key,
+                    "media_redacted": redact_media,
+                },
+                [(bundle.original.visit_id, bundle_text)],
+            ),
+        )
         if redact_media:
             z.writestr("redaction.json", _redaction_marker(bundle))
         elif include_media:
