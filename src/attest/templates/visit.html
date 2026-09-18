@@ -186,9 +186,12 @@ document.getElementById('coordinator-review').onsubmit = async event => {
 };
 document.getElementById('coordinator-resolve').onsubmit = async event => {
   event.preventDefault();
+  const btn = event.target.querySelector('button[type=submit],button');
+  if (btn) btn.disabled = true;
   const body = Object.fromEntries(new FormData(event.target));
   const response = await fetch('/api/visits/{{ visit.id }}/resolve', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   if (response.ok) { location.reload(); return; }
+  if (btn) btn.disabled = false;
   const data = await response.json();
   document.getElementById('resolve-status').textContent = typeof data.detail === 'string' ? data.detail : 'Check the required conclusion fields.';
 };

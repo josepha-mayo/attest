@@ -167,6 +167,23 @@ def test_new_worker_statement_after_resolution_reopens(review_case):
     assert service.countersign(visit_id)["state"] == "corrected"
 
 
+def test_identical_resolution_resubmission_is_idempotent(review_case):
+    """A double-submit (retry, refreshed form) must not chain a byte-identical
+    duplicate — the same entry comes back. A *different* outcome or statement
+    is a changed mind and appends normally."""
+    from attest.models import ResolutionInput
+
+    service, visit_id = review_case
+    first = service.resolve(visit_id, ResolutionInput(outcome="record_upheld", statement="Record stands."))
+    again = service.resolve(visit_id, ResolutionInput(outcome="record_upheld", statement="Record stands."))
+    assert again.id == first.id
+    assert len(service.bundle(visit_id).reviews) == 1
+
+    changed = service.resolve(visit_id, ResolutionInput(outcome="inconclusive", statement="Reconsidered."))
+    assert changed.id != first.id
+    assert len(service.bundle(visit_id).reviews) == 2
+
+
 def test_resolution_without_worker_statement(review_case):
     from attest.models import ResolutionInput
 

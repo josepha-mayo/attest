@@ -194,6 +194,21 @@ class ReviewService:
         the worker's stance stays in the chain; ``countersign_status`` derives
         ``resolved`` while this post-dates the latest worker statement."""
         bundle = self._checked_bundle(visit_id)
+        # Idempotent re-submit: if the chain tip is already this exact
+        # resolution (double-click, retry, refreshed form), return it rather
+        # than chaining a byte-identical duplicate. A *different* outcome or
+        # statement appends normally — a changed mind is legitimate history.
+        if bundle.reviews:
+            tip = bundle.reviews[-1].receipt.payload
+            review = tip.get("review", {})
+            if (
+                tip.get("record_type") == "review"
+                and review.get("kind") == "resolution"
+                and tip.get("actor", {}).get("role") == "coordinator"
+                and review.get("outcome") == data.outcome
+                and review.get("statement") == data.statement
+            ):
+                return bundle.reviews[-1]
         previous = bundle.reviews[-1].receipt.payload_hash if bundle.reviews else bundle.original.payload_hash
         signed = self.signer.issue(
             visit_id=visit_id,
