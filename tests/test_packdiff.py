@@ -78,6 +78,41 @@ def test_diff_flags_a_vanished_record(exports):
     assert any("absent now" in line for line in lines)
 
 
+def test_diff_reports_new_attestation_and_flags_a_vanished_one(
+    engine, store, household, schedule, t0, tmp_path
+):
+    service = ReviewService(store, engine.signer, engine.clock)
+    site = store.sites()[0]
+    v1 = _visit(engine, household, t0)
+    first = _case(store, tmp_path, site, service, [v1])
+    engine.issue_coverage_attestation(site, t0 - timedelta(hours=1), t0 + timedelta(hours=2))
+    second = _case(store, tmp_path, site, service, [v1])
+
+    lines, anomalies = diff(first, second)
+    text = "\n".join(lines)
+    assert anomalies == 0, lines
+    assert "+  attestation coverage_attestation" in text
+
+    # tamper: drop the attestation from a third pack's manifest — the previous
+    # export listed it, so its absence is an anomaly, not drift.
+    third = _case(store, tmp_path, site, service, [v1])
+    zin = zipfile.ZipFile(third)
+    manifest = json.loads(zin.read("manifest.json"))
+    assert manifest["attestations"]  # the export carries it
+    manifest["attestations"] = []
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zout:
+        for name in zin.namelist():
+            if name != "manifest.json":
+                zout.writestr(name, zin.read(name))
+        zout.writestr("manifest.json", json.dumps(manifest))
+    forged = third.with_name("forged-att.zip")
+    forged.write_bytes(buf.getvalue())
+    lines, anomalies = diff(second, forged)
+    assert anomalies >= 1
+    assert any("absent now" in line and "attestation" in line for line in lines)
+
+
 def test_diff_flags_an_altered_signed_record(exports, tmp_path):
     first, second, v1, _ = exports
     # tamper: same visit id, different payload hash inside the newer pack

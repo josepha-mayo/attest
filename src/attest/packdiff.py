@@ -45,6 +45,7 @@ def load_artifact(path: str | Path) -> dict:
             if "manifest.json" in names:
                 manifest = json.loads(z.read("manifest.json"))
                 issuer = manifest.get("issuer_key")
+                attestations = {a["receipt_id"]: a for a in manifest.get("attestations", [])}
                 entries = {v["visit_id"]: v for v in manifest.get("visits", [])}
                 for vid in entries:
                     try:
@@ -52,7 +53,12 @@ def load_artifact(path: str | Path) -> dict:
                     except KeyError:
                         continue
                     visits[vid] = _visit_summary(bundle, entries[vid])
-                return {"issuer": issuer, "visits": visits, "kind": "case-pack"}
+                return {
+                    "issuer": issuer,
+                    "visits": visits,
+                    "attestations": attestations,
+                    "kind": "case-pack",
+                }
             if "bundle.json" in names:
                 bundle = json.loads(z.read("bundle.json"))
                 issuer = bundle["original"]["public_key"]
@@ -77,7 +83,12 @@ def load_artifact(path: str | Path) -> dict:
                 "manifest_hash": v.get("payload_hash"),
                 "countersign": (v.get("countersign") or {}).get("state"),
             }
-        return {"issuer": issuer, "visits": visits, "kind": "manifest"}
+        return {
+            "issuer": issuer,
+            "visits": visits,
+            "attestations": {a["receipt_id"]: a for a in data.get("attestations", [])},
+            "kind": "manifest",
+        }
     raise ValueError(f"{path}: unrecognized artifact (no 'original' or 'visits' key)")
 
 
@@ -119,6 +130,24 @@ def diff(old_path: str | Path, new_path: str | Path) -> tuple[list[str], int]:
             lines.append(f"~  {vid}: worker stance {ac} -> {bc}")
         if a["media_digests"] != b["media_digests"]:
             lines.append(f"!! {vid}: media digest set changed — evidence cannot change post-signature")
+            anomalies += 1
+
+    # Site attestations (coverage certs, digests, prior exports, disconnects)
+    # are chain events too — new ones are drift, vanished or altered ones are
+    # anomalies on the same append-only argument as visits.
+    old_att = old.get("attestations") or {}
+    new_att = new.get("attestations") or {}
+    for rid in sorted(set(old_att) | set(new_att)):
+        a, b = old_att.get(rid), new_att.get(rid)
+        if a is None:
+            lines.append(f"+  attestation {b['record_type'] or 'record'} ({rid[:20]}…): new site event")
+            continue
+        if b is None:
+            lines.append(f"!! attestation {rid}: present before, absent now — receipts are append-only")
+            anomalies += 1
+            continue
+        if a["payload_hash"] != b["payload_hash"]:
+            lines.append(f"!! attestation {rid}: signed payload changed — one export is inauthentic")
             anomalies += 1
     if not anomalies:
         lines.append("clean: all changes are append-only")
