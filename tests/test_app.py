@@ -344,3 +344,18 @@ def test_link_tokens_and_ids_have_bounded_length(api):
     assert api.get("/checkin/" + "a" * 200, auth=None).status_code == 422
     assert api.get("/review/" + "a" * 200, auth=None).status_code == 422
     assert api.get("/visits/" + "v" * 200).status_code == 422
+
+
+def test_triage_endpoint_labels_its_source(api):
+    r = api.post("/api/triage")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["source"] in ("strands-agent", "deterministic")
+    assert data["brief"]
+
+
+def test_dashboard_renders_triage_brief(api):
+    dash = api.get("/")
+    assert dash.status_code == 200
+    assert "triage-brief" in dash.text
+    assert "Run agent brief" in dash.text

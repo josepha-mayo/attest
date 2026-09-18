@@ -131,6 +131,19 @@ CloudTrail-audited event and a stolen data directory contains nothing signable. 
 end-to-end against a real CMK (GenerateDataKey → wrap → Decrypt → sign). Without the setting
 the key is stored as a plain PEM as before.
 
+**S3 checkpoint custody (verified live):** `attest anchor --publish s3://bucket/key` uploads
+the signed anchor to S3 with the file SHA-256 and payload hash in object metadata — external
+custody for the checkpoint, verified against a versioned, public-access-blocked bucket.
+
+**Agent triage (Strands + Bedrock):** install the `agent` extra, then `attest triage` (or
+**Run agent brief** on the dashboard, `POST /api/triage`) has a Strands agent write the
+week's "needs attention" brief by reading the ledger through real tools — list sites,
+list records, inspect a record's evidence/coverage/stance, check chain + journal health.
+The system prompt forbids presence/absence claims, and the output always labels its source:
+`strands-agent` with the model id, or `deterministic` with the reason the agent path was
+unavailable. The deterministic fallback is the same computation the dashboard renders, so
+triage never blocks on model access.
+
 ## Verification
 
 ```powershell
@@ -154,5 +167,14 @@ A fresh published checkout of both repositories passed 145+ Attest tests and 37 
 - Validate customer usefulness and hackathon rules; prepare the separate open-source contribution, product feedback, friction log, and under-three-minute video.
 
 Runtime databases, media, private keys, tokens, and personal identifiers must not be published. Keep runtime folders out of Git. Changing ignore rules does not remove files already committed. Legacy demo records are preserved locally and may contain earlier unsupported claims; use a fresh private runtime directory when testing the corrected semantics.
+
+## Judging criteria map
+
+How this project sits against the hackathon's four criteria:
+
+- **Tech Implementation** — real `api.amazonvision.com` calls (server-to-server OAuth-shaped client, webhook HMAC-SHA256 verification, `meta.request_id` idempotency, Event History polling, media download behind validated redirects) plus four AWS touchpoints: KMS envelope-encrypts the signing key (live-verified), S3 holds published anchors (live-verified), Bedrock generates summaries with honest fallback provenance, and a Strands agent triages the week by reading the ledger through tools — with a deterministic fallback that labels which source wrote the brief. The integrity layer is Ed25519 + hash-chained receipts + a hash-chained mutation journal + OpenTimestamps Bitcoin notarization — each independently verifiable offline.
+- **Design** — a coherent coordinator workflow: dashboard triage → visual timeline (schedule vs. watched coverage vs. observations) → review/issue links → export a pack that verifies itself in a browser with zero install. Worker-facing pages show the same timeline the coordinator sees before they sign.
+- **Potential Impact** — proof-of-visit is a real field-service problem (cleaners, caregivers, contractors) with no product anchored to the household's own Ring events; the Ring Appstore is the named beyond-hackathon venue, and the Configure→Certify→Publish path is understood. `ring-sandbox` is independently useful to every developer integrating the Partner API (published on PyPI).
+- **Quality of the Idea** — the rubric's "creative" ring, not the "obvious" one: caretaking monitoring + business-system integration + event-based triggers. The differentiated bet is *honest uncertainty as a product feature* — the record refuses to call motion "presence" or silence "absence," and signs exactly how much of the window was watched.
 
 MIT licensed.

@@ -684,6 +684,48 @@ def _publish_anchor(uri: str, path, payload_hash: str, region: str) -> None:
     print(f"published {uri} (sha256 {sha[:16]}…) — the checkpoint now has external custody")
 
 
+def _triage(args: argparse.Namespace) -> None:
+    """Print the week's 'needs attention' brief — a Strands agent reading the
+    ledger through real tools when Bedrock is reachable, else the deterministic
+    triage. The output always labels which source produced it."""
+    from .keycustody import load_or_create_signer
+    from .reviews import ReviewService
+    from .store import Store
+    from .triage import run_triage
+
+    db = settings.data_dir / "attest.sqlite3"
+    if not db.exists():
+        sys.exit(f"no store at {db}")
+    store = Store(db)
+    try:
+        signer = load_or_create_signer(
+            settings.data_dir / "attest-ed25519.key",
+            kms_key_id=settings.kms_key_id,
+            aws_region=settings.aws_region,
+        )
+        from .clock import ExecutionClock
+
+        # Triage never writes; the clock only needs to match the store's mode.
+        replay = (store.setting("execution_mode") or {}).get("mode") == "replay"
+        clock = ExecutionClock(
+            store, replay=replay, ring_base_url="http://127.0.0.1" if replay else settings.ring_base_url
+        )
+        reviews = ReviewService(store, signer, clock)
+        result = run_triage(
+            store,
+            reviews,
+            model_id=settings.bedrock_model_id,
+            region=settings.aws_region,
+        )
+        print(result.brief)
+        if result.source == "strands-agent":
+            print(f"\n[source: Strands agent over Bedrock {result.model}]")
+        else:
+            print(f"\n[source: deterministic triage — agent unavailable: {result.fallback_reason}]")
+    finally:
+        store.close()
+
+
 def _cli_engine(store):
     """A real VisitEngine over an existing store for offline issuance commands
     (coverage/digest/export signing). The Ring client is never called."""
@@ -1119,6 +1161,12 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--from", dest="start", required=True, help="interval start (ISO 8601, tz-aware)")
     s.add_argument("--to", dest="to", required=True, help="interval end (ISO 8601, tz-aware)")
     s.set_defaults(fn=_digest)
+
+    s = sub.add_parser(
+        "triage",
+        help="agentic weekly triage — a Strands agent reads the ledger via tools, or a deterministic brief",
+    )
+    s.set_defaults(fn=_triage)
 
     s = sub.add_parser("deliveries", help="show durable webhook inbox state, or requeue failed deliveries")
     s.add_argument(

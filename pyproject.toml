@@ -25,7 +25,8 @@ dependencies = [
 
 [project.optional-dependencies]
 aws = ["boto3>=1.35", "botocore[crt]>=1.35"]
-dev = ["attest[aws]", "pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.6"]
+agent = ["attest[aws]", "strands-agents>=1.56"]
+dev = ["attest[aws]", "attest[agent]", "pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.6"]
 
 [project.scripts]
 attest = "attest.cli:main"

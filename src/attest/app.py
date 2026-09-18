@@ -48,6 +48,7 @@ from .reviews import ReviewService, verify_bundle
 from .setup import SetupService
 from .store import Store
 from .summarize import build as build_summarizer
+from .triage import attention_items, deterministic_brief, run_triage
 
 log = logging.getLogger("attest")
 _TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -340,21 +341,7 @@ def create_app(
             lags = sorted(st["lags"])
             st["median_lag"] = lags[len(lags) // 2] if lags else None
         stances = {v.id: reviews.countersign(v.id) for v in visits if v.receipt_id}
-        attention: list[dict] = []
-        for v in visits:
-            cs = stances.get(v.id)
-            if cs and cs["state"] == "contested":
-                attention.append({"visit": v, "why": "worker disputes this record", "level": "bad"})
-            elif cs and cs["state"] in ("corrected", "inconclusive"):
-                attention.append({"visit": v, "why": cs["detail"], "level": "warn"})
-            elif v.state == "unmatched":
-                attention.append({"visit": v, "why": "observation matched no schedule", "level": "warn"})
-            elif v.flags:
-                attention.append(
-                    {"visit": v, "why": f"{len(v.flags)} review note(s): {v.flags[0].code}", "level": "warn"}
-                )
-            elif cs and cs["state"] == "awaiting":
-                attention.append({"visit": v, "why": "worker statement pending", "level": "muted"})
+        attention = attention_items(store, reviews)
         return render(
             request,
             "dashboard.html",
@@ -369,6 +356,7 @@ def create_app(
             queue=inbox.counts(),
             countersign=stances,
             attention=attention,
+            triage_brief=deterministic_brief(store, reviews),
         )
 
     @app.get("/visits/{visit_id}", response_class=HTMLResponse)
@@ -860,6 +848,21 @@ def create_app(
     async def api_poll():
         n = await asyncio.to_thread(HistoryPoller(engine, store, ring).poll_once)
         return {"ingested": n}
+
+    @app.post("/api/triage")
+    async def api_triage():
+        """Run the weekly triage brief — a Strands agent reading the ledger
+        through tools when Bedrock is reachable, else the deterministic brief.
+        The response always labels which source wrote it."""
+        result = await asyncio.to_thread(
+            run_triage, store, reviews, model_id=s.bedrock_model_id, region=s.aws_region
+        )
+        return {
+            "brief": result.brief,
+            "source": result.source,
+            "model": result.model,
+            "fallback_reason": result.fallback_reason,
+        }
 
     @app.get("/healthz")
     async def healthz():
