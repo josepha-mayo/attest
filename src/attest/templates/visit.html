@@ -109,6 +109,7 @@ document.getElementById('close-record').onclick = async () => {
   <div class="muted small">Record agreement</div>
   <div style="font-size:20px;font-weight:600;margin:4px 0">
     {% if countersign.state == "acknowledged" %}<span class="ok">Worker acknowledges this record</span>
+    {% elif countersign.state == "resolved" %}<span class="ok">Resolved — coordinator's conclusion signed</span>
     {% elif countersign.state == "contested" %}<span class="bad">Worker disputes this record</span>
     {% elif countersign.state == "corrected" %}<span class="warn">Worker submitted a correction</span>
     {% elif countersign.state == "inconclusive" %}<span class="warn">Worker response inconclusive</span>
@@ -117,6 +118,7 @@ document.getElementById('close-record').onclick = async () => {
     {% else %}<span class="muted">No worker statement requested</span>{% endif %}
   </div>
   <div class="small muted">{{ countersign.detail }}{% if countersign.at %} — received {{ countersign.at }}{% endif %}. An acknowledgment binds to this record's hash; it does not certify identity or attendance.</div>
+  {% if countersign.resolution %}<div class="small muted">Conclusion: {{ countersign.resolution.outcome.replace('_', ' ') }} — appended as revision {{ countersign.resolution.revision }}. The worker's statement remains in the chain unchanged.</div>{% endif %}
 </div>
 {% endif %}
 <div class="card">
@@ -132,7 +134,11 @@ document.getElementById('close-record').onclick = async () => {
 {% for review in reviews %}
 {% set facts = review.receipt.payload %}
 <article style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
+{% if facts.review.kind == "resolution" %}
+<strong>Revision {{ review.revision }}: resolution — {{ facts.review.outcome.replace('_', ' ') }} — {{ facts.actor.name }} ({{ facts.actor.role }})</strong>
+{% else %}
 <strong>Revision {{ review.revision }}: {{ facts.review.decision }} — {{ facts.actor.name }} ({{ facts.actor.role }})</strong>
+{% endif %}
 <p style="white-space:pre-wrap">{{ facts.review.statement }}</p>
 {% if facts.review.reported_start %}<p class="small">Reported interval: {{ facts.review.reported_start }} to {{ facts.review.reported_end }}</p>{% endif %}
 <div class="muted small">Received {{ facts.statement_received_at }} &middot; hash {{ review.receipt.payload_hash[:16] }}…</div>
@@ -144,6 +150,19 @@ document.getElementById('close-record').onclick = async () => {
 {% include "review_fields.html" %}
 <button class="btn">Append signed review</button>
 <p id="review-status" role="status"></p>
+</form>
+<form id="coordinator-resolve" class="card" style="margin-top:16px">
+<h2>Conclude the record</h2>
+<p class="muted small">A resolution appends the coordinator's signed conclusion. It never edits or removes the worker's statement — a later worker statement re-opens the record.</p>
+<label>Conclusion
+<select name="outcome" required>
+<option value="record_upheld">Record upheld — the signed record stands as the conclusion</option>
+<option value="account_accepted">Worker's account accepted — their statement is the operative conclusion</option>
+<option value="inconclusive">Inconclusive — the ambiguity itself is the conclusion</option>
+</select></label>
+<label>Statement <textarea name="statement" rows="4" maxlength="2000" required placeholder="Why this conclusion, and what evidence weighed on it."></textarea></label>
+<button class="btn">Sign conclusion</button>
+<p id="resolve-status" role="status"></p>
 </form>
 <script>
 const requestReview = document.getElementById('issue-review');
@@ -164,6 +183,14 @@ document.getElementById('coordinator-review').onsubmit = async event => {
   if (response.ok) { location.reload(); return; }
   const data = await response.json();
   document.getElementById('review-status').textContent = typeof data.detail === 'string' ? data.detail : 'Check the required statement and reported time fields.';
+};
+document.getElementById('coordinator-resolve').onsubmit = async event => {
+  event.preventDefault();
+  const body = Object.fromEntries(new FormData(event.target));
+  const response = await fetch('/api/visits/{{ visit.id }}/resolve', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  if (response.ok) { location.reload(); return; }
+  const data = await response.json();
+  document.getElementById('resolve-status').textContent = typeof data.detail === 'string' ? data.detail : 'Check the required conclusion fields.';
 };
 </script>
 {% set cov = receipt.payload.history_poll_coverage %}

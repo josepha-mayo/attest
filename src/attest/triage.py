@@ -24,6 +24,8 @@ Rules:
 - "no_observation" means nothing was observed — NOT that the worker was absent.
 - "unmatched" means an observation arrived outside every scheduled window.
 - Worker stances (contested/corrected/inconclusive/awaiting) always need review.
+- A "resolved" stance means the coordinator's signed conclusion post-dates the
+  latest worker statement — the dispute stays in the chain but needs no action.
 - End with a one-line count summary: N records, K need attention."""
 
 

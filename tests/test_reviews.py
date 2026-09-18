@@ -119,6 +119,67 @@ def test_countersign_tracks_worker_stance_and_link_state(review_case, store):
     assert countersign_status(exported)["state"] == "contested"
 
 
+def test_resolution_is_the_terminal_signed_conclusion(review_case):
+    """A worker dispute has no terminal state without a resolution — the
+    coordinator's signed conclusion layers after the stance, leaves the
+    worker's words in the chain, and re-opens on any newer statement."""
+    from attest.models import ResolutionInput
+    from attest.reviews import countersign_status, verify_bundle
+
+    service, visit_id = review_case
+    token = service.issue_worker_link(visit_id)
+    service.worker_review(token, ReviewInput(decision="dispute", statement="Times are wrong."))
+    assert service.countersign(visit_id)["state"] == "contested"
+
+    entry = service.resolve(
+        visit_id,
+        ResolutionInput(outcome="record_upheld", statement="Coverage was continuous; the record stands."),
+    )
+    assert entry.receipt.payload["review"]["kind"] == "resolution"
+    assert entry.receipt.payload["actor"]["role"] == "coordinator"
+    assert entry.receipt.payload["record_type"] == "review"
+
+    status = service.countersign(visit_id)
+    assert status["state"] == "resolved"
+    assert status["decision"] == "dispute"  # worker stance preserved, not erased
+    assert status["resolution"]["outcome"] == "record_upheld"
+    assert status["resolution"]["revision"] == entry.revision
+    assert "coordinator upheld the record" in status["detail"]
+
+    # The exported bundle recomputes identically, and the resolution verifies.
+    exported = service.bundle(visit_id)
+    assert countersign_status(exported)["state"] == "resolved"
+    ok, _ = verify_bundle(exported, public_key=service.signer.public_key_b64)
+    assert ok
+
+
+def test_new_worker_statement_after_resolution_reopens(review_case):
+    from attest.models import ResolutionInput
+
+    service, visit_id = review_case
+    token = service.issue_worker_link(visit_id)
+    service.worker_review(token, ReviewInput(decision="dispute", statement="Not me."))
+    service.resolve(visit_id, ResolutionInput(outcome="record_upheld", statement="Record stands."))
+    assert service.countersign(visit_id)["state"] == "resolved"
+
+    token = service.issue_worker_link(visit_id)
+    service.worker_review(token, ReviewInput(decision="correction", statement="Window moved an hour."))
+    assert service.countersign(visit_id)["state"] == "corrected"
+
+
+def test_resolution_without_worker_statement(review_case):
+    from attest.models import ResolutionInput
+
+    service, visit_id = review_case
+    service.resolve(
+        visit_id,
+        ResolutionInput(outcome="inconclusive", statement="No account received; ambiguity recorded."),
+    )
+    status = service.countersign(visit_id)
+    assert status["state"] == "resolved"
+    assert "No worker statement" in status["detail"]
+
+
 def test_countersign_marks_expired_unused_links(review_case, store):
     service, visit_id = review_case
     token = service.issue_worker_link(visit_id)

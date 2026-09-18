@@ -34,6 +34,7 @@ from .models import (
     Receipt,
     ReplayTime,
     RequeueDeliveries,
+    ResolutionInput,
     RetentionApply,
     ReviewBundle,
     ReviewInput,
@@ -698,6 +699,10 @@ def create_app(
     @app.post("/api/visits/{visit_id}/reviews")
     async def coordinator_review(body: ReviewInput, visit_id: str = PathParam(max_length=128)):
         return await action(reviews.coordinator_review, visit_id, body)
+
+    @app.post("/api/visits/{visit_id}/resolve")
+    async def resolve_visit(body: ResolutionInput, visit_id: str = PathParam(max_length=128)):
+        return await action(reviews.resolve, visit_id, body)
 
     @app.post("/api/visits/{visit_id}/review-link")
     async def issue_review_link(visit_id: str = PathParam(max_length=128)):

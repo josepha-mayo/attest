@@ -92,6 +92,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
     <td>{% set cs = countersign.get(v.id) %}
       {% if cs is none %}<span class="muted">—</span>
       {% elif cs.state == "acknowledged" %}<span class="ok">Acknowledged</span>
+      {% elif cs.state == "resolved" %}<span class="ok">Resolved</span>
       {% elif cs.state == "contested" %}<span class="bad">Contested</span>
       {% elif cs.state == "corrected" %}<span class="warn">Corrected</span>
       {% elif cs.state == "inconclusive" %}<span class="warn">Inconclusive</span>

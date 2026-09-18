@@ -233,6 +233,16 @@ class ReviewInput(BaseModel):
         return self
 
 
+class ResolutionInput(BaseModel):
+    """A coordinator's terminal conclusion over a worker stance — appended as a
+    signed review, never an edit. The worker's statement stays in the chain;
+    the resolution is the human conclusion layered after it."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    outcome: Literal["record_upheld", "account_accepted", "inconclusive"]
+    statement: str = Field(min_length=1, max_length=2000)
+
+
 class ReviewGrant(CheckinGrant):
     original_hash: str
 
