@@ -176,10 +176,20 @@ def check_bundle(bundle, key):
         ok, why = check_receipt(r, key)
         if not ok:
             return False, f"review {n}: {why}", n
-        if entry["revision"] != n or r["prev_hash"] != prev:
-            return False, f"review {n}: broken chain", n
+        if (
+            entry["id"] != r["id"]
+            or entry["visit_id"] != original["visit_id"]
+            or r["visit_id"] != original["visit_id"]
+        ):
+            return False, f"review {n}: identity does not match original", n
+        if entry["revision"] != n or r["sequence"] != n or r["prev_hash"] != prev:
+            return False, f"review {n}: sequence or previous hash mismatch", n
         anchor = r["payload"].get("original_receipt") or {}
-        if anchor.get("hash") != original["payload_hash"]:
+        if (
+            r["payload"].get("record_type") != "review"
+            or anchor.get("id") != original["id"]
+            or anchor.get("hash") != original["payload_hash"]
+        ):
             return False, f"review {n}: not anchored to this original", n
         prev = r["payload_hash"]
     return True, "ok", n + 1

@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Link unavailable{% endblock %}
+{% block body %}
+<h1>This link is no longer usable</h1>
+<div class="card" style="margin:16px 0">
+  <p>{{ detail }}</p>
+  <p class="muted small">Worker check-in and review links are visit-scoped, expire, and are
+  single-use — a link that was already used or has expired cannot be reopened. If you need
+  a new link, ask the coordinator to issue one from the visit record.</p>
+</div>
+<p class="muted small">Nothing about the underlying record changed: links gate <em>adding a
+statement</em>, never the signed record itself.</p>
+{% endblock %}

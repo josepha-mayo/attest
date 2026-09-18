@@ -143,25 +143,40 @@ async function checkReceipt(rNode){
   }else if(p.schema!=="attest.receipt/1")return{ok:false,why:"unsupported receipt schema"};
   const ok=await edVerify(b64d(r.signature),b64d(r.public_key),hex2b(r.payload_hash));
   return ok?{ok:true}:{ok:false,why:"signature invalid"};}
-async function checkChain(rNodes,key){
-  /* rNodes: [original, ...reviews] in bundle order — mirrors
-     attest.reviews.verify_bundle. The original's sequence is a GLOBAL chain
-     position that legitimately interleaves with other receipts (other visits,
-     coverage certs, anchors, digests) and its prev_hash may point outside the
-     bundle. Review receipts are numbered within this visit and each must link
-     its prev_hash to the previous receipt — rev1 anchored on the original. */
-  let prev=null;
-  for(let i=0;i<rNodes.length;i++){
-    const r=toJS(rNodes[i]);
-    if(key&&r.public_key!==key)return{ok:false,why:`receipt #${r.sequence}: different issuer key`};
-    const c=await checkReceipt(rNodes[i]);
-    if(!c.ok)return{ok:false,why:`receipt #${r.sequence}: ${c.why}`};
-    if(i>0&&r.sequence!==i)
-      return{ok:false,why:`review #${r.sequence}: sequence disagrees with revision`};
-    if(prev!==null&&r.prev_hash!==prev)
-      return{ok:false,why:`receipt #${r.sequence}: review chain broken`};
+async function checkBundle(root,key){
+  /* Full parity with attest.reviews.verify_bundle: each review entry binds its
+     id/visit_id to the original, revision==sequence==position, prev_hash links
+     to the previous receipt, record_type is 'review', and the signed
+     original_receipt anchor names this original's id + payload_hash. The
+     original's own sequence is a GLOBAL chain position that legitimately
+     interleaves with other receipts, so it is checked as a receipt only. */
+  const oNode=get(root,"original");
+  if(!oNode)return{ok:false,why:"no original receipt"};
+  const original=toJS(oNode);
+  if(key&&original.public_key!==key)return{ok:false,why:"original: different issuer key"};
+  const c0=await checkReceipt(oNode);
+  if(!c0.ok)return{ok:false,why:"original: "+c0.why};
+  let prev=original.payload_hash,n=0;
+  const rev=get(root,"reviews");
+  const entries=rev&&rev.t==="arr"?rev.v:[];
+  for(let i=0;i<entries.length;i++){
+    n=i+1;
+    const e=toJS(entries[i]);
+    const rNode=get(entries[i],"receipt");
+    if(!rNode)return{ok:false,why:`review ${n}: entry has no receipt`};
+    const r=toJS(rNode);
+    if(key&&r.public_key!==key)return{ok:false,why:`review ${n}: different issuer key`};
+    const c=await checkReceipt(rNode);
+    if(!c.ok)return{ok:false,why:`review ${n}: ${c.why}`};
+    if(e.id!==r.id||e.visit_id!==original.visit_id||r.visit_id!==original.visit_id)
+      return{ok:false,why:`review ${n}: identity does not match original`};
+    if(e.revision!==n||r.sequence!==n||r.prev_hash!==prev)
+      return{ok:false,why:`review ${n}: sequence or previous hash mismatch`};
+    const p=r.payload||{},a=p.original_receipt||{};
+    if(p.record_type!=="review"||a.id!==original.id||a.hash!==original.payload_hash)
+      return{ok:false,why:`review ${n}: not anchored to this original`};
     prev=r.payload_hash;}
-  return{ok:true,why:`${rNodes.length} receipt(s), review chain intact`};}
+  return{ok:true,why:`original and ${n} review(s) verified (integrity only)`};}
 /* ---------- timeline renderer (mirrors attest.timeline semantics) ---------- */
 const _ESC={"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"};
 function esc(s){return String(s).replace(/[&<>"']/g,c=>_ESC[c]);}
@@ -248,11 +263,6 @@ function digests(o,out=[]){
     if(typeof o.media_sha256==="string")out.push(o.media_sha256);
     for(const v of Object.values(o))digests(v,out);}
   return out;}
-function receiptNodes(root){
-  const rNodes=[get(root,"original")];
-  const rev=get(root,"reviews");
-  if(rev&&rev.t==="arr")for(const e of rev.v)rNodes.push(get(e,"receipt")||e);
-  return rNodes.filter(Boolean);}
 """
 
 _VERIFY_DRIVER = """/* ---------- pack driver ---------- */
@@ -278,13 +288,14 @@ async function verifyFiles(files){
     const vid=toJS(get(root,"original")||{t:"obj",v:[]}).visit_id||"visit";
     bundles.push([vid,root]);
   }
-  let anyBad=false,key=null;
+  let anyBad=false,key=null;const actual={};
   for(const[vid,root]of bundles){
-    const filtered=receiptNodes(root);
-    if(!key)key=toJS(get(filtered[0],"public_key"));
-    const c=await checkChain(filtered,key);
+    const oNode=get(root,"original");
+    if(!key)key=toJS(get(oNode,"public_key"));
+    const c=await checkBundle(root,key);
     if(!c.ok)anyBad=true;
     const js=toJS(root);
+    actual[vid]=(js.original||{}).payload_hash;
     const stance=js.countersign_status?` — worker: ${js.countersign_status.state}`:"";
     say(c.ok?"ok":"bad",`${vid}: ${c.why}${stance}`);
     const svg=timelineSVG((js.original||{}).payload||{});
@@ -305,6 +316,13 @@ async function verifyFiles(files){
     const mc=await checkManifestNode(mNode,key);
     if(!mc.ok)anyBad=true;
     say(mc.ok?"ok":"bad",`manifest: ${mc.why}`);
+    const manifest=toJS(mNode);
+    for(const v of manifest.visits||[]){
+      if(actual[v.visit_id]&&actual[v.visit_id]!==v.payload_hash){
+        anyBad=true;
+        say("bad",`${v.visit_id}: manifest hash disagrees with signed original`);
+      }
+    }
   }
   say(anyBad?"bad":"ok",anyBad
     ?"FAILED — do not rely on this pack"
@@ -370,15 +388,16 @@ async function renderIndex(){
   const cards=document.getElementById("cards");
   const verdict=document.getElementById("verdict");
   let key=null,anyBad=false,n=0,declared=0;
-  const rows=[];
+  const rows=[];const actual={};
   for(const tag of document.querySelectorAll("script.bundle")){
     const root=parseKeep(d64(tag.textContent));
     const js=toJS(root);
-    const filtered=receiptNodes(root);
-    if(!key)key=toJS(get(filtered[0],"public_key"));
-    const c=await checkChain(filtered,key);
+    const oNode=get(root,"original");
+    if(!key)key=toJS(get(oNode,"public_key"));
+    const c=await checkBundle(root,key);
     if(!c.ok)anyBad=true;
     n++;
+    actual[tag.dataset.vid]=(js.original||{}).payload_hash;
     const p=(js.original||{}).payload||{};
     const stance=js.countersign_status?js.countersign_status.state:null;
     const ds=digests(js);declared+=ds.length;
@@ -400,9 +419,16 @@ async function renderIndex(){
   let mLine="";
   const mtag=document.getElementById("packmanifest");
   if(mtag){
-    const mc=await checkManifestNode(parseKeep(d64(mtag.textContent)),key);
+    const mNode=parseKeep(d64(mtag.textContent));
+    const mc=await checkManifestNode(mNode,key);
     if(!mc.ok)anyBad=true;
     mLine=`<div class="row ${mc.ok?"ok":"bad"}">manifest: ${mc.why}</div>`;
+    for(const v of toJS(mNode).visits||[]){
+      if(actual[v.visit_id]&&actual[v.visit_id]!==v.payload_hash){
+        anyBad=true;
+        mLine+=`<div class="row bad">${esc(v.visit_id)}: manifest hash disagrees with signed original</div>`;
+      }
+    }
   }
   verdict.innerHTML=anyBad
     ?'<div class="row bad">FAILED — '+n

@@ -112,24 +112,6 @@ def _seed(args: argparse.Namespace) -> dict:
     return out
 
 
-def _demo(args: argparse.Namespace) -> None:
-    out = _seed(args)
-    hook = f"{args.public_url}/webhooks/ring"
-    r = httpx.post(
-        f"{args.ring_url}/_sandbox/webhooks",
-        json={"url": hook, "signing_key": settings.ring_webhook_key},
-    )
-    r.raise_for_status()
-    print(f"\nsandbox will deliver signed webhooks to {hook}")
-    print("\nNext:")
-    print(f"  open {args.public_url}/            (dashboard)")
-    print(f"  issue a visit-scoped check-in link from {out['dashboard_url']} after the first event")
-    print(f"  ring-sandbox play home_aide_visit --url {args.ring_url} --speed 60   (90-min visit in ~90s)")
-    print(
-        f"  ring-sandbox play short_visit     --url {args.ring_url} --speed 20   (12-min visit -> shortfall)"
-    )
-
-
 def _replay(args: argparse.Namespace) -> None:
     from pathlib import Path
 
@@ -477,8 +459,11 @@ def _demo(args: argparse.Namespace) -> None:
     print("  2. Click a visit — the strip shows schedule vs. coverage vs. evidence.", flush=True)
     print("  3. Download the dispute pack, extract, open index.html", flush=True)
     print("     or verify.html — they self-verify in the browser, no install.", flush=True)
-    print("  4. In another terminal: attest attack-demo  (7 tamper attempts, all caught)", flush=True)
-    print("  5. attest status  audits the whole runtime offline.", flush=True)
+    print("  In another terminal, point at the demo's store first:", flush=True)
+    print(f'    $env:ATTEST_DATA_DIR="{data_dir}"   (PowerShell)', flush=True)
+    print(f"    ATTEST_DATA_DIR={data_dir} <cmd>      (POSIX)", flush=True)
+    print("  4. attest attack-demo  — 7 tamper attempts, all caught and rolled back", flush=True)
+    print("  5. attest status       — audits the whole runtime offline", flush=True)
     print("", flush=True)
     print("Press Ctrl+C to stop.", flush=True)
     try:
@@ -501,7 +486,16 @@ def _verify(args: argparse.Namespace) -> None:
     from . import ledger, reviews
     from .models import Receipt, ReviewBundle
 
-    data = json.loads(Path(args.bundle).read_text(encoding="utf-8"))
+    path = Path(args.bundle)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except UnicodeDecodeError:
+        sys.exit(
+            f"not a JSON artifact: {path.name}\n"
+            "  a .zip pack verifies with the verify_case.py / verify.html inside it."
+        )
+    except json.JSONDecodeError as exc:
+        sys.exit(f"not valid JSON: {exc}")
     pinned = " (against the supplied issuer key)" if args.key else ""
 
     if isinstance(data, list):
@@ -521,9 +515,16 @@ def _verify(args: argparse.Namespace) -> None:
         kind = receipt.payload.get("record_type") or receipt.payload.get("schema")
         print(f"OK{pinned}: {kind} {receipt.id} — {reason}.")
         print("Note: a valid signature proves record integrity under that key, not physical truth.")
+        _report_sibling_ots(Path(args.bundle))
         return
 
-    bundle = ReviewBundle.model_validate(data)
+    try:
+        bundle = ReviewBundle.model_validate(data)
+    except Exception:
+        sys.exit(
+            f"not a reviewable artifact: {path.name}\n"
+            "  expected a bundle.json, receipt, anchor, or receipts.json export list."
+        )
     key = args.key or bundle.original.public_key
     ok, reason = reviews.verify_bundle(bundle, public_key=key)
     if not ok:
@@ -532,6 +533,26 @@ def _verify(args: argparse.Namespace) -> None:
     stance = reviews.countersign_status(bundle)
     print(f"Worker stance: {stance['state']} — {stance['detail']}")
     print("Note: a valid signature proves record integrity under that key, not physical truth.")
+
+
+def _report_sibling_ots(path) -> None:
+    """If FILE.ots sits next to the artifact, report its OpenTimestamps status
+    and check the stamped digest still matches the file's bytes."""
+    import hashlib
+
+    from .timestamp import extract_digest, ots_status
+
+    ots_path = path.with_name(path.name + ".ots")
+    if not ots_path.exists():
+        return
+    ots = ots_path.read_bytes()
+    stamped = extract_digest(ots)
+    actual = hashlib.sha256(path.read_bytes()).digest()
+    if stamped == actual:
+        match = "digest matches this file"
+    else:
+        match = "stamped digest differs — file changed since stamping"
+    print(f"OpenTimestamps: {ots_status(ots)} — {match}.")
 
 
 def _anchor(args: argparse.Namespace) -> None:
@@ -580,8 +601,53 @@ def _anchor(args: argparse.Namespace) -> None:
         )
         if args.publish:
             _publish_anchor(args.publish, out, anchor.payload_hash, settings.aws_region)
+        if args.timestamp:
+            _stamp_file(out)
     finally:
         store.close()
+
+
+def _stamp_file(path) -> None:
+    """Submit a file's sha256 to the public OTS calendars and write FILE.ots —
+    an independently-verifiable 'existed before this Bitcoin block' proof."""
+    from .timestamp import ots_status, stamp_bytes
+
+    try:
+        ots, cal = stamp_bytes(path.read_bytes())
+    except RuntimeError as exc:
+        sys.exit(f"timestamp failed: {exc}")
+    ots_path = path.with_name(path.name + ".ots")
+    ots_path.write_bytes(ots)
+    print(
+        f"wrote {ots_path} — submitted via {cal}; {ots_status(ots)}.\n"
+        f"  upgrade once the calendar commits to Bitcoin: attest stamp --upgrade {ots_path}\n"
+        f"  verify independently: `ots verify {ots_path}` (pip install opentimestamps-client)"
+    )
+
+
+def _stamp(args: argparse.Namespace) -> None:
+    """Notarize any file's digest on the public OpenTimestamps calendars — or
+    refresh a pending proof once its calendar has committed to Bitcoin."""
+    from pathlib import Path
+
+    from .timestamp import ots_status, upgrade
+
+    target = Path(args.file)
+    if args.upgrade:
+        old = target.read_bytes()
+        try:
+            new = upgrade(old)
+        except RuntimeError as exc:
+            sys.exit(f"upgrade failed: {exc}")
+        if new is None:
+            print(f"{ots_status(old)} — the calendar is reachable; check again later")
+        elif new != old:
+            target.write_bytes(new)
+            print(f"upgraded {target} — {ots_status(new)}")
+        else:
+            print(f"{ots_status(new)} — check again later")
+        return
+    _stamp_file(target)
 
 
 def _publish_anchor(uri: str, path, payload_hash: str, region: str) -> None:
@@ -816,7 +882,7 @@ def _export(args: argparse.Namespace) -> None:
         if site is None:
             sys.exit("no site found — seed or run a replay first")
         entries = []
-        for visit in store.visits(site_id=site.id):
+        for visit in store.visits(site_id=site.id, limit=10_000):
             receipt = store.receipt_for_visit(visit.id)
             if receipt is None:
                 continue  # open visits have no signed record to export
@@ -1014,7 +1080,24 @@ def main(argv: list[str] | None = None) -> None:
         metavar="s3://bucket/key",
         help="also upload the anchor to S3 — external custody for the checkpoint",
     )
+    s.add_argument(
+        "--timestamp",
+        action="store_true",
+        help="also notarize the anchor on public OpenTimestamps calendars (writes FILE.ots)",
+    )
     s.set_defaults(fn=_anchor)
+
+    s = sub.add_parser(
+        "stamp",
+        help="notarize any file's digest via OpenTimestamps — 'existed before this Bitcoin block'",
+    )
+    s.add_argument("file", help="file to stamp (or the FILE.ots to upgrade)")
+    s.add_argument(
+        "--upgrade",
+        action="store_true",
+        help="refresh a pending .ots proof once the calendar has committed to Bitcoin",
+    )
+    s.set_defaults(fn=_stamp)
 
     s = sub.add_parser(
         "coverage",
@@ -1042,8 +1125,13 @@ def main(argv: list[str] | None = None) -> None:
     )
     s.set_defaults(fn=_deliveries)
 
+    _HELP = {
+        "seed": "seed a demo site + schedule + worker against a Ring sandbox",
+        "demo": "one command: in-process sandbox + server + a seeded story week + live dashboard",
+        "replay": "drive a scenario (builtin or YAML) through the webhook path on a replay clock",
+    }
     for name, fn in (("seed", _seed), ("demo", _demo), ("replay", _replay)):
-        s = sub.add_parser(name)
+        s = sub.add_parser(name, help=_HELP[name])
         s.add_argument("--ring-url", default=settings.ring_base_url)
         s.add_argument("--public-url", default=settings.public_base_url)
         s.add_argument("--site-name", default="Alvarez residence")

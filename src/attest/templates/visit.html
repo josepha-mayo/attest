@@ -75,6 +75,10 @@ document.getElementById('issue-link').onclick = async () => {
 {% include "_timeline.html" %}
 </div>
 {% endif %}
+{% if late_count %}
+<p class="small muted">{{ late_count }} late-arriving event(s) retained for this site — shown as gray marks
+where they fall inside the strip. They were not merged into the signed record.</p>
+{% endif %}
 <div class="card"><ul class="timeline">
 {% for e in evidence if e.kind != "snapshot" %}
 <li><time>{{ t(e.at) }}</time><div>{{ e.kind.replace("_"," ") }}{% if e.ring_sub_type %} ({{ e.ring_sub_type }}){% endif %}

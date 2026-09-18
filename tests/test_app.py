@@ -80,7 +80,7 @@ def test_admin_writes_require_auth_and_same_origin(api):
 
 def test_old_worker_tokens_no_longer_authenticate(api):
     assert api.get("/checkin/tok123", auth=None).status_code == 404
-    assert api.post("/checkin/tok123", auth=None).status_code == 409
+    assert api.post("/checkin/tok123", auth=None).status_code == 410  # dead link page
 
 
 def test_rejects_bad_signature(api, household, t0):
@@ -100,7 +100,7 @@ def test_webhook_to_receipt(api, store, household, schedule, t0):
     page = api.get(claim_path, auth=None)
     assert page.status_code == 200 and "Are you there now" in page.text
     assert api.post(claim_path, auth=None).status_code == 200
-    assert api.post(claim_path, auth=None).status_code == 409
+    assert api.post(claim_path, auth=None).status_code == 410  # consumed link -> Gone page
     assert store.visit(vid).state == VisitState.IN_PROGRESS
 
     leave = t + timedelta(minutes=85)
@@ -273,7 +273,7 @@ def test_worker_and_coordinator_review_flow_keeps_original(api, store, household
     assert api.get(link, auth=None).status_code == 200
     response = api.post(link, auth=None, data={"decision": "correction", "statement": "I remained inside."})
     assert response.status_code == 200 and "Statement recorded" in response.text
-    assert api.post(link, auth=None, data={"decision": "confirm", "statement": "Again"}).status_code == 409
+    assert api.post(link, auth=None, data={"decision": "confirm", "statement": "Again"}).status_code == 410
     bundle = api.get(f"/visits/{visit.id}/bundle.json")
     assert len(bundle.json()["reviews"]) == 2
     assert bundle.json()["reviews"][1]["receipt"]["payload"]["actor"]["role"] == "worker"
@@ -336,8 +336,8 @@ def test_declared_request_bodies_are_bounded(api):
 
 
 def test_verify_input_is_bounded(api):
-    oversized = "x" * (4 * 1024 * 1024 + 1)
-    assert api.post("/verify", data={"text": oversized}).status_code == 413
+    oversized = "x" * (2 * 1024 * 1024)  # Starlette caps form fields at 1MB -> 400
+    assert api.post("/verify", data={"text": oversized}).status_code == 400
 
 
 def test_link_tokens_and_ids_have_bounded_length(api):

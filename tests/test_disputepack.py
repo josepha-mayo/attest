@@ -104,7 +104,7 @@ def test_pack_verifier_rejects_broken_chain(pack):
     bundle_path.write_text(json.dumps(bundle))
     result = _run(pack)
     assert result.returncode != 0
-    assert "chain" in result.stderr
+    assert "sequence or previous hash mismatch" in result.stderr
 
 
 @pytest.fixture
@@ -156,6 +156,90 @@ def test_case_pack_verifier_rejects_manifest_tamper(case_pack):
     result = _run_case(case_pack)
     assert result.returncode != 0
     assert "manifest hash disagrees" in result.stdout
+
+
+@pytest.fixture
+def case_pack_signed(engine, store, household, schedule, t0, tmp_path):
+    """Same two-visit pack, but the manifest is signed at export time."""
+    service = ReviewService(store, engine.signer, engine.clock)
+    entries = []
+    for offset in (0, 60):
+        event = WebhookEvent.model_validate(
+            webhooks.build_event(
+                event_type="button_press",
+                device_id=household[2].id,
+                occurred_at=t0 + timedelta(minutes=offset),
+            )
+        )
+        visit = engine.ingest(event).visit
+        engine.close_for_review(visit.id)
+        bundle = service.bundle(visit.id)
+        entries.append((visit, bundle, countersign_status(bundle)))
+    site = store.sites()[0]
+    data = build_case_pack(
+        store,
+        tmp_path / "media",
+        site,
+        entries,
+        manifest_signer=lambda m: engine.issue_export_manifest(site, m),
+    )
+    out = tmp_path / "case-signed"
+    zipfile.ZipFile(io.BytesIO(data)).extractall(out)
+    return out
+
+
+def test_signed_manifest_verifies_in_embedded_verifier(case_pack_signed):
+    result = _run_case(case_pack_signed)
+    assert result.returncode == 0, result.stderr
+    assert "manifest: export signed: 2 record(s)" in result.stdout
+
+
+def test_signed_manifest_rejects_dropped_record(case_pack_signed):
+    """Removing a visit entry rewrites the manifest — the content hash inside
+    the signed export receipt must catch it even though every bundle is intact."""
+    manifest_path = case_pack_signed / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["visits"].pop()
+    manifest_path.write_text(json.dumps(manifest))
+    result = _run_case(case_pack_signed)
+    assert result.returncode != 0
+    assert "manifest content hash mismatch" in result.stdout
+
+
+def test_signed_manifest_rejects_swapped_hash(case_pack_signed):
+    """Keeping the manifest text identical but swapping a listed hash breaks the
+    visit list ↔ signed-export equality even though the content digest is the
+    attacker's too — recompute it to isolate the hash-map check."""
+    import hashlib
+    import json as _json
+
+    manifest_path = case_pack_signed / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["visits"][0]["payload_hash"] = "0" * 64
+    sig = manifest["signature_receipt"]
+    core = {k: v for k, v in manifest.items() if k != "signature_receipt"}
+    canonical = _json.dumps(core, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    sig["payload"]["manifest_sha256"] = hashlib.sha256(canonical.encode()).hexdigest()
+    manifest_path.write_text(_json.dumps(manifest))
+    result = _run_case(case_pack_signed)
+    assert result.returncode != 0
+    assert "payload hash mismatch" in result.stdout or "disagrees" in result.stdout
+
+
+def test_case_verifier_parity_rejects_forged_entry(case_pack):
+    """Parity with reviews.verify_bundle: an entry whose id/visit_id doesn't
+    match its receipt fails, not just on revision/prev_hash."""
+    manifest = json.loads((case_pack / "manifest.json").read_text())
+    vid = manifest["visits"][0]["visit_id"]
+    bundle_path = case_pack / "visits" / vid / "bundle.json"
+    bundle = json.loads(bundle_path.read_text())
+    if not bundle["reviews"]:
+        pytest.skip("fixture has no review entries")
+    bundle["reviews"][0]["id"] = "rcpt_forged"
+    bundle_path.write_text(json.dumps(bundle))
+    result = _run_case(case_pack)
+    assert result.returncode != 0
+    assert "identity does not match" in result.stdout
 
 
 def test_case_pack_redacted_media_verifies(engine, store, household, schedule, t0, tmp_path):

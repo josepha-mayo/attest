@@ -53,7 +53,7 @@ log = logging.getLogger("attest")
 _TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 _MAX_WEBHOOK_BYTES = 256 * 1024
-_MAX_VERIFY_BYTES = 4 * 1024 * 1024
+_MAX_VERIFY_BYTES = 32 * 1024 * 1024
 _MAX_BODY_BYTES = 1024 * 1024
 
 
@@ -285,11 +285,20 @@ def create_app(
 
     # ------------------------------------------------------------------ worker check-in
 
+    def _dead_link(request: Request, what: str, status_code: int = 404):
+        resp = render(
+            request,
+            "link_expired.html",
+            detail=f"This {what} link is invalid, expired, or already used.",
+        )
+        resp.status_code = status_code
+        return resp
+
     @app.get("/checkin/{token}", response_class=HTMLResponse)
     async def checkin_page(request: Request, token: str = PathParam(max_length=128)):
         target = engine.checkin_target(token)
         if target is None:
-            raise HTTPException(404, "invalid, expired, or used check-in link")
+            return _dead_link(request, "check-in")
         _, visit, worker = target
         return render(
             request,
@@ -305,7 +314,7 @@ def create_app(
     async def checkin_submit(request: Request, token: str = PathParam(max_length=128)):
         visit = await asyncio.to_thread(engine.check_in, token)
         if visit is None:
-            raise HTTPException(409, "invalid, expired, or used check-in link")
+            return _dead_link(request, "check-in", status_code=410)
         return render(
             request,
             "checkin.html",
@@ -382,11 +391,13 @@ def create_app(
             end = min(schedule.window_end, engine.clock.now())
             if end > start:
                 cov = coverage_report(store, device, start, end, now=engine.clock.now())
+        late = [r["body"] for r in store.late_event_rows() if r["site_id"] == v.site_id]
         strip = timeline_strip(
             schedule=schedule,
             evidence=evidence,
             checked_in_at=v.checked_in_at,
             coverage=cov,
+            late_events=late,
         )
         return render(
             request,
@@ -404,6 +415,7 @@ def create_app(
             review_verification=verify_bundle(bundle, public_key=signer.public_key_b64) if bundle else None,
             verified=ledger.verify_receipt(receipt, public_key=signer.public_key_b64) if receipt else None,
             countersign=reviews.countersign(visit_id) if bundle else None,
+            late_count=len(late),
         )
 
     @app.get("/visits/{visit_id}/media/{name}")
@@ -619,6 +631,7 @@ def create_app(
         workers = {w.id: w for w in store.workers()}
         schedules = {x.id: x for x in store.schedules_for_site(site.id)}
         digests = [r for r in store.receipts() if r.visit_id.startswith(f"digest:{site.id}:")]
+        exports = [r for r in store.receipts() if r.visit_id.startswith(f"export:{site.id}:")]
         from .timeline import day_strips
 
         days = day_strips(
@@ -639,6 +652,7 @@ def create_app(
             coverage=coverage_summaries,
             receipts={v.id: store.receipt_for_visit(v.id) for v in visits},
             digests=digests,
+            exports=exports,
             days=days,
         )
 
@@ -668,13 +682,15 @@ def create_app(
 
         def build() -> bytes:
             entries = []
-            for visit in store.visits(site_id=site.id):
+            for visit in store.visits(site_id=site.id, limit=10_000):
                 # Only closed records carry signed receipts; open visits have
                 # nothing to verify and are skipped from the case export.
                 if store.receipt_for_visit(visit.id) is None:
                     continue
                 bundle = reviews.bundle(visit.id)
                 entries.append((visit, bundle, reviews.countersign(visit.id)))
+            if not entries:
+                raise HTTPException(409, "no signed records for this site yet")
             return build_case_pack(
                 store,
                 s.data_dir / "media",
@@ -704,7 +720,7 @@ def create_app(
     async def worker_review_page(request: Request, token: str = PathParam(max_length=128)):
         target = await action(reviews.worker_target, token)
         if target is None:
-            raise HTTPException(404, "invalid, expired, or used review link")
+            return _dead_link(request, "review")
         _, bundle = target
         # The worker sees the same visual the coordinator does — built from the
         # signed payload itself, so the strip is exactly what they countersign.
@@ -746,7 +762,12 @@ def create_app(
             raise HTTPException(
                 422, "Use a valid decision, non-empty statement, and two ordered offset-aware times"
             ) from exc
-        await action(reviews.worker_review, token, body)
+        try:
+            await action(reviews.worker_review, token, body)
+        except HTTPException as exc:
+            if exc.status_code == 409 and "review link" in str(exc.detail):
+                return _dead_link(request, "review", status_code=410)
+            raise
         return render(request, "worker_review.html", original=None, token=None, done=True)
 
     @app.get("/api/clock")
@@ -859,9 +880,9 @@ def _verify_pack(data: bytes, public_key: str) -> tuple[bool, str]:
         if "manifest.json" in names:
             return _verify_case_pack(z, public_key)
         bundle = ReviewBundle.model_validate(json.loads(z.read("bundle.json")))
+        return _check_pack_bundle(z, bundle, public_key, media_prefix="media/")
     except Exception as exc:  # noqa: BLE001
-        return False, f"not a dispute pack: {exc}"
-    return _check_pack_bundle(z, bundle, public_key, media_prefix="media/")
+        return False, f"not a valid exported pack: {exc}"
 
 
 def _check_pack_bundle(z, bundle: ReviewBundle, public_key: str, *, media_prefix: str) -> tuple[bool, str]:
@@ -878,11 +899,12 @@ def _check_pack_bundle(z, bundle: ReviewBundle, public_key: str, *, media_prefix
         withheld = set(marker.get("withheld_digests", []))
         if not withheld <= digests:
             return False, "bundle: redaction.json lists digests not in the signed evidence"
-    matched = 0
-    for name in z.namelist():
-        if name.startswith(media_prefix) and not name.endswith("/"):
-            if hashlib.sha256(z.read(name)).hexdigest() in digests:
-                matched += 1
+    present = {
+        hashlib.sha256(z.read(name)).hexdigest()
+        for name in z.namelist()
+        if name.startswith(media_prefix) and not name.endswith("/")
+    }
+    matched = len(digests & present)
     covered = matched + len(withheld & digests)
     detail = f"{why}; {matched}/{len(digests)} signed media digests found in pack" + (
         f", {len(withheld & digests)} withheld by redaction" if withheld else ""

@@ -28,6 +28,12 @@
   {{ d.payload.summarized_receipts|length }} receipt(s) — verifies offline with the issuer key.
 </div>
 {% endfor %}
+{% if exports %}
+<div class="muted small" style="margin-top:4px">
+  {{ exports|length }} case export(s) signed — each export is itself a chain event
+  naming exactly which receipt hashes it carried (latest: <code>{{ exports[-1].id }}</code>).
+</div>
+{% endif %}
 <script>
 async function signDigest() {
   const box = document.getElementById('digest-result');

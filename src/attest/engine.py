@@ -7,7 +7,7 @@ State machine (per site, at most one active visit):
     OPEN --worker check-in------------------------> IN_PROGRESS
     OPEN | IN_PROGRESS --departure cue------------> CLOSED (receipt issued)
     OPEN | IN_PROGRESS --idle timeout-------------> CLOSED (receipt issued, flagged)
-    schedule window elapsed, no visit-------------> NO_SHOW (receipt issued)
+    schedule window elapsed, no visit-------------> NO_OBSERVATION (receipt issued)
 
 Arrival cues:  motion_detected(human) on the door camera, button_press, door opened (contact sensor).
 Departure cue: door open->close, then motion_detected(human) within 2 min, once the visit is at

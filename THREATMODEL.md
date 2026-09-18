@@ -62,7 +62,12 @@ against a live store:
 Two paths need an **external anchor** to be provable: truncating the journal
 before the earliest pin, and wholesale replacement of store + receipts + key
 together. Anchors exist for exactly this; `--publish s3://` gives them custody
-outside the deployment's control.
+outside the deployment's control, and `--timestamp` / `attest stamp` notarize
+the file's digest on public OpenTimestamps calendars — once the calendar's
+Merkle root lands in a Bitcoin block, the `.ots` proof attests the anchor
+*existed at that time*, verifiable by anyone with the free reference tool.
+Backdating an anchor is then provable against a clock neither we nor the
+deployment controls.
 
 ## Privacy model
 

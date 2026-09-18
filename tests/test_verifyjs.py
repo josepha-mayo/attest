@@ -41,9 +41,32 @@ def _chain():
         visit_id="vis_a",
         sequence=1,
         prev_hash=r1.payload_hash,
-        facts={"record_type": "review", "statement": "tést — non-ascii"},
+        facts={
+            "record_type": "review",
+            "original_receipt": {"id": r1.id, "hash": r1.payload_hash},
+            "statement": "tést — non-ascii",
+        },
     )
     return s, r1, r2
+
+
+def _bundle(r1, r2) -> str:
+    import json
+
+    return json.dumps(
+        {
+            "original": r1.model_dump(mode="json"),
+            "reviews": [
+                {
+                    "id": r2.id,
+                    "visit_id": r1.visit_id,
+                    "revision": 1,
+                    "receipt": r2.model_dump(mode="json"),
+                }
+            ],
+        },
+        ensure_ascii=False,
+    )
 
 
 @pytest.mark.skipif(NODE is None, reason="node runtime not available")
@@ -85,30 +108,32 @@ const receiptText=${JSON.stringify(rt)};
 def test_js_chain_verification(tmp_path):
     _, r1, r2 = _chain()
     (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
-    (tmp_path / "r1.json").write_text(r1.model_dump_json(indent=2), encoding="utf-8")
-    (tmp_path / "r2.json").write_text(r2.model_dump_json(indent=2), encoding="utf-8")
+    (tmp_path / "b.json").write_text(_bundle(r1, r2), encoding="utf-8")
     driver = """
 const fs=require('fs');
 let src=fs.readFileSync(process.argv[2],'utf8').replace(/const dz=[\\s\\S]*$/,'');
-const a=fs.readFileSync(process.argv[3],'utf8'),b=fs.readFileSync(process.argv[4],'utf8');
+const a=fs.readFileSync(process.argv[3],'utf8');
 eval(src + `
 (async()=>{
-  console.log('chain:',JSON.stringify(await checkChain([parseKeep(a),parseKeep(b)],null)));
-  const rev=JSON.parse(b);rev.prev_hash='0'.repeat(64);
-  console.log('broken:',JSON.stringify(await checkChain([parseKeep(a),parseKeep(JSON.stringify(rev))],null)));
+  console.log('chain:',JSON.stringify(await checkBundle(parseKeep(a),null)));
+  const bad=JSON.parse(a);bad.reviews[0].receipt.prev_hash='0'.repeat(64);
+  console.log('broken:',JSON.stringify(await checkBundle(parseKeep(JSON.stringify(bad)),null)));
+  const forged=JSON.parse(a);forged.reviews[0].id='rcpt_forged';
+  console.log('forged:',JSON.stringify(await checkBundle(parseKeep(JSON.stringify(forged)),null)));
 })();`);
 """
     (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
     proc = subprocess.run(
-        [NODE, "drive.js", "verify.js", "r1.json", "r2.json"],
+        [NODE, "drive.js", "verify.js", "b.json"],
         cwd=tmp_path,
         capture_output=True,
         text=True,
         timeout=60,
     )
     assert proc.returncode == 0, proc.stderr
-    assert '"ok":true' in proc.stdout and "chain intact" in proc.stdout
-    assert "broken" in proc.stdout
+    assert '"ok":true' in proc.stdout and "review(s) verified" in proc.stdout
+    assert "envelope fields disagree" in proc.stdout  # broken: prev_hash is signed too
+    assert "identity does not match" in proc.stdout
 
 
 @pytest.mark.skipif(NODE is None, reason="node runtime not available")
