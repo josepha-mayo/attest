@@ -1,5 +1,6 @@
 import io
 import json
+import re
 import subprocess
 import sys
 import zipfile
@@ -224,6 +225,102 @@ def test_signed_manifest_rejects_swapped_hash(case_pack_signed):
     result = _run_case(case_pack_signed)
     assert result.returncode != 0
     assert "payload hash mismatch" in result.stdout or "disagrees" in result.stdout
+
+
+@pytest.fixture
+def case_pack_attested(engine, store, household, schedule, t0, tmp_path):
+    """Pack built after coverage + digest attestations — they must travel."""
+    service = ReviewService(store, engine.signer, engine.clock)
+    event = WebhookEvent.model_validate(
+        webhooks.build_event(
+            event_type="button_press",
+            device_id=household[2].id,
+            occurred_at=t0,
+        )
+    )
+    visit = engine.ingest(event).visit
+    engine.close_for_review(visit.id)
+    bundle = service.bundle(visit.id)
+    site = store.sites()[0]
+    engine.issue_coverage_attestation(site, t0 - timedelta(hours=1), t0 + timedelta(hours=2))
+    engine.issue_period_digest(site, t0 - timedelta(hours=1), t0 + timedelta(hours=2))
+    data = build_case_pack(
+        store,
+        tmp_path / "media",
+        site,
+        [(visit, bundle, countersign_status(bundle))],
+        manifest_signer=lambda m: engine.issue_export_manifest(site, m),
+    )
+    out = tmp_path / "case-attested"
+    zipfile.ZipFile(io.BytesIO(data)).extractall(out)
+    return out
+
+
+def test_site_attestations_travel_in_case_pack(case_pack_attested):
+    manifest = json.loads((case_pack_attested / "manifest.json").read_text(encoding="utf-8"))
+    listed = manifest["attestations"]
+    assert {a["record_type"] for a in listed} == {"coverage_attestation", "period_digest"}
+    # The export's own receipt cannot reference itself — not listed, not present.
+    assert not any(a["visit_id"].startswith("export:") for a in listed)
+    for a in listed:
+        att = json.loads(
+            (case_pack_attested / "attestations" / f"{a['receipt_id']}.json").read_text(encoding="utf-8")
+        )
+        assert att["payload_hash"] == a["payload_hash"]
+        assert att["visit_id"] == a["visit_id"]
+    result = _run_case(case_pack_attested)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "OK   attestation coverage_attestation" in result.stdout
+    assert "OK   attestation period_digest" in result.stdout
+
+
+def test_case_pack_verifier_rejects_missing_attestation(case_pack_attested):
+    manifest = json.loads((case_pack_attested / "manifest.json").read_text(encoding="utf-8"))
+    rid = manifest["attestations"][0]["receipt_id"]
+    (case_pack_attested / "attestations" / f"{rid}.json").unlink()
+    result = _run_case(case_pack_attested)
+    assert result.returncode != 0
+    assert "file is missing" in result.stdout
+
+
+def test_case_pack_verifier_rejects_tampered_attestation(case_pack_attested):
+    manifest = json.loads((case_pack_attested / "manifest.json").read_text(encoding="utf-8"))
+    rid = manifest["attestations"][0]["receipt_id"]
+    apath = case_pack_attested / "attestations" / f"{rid}.json"
+    att = json.loads(apath.read_text(encoding="utf-8"))
+    att["payload"]["device_id"] = "attacker-device"
+    apath.write_text(json.dumps(att), encoding="utf-8")
+    result = _run_case(case_pack_attested)
+    assert result.returncode != 0
+    assert "payload hash mismatch" in result.stdout
+
+
+def test_case_pack_verifier_rejects_unlisted_attestation(case_pack_attested):
+    """An attestation file dropped into the pack that the signed manifest does
+    not list must fail closed — otherwise anyone could smuggle 'proof'."""
+    import shutil
+
+    manifest = json.loads((case_pack_attested / "manifest.json").read_text(encoding="utf-8"))
+    rid = manifest["attestations"][0]["receipt_id"]
+    shutil.copy(
+        case_pack_attested / "attestations" / f"{rid}.json",
+        case_pack_attested / "attestations" / "smuggled.json",
+    )
+    result = _run_case(case_pack_attested)
+    assert result.returncode != 0
+    assert "not in the signed manifest" in result.stdout
+
+
+def test_case_pack_index_inlines_attestations(case_pack_attested):
+    html = (case_pack_attested / "index.html").read_text(encoding="utf-8")
+    tags = re.findall(r'class="attestation" data-rid="([^"]+)">([A-Za-z0-9+/=]+)', html)
+    manifest = json.loads((case_pack_attested / "manifest.json").read_text(encoding="utf-8"))
+    assert {t[0] for t in tags} == {a["receipt_id"] for a in manifest["attestations"]}
+    import base64
+
+    for rid, b64 in tags:
+        att = json.loads(base64.b64decode(b64).decode())
+        assert att["id"] == rid
 
 
 def test_case_verifier_parity_rejects_forged_entry(case_pack):

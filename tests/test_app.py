@@ -150,6 +150,39 @@ def test_redacted_case_pack_upload_verifies(api, household, t0):
     assert "withheld" in detail
 
 
+def test_case_pack_attestations_verify_and_fail_closed(api, household, t0):
+    """Site-level attestations travel in the pack: a coverage cert issued before
+    export must verify under the issuer key — and removing it must fail."""
+    import io
+    import zipfile
+    from datetime import timedelta
+
+    site, _, cam, _ = household
+    r = _post_hook(api, cam.id, "motion_detected", t0, "human")
+    assert r.status_code == 202
+    vid = api.attest_state.store.active_visit(site.id).id
+    assert api.post(f"/api/visits/{vid}/close").status_code == 200
+    api.attest_state.engine.issue_coverage_attestation(site, t0 - timedelta(hours=1), t0 + timedelta(hours=2))
+
+    pack = api.get(f"/sites/{site.id}/pack.zip")
+    assert pack.status_code == 200
+    from attest.app import _verify_pack
+
+    ok, detail = _verify_pack(pack.content, api.attest_state.signer.public_key_b64)
+    assert ok, detail
+
+    zin = zipfile.ZipFile(io.BytesIO(pack.content))
+    dropped = [n for n in zin.namelist() if not n.startswith("attestations/")]
+    assert len(dropped) < len(zin.namelist())  # attestations were present
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zout:
+        for n in dropped:
+            zout.writestr(n, zin.read(n))
+    ok, detail = _verify_pack(buf.getvalue(), api.attest_state.signer.public_key_b64)
+    assert not ok
+    assert "attestation" in detail
+
+
 def test_webhook_ack_does_not_wait_for_enrichment(api, household, t0, monkeypatch):
     called = []
     monkeypatch.setattr(api.attest_state.engine, "ingest", lambda ev: called.append(ev))

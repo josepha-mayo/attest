@@ -982,6 +982,19 @@ def _verify_case_pack(z, public_key: str) -> tuple[bool, str]:
         if listed != signed_hashes:
             return False, "manifest visit list disagrees with the signed export"
         manifest_note = f"export signed: {total} record(s)"
+    for a in manifest.get("attestations", []):
+        rid = a.get("receipt_id", "?")
+        try:
+            att = Receipt.model_validate(json.loads(z.read(f"attestations/{rid}.json")))
+        except Exception as exc:  # noqa: BLE001
+            return False, f"attestation {rid}: missing or invalid ({exc})"
+        if att.public_key != public_key:
+            return False, f"attestation {rid}: issued under a different key"
+        ok, why = ledger.verify_receipt(att, public_key=public_key)
+        if not ok:
+            return False, f"attestation {rid}: {why}"
+        if att.visit_id != a.get("visit_id") or att.payload_hash != a.get("payload_hash"):
+            return False, f"attestation {rid}: does not match the manifest's signed entry"
     return True, f"case pack verified — {total} visit record(s) intact ({manifest_note}): " + "; ".join(lines)
 
 

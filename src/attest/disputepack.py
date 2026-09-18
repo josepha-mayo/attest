@@ -336,6 +336,29 @@ def main():
         redact_note = f", {held} withheld" if held else ""
         print(f"OK   {vid}: {v['state']} — {v['countersign']['state']}"
               f" ({n} receipt(s), {checked} media digest(s){redact_note})")
+    for a in manifest.get("attestations", []):
+        apath = root / "attestations" / f"{a['receipt_id']}.json"
+        if not apath.exists():
+            print(f"FAIL attestation {a['receipt_id']}: manifest lists it but the file is missing")
+            failed += 1
+            continue
+        ar = json.loads(apath.read_text(encoding="utf-8"))
+        aok, awhy = check_receipt(ar, key)
+        if not aok:
+            print(f"FAIL attestation {a['receipt_id']}: {awhy}")
+            failed += 1
+        elif ar["payload_hash"] != a["payload_hash"] or ar["visit_id"] != a["visit_id"]:
+            print(f"FAIL attestation {a['receipt_id']}: disagrees with the signed manifest")
+            failed += 1
+        else:
+            print(f"OK   attestation {a.get('record_type') or 'record'} ({a['receipt_id'][:20]}...)")
+    adir = root / "attestations"
+    if adir.exists():
+        listed = {f"{a['receipt_id']}.json" for a in manifest.get("attestations", [])}
+        extra = {p.name for p in adir.glob("*.json")} - listed
+        if extra:
+            print(f"FAIL {len(extra)} attestation file(s) present but not in the signed manifest")
+            failed += 1
     mok, mwhy = check_manifest(manifest, key)
     print(f"{'OK  ' if mok else 'FAIL'} manifest: {mwhy}")
     if not mok:
@@ -490,6 +513,19 @@ def build_case_pack(
     import json
     from datetime import UTC, datetime
 
+    # Site-level chain events — coverage attestations ("was anyone watching?"),
+    # period digests, prior exports, source disconnect — travel in the pack so
+    # the evidence segment is complete, not just the visit receipts. Collected
+    # before signing: this export's own manifest receipt cannot reference its
+    # own hash, so it is the one attestation the pack cannot carry.
+    attestations = [
+        r
+        for r in store.receipts()
+        if r.visit_id == f"source:{site.id}"
+        or r.visit_id.startswith(f"coverage:{site.id}:")
+        or r.visit_id.startswith(f"digest:{site.id}:")
+        or r.visit_id.startswith(f"export:{site.id}:")
+    ]
     manifest = {
         "schema": "attest.case-pack/1",
         "site": {
@@ -500,6 +536,15 @@ def build_case_pack(
         "generated_at": datetime.now(tz=UTC).isoformat(),
         "issuer_key": entries[0][1].original.public_key if entries else None,
         "media_redacted": redact_media,
+        "attestations": [
+            {
+                "visit_id": r.visit_id,
+                "receipt_id": r.id,
+                "payload_hash": r.payload_hash,
+                "record_type": r.payload.get("record_type"),
+            }
+            for r in attestations
+        ],
         "visits": [
             {
                 "visit_id": visit.id,
@@ -544,8 +589,11 @@ def build_case_pack(
                 },
                 bundle_texts,
                 manifest_text,
+                attestations=[(r.id, r.model_dump_json(indent=2)) for r in attestations],
             ),
         )
+        for r in attestations:
+            z.writestr(f"attestations/{r.id}.json", r.model_dump_json(indent=2))
         for (vid, text), (visit, bundle, _) in zip(bundle_texts, entries, strict=True):
             base = f"visits/{vid}"
             z.writestr(f"{base}/bundle.json", text)

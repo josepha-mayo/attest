@@ -332,6 +332,20 @@ async function verifyFiles(files){
         say("bad",`${v.visit_id}: manifest hash disagrees with signed original`);
       }
     }
+    /* Site attestations (coverage certs, digests, prior exports, disconnects)
+       travel in the pack — each must verify and match the manifest entry. */
+    for(const a of manifest.attestations||[]){
+      const at=await text(`attestations/${a.receipt_id}.json`);
+      if(!at){anyBad=true;say("bad",`attestation ${a.receipt_id}: missing from pack`);continue;}
+      const aNode=parseKeep(at);const rjs=toJS(aNode);
+      if(key&&rjs.public_key!==key){
+        anyBad=true;say("bad",`attestation ${a.receipt_id}: different issuer key`);continue;}
+      const rc=await checkReceipt(aNode);
+      if(!rc.ok){anyBad=true;say("bad",`attestation ${a.receipt_id}: ${rc.why}`);continue;}
+      if(rjs.payload_hash!==a.payload_hash||rjs.visit_id!==a.visit_id){
+        anyBad=true;say("bad",`attestation ${a.receipt_id}: disagrees with signed manifest`);continue;}
+      say("ok",`attestation ${a.record_type||"record"}: signed and intact`);
+    }
   }
   say(anyBad?"bad":"ok",anyBad
     ?"FAILED — do not rely on this pack"
@@ -540,6 +554,30 @@ async function renderIndex(){
         mLine+=`<div class="row bad">${esc(v.visit_id)}: manifest hash disagrees with signed original</div>`;
       }
     }
+    /* Attestations inlined as <script class="attestation"> — verify each
+       against the manifest's signed list (signature + hash + visit_id). */
+    const alist={};for(const a of toJS(mNode).attestations||[])alist[a.receipt_id]=a;
+    const present=new Set();
+    for(const tag of document.querySelectorAll("script.attestation")){
+      present.add(tag.dataset.rid);
+      const aNode=parseKeep(d64(tag.textContent));const rjs=toJS(aNode);
+      const listed=alist[tag.dataset.rid];
+      const rid=esc(tag.dataset.rid);
+      if(key&&rjs.public_key!==key){
+        anyBad=true;mLine+=`<div class="row bad">attestation ${rid}: different issuer key</div>`;continue;}
+      const rc=await checkReceipt(aNode);
+      if(!rc.ok){
+        anyBad=true;mLine+=`<div class="row bad">attestation ${rid}: ${esc(rc.why)}</div>`;continue;}
+      if(!listed||listed.payload_hash!==rjs.payload_hash||listed.visit_id!==rjs.visit_id){
+        anyBad=true;
+        mLine+=`<div class="row bad">attestation ${rid}: not in the signed manifest</div>`;continue;}
+      mLine+=`<div class="row ok">attestation ${esc(listed.record_type||"record")}: signed and intact</div>`;
+    }
+    for(const a of toJS(mNode).attestations||[]){
+      if(!present.has(a.receipt_id)){
+        anyBad=true;
+        mLine+=`<div class="row bad">attestation ${esc(a.receipt_id)}: listed but not inlined</div>`;}
+    }
   }
   verdict.innerHTML=anyBad
     ?'<div class="row bad">FAILED — '+n
@@ -555,7 +593,12 @@ renderIndex().catch(e=>{
 """
 
 
-def case_index_html(meta: dict, bundles: list[tuple[str, str]], manifest_text: str = "") -> str:
+def case_index_html(
+    meta: dict,
+    bundles: list[tuple[str, str]],
+    manifest_text: str = "",
+    attestations: list[tuple[str, str]] = (),
+) -> str:
     """Self-contained offline case browser embedded in case packs.
 
     Each visit's bundle.json text is inlined base64-encoded — immune to
@@ -571,6 +614,9 @@ def case_index_html(meta: dict, bundles: list[tuple[str, str]], manifest_text: s
 
     enc = lambda s: base64.b64encode(s.encode()).decode()  # noqa: E731
     tags = "".join(f'<script class="bundle" data-vid="{vid}">{enc(text)}</script>\n' for vid, text in bundles)
+    tags += "".join(
+        f'<script class="attestation" data-rid="{rid}">{enc(text)}</script>\n' for rid, text in attestations
+    )
     meta_tag = f'<script id="packmeta">{enc(_json.dumps(meta))}</script>\n'
     if manifest_text:
         meta_tag += f'<script id="packmanifest">{enc(manifest_text)}</script>\n'

@@ -264,7 +264,10 @@ def test_case_pack_index_verifies_records_in_browser(engine, store, household, s
     """Run index.html's own script under node with a minimal DOM stub — the
     embedded driver must verify the real inlined bundle and report VERIFIED."""
     import re
+    from datetime import timedelta
 
+    site = store.sites()[0]
+    engine.issue_coverage_attestation(site, t0 - timedelta(hours=1), t0 + timedelta(hours=2))
     z = _case_pack(engine, store, household, schedule, t0, tmp_path)
     html = z.read("index.html").decode()
     meta = re.search(r'id="packmeta">([A-Za-z0-9+/=]+)</script>', html).group(1)
@@ -276,20 +279,24 @@ const fs=require('fs');
 const html=fs.readFileSync(process.argv[2],'utf8');
 const bundles=[...html.matchAll(/data-vid="([^"]+)">([A-Za-z0-9+/=]+)<\\/script>/g)]
   .map(m=>({dataset:{vid:m[1]},textContent:m[2]}));
+const attags=[...html.matchAll(/class="attestation" data-rid="([^"]+)">([A-Za-z0-9+/=]+)<\\/script>/g)]
+  .map(m=>({dataset:{rid:m[1]},textContent:m[2]}));
 const mm=html.match(/id="packmanifest">([A-Za-z0-9+/=]+)<\\/script>/);
 const els={packmeta:{textContent:fs.readFileSync(process.argv[4],'utf8')}};
 if(mm)els.packmanifest={textContent:mm[1]};
 const get=id=>els[id]||(els[id]={textContent:'',innerHTML:''});
-global.document={querySelectorAll:s=>s==='script.bundle'?bundles:[],getElementById:get};
+global.document={querySelectorAll:s=>s==='script.bundle'?bundles:s==='script.attestation'?attags:[],getElementById:get};
 let src=fs.readFileSync(process.argv[3],'utf8');
 src=src.replace(/renderIndex\\(\\)\\.catch[\\s\\S]*$/,'');
 eval(src+';globalThis.__r=renderIndex;');
 __r().then(()=>{
-  console.log('verdict:',els.verdict.innerHTML.slice(0,120));
+  console.log('verdict:',els.verdict.innerHTML.slice(0,140));
   console.log('cards:',(els.cards.innerHTML.match(/class="card"/g)||[]).length);
   console.log('timeline:',els.cards.innerHTML.includes('<svg'));
   console.log('corr:',(els.cards.innerHTML.match(/class="corr"/g)||[]).length);
   console.log('corrrows:',els.cards.innerHTML.includes('Pipeline coverage'));
+  console.log('attline:',
+    els.verdict.innerHTML.includes('attestation coverage_attestation: signed and intact'));
 });
 """
     (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
@@ -308,6 +315,7 @@ __r().then(()=>{
     assert "timeline: true" in out, out
     assert "corr: 1" in out, out
     assert "corrrows: true" in out, out
+    assert "attline: true" in out, out
 
 
 @pytest.mark.skipif(NODE is None, reason="node runtime not available")
@@ -385,7 +393,12 @@ def test_verify_html_reads_the_zip_directly(engine, store, household, schedule, 
     deflate entries (node's DecompressionStream stands in for the browser's),
     and media files are matched by CONTENT hash — their filenames hold only a
     digest prefix."""
+    from datetime import timedelta
+
+    site = store.sites()[0]
+    engine.issue_coverage_attestation(site, t0 - timedelta(hours=1), t0 + timedelta(hours=2))
     z = _case_pack(engine, store, household, schedule, t0, tmp_path)
+    assert any(n.startswith("attestations/") for n in z.namelist())
     pack_bytes = tmp_path / "case.zip"
     with zipfile.ZipFile(pack_bytes, "w", zipfile.ZIP_DEFLATED) as out:
         for name in z.namelist():
@@ -404,6 +417,7 @@ __rz(fake).then(async files=>{
   const html=await __v(files);
   console.log('verdict:',(html.match(/VERIFIED[^<]*|FAILED[^<]*/)||['none'])[0]);
   console.log('media-ok:',(html.match(/digest matches/g)||[]).length);
+  console.log('att-ok:',html.includes('attestation coverage_attestation: signed and intact'));
   console.log('manifest:',(html.match(/manifest: [^<]*/g)||['none']).pop());
 }).catch(e=>{console.log('ERR',e.message);process.exit(2);});
 """
@@ -420,4 +434,5 @@ __rz(fake).then(async files=>{
     assert "entries:" in out and "0" not in out.split("entries:")[1].split("\n")[0]
     assert "VERIFIED" in out, out
     assert "media-ok:" in out, out
+    assert "att-ok: true" in out, out
     assert "export signed" in out, out
