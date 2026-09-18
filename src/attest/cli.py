@@ -1105,6 +1105,30 @@ def _explain(args: argparse.Namespace) -> None:
                 print(f"  rev {r.revision}: {label} — {actor.get('name', '?')} ({actor.get('role')})")
             status = reviews.countersign(visit.id)
             print(f"Derived stance: {status['state']} — {status['detail']}")
+        attestations = [
+            r
+            for r in store.receipts()
+            if r.visit_id == f"source:{visit.site_id}"
+            or r.visit_id.startswith(f"coverage:{visit.site_id}:")
+            or r.visit_id.startswith(f"digest:{visit.site_id}:")
+            or r.visit_id.startswith(f"export:{visit.site_id}:")
+        ]
+        if attestations:
+            print()
+            print(f"Site attestations ({len(attestations)} signed chain event(s)):")
+            for r in attestations:
+                rtype = r.payload.get("record_type", "record")
+                spans = ""
+                cov = r.payload.get("coverage") or {}
+                window = cov.get("window") or {}
+                if (
+                    rtype == "coverage_attestation"
+                    and visit.arrived_at
+                    and window.get("start", "") <= visit.arrived_at.isoformat()
+                    and visit.arrived_at.isoformat() <= window.get("end", "")
+                ):
+                    spans = " — spans this visit's window"
+                print(f"  {rtype:<22} {r.payload_hash[:16]}…{spans}")
         print()
         print("Boundary: sources establish what they reported; the signature proves")
         print("the record is intact — never identity, attendance, or physical truth.")

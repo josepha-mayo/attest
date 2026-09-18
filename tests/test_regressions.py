@@ -299,6 +299,7 @@ def test_cli_explain_narrates_a_record(tmp_path, monkeypatch, ring_world, ring_c
     )
     visit = engine.ingest(event(cam, t0 + timedelta(minutes=2))).visit
     engine.close_for_review(visit.id)
+    engine.issue_coverage_attestation(site, t0 - timedelta(hours=1), t0 + timedelta(hours=2))
 
     monkeypatch.setattr(cli.settings, "data_dir", tmp_path)
     monkeypatch.setattr(cli.settings, "kms_key_id", None)
@@ -315,6 +316,8 @@ def test_cli_explain_narrates_a_record(tmp_path, monkeypatch, ring_world, ring_c
     assert "Pipeline coverage" in out
     assert "Signed receipt" in out and "Review chain: OK" in out
     assert "Derived stance" in out
+    assert "Site attestations" in out
+    assert "coverage_attestation" in out and "spans this visit's window" in out
 
     with pytest.raises(SystemExit):
         with contextlib.redirect_stdout(buf):

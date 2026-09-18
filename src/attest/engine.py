@@ -575,6 +575,9 @@ class VisitEngine:
         ]
         entries = [e for v in visits for e in self.store.reviews_for(v.id)]
         worker_entries = [e for e in entries if e.receipt.payload.get("actor", {}).get("role") == "worker"]
+        resolution_entries = [
+            e for e in entries if e.receipt.payload.get("review", {}).get("kind") == "resolution"
+        ]
         receipts = {
             r.visit_id: r.payload_hash for r in self.store.receipts() if r.visit_id in {v.id for v in visits}
         }
@@ -586,7 +589,8 @@ class VisitEngine:
             "worker_disputes": sum(
                 1 for e in worker_entries if e.receipt.payload.get("review", {}).get("decision") == "dispute"
             ),
-            "coordinator_statements": len(entries) - len(worker_entries),
+            "coordinator_statements": len(entries) - len(worker_entries) - len(resolution_entries),
+            "coordinator_resolutions": len(resolution_entries),
         }
         device = site.door_camera_id or site.door_sensor_id
         prev = self.store.latest_receipt()
