@@ -476,6 +476,14 @@ def create_app(
             ok, why = False, f"could not parse receipt: {exc}"
         return render(request, "verify.html", result=(ok, why), public_key=signer.public_key_b64)
 
+    @app.get("/verify-pack", response_class=HTMLResponse)
+    async def verify_pack_page(request: Request):
+        """The same dependency-free browser verifier every pack embeds — drop a
+        downloaded .zip straight onto the running dashboard; nothing uploads."""
+        from .verifyjs import VERIFY_HTML
+
+        return HTMLResponse(VERIFY_HTML)
+
     # ------------------------------------------------------------------ admin (JSON)
 
     @app.post("/api/sites")

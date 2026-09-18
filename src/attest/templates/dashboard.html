@@ -15,6 +15,7 @@
     {% for sid, site in sites.items() %}
     <br><a href="/sites/{{ sid }}/pack.zip" style="color:var(--accent)" title="Every signed record for this site, one manifest, offline verifier">Case pack: {{ site.name }}</a>
     {% endfor %}
+    <br><a href="/verify-pack" style="color:var(--accent)" title="The same verifier every pack embeds — drop a .zip; nothing uploads">Verify a pack in-browser</a>
   </div>
 </div>
 

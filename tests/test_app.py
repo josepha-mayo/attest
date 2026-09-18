@@ -150,6 +150,15 @@ def test_redacted_case_pack_upload_verifies(api, household, t0):
     assert "withheld" in detail
 
 
+def test_verify_pack_page_serves_the_standalone_verifier(api):
+    """The dashboard serves the same zero-dependency verifier the packs embed —
+    a judge can drop a .zip without extracting anything."""
+    r = api.get("/verify-pack")
+    assert r.status_code == 200
+    assert 'id="drop"' in r.text
+    assert "checkReceipt" in r.text  # the self-contained Ed25519 verifier
+
+
 def test_case_pack_attestations_verify_and_fail_closed(api, household, t0):
     """Site-level attestations travel in the pack: a coverage cert issued before
     export must verify under the issuer key — and removing it must fail."""
