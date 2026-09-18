@@ -85,6 +85,10 @@ class VisitEngine:
             return Outcome(ignored_reason=f"device {ev.device_id} not bound to a site")
         if ev.meta.account_id != site.ring_account_id:
             return Outcome(ignored_reason="account mismatch")
+        if site.disconnected_at is not None:
+            return Outcome(
+                ignored_reason=f"site's Ring source disconnected at {site.disconnected_at.isoformat()}"
+            )
         if not self.store.bind_source(site.id, source):
             return Outcome(ignored_reason="ingestion source changed; reconciliation required")
         if not self.store.mark_seen(f"{site.ring_account_id}:{ev.request_id}", utcnow()):
@@ -650,6 +654,44 @@ class VisitEngine:
             self.store.put_receipt(receipt)
         except sqlite3.IntegrityError:
             return self.store.receipt_for_visit(pseudo_id)
+        return receipt
+
+    @atomic
+    def disconnect_site(self, site: Site, reason: str = "") -> Receipt:
+        """Revoke a site's Ring source binding: tombstone the site and sign a
+        ``source_disconnected`` receipt naming exactly what was unbound. The
+        binding stays recorded as historical fact; ingestion and polling stop.
+        One-way — reconnecting is a new site, not a silent re-bind."""
+        if site.disconnected_at is not None:
+            raise ValueError(f"site {site.id} source already disconnected")
+        at = utcnow()
+        prev = self.store.latest_receipt()
+        receipt = self.signer.issue(
+            visit_id=f"source:{site.id}",
+            sequence=prev.sequence + 1 if prev else 1,
+            prev_hash=prev.payload_hash if prev else None,
+            facts={
+                "record_type": "source_disconnected",
+                "site": {"id": site.id, "name": site.name},
+                "ring_account_id": site.ring_account_id,
+                "devices": {
+                    "door_camera_id": site.door_camera_id,
+                    "door_sensor_id": site.door_sensor_id,
+                },
+                "disconnected_at": at.isoformat(),
+                "reason": reason,
+                "boundary": (
+                    "Stops ingestion and Event History polling for this site. "
+                    "Does not alter any signed record; deliveries arriving after "
+                    "disconnect are acknowledged to the inbox but never bound."
+                ),
+                "journal_head": self.store.journal_head(),
+            },
+        )
+        self.store.put_receipt(receipt)
+        site.disconnected_at = at
+        site.disconnected_reason = reason
+        self.store.put_site(site)
         return receipt
 
     def _coverage(self, visit: Visit, site: Site) -> dict | None:

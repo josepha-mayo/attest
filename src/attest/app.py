@@ -660,6 +660,26 @@ def create_app(
         receipt = await asyncio.to_thread(engine.issue_period_digest, site, start, end)
         return receipt.model_dump(mode="json")
 
+    @app.post("/api/sites/{site_id}/disconnect")
+    async def site_disconnect(request: Request, site_id: str = PathParam(max_length=128)):
+        """Revoke the site's Ring source: tombstone the binding and sign a
+        source_disconnected receipt naming exactly what was unbound. Ingestion
+        and Event History polling stop; signed records are never altered."""
+        site = store.site(site_id)
+        if site is None:
+            raise HTTPException(404, "unknown site")
+        reason = ""
+        try:
+            body = await request.json()
+            reason = str(body.get("reason") or "")[:500]
+        except Exception:
+            pass
+        try:
+            receipt = await asyncio.to_thread(engine.disconnect_site, site, reason)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return receipt.model_dump(mode="json")
+
     @app.get("/sites/{site_id}/pack.zip")
     async def case_pack(site_id: str = PathParam(max_length=128), redact_media: bool = False):
         """Site-level case pack: every visit's signed bundle, a manifest of receipt

@@ -55,6 +55,8 @@ class HistoryPoller:
         now = self.engine.clock.now()
         since = max(self._started - self.lookback, now - timedelta(hours=24))
         for site in self.store.sites():
+            if site.disconnected_at is not None:
+                continue  # consent revoked — stop calling their Event History API
             pending = {}
             seen = 0
             try:

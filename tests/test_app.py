@@ -390,3 +390,38 @@ def test_webhook_intake_meets_ring_deadline(api, household, t0):
         assert r.status_code == 202
     worst = max(latencies)
     assert worst < 2.0, f"slowest ack {worst:.2f}s — dangerously close to Ring's deadline"
+
+
+def test_disconnect_endpoint_tombstones_and_blocks_ingest(api, store, household):
+    site, _worker, cam, _sensor = household
+    r = api.post(f"/api/sites/{site.id}/disconnect", json={"reason": "moved out"})
+    assert r.status_code == 200
+    assert r.json()["payload"]["record_type"] == "source_disconnected"
+    assert store.site(site.id).disconnected_at is not None
+
+    # second call is refused, not silently re-signed
+    assert api.post(f"/api/sites/{site.id}/disconnect").status_code == 409
+
+    # webhook from the bound device is still acked to the inbox but never binds
+    from attest.models import utcnow
+
+    body = webhooks.encode(
+        webhooks.build_event(event_type="button_press", device_id=cam.id, occurred_at=utcnow())
+    )
+    assert (
+        api.post(
+            "/webhooks/ring",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                webhooks.SIGNATURE_HEADER: webhooks.sign(KEY, body),
+            },
+        ).status_code
+        == 202
+    )
+    api.post("/api/process-webhooks")
+    assert store.visits(site_id=site.id) == []
+
+
+def test_disconnect_unknown_site_404s(api):
+    assert api.post("/api/sites/site_nope/disconnect").status_code == 404

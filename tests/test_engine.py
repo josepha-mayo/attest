@@ -1,6 +1,6 @@
 """Drive the visit engine with v1.1 webhook payloads built by ring-sandbox."""
 
-from datetime import timedelta
+from datetime import UTC, timedelta
 
 from ring_sandbox import WebhookEvent, webhooks
 
@@ -152,3 +152,57 @@ def test_sweep_closes_idle_visit_and_marks_no_show(engine, store, household, sch
     assert ns.state == VisitState.NO_OBSERVATION and ns.flags[0].code == "no_observation"
     receipts = store.receipts()
     assert [r.sequence for r in receipts] == [1, 2] and ledger.verify_chain(receipts)[0]
+
+
+def test_disconnect_site_tombstones_binding_and_signs_receipt(engine, store, household, schedule, t0):
+    """Consent revocation: the binding stays recorded as fact, a signed
+    source_disconnected receipt names what was unbound, and new events stop
+    binding — while the inbox still acknowledges deliveries."""
+    site, worker, cam, sensor = household
+    t = t0 + timedelta(minutes=2)
+    engine.ingest(ev(cam.id, "motion_detected", t, "human"))
+    engine.close_for_review(store.active_visit(site.id).id)
+
+    receipt = engine.disconnect_site(site, "household revoked access")
+    assert receipt.payload["record_type"] == "source_disconnected"
+    assert receipt.payload["ring_account_id"] == site.ring_account_id
+    assert receipt.payload["devices"]["door_camera_id"] == cam.id
+    assert receipt.payload["reason"] == "household revoked access"
+
+    site = store.site(site.id)
+    assert site.disconnected_at is not None
+
+    # Post-disconnect deliveries are acknowledged but never bound.
+    out = engine.ingest(ev(cam.id, "button_press", t + timedelta(minutes=1)))
+    assert out.visit is None and "disconnected" in out.ignored_reason
+
+    # Disconnecting twice is refused, not silently re-signed.
+    import pytest
+
+    with pytest.raises(ValueError, match="already disconnected"):
+        engine.disconnect_site(site)
+
+    # The chain stays intact and includes the disconnect event.
+    receipts = store.receipts()
+    assert ledger.verify_chain(receipts)[0]
+    assert receipts[-1].payload["record_type"] == "source_disconnected"
+
+
+def test_disconnected_site_is_not_polled(engine, store, household, ring_control):
+    """Consent revocation means stop calling their Event History API too —
+    no poll_observations rows land for a tombstoned site."""
+    from attest.poller import HistoryPoller
+
+    site = household[0]
+    cam = household[2]
+    engine.disconnect_site(site)
+    n = HistoryPoller(engine, store, ring_control).poll_once()
+    assert n == 0
+    from datetime import datetime
+
+    rows = store.poll_observations(
+        cam.id,
+        datetime(2020, 1, 1, tzinfo=UTC),
+        datetime(2100, 1, 1, tzinfo=UTC),
+    )
+    assert rows == []

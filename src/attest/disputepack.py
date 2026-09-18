@@ -492,7 +492,11 @@ def build_case_pack(
 
     manifest = {
         "schema": "attest.case-pack/1",
-        "site": {"id": site.id, "name": site.name},
+        "site": {
+            "id": site.id,
+            "name": site.name,
+            "source_disconnected_at": (site.disconnected_at.isoformat() if site.disconnected_at else None),
+        },
         "generated_at": datetime.now(tz=UTC).isoformat(),
         "issuer_key": entries[0][1].original.public_key if entries else None,
         "media_redacted": redact_media,

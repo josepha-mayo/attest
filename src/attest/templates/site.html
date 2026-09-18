@@ -15,8 +15,19 @@
     <a class="btn secondary" href="/sites/{{ site.id }}/pack.zip">Export case pack</a>
     <a class="btn secondary" href="/sites/{{ site.id }}/pack.zip?redact_media=1">Privacy export</a>
     <button class="btn secondary" onclick="signDigest()">Sign records digest</button>
+    {% if not site.disconnected_at %}
+    <button class="btn secondary" onclick="disconnectSource()">Disconnect Ring source</button>
+    {% endif %}
   </div>
 </div>
+{% if site.disconnected_at %}
+<div class="row warn" style="margin-top:10px">
+  Ring source disconnected {{ site.disconnected_at.astimezone(tz).strftime("%b %d, %I:%M %p").replace(" 0", " ") }}
+  {% if site.disconnected_reason %}— {{ site.disconnected_reason }}{% endif %}.
+  Ingestion and Event History polling stopped; every signed record is unchanged.
+  The disconnect itself is a signed chain event.
+</div>
+{% endif %}
 
 <div id="digest-result" class="muted small" style="margin-top:6px"></div>
 {% for d in digests %}
@@ -51,6 +62,18 @@ async function signDigest() {
     ' observed, ' + c.visits_no_observation + ' no-observation, ' + c.visits_unmatched +
     ' unmatched, ' + c.worker_disputes + '/' + c.worker_statements +
     ' worker disputes/statements. Counts of records, not physical presence.';
+}
+async function disconnectSource() {
+  if (!confirm('Disconnect this Ring source? Ingestion and polling stop; the ' +
+    'binding stays on record and the disconnect is signed into the chain.')) return;
+  const reason = prompt('Reason (optional):', 'household revoked access') || '';
+  const response = await fetch('/api/sites/{{ site.id }}/disconnect', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({reason}),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (response.ok) { location.reload(); return; }
+  alert('Disconnect refused: ' + (data.detail || response.status));
 }
 </script>
 
