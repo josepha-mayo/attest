@@ -297,6 +297,8 @@ __r().then(()=>{
   console.log('corrrows:',els.cards.innerHTML.includes('Pipeline coverage'));
   console.log('attline:',
     els.verdict.innerHTML.includes('attestation coverage_attestation: signed and intact'));
+  console.log('attcard:',els.cards.innerHTML.includes('watched')&&
+    els.cards.innerHTML.includes('coverage attestation'));
 });
 """
     (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
@@ -311,11 +313,12 @@ __r().then(()=>{
     assert proc.returncode == 0, proc.stderr
     out = proc.stdout
     assert "VERIFIED" in out, out
-    assert "cards: 1" in out, out
+    assert "cards: 2" in out, out  # visit card + coverage attestation card
     assert "timeline: true" in out, out
     assert "corr: 1" in out, out
     assert "corrrows: true" in out, out
     assert "attline: true" in out, out
+    assert "attcard: true" in out, out
 
 
 @pytest.mark.skipif(NODE is None, reason="node runtime not available")

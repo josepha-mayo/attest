@@ -504,6 +504,38 @@ function statementsHTML(js){
   }
   return out.join("");
 }
+/* Site-level attestations render as provenance cards, not just verify rows —
+   the coverage cert is the pack's answer to "was anyone watching?". */
+function attestationHTML(p){
+  const t=p.record_type||"record";
+  if(t==="coverage_attestation"){
+    const cov=p.coverage||{};const w=cov.window||{};
+    const pct=cov.fraction!=null?Math.round(cov.fraction*100):null;
+    return `<div class="row ok"><span class="pill">coverage</span> `
+      +`<strong>coverage attestation</strong> — ${esc(w.start||"")} → ${esc(w.end||"")}</div>`
+      +`<small>watched ${pct!=null?pct+"%":"?"} of the window · ${cov.polls||0} poll(s)`
+      +` · ${(cov.gaps||[]).length} gap(s) — silence is not absence</small>`;
+  }
+  if(t==="period_digest"){
+    const i=p.interval||{};const c=p.counts||{};
+    return `<div class="row ok"><span class="pill">digest</span> `
+      +`<strong>period digest</strong> — ${esc(i.start||"")} → ${esc(i.end||"")}</div>`
+      +`<small>${c.visits_observed||0} observed · ${c.visits_no_observation||0} no-observation`
+      +` · ${c.worker_disputes||0} dispute(s) · ${c.coordinator_resolutions||0} resolution(s)</small>`;
+  }
+  if(t==="source_disconnected"){
+    return `<div class="row bad"><span class="pill">disconnected</span> `
+      +`<strong>source disconnected</strong> — ${esc(p.disconnected_at||"")}</div>`
+      +`<small>${esc(p.reason||"consent revoked")}`
+      +` — ingestion and polling stopped; signed records preserved</small>`;
+  }
+  if(t==="case_export"){
+    const n2=Object.keys(p.receipt_hashes||{}).length;
+    return `<div class="row ok"><span class="pill">export</span> `
+      +`<strong>case export</strong> — signed manifest naming ${n2} record(s)</div>`;
+  }
+  return `<div class="row ok"><span class="pill">${esc(t)}</span> <strong>${esc(t)}</strong></div>`;
+}
 async function renderIndex(){
   const meta=JSON.parse(d64(document.getElementById("packmeta").textContent));
   document.getElementById("site").textContent=
@@ -572,6 +604,7 @@ async function renderIndex(){
         anyBad=true;
         mLine+=`<div class="row bad">attestation ${rid}: not in the signed manifest</div>`;continue;}
       mLine+=`<div class="row ok">attestation ${esc(listed.record_type||"record")}: signed and intact</div>`;
+      cards.innerHTML+=`<div class="card">${attestationHTML(rjs.payload||{})}</div>`;
     }
     for(const a of toJS(mNode).attestations||[]){
       if(!present.has(a.receipt_id)){
