@@ -28,6 +28,38 @@
   <div class="card"><div class="kpi">{{ sites|length }}</div><div class="muted">sites monitored</div></div>
 </div>
 
+{% if failed_deliveries %}
+<h2>Failed webhook deliveries</h2>
+<div class="card">
+  <p class="muted small">Ring kept its deadline — these deliveries were durably
+  received but processing failed. Nothing is lost: requeueing replays them
+  through the same pipeline with a fresh attempt budget.</p>
+  <table>
+    <tbody>
+    {% for d in failed_deliveries %}
+    <tr>
+      <td><code class="small">{{ d.id[:36] }}</code></td>
+      <td class="muted small">{{ d.received_at }}</td>
+      <td class="muted small">{{ d.attempts }} attempt(s)</td>
+      <td><span class="flag warn">{{ d.error_code or "failed" }}</span></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <button class="btn secondary" id="requeue-btn" type="button">Requeue failed deliveries</button>
+  <span id="requeue-status" class="muted small" style="margin-left:.5rem"></span>
+</div>
+<script>
+document.getElementById("requeue-btn").addEventListener("click", async () => {
+  const r = await fetch("/api/webhook-queue/requeue", {method: "POST"});
+  const data = await r.json().catch(() => ({}));
+  document.getElementById("requeue-status").textContent = r.ok
+    ? `${data.requeued} delivery(ies) back in flight — processing resumes automatically.`
+    : (data.detail || `requeue refused (${r.status})`);
+});
+</script>
+{% endif %}
+
 {% if attention %}
 <h2>Needs review</h2>
 <div class="card table-wrap" style="padding:0">

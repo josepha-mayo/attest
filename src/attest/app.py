@@ -355,6 +355,9 @@ def create_app(
             journal=store.verify_journal(),
             worker_stats=worker_stats,
             queue=inbox.counts(),
+            failed_deliveries=[
+                e for e in inbox.entries(limit=50) if e["status"] == "failed"
+            ],
             countersign=stances,
             attention=attention,
             triage_brief=deterministic_brief(store, reviews),
