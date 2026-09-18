@@ -17,6 +17,12 @@ parties; a tampered pack cannot also tamper with the check.
 Pure standard library — the same verifier source that ships inside every pack.
 No dependency layer, no boto3, no network calls, ~1s cold start.
 
+**Verified live** (2026-09-18, us-east-1, `attest-verify-pack`): a clean signed
+case pack returned `ok:true` — bundle chain, coverage attestation, and signed
+manifest all checked; the same pack with a forged payload returned
+`ok:false — payload hash mismatch`. Authenticated invoke only for now —
+a public function URL is a deliberate decision left to the deployer.
+
 ## Build
 
 ```powershell
