@@ -451,6 +451,45 @@ def _demo(args: argparse.Namespace) -> None:
         camera_only=args.camera_only,
     )
     _replay(replay)
+
+    # Sign a coverage attestation over the replayed window up front, so every
+    # case pack the judge exports already carries the "was anyone watching?"
+    # answer — silence inside it is meaningful, never an absence claim.
+    from datetime import timedelta
+
+    from ring_sandbox import RingClient
+
+    from .engine import VisitEngine
+    from .keycustody import load_or_create_signer
+    from .media import MediaStore
+    from .store import Store
+    from .summarize import TemplateSummarizer
+
+    store = Store(data_dir / "attest.sqlite3")
+    try:
+        engine = VisitEngine(
+            store,
+            RingClient(None, base_url=ring_url),
+            load_or_create_signer(demo.key_path, kms_key_id=demo.kms_key_id, aws_region=demo.aws_region),
+            MediaStore(data_dir / "media"),
+            TemplateSummarizer("UTC"),
+            demo,
+        )
+        sites = store.sites()
+        if sites:
+            end = engine.clock.now()
+            receipt = engine.issue_coverage_attestation(
+                sites[0], end - timedelta(days=args.days, hours=1), end
+            )
+            cov = receipt.payload["coverage"]
+            print(
+                f"Signed {receipt.id}: coverage {cov['state']}"
+                f" ({cov['fraction'] * 100:.0f}%) over the story window.",
+                flush=True,
+            )
+    finally:
+        store.close()
+
     print()
     print("Demo is live — simulated data only, no real Ring account involved.", flush=True)
     print(f"  dashboard   http://admin:{token}@127.0.0.1:{app_sock.getsockname()[1]}/", flush=True)
@@ -463,7 +502,8 @@ def _demo(args: argparse.Namespace) -> None:
     print("  2. Click a visit — the strip shows schedule vs. coverage vs. evidence;", flush=True)
     print("     'Conclude the record' signs the coordinator's call on a dispute.", flush=True)
     print("  3. Download a pack and drop the .zip onto verify.html — it", flush=True)
-    print("     self-verifies in the browser, no install, no unzip.", flush=True)
+    print("     self-verifies in the browser, no install, no unzip. Site packs", flush=True)
+    print("     carry the signed coverage cert: 'was anyone watching?'", flush=True)
     print("  In another terminal, point at the demo's store first:", flush=True)
     print(f'    $env:ATTEST_DATA_DIR="{data_dir}"   (PowerShell)', flush=True)
     print(f"    ATTEST_DATA_DIR={data_dir} <cmd>      (POSIX)", flush=True)
