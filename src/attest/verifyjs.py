@@ -303,16 +303,22 @@ async function verifyFiles(files){
     say(c.ok?"ok":"bad",`${vid}: ${c.why}${stance}`);
     const svg=timelineSVG((js.original||{}).payload||{});
     if(svg)out.push(svg);
-    const redT=await text(vid==="visit"?"redaction.json":`visits/${vid}/redaction.json`);
+    const redT=await text(mNode?`visits/${vid}/redaction.json`:"redaction.json");
     const rj=redT?JSON.parse(redT):{};
     const withheld=new Set(rj.withheld_digests||rj.withheld_media_sha256||[]);
+    /* Media is matched by CONTENT hash, not filename — the pack stores files as
+       media/<vid>/<label>.<digest-prefix>.png, mirroring _check_pack_bundle.
+       Case packs nest under visits/<vid>/; single packs use media/ flat. */
+    const mprefix=mNode?`visits/${vid}/media/`:"media/";
+    const found=new Set();
+    for(const name of Object.keys(byName)){
+      if(name.startsWith(mprefix)&&!name.endsWith("/"))
+        found.add(await sha256hex(new Uint8Array(await byName[name].arrayBuffer())));
+    }
     for(const d of digests(js)){
       if(withheld.has(d)){say("warn",`  media ${d.slice(0,12)}… withheld by redaction`);continue;}
-      const f=byName[`media/${d}`]||byName[`visits/${vid}/media/${d}`];
-      if(!f){say("bad",`  media ${d.slice(0,12)}… missing (not listed as withheld)`);anyBad=true;continue;}
-      const hh=await sha256hex(new Uint8Array(await f.arrayBuffer()));
-      if(hh!==d){say("bad",`  media ${d.slice(0,12)}… digest mismatch`);anyBad=true;}
-      else say("ok",`  media ${d.slice(0,12)}… digest matches`);
+      if(found.has(d))say("ok",`  media ${d.slice(0,12)}… digest matches`);
+      else{say("bad",`  media ${d.slice(0,12)}… missing (not listed as withheld)`);anyBad=true;}
     }
   }
   if(mNode){
@@ -331,8 +337,44 @@ async function verifyFiles(files){
     ?"FAILED — do not rely on this pack"
     :"VERIFIED — chain intact under issuer key "+(key||"").slice(0,16)+"…");
   return out.join("");}
+/* ---------- minimal zip reader: stored + deflate via DecompressionStream ---------- */
+async function inflate(raw){
+  const ds=new DecompressionStream("deflate-raw");
+  const stream=new Blob([raw]).stream().pipeThrough(ds);
+  return new Uint8Array(await new Response(stream).arrayBuffer());}
+async function readZipEntries(file){
+  /* Parse the EOCD + central directory; returns File-like {name,text,arrayBuffer}. */
+  const buf=new Uint8Array(await file.arrayBuffer());
+  const dv=new DataView(buf.buffer);
+  let eocd=-1;
+  for(let i=buf.length-22;i>=Math.max(0,buf.length-22-65536);i--){
+    if(dv.getUint32(i,true)===0x06054b50){eocd=i;break;}
+  }
+  if(eocd<0)throw new Error("not a zip file (no end-of-central-directory)");
+  const n=dv.getUint16(eocd+10,true),cdOff=dv.getUint32(eocd+16,true);
+  const dec=new TextDecoder();let p=cdOff;const files=[];
+  for(let e=0;e<n;e++){
+    if(dv.getUint32(p,true)!==0x02014b50)throw new Error("corrupt central directory");
+    const method=dv.getUint16(p+10,true),csize=dv.getUint32(p+20,true);
+    const nlen=dv.getUint16(p+28,true),elen=dv.getUint16(p+30,true),clen=dv.getUint16(p+32,true);
+    const lhoff=dv.getUint32(p+42,true);
+    const name=dec.decode(buf.slice(p+46,p+46+nlen));
+    const lnlen=dv.getUint16(lhoff+26,true),lelen=dv.getUint16(lhoff+28,true);
+    const start=lhoff+30+lnlen+lelen;
+    const raw=buf.slice(start,start+csize);
+    let data;
+    if(method===0)data=raw;
+    else if(method===8)data=await inflate(raw);
+    else continue;  // unsupported compression — skip, the verifier reports it missing
+    files.push({name,
+      arrayBuffer:async()=>data.buffer.slice(data.byteOffset,data.byteOffset+data.byteLength),
+      text:async()=>dec.decode(data)});
+    p+=46+nlen+elen+clen;
+  }
+  return files;}
 async function go(fileList){
-  const files=[...fileList];if(!files.length)return;
+  let files=[...fileList];if(!files.length)return;
+  if(files.length===1&&/\\.zip$/i.test(files[0].name))files=await readZipEntries(files[0]);
   const out=document.getElementById("out");
   out.innerHTML="<p>verifying "+files.length+" file(s)…</p>";
   try{out.innerHTML=await verifyFiles(files);}
@@ -346,9 +388,11 @@ document.getElementById("pick").onchange=e=>go(e.target.files);
 
 _VERIFY_BODY = """<h1>Attest pack verifier</h1>
 <p>This page verifies an exported Attest pack <strong>in your browser</strong>. Nothing is
-uploaded — all hashing and signature checks run locally, offline. Select every file from the
-extracted pack, or just bundle.json for a single-visit pack.</p>
-<div class="drop" id="drop">Drop pack files here, or <input type="file" id="pick" multiple></div>
+uploaded — all hashing and signature checks run locally, offline. Drop the
+<strong>.zip pack itself</strong>, select every extracted file, or just bundle.json for a
+single-visit pack.</p>
+<div class="drop" id="drop">Drop the pack .zip (or extracted files) here,
+or <input type="file" id="pick" multiple></div>
 <div id="out"></div>
 <h2>What this does and does not establish</h2>
 <p><small>A green result proves the signed records are intact and were issued under the pinned

@@ -232,7 +232,7 @@ def _case_pack(engine, store, household, schedule, t0, tmp_path):
     site = store.sites()[0]
     data = build_case_pack(
         store,
-        tmp_path / "m",
+        tmp_path / "media",
         site,
         [(visit, bundle, countersign_status(bundle))],
         manifest_signer=lambda m: engine.issue_export_manifest(site, m),
@@ -308,3 +308,47 @@ __r().then(()=>{
     assert "timeline: true" in out, out
     assert "corr: 1" in out, out
     assert "corrrows: true" in out, out
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_verify_html_reads_the_zip_directly(engine, store, household, schedule, t0, tmp_path):
+    """verify.html must verify a dropped .zip: readZipEntries parses stored +
+    deflate entries (node's DecompressionStream stands in for the browser's),
+    and media files are matched by CONTENT hash — their filenames hold only a
+    digest prefix."""
+    z = _case_pack(engine, store, household, schedule, t0, tmp_path)
+    pack_bytes = tmp_path / "case.zip"
+    with zipfile.ZipFile(pack_bytes, "w", zipfile.ZIP_DEFLATED) as out:
+        for name in z.namelist():
+            out.writestr(name, z.read(name))
+    script = _script()
+    (tmp_path / "verify.js").write_text(script, encoding="utf-8")
+    driver = """
+const fs=require('fs');
+let src=fs.readFileSync(process.argv[2],'utf8').replace(/const dz=[\\s\\S]*$/,'');
+eval(src+';globalThis.__v=verifyFiles;globalThis.__rz=readZipEntries;');
+const bytes=fs.readFileSync(process.argv[3]);
+const fake={name:'case.zip',
+  arrayBuffer:async()=>bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength)};
+__rz(fake).then(async files=>{
+  console.log('entries:',files.length);
+  const html=await __v(files);
+  console.log('verdict:',(html.match(/VERIFIED[^<]*|FAILED[^<]*/)||['none'])[0]);
+  console.log('media-ok:',(html.match(/digest matches/g)||[]).length);
+  console.log('manifest:',(html.match(/manifest: [^<]*/g)||['none']).pop());
+}).catch(e=>{console.log('ERR',e.message);process.exit(2);});
+"""
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "verify.js", "case.zip"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout
+    assert "entries:" in out and "0" not in out.split("entries:")[1].split("\n")[0]
+    assert "VERIFIED" in out, out
+    assert "media-ok:" in out, out
+    assert "export signed" in out, out
