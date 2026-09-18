@@ -108,11 +108,20 @@
     <td>{{ t(s.window_start) }} – {{ s.window_end.astimezone(tz).strftime("%I:%M %p").lstrip("0") }}</td>
     <td>{{ s.expected_minutes }} min</td>
     <td>{{ s.service }}</td>
-    <td class="small muted">Open the observation record to issue a single-use link.</td>
+    <td class="small muted">Issued from the visit record.</td>
   </tr>
   {% else %}<tr><td colspan="6" class="muted">No schedules.</td></tr>{% endfor %}
   </tbody>
 </table>
 </div>
-<script>setTimeout(()=>location.reload(), 5000)</script>
+<script>
+setTimeout(() => {
+  sessionStorage.setItem('dash-scroll', String(window.scrollY));
+  location.reload();
+}, 5000);
+addEventListener('DOMContentLoaded', () => {
+  const y = sessionStorage.getItem('dash-scroll');
+  if (y) { window.scrollTo(0, Number(y)); sessionStorage.removeItem('dash-scroll'); }
+});
+</script>
 {% endblock %}

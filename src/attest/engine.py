@@ -517,6 +517,7 @@ class VisitEngine:
 
     # ------------------------------------------------------------------ helpers
 
+    @atomic
     def issue_coverage_attestation(self, site: Site, start: datetime, end: datetime) -> Receipt:
         """Sign a coverage attestation for an arbitrary interval — chain-linked but
         visit-independent. "We polled K times and Ring returned M events" is a
@@ -552,6 +553,7 @@ class VisitEngine:
             return self.store.receipt_for_visit(pseudo_id)
         return receipt
 
+    @atomic
     def issue_period_digest(self, site: Site, start: datetime, end: datetime) -> Receipt:
         """Sign a digest of the *records* written for an interval — visit counts by
         outcome, review counts by stance, and exactly which receipts it summarizes.
@@ -608,6 +610,7 @@ class VisitEngine:
             return self.store.receipt_for_visit(pseudo_id)
         return receipt
 
+    @atomic
     def issue_export_manifest(self, site: Site, manifest: dict) -> Receipt:
         """Sign a case-pack manifest: the export itself becomes a chain event
         naming exactly which receipt hashes it carries. A pack that drops or

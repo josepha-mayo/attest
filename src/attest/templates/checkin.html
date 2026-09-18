@@ -13,9 +13,6 @@
         <b>{{ visit.arrived_at.astimezone(tz).strftime("%I:%M %p").lstrip("0") }}</b>. Are you there now?</p>
       <p class="muted small">This records your self-report at the current time, not the time of the camera event. It does not independently verify identity or location. Submit only for yourself.</p>
       <form method="post" action="/checkin/{{ token }}"><button class="btn" style="width:100%">Yes, I'm here</button></form>
-    {% else %}
-      <p class="muted">There's no open visit at any of your sites right now. Ring the doorbell or open the door, then reload this page.</p>
-      <script>setTimeout(()=>location.reload(), 3000)</script>
     {% endif %}
   </div>
 </div>

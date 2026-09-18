@@ -1,8 +1,11 @@
-"""``attest`` command line.
+"""``attest`` command line — run ``attest --help`` for the full command list.
 
-attest serve [--port 8000]
-attest seed  [--ring-url http://127.0.0.1:8787] [--public-url http://127.0.0.1:8000]
-attest demo                # seeds, registers the webhook with the sandbox, prints next steps
+Most-used: ``attest demo`` (one-command seeded demo), ``attest serve``,
+``attest replay`` (scenario driver), ``attest export`` (case pack),
+``attest verify`` (offline artifact check), ``attest anchor`` (signed
+checkpoint), ``attest stamp`` (OpenTimestamps notarization),
+``attest status`` (runtime self-audit), ``attest attack-demo`` (tamper
+battery), ``attest diff`` (compare two exports).
 """
 
 from __future__ import annotations

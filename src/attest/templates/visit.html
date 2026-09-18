@@ -30,8 +30,9 @@
 <script>
 document.getElementById('issue-link').onclick = async () => {
   const response = await fetch('/api/visits/{{ visit.id }}/checkin-link', {method: 'POST'});
-  const data = await response.json();
-  if (!response.ok) { document.getElementById('issue-status').textContent = data.detail || 'Unable to issue link'; return; }
+  let data = {};
+  try { data = await response.json(); } catch (e) { /* non-JSON error body */ }
+  if (!response.ok) { document.getElementById('issue-status').textContent = data.detail || 'Unable to issue link (' + response.status + ')'; return; }
   const link = document.getElementById('issued-link');
   link.href = data.path;
   link.textContent = new URL(data.path, location.origin).href;

@@ -7,7 +7,7 @@
 <div class="card"><h2>Statement recorded</h2><p>Your statement was appended and signed without changing the original observation record. This link has been consumed.</p></div>
 {% else %}
 <div class="card">
-<p>This link was issued to <b>{{ original.scheduled_worker.name }}</b> for the record at <b>{{ original.site.name }}</b>.</p>
+<p>This link was issued to <b>{{ original.scheduled_worker.name }}</b> for the record at <b>{{ original.site.name }}</b>. It expires 24 hours after issue and works once.</p>
 <p>First observation: {{ original.first_observed_at or "None received" }}<br>Last observation: {{ original.last_observed_at or "None received" }}</p>
 {% if timeline %}<div style="margin:10px 0;padding:8px 4px;background:#11131a;border-radius:8px">
 {% include "_timeline.html" %}

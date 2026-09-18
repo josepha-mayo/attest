@@ -21,7 +21,7 @@
 <div id="digest-result" class="muted small" style="margin-top:6px"></div>
 {% for d in digests %}
 <div class="muted small" style="margin-top:4px">
-  Digest <code>{{ d.id }}</code> — {{ d.payload.counts.visits_observed }} observed,
+  Digest <a href="/receipts/{{ d.id }}.json"><code>{{ d.id }}</code></a> — {{ d.payload.counts.visits_observed }} observed,
   {{ d.payload.counts.visits_no_observation }} no-observation,
   {{ d.payload.counts.visits_unmatched }} unmatched,
   {{ d.payload.counts.worker_disputes }} worker dispute(s) over
@@ -31,7 +31,8 @@
 {% if exports %}
 <div class="muted small" style="margin-top:4px">
   {{ exports|length }} case export(s) signed — each export is itself a chain event
-  naming exactly which receipt hashes it carried (latest: <code>{{ exports[-1].id }}</code>).
+  naming exactly which receipt hashes it carried
+  (latest: <a href="/receipts/{{ exports[-1].id }}.json"><code>{{ exports[-1].id }}</code></a>).
 </div>
 {% endif %}
 <script>
@@ -39,11 +40,12 @@ async function signDigest() {
   const box = document.getElementById('digest-result');
   box.textContent = 'Signing digest of the shown records…';
   const response = await fetch('/api/sites/{{ site.id }}/digest', {method: 'POST'});
+  let receipt = {};
+  try { receipt = await response.json(); } catch (e) { /* non-JSON error body */ }
   if (!response.ok) {
-    box.textContent = 'Digest refused: ' + (await response.json()).detail;
+    box.textContent = 'Digest refused: ' + (receipt.detail || response.status);
     return;
   }
-  const receipt = await response.json();
   const c = receipt.payload.counts;
   box.innerHTML = 'Signed <code>' + receipt.id + '</code> — ' + c.visits_observed +
     ' observed, ' + c.visits_no_observation + ' no-observation, ' + c.visits_unmatched +

@@ -39,7 +39,6 @@ _HEAD = """<!doctype html>
 _JS_OPEN = '<script>\n"use strict";\n'
 
 _JS_LIB = """/* ---------- canonical JSON (mirrors attest.ledger.canonical) ----------
-/* ---------- canonical JSON (mirrors attest.ledger.canonical) ----------
    Parses the document keeping every string/number literal verbatim, then
    re-emits with sorted keys and no whitespace — identical bytes to
    json.dumps(payload, sort_keys=True, separators=(",",":"), ensure_ascii=False)
