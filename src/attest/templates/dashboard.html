@@ -5,7 +5,7 @@
 <div class="row" style="justify-content:space-between;align-items:flex-end">
   <div>
     <h1>Visit observations. Clear limits.</h1>
-    <div class="muted">Review Ring observations and worker self-reports. Signed records preserve what was received; they do not certify identity, attendance, or time worked.</div>
+    <div class="muted">Ring observations and worker self-reports around scheduled home-service visits — signed, reviewable, correctable. Records preserve what was received; they do not certify identity, attendance, or time worked.</div>
   </div>
   <div class="card small">
     Ledger: {% if chain[0] %}<span class="ok">&#10003; {{ chain[1] }}</span>{% else %}<span class="bad">&#10007; {{ chain[1] }}</span>{% endif %}
@@ -18,6 +18,25 @@
     <br><a href="/verify-pack" style="color:var(--accent)" title="The same verifier every pack embeds — drop a .zip; nothing uploads">Verify a pack in-browser</a>
   </div>
 </div>
+
+{% if attention %}
+<h2>Needs review</h2>
+<div class="card table-wrap" style="padding:0">
+<table>
+  <tbody>
+  {% for a in attention %}
+  <tr>
+    <td style="width:1rem"><span class="flag {{ 'warn' if a.level == 'warn' else a.level }}">&nbsp;</span></td>
+    <td><a href="/sites/{{ a.visit.site_id }}" style="color:var(--accent)">{{ sites[a.visit.site_id].name if a.visit.site_id in sites else a.visit.site_id }}</a>
+      <a href="/visits/{{ a.visit.id }}" class="muted small"> — {{ t(a.visit.arrived_at) if a.visit.has_observations else t(a.visit.created_at) }}</a>
+      {% if a.visit.worker_id and a.visit.worker_id in workers %}<span class="muted small"> · {{ workers[a.visit.worker_id].name }}</span>{% endif %}</td>
+    <td>{{ a.why }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
 
 <div class="grid" style="margin-top:20px">
   {% set closed = visits|selectattr("receipt_id")|list %}
@@ -59,24 +78,6 @@ document.getElementById("requeue-btn").addEventListener("click", async () => {
     : (data.detail || `requeue refused (${r.status})`);
 });
 </script>
-{% endif %}
-
-{% if attention %}
-<h2>Needs review</h2>
-<div class="card table-wrap" style="padding:0">
-<table>
-  <tbody>
-  {% for a in attention %}
-  <tr>
-    <td style="width:1rem"><span class="flag {{ 'warn' if a.level == 'warn' else a.level }}">&nbsp;</span></td>
-    <td><a href="/sites/{{ a.visit.site_id }}" style="color:var(--accent)">{{ sites[a.visit.site_id].name if a.visit.site_id in sites else a.visit.site_id }}</a>
-      <a href="/visits/{{ a.visit.id }}" class="muted small"> — {{ t(a.visit.arrived_at) if a.visit.has_observations else t(a.visit.created_at) }}</a></td>
-    <td>{{ a.why }}</td>
-  </tr>
-  {% endfor %}
-  </tbody>
-</table>
-</div>
 {% endif %}
 
 <h2>Weekly triage brief</h2>
