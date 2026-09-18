@@ -46,6 +46,15 @@
   (latest: <a href="/receipts/{{ exports[-1].id }}.json"><code>{{ exports[-1].id }}</code></a>).
 </div>
 {% endif %}
+{% for c in coverage_certs %}
+{% set cov = c.payload.coverage %}
+<div class="muted small" style="margin-top:4px">
+  Coverage <a href="/receipts/{{ c.id }}.json"><code>{{ c.id }}</code></a> — watched
+  {{ "%.0f"|format(cov.fraction * 100) }}% of {{ cov.window.start[:16].replace("T", " ") }} to
+  {{ cov.window.end[11:16] }} — {{ cov.polls }} poll(s), {{ cov.events }} event(s),
+  {{ cov.gaps|length }} gap(s). What was watched — never a claim of absence.
+</div>
+{% endfor %}
 <script>
 async function signDigest() {
   const box = document.getElementById('digest-result');

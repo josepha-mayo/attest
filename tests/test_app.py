@@ -467,3 +467,23 @@ def test_disconnect_endpoint_tombstones_and_blocks_ingest(api, store, household)
 
 def test_disconnect_unknown_site_404s(api):
     assert api.post("/api/sites/site_nope/disconnect").status_code == 404
+
+
+def test_site_page_lists_coverage_attestations(api, household, t0):
+    """The household-facing site page surfaces coverage certs with honest framing."""
+    from datetime import timedelta
+
+    site, _, cam, _ = household
+    r = _post_hook(api, cam.id, "motion_detected", t0, "human")
+    assert r.status_code == 202
+    vid = api.attest_state.store.active_visit(site.id).id
+    assert api.post(f"/api/visits/{vid}/close").status_code == 200
+    cert = api.attest_state.engine.issue_coverage_attestation(
+        site, t0 - timedelta(hours=1), t0 + timedelta(hours=2)
+    )
+
+    page = api.get(f"/sites/{site.id}")
+    assert page.status_code == 200
+    assert cert.id in page.text
+    assert "Coverage" in page.text
+    assert "never a claim of absence" in page.text

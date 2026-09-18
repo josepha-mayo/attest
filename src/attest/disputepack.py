@@ -603,3 +603,15 @@ def build_case_pack(
                 for p, rel in _media_files(store, media_root, visit.id):
                     z.write(p, f"{base}/media/{rel}")
     return buf.getvalue()
+
+
+def write_verifiers(directory) -> tuple[Path, Path]:
+    """Emit the standalone verifier scripts next to a verifier deployment —
+    e.g. the AWS Lambda handler in ``extras/lambda/``, which runs these pinned
+    copies so a pack's own embedded verify script is never executed."""
+    directory = Path(directory)
+    case = directory / "verifier_case.py"
+    bundle = directory / "verifier_bundle.py"
+    case.write_text(_CASE_VERIFIER, encoding="utf-8")
+    bundle.write_text(_VERIFIER, encoding="utf-8")
+    return case, bundle

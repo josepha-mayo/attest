@@ -5,6 +5,7 @@ import subprocess
 import sys
 import zipfile
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from ring_sandbox import WebhookEvent, webhooks
@@ -395,3 +396,87 @@ def test_case_pack_verifier_rejects_bogus_redaction(engine, store, household, sc
     result = _run_case(out)
     assert result.returncode != 0
     assert "not in the signed evidence" in result.stdout
+
+
+def _lambda_deploy(tmp_path):
+    """Stage a Lambda deployment dir: pinned verifiers + handler module."""
+    import importlib.util
+    import shutil
+
+    import attest.disputepack as disputepack
+
+    deploy = tmp_path / "lambda-deploy"
+    deploy.mkdir()
+    disputepack.write_verifiers(deploy)
+    handler_src = Path(__file__).parents[1] / "extras" / "lambda" / "verify_lambda.py"
+    shutil.copy(handler_src, deploy / "verify_lambda.py")
+    spec = importlib.util.spec_from_file_location("verify_lambda", deploy / "verify_lambda.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _invoke(mod, zip_bytes):
+    import base64
+
+    event = {"body": base64.b64encode(zip_bytes).decode(), "isBase64Encoded": True}
+    return json.loads(mod.handler(event, None)["body"])
+
+
+def test_lambda_handler_verifies_case_pack(engine, store, household, schedule, t0, tmp_path):
+    """The AWS Lambda entry point runs the pinned verifier — pack's own script
+    is never executed — and returns the same verdict as the offline path."""
+    service = ReviewService(store, engine.signer, engine.clock)
+    event = WebhookEvent.model_validate(
+        webhooks.build_event(event_type="button_press", device_id=household[2].id, occurred_at=t0)
+    )
+    visit = engine.ingest(event).visit
+    engine.close_for_review(visit.id)
+    bundle = service.bundle(visit.id)
+    site = store.sites()[0]
+    engine.issue_coverage_attestation(site, t0 - timedelta(hours=1), t0 + timedelta(hours=2))
+    data = build_case_pack(
+        store,
+        tmp_path / "media",
+        site,
+        [(visit, bundle, countersign_status(bundle))],
+        manifest_signer=lambda m: engine.issue_export_manifest(site, m),
+    )
+    mod = _lambda_deploy(tmp_path)
+    body = _invoke(mod, data)
+    assert body["ok"] is True, body["output"]
+    assert "attestation coverage_attestation" in body["output"]
+
+    # The same pack with one tampered bundle must fail closed in Lambda too.
+    zin = zipfile.ZipFile(io.BytesIO(data))
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zout:
+        for name in zin.namelist():
+            content = zin.read(name)
+            if name.endswith("/bundle.json"):
+                forged = json.loads(content)
+                forged["original"]["payload"]["summary"] = "attendance confirmed"
+                content = json.dumps(forged).encode()
+            zout.writestr(name, content)
+    body = _invoke(mod, buf.getvalue())
+    assert body["ok"] is False
+    assert "payload hash mismatch" in body["output"]
+
+
+def test_lambda_handler_verifies_single_pack(engine, store, household, schedule, t0, tmp_path):
+    service = ReviewService(store, engine.signer, engine.clock)
+    event = WebhookEvent.model_validate(
+        webhooks.build_event(event_type="button_press", device_id=household[2].id, occurred_at=t0)
+    )
+    visit = engine.ingest(event).visit
+    engine.close_for_review(visit.id)
+    bundle = service.bundle(visit.id)
+    data = build_pack(store, tmp_path / "media", bundle)
+    mod = _lambda_deploy(tmp_path)
+    body = _invoke(mod, data)
+    assert body["ok"] is True, body["output"]
+    assert "receipt(s) verified" in body["output"]
+
+    body = _invoke(mod, b"not a zip at all")
+    assert body["ok"] is False
+    assert "not a zip" in body["error"]

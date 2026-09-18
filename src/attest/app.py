@@ -632,6 +632,7 @@ def create_app(
         schedules = {x.id: x for x in store.schedules_for_site(site.id)}
         digests = [r for r in store.receipts() if r.visit_id.startswith(f"digest:{site.id}:")]
         exports = [r for r in store.receipts() if r.visit_id.startswith(f"export:{site.id}:")]
+        coverage_certs = [r for r in store.receipts() if r.visit_id.startswith(f"coverage:{site.id}:")]
         from .timeline import day_strips
 
         days = day_strips(
@@ -653,6 +654,7 @@ def create_app(
             receipts={v.id: store.receipt_for_visit(v.id) for v in visits},
             digests=digests,
             exports=exports,
+            coverage_certs=coverage_certs,
             days=days,
         )
 
