@@ -359,3 +359,34 @@ def test_dashboard_renders_triage_brief(api):
     assert dash.status_code == 200
     assert "triage-brief" in dash.text
     assert "Run agent brief" in dash.text
+
+
+def test_webhook_intake_meets_ring_deadline(api, household, t0):
+    """Ring requires webhook ack within ~5s. The intake path (signature check +
+    durable inbox enqueue + 202) must stay far under it under a burst."""
+    import time
+
+    cam = household[2]
+    latencies = []
+    for i in range(40):
+        body = webhooks.encode(
+            webhooks.build_event(
+                event_type="motion_detected",
+                device_id=cam.id,
+                occurred_at=t0 + timedelta(minutes=i),
+                sub_type="human",
+            )
+        )
+        start = time.monotonic()
+        r = api.post(
+            "/webhooks/ring",
+            content=body,
+            headers={
+                "Content-Type": "application/json",
+                webhooks.SIGNATURE_HEADER: webhooks.sign(KEY, body),
+            },
+        )
+        latencies.append(time.monotonic() - start)
+        assert r.status_code == 202
+    worst = max(latencies)
+    assert worst < 2.0, f"slowest ack {worst:.2f}s — dangerously close to Ring's deadline"

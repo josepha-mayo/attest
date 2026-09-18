@@ -203,3 +203,56 @@ def test_media_read_stays_within_root_and_relative_save_roundtrips(tmp_path, mon
     assert media.read(tmp_path / "outside.txt") is None
     with pytest.raises(ValueError):
         media.save("../escape", "arrival", b"test", "image/png")
+
+
+def test_cli_verify_accepts_zip_packs(tmp_path):
+    """`attest verify pack.zip` runs the same pack checks as the /verify page —
+    no manual unzip, no pointing at embedded scripts. A corrupt zip fails
+    cleanly rather than tracebacking."""
+    import subprocess
+    import sys
+
+    bad = tmp_path / "bad.zip"
+    bad.write_bytes(b"PK" + b"0" * 20)
+    rc = subprocess.run(
+        [sys.executable, "-m", "attest.cli", "verify", str(bad)],
+        capture_output=True,
+        text=True,
+    )
+    assert rc.returncode != 0
+    assert "Traceback" not in rc.stderr
+    out = rc.stdout + rc.stderr
+    assert "not a valid zip" in out or "could not read" in out
+
+
+def test_cli_verify_real_pack(tmp_path, engine, store, household, schedule, t0):
+    """End-to-end: export a case pack and `attest verify` it by path."""
+    import subprocess
+    import sys
+    import zipfile
+    from io import BytesIO
+
+    from attest.disputepack import build_case_pack
+    from attest.reviews import ReviewService, countersign_status
+
+    visit = engine.ingest(event(household[2], t0)).visit
+    engine.close_for_review(visit.id)
+    bundle = ReviewService(store, engine.signer, engine.clock).bundle(visit.id)
+    site = store.sites()[0]
+    data = build_case_pack(
+        store,
+        tmp_path / "media",
+        site,
+        [(visit, bundle, countersign_status(bundle))],
+        manifest_signer=lambda m: engine.issue_export_manifest(site, m),
+    )
+    pack = tmp_path / "case.zip"
+    pack.write_bytes(data)
+    assert "manifest.json" in zipfile.ZipFile(BytesIO(data)).namelist()
+    rc = subprocess.run(
+        [sys.executable, "-m", "attest.cli", "verify", str(pack)],
+        capture_output=True,
+        text=True,
+    )
+    assert rc.returncode == 0, rc.stderr + rc.stdout
+    assert "case pack verified" in rc.stdout

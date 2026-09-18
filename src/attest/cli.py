@@ -490,13 +490,14 @@ def _verify(args: argparse.Namespace) -> None:
     from .models import Receipt, ReviewBundle
 
     path = Path(args.bundle)
+    raw = path.read_bytes()
+    if raw[:2] == b"PK":
+        _verify_zip(raw, args.key)
+        return
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(raw.decode("utf-8"))
     except UnicodeDecodeError:
-        sys.exit(
-            f"not a JSON artifact: {path.name}\n"
-            "  a .zip pack verifies with the verify_case.py / verify.html inside it."
-        )
+        sys.exit(f"not a JSON artifact: {path.name}\n  a .zip pack verifies directly — pass the zip itself.")
     except json.JSONDecodeError as exc:
         sys.exit(f"not valid JSON: {exc}")
     pinned = " (against the supplied issuer key)" if args.key else ""
@@ -536,6 +537,37 @@ def _verify(args: argparse.Namespace) -> None:
     stance = reviews.countersign_status(bundle)
     print(f"Worker stance: {stance['state']} — {stance['detail']}")
     print("Note: a valid signature proves record integrity under that key, not physical truth.")
+
+
+def _verify_zip(raw: bytes, pinned_key: str | None) -> None:
+    """Verify a dispute pack or case pack zip in place — same checks as the
+    embedded verify_case.py and the /verify page. Without --key the pack's own
+    declared issuer key is pinned (self-consistency); --key pins a deployment key."""
+    import io
+    import zipfile
+
+    from .app import _verify_pack
+    from .models import ReviewBundle
+
+    try:
+        z = zipfile.ZipFile(io.BytesIO(raw))
+        names = set(z.namelist())
+        if "manifest.json" in names:
+            declared = json.loads(z.read("manifest.json")).get("issuer_key")
+        elif "bundle.json" in names:
+            declared = ReviewBundle.model_validate(json.loads(z.read("bundle.json"))).original.public_key
+        else:
+            sys.exit("zip contains no manifest.json or bundle.json — not an Attest pack")
+    except zipfile.BadZipFile:
+        sys.exit("not a valid zip file")
+    except Exception as exc:
+        sys.exit(f"could not read pack issuer: {exc}")
+    key = pinned_key or declared
+    ok, detail = _verify_pack(raw, key)
+    if not ok:
+        sys.exit(f"verification failed: {detail}")
+    print(f"OK: {detail}")
+    print("Note: a valid pack proves record integrity under the issuer key, not physical truth.")
 
 
 def _report_sibling_ots(path) -> None:
@@ -1084,7 +1116,7 @@ def main(argv: list[str] | None = None) -> None:
     s.set_defaults(fn=_status)
 
     s = sub.add_parser("verify", help="verify a downloaded bundle.json offline")
-    s.add_argument("bundle", help="path to the exported original + review chain JSON")
+    s.add_argument("bundle", help="bundle.json, receipt, anchor, receipts.json — or a pack .zip")
     s.add_argument("--key", default=None, help="issuer public key (base64) to pin against")
     s.set_defaults(fn=_verify)
 
