@@ -1113,7 +1113,8 @@ def _explain(args: argparse.Namespace) -> None:
     try:
         visit = store.visit(args.visit)
         if visit is None:
-            sys.exit(f"no visit {args.visit}")
+            _explain_attestation(store, args.visit)
+            return
         site = store.site(visit.site_id)
         schedule = store.schedule(visit.schedule_id) if visit.schedule_id else None
         evidence = store.evidence_for(visit.id)
@@ -1184,6 +1185,53 @@ def _explain(args: argparse.Namespace) -> None:
         print("the record is intact — never identity, attendance, or physical truth.")
     finally:
         store.close()
+
+
+def _explain_attestation(store, ident: str) -> None:
+    """Narrate a site-level chain event (coverage cert, digest, export,
+    disconnect) by pseudo visit_id or receipt id — same honesty rules."""
+    from .ledger import verify_receipt
+
+    receipt = store.receipt_for_visit(ident)
+    if receipt is None:
+        receipt = next((r for r in store.receipts() if r.id == ident), None)
+    if receipt is None:
+        sys.exit(f"no visit or attestation {ident}")
+    ok, why = verify_receipt(receipt, public_key=receipt.public_key)
+    p = receipt.payload
+    rtype = p.get("record_type", "record")
+    print(f"{receipt.id} — {rtype} · seq {receipt.sequence} · {receipt.payload_hash[:16]}…")
+    print(f"  signature: {'OK' if ok else 'FAILED'} — {why}")
+    print(f"  issued {receipt.issued_at.isoformat()} · under issuer key {receipt.public_key[:16]}…")
+    if rtype == "coverage_attestation":
+        cov = p.get("coverage", {})
+        w = cov.get("window", {})
+        print(f"  window {w.get('start')} -> {w.get('end')}")
+        print(
+            f"  watched {cov.get('fraction', 0) * 100:.0f}% of it — "
+            f"{cov.get('polls')} poll(s), {cov.get('events')} event(s), "
+            f"{len(cov.get('gaps', []))} gap(s) — silence is not absence"
+        )
+    elif rtype == "period_digest":
+        i = p.get("interval", {})
+        c = p.get("counts", {})
+        print(f"  interval {i.get('start')} -> {i.get('end')}")
+        print(
+            f"  {c.get('visits_observed', 0)} observed · {c.get('visits_no_observation', 0)} "
+            f"no-observation · {c.get('worker_disputes', 0)} dispute(s) · "
+            f"{c.get('coordinator_resolutions', 0)} resolution(s) — counts of signed records"
+        )
+    elif rtype == "source_disconnected":
+        print(f"  disconnected {p.get('disconnected_at')} — {p.get('reason') or 'no reason given'}")
+        dev = p.get("devices", {})
+        print(f"  devices unbound: {', '.join(v for v in dev.values() if v) or 'none'}")
+        print("  ingestion and polling stopped; the signed history stays intact")
+    elif rtype == "case_export":
+        n = len(p.get("receipt_hashes", {}))
+        print(f"  export manifest pins {n} record(s), sha256 {str(p.get('manifest_sha256'))[:16]}…")
+    print()
+    print("Boundary: a signature attests what the record claims and that it is")
+    print("intact under the issuer key — never identity, attendance, or truth.")
 
 
 def _retention(args: argparse.Namespace) -> None:
@@ -1353,7 +1401,10 @@ def main(argv: list[str] | None = None) -> None:
         "explain",
         help="explain one record in human terms — every source's account, anchors, and stance",
     )
-    s.add_argument("visit", help="visit id")
+    s.add_argument(
+        "visit",
+        help="visit id, or an attestation (coverage:/digest:/export:/source: pseudo id, or receipt id)",
+    )
     s.set_defaults(fn=_explain)
 
     s = sub.add_parser("deliveries", help="show durable webhook inbox state, or requeue failed deliveries")

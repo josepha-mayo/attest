@@ -319,6 +319,16 @@ def test_cli_explain_narrates_a_record(tmp_path, monkeypatch, ring_world, ring_c
     assert "Site attestations" in out
     assert "coverage_attestation" in out and "spans this visit's window" in out
 
+    # attestations explain too — by pseudo visit_id or receipt id
+    w0, w1 = (t0 - timedelta(hours=1)).isoformat(), (t0 + timedelta(hours=2)).isoformat()
+    pseudo = f"coverage:{site.id}:{w0}:{w1}"
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cli._explain(argparse.Namespace(visit=pseudo))
+    att = buf.getvalue()
+    assert "coverage_attestation" in att
+    assert "signature: OK" in att and "silence is not absence" in att
+
     with pytest.raises(SystemExit):
         with contextlib.redirect_stdout(buf):
             cli._explain(argparse.Namespace(visit="vis_nope"))
