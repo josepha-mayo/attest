@@ -980,6 +980,16 @@ def _status(args: argparse.Namespace) -> None:
             line += f", {len(journal['mismatches'])} mismatches"
         print(line)
         print(f"coverage: {stats['poll_observations']} poll observations on record")
+        # Site-level chain events: coverage certs, digests, exports, disconnects —
+        # the signed ledger's record of watching, summarizing, and consent.
+        att_types: dict[str, int] = {}
+        for r in store.receipts():
+            if ":" in r.visit_id:
+                rtype = r.payload.get("record_type") or "record"
+                att_types[rtype] = att_types.get(rtype, 0) + 1
+        if att_types:
+            detail = ", ".join(f"{n} {t}" for t, n in sorted(att_types.items()))
+            print(f"attestations: {detail}")
         print(f"reviews:  {stats['reviews']}, late events retained: {stats['late_events']}")
         print(f"inbox:    {queue if queue else 'empty'}")
         print(f"status:   {'healthy' if healthy else 'ATTENTION — integrity check failed'}")
