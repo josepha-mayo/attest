@@ -123,9 +123,16 @@ class BedrockSummarizer:
 
     def __init__(self, model_id: str, region: str, tz: str = "UTC", fallback: Summarizer | None = None):
         import boto3  # optional dependency
+        from botocore.config import Config
 
         self.client = None
-        self._client_factory = lambda: boto3.client("bedrock-runtime", region_name=region)
+        # Quota/model-access failures need credentials or quota, not retries —
+        # fail fast so the honest template fallback isn't minutes late.
+        self._client_factory = lambda: boto3.client(
+            "bedrock-runtime",
+            region_name=region,
+            config=Config(retries={"total_max_attempts": 2}),
+        )
         self.model_id = model_id
         self.tz = tz
         self.fallback = fallback or TemplateSummarizer(tz)

@@ -148,13 +148,23 @@ def run_triage(
         text = runner(prompt)
         return TriageResult(text, "strands-agent", model_id, None)
     try:
+        from botocore.config import Config
         from strands import Agent, tool
         from strands.models import BedrockModel
 
         agent = Agent(
-            model=BedrockModel(model_id=model_id, region_name=region),
+            model=BedrockModel(
+                model_id=model_id,
+                region_name=region,
+                # Throttling/quota failures need quota, not retries — fail fast
+                # so the honest deterministic fallback isn't minutes late.
+                boto_client_config=Config(retries={"total_max_attempts": 2}),
+            ),
             system_prompt=_SYSTEM,
             tools=[tool(fn) for fn in make_tools(store, reviews)],
+            # Strands defaults to 6 attempts at up to 240s — a judge clicking
+            # "run agent brief" deserves the honest fallback in seconds.
+            retry_strategy=None,
         )
         result = agent(prompt)
         text = str(result)
