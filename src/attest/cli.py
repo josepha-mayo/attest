@@ -368,12 +368,22 @@ def _replay(args: argparse.Namespace) -> None:
             ]
             if not targets:
                 sys.exit("no observed visit to post the worker review against")
-            # Prefer the late day for a dispute: "I arrived earlier than the
-            # record shows" is a claim about ARRIVAL — on the early_out day the
-            # open question is departure and the canned statement reads wrong.
-            # Fall back to the newest observed visit (state lists newest first).
-            late = [v for v in targets if any(f["code"] == "late" for f in v.get("flags", []))]
-            target = late[0] if late else targets[0]
+
+            # Prefer the visit whose worker check-in diverges most from the
+            # camera's first observation — the canned dispute is an ARRIVAL
+            # claim ("I arrived before the first observation shown"), and on a
+            # 'late' story day the deferred check-in makes that record show the
+            # Source divergence row. Fall back to the newest observed visit.
+            def _lag(v):
+                if not v.get("checked_in_at") or not v.get("arrived_at"):
+                    return -1.0
+                return abs(
+                    (
+                        datetime.fromisoformat(v["checked_in_at"]) - datetime.fromisoformat(v["arrived_at"])
+                    ).total_seconds()
+                )
+
+            target = max(targets, key=_lag)
             response = api.post(f"/api/visits/{target['id']}/review-link")
             response.raise_for_status()
             decision, statement = (
