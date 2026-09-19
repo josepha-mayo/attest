@@ -322,6 +322,9 @@ def test_worker_and_coordinator_review_flow_keeps_original(api, store, household
     assert "append-only reviews verified" in api.post("/verify", data={"text": bundle.text}).text
     page = api.get(f"/visits/{visit.id}")
     assert page.status_code == 200 and "I remained inside." in page.text
+    # The worker's own words render inside the agreement card, quoted, with a
+    # jump link to the conclude form.
+    assert 'class="dispute-quote"' in page.text and 'href="#coordinator-resolve"' in page.text
     assert store.receipt_for_visit(visit.id).model_dump_json() == original
 
 
