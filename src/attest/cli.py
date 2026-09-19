@@ -542,6 +542,9 @@ def _demo(args: argparse.Namespace) -> None:
     print("  6. attest triage       — the week's brief (agent when AWS is reachable)", flush=True)
     print("  7. attest verify <zip> — verifies a downloaded pack without unzipping", flush=True)
     print("  8. attest explain <visit_id> — one record's full provenance, in words", flush=True)
+    print("  Also: the site page is the household-facing surface; --redact-media", flush=True)
+    print("  exports keep signed digests while withholding footage; attest diff", flush=True)
+    print("  A.zip B.zip proves appends only ever add — never rewrite.", flush=True)
     print("", flush=True)
     print("Press Ctrl+C to stop.", flush=True)
     try:

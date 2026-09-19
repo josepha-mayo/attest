@@ -14,6 +14,7 @@
     <br><span class="muted">Queue: {{ queue.get('pending', 0) }} pending · {{ queue.get('processing', 0) }} in flight · {{ queue.get('failed', 0) }} failed</span>
     {% for sid, site in sites.items() %}
     <br><a href="/sites/{{ sid }}/pack.zip" style="color:var(--accent)" title="Every signed record for this site, one manifest, offline verifier">Case pack: {{ site.name }}</a>
+    <span class="muted">— unzip and open index.html: it verifies every record in the browser, no install</span>
     {% endfor %}
     <br><a href="/verify-pack" style="color:var(--accent)" title="The same verifier every pack embeds — drop a .zip; nothing uploads">Verify a pack in-browser</a>
   </div>
@@ -148,13 +149,14 @@ document.getElementById("triage-run").addEventListener("click", async () => {
 <h2>Self-report reliability</h2>
 <div class="card table-wrap" style="padding:0">
 <table>
-  <thead><tr><th>Worker</th><th>Visits with self-report</th><th>Median lag vs first observation</th></tr></thead>
+  <thead><tr><th>Worker</th><th>Visits with self-report</th><th>Median lag vs first observation</th><th>Worst lag</th></tr></thead>
   <tbody>
   {% for wid, st in worker_stats.items() %}
   <tr>
     <td>{{ workers[wid].name if wid in workers else wid }}</td>
     <td>{{ st.visits }}</td>
-    <td>{{ "%.0f"|format(st.median_lag) }} min {% if st.median_lag and st.median_lag > 10 %}<span class="flag warn">divergence</span>{% endif %}</td>
+    <td>{{ "%.0f"|format(st.median_lag) }} min</td>
+    <td>{{ "%.0f"|format(st.max_lag) }} min {% if st.max_lag and st.max_lag > 10 %}<span class="flag warn">divergence</span>{% endif %}</td>
   </tr>
   {% endfor %}
   </tbody>

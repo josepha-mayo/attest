@@ -59,6 +59,14 @@ document.getElementById('issue-link').onclick = async () => {
   </div>
   <div class="small muted">{{ countersign.detail }}{% if countersign.at %} — received {{ countersign.at }}{% endif %}. An acknowledgment binds to this record's hash; it does not certify identity or attendance.</div>
   {% if countersign.resolution %}<div class="small muted">Conclusion: {{ countersign.resolution.outcome.replace('_', ' ') }} — appended as revision {{ countersign.resolution.revision }}. The worker's statement remains in the chain unchanged.</div>{% endif %}
+  {% set worker_reviews = reviews|rejectattr("receipt.payload.review.kind", "equalto", "resolution")|list %}
+  {% if countersign.state in ["contested", "corrected", "inconclusive"] and worker_reviews %}
+  {% set lw = worker_reviews[-1].receipt.payload %}
+  <blockquote class="dispute-quote">“{{ lw.review.statement }}”<br>
+    <span class="small muted">— {{ lw.actor.name }} ({{ lw.actor.role }}), revision {{ worker_reviews[-1].revision }}</span>
+  </blockquote>
+  <a class="btn" href="#coordinator-resolve">Conclude the record</a>
+  {% endif %}
 </div>
 {% endif %}
 {% set snaps = evidence|selectattr("kind","equalto","snapshot")|list %}

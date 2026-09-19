@@ -29,6 +29,11 @@ Rules:
 - End with a one-line count summary: N records, K need attention."""
 
 
+# Flags every closed record carries as a standing boundary statement — honest,
+# but not a per-record reason to review. Only flags beyond these queue a visit.
+_ROUTINE_FLAGS = {"departure_unconfirmed"}
+
+
 def attention_items(store, reviews, *, limit: int = 50) -> list[dict]:
     """The same attention computation the dashboard renders — the deterministic
     baseline the agent brief is compared against."""
@@ -36,17 +41,27 @@ def attention_items(store, reviews, *, limit: int = 50) -> list[dict]:
     visits = store.visits(limit=limit)
     for v in visits:
         cs = reviews.countersign(v.id) if v.receipt_id else None
-        if cs and cs["state"] == "contested":
+        state = cs["state"] if cs else None
+        notable = [f for f in v.flags if f.code not in _ROUTINE_FLAGS]
+        if state == "contested":
             items.append({"visit": v, "why": "worker disputes this record", "level": "bad"})
-        elif cs and cs["state"] in ("corrected", "inconclusive"):
+        elif state in ("corrected", "inconclusive"):
             items.append({"visit": v, "why": cs["detail"], "level": "warn"})
+        elif state == "resolved":
+            # The coordinator's signed conclusion post-dates the latest worker
+            # statement — the dispute stays in the chain but needs no action.
+            continue
         elif v.state.value == "unmatched":
             items.append({"visit": v, "why": "observation matched no schedule", "level": "warn"})
-        elif v.flags:
+        elif notable:
             items.append(
-                {"visit": v, "why": f"{len(v.flags)} review note(s): {v.flags[0].code}", "level": "warn"}
+                {
+                    "visit": v,
+                    "why": f"{len(notable)} review note(s): {notable[0].code}",
+                    "level": "warn",
+                }
             )
-        elif cs and cs["state"] == "awaiting":
+        elif state == "awaiting":
             items.append({"visit": v, "why": "worker statement pending", "level": "muted"})
     # Contested records lead the queue — a worker dispute outranks housekeeping
     # warnings. Stable sort keeps recency ordering inside each severity.

@@ -341,6 +341,7 @@ def create_app(
                 st["lags"].append((v.checked_in_at - v.arrived_at).total_seconds() / 60)
         for st in worker_stats.values():
             st["median_lag"] = statistics.median(st["lags"]) if st["lags"] else None
+            st["max_lag"] = max(st["lags"]) if st["lags"] else None
         stances = {v.id: reviews.countersign(v.id) for v in visits if v.receipt_id}
         attention = attention_items(store, reviews)
         return render(
