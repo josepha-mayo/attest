@@ -13,6 +13,7 @@
   <li>The mutation journal makes post-hoc edits to stored rows detectable.</li>
   <li>Poll coverage attests how much of a window the pipeline actually watched.</li>
   <li>A worker's acknowledgment binds to the record's hash — agreement or dispute is on record.</li>
+  <li>A coordinator's resolution is appended, never substituted — the worker's statement stays in the chain and a newer statement re-opens the record.</li>
 </ul>
 </div>
 <div class="card">
@@ -34,7 +35,9 @@
   <tr><td>Review chain</td><td class="small muted">Each revision signs over the previous hash and anchors to the original receipt.</td></tr>
   <tr><td>Mutation journal</td><td class="small muted">Every store write is a chained journal entry; <code>attest journal</code> or <code>/api/journal</code> replays it. Silent edits and row deletions surface as mismatches.</td></tr>
   <tr><td>Dispute pack</td><td class="small muted"><code>pack.zip</code> ships the bundle, media, and a zero-dependency verifier — check it on any Python install, no trust in this service.</td></tr>
-  <tr><td>Case pack</td><td class="small muted"><code>/sites/{id}/pack.zip</code> exports every signed record for a site with a manifest of receipt hashes and worker stances — for disputes about a pattern, not one visit.</td></tr>
+  <tr><td>Case pack</td><td class="small muted"><code>/sites/{id}/pack.zip</code> exports every signed record for a site under a <em>signed</em> manifest of receipt hashes — a dropped or swapped record fails closed. Site attestations (coverage certificates, period digests, source-disconnect receipts, prior exports) travel pinned inside it, and <code>index.html</code> verifies and renders every record offline in the browser.</td></tr>
+  <tr><td>External checkpoints</td><td class="small muted"><code>attest anchor</code> signs the journal + receipt heads into a file a third party can hold; <code>--timestamp</code> notarizes it on the public OpenTimestamps calendars — proof the record existed when we say it did.</td></tr>
+  <tr><td>Independent verification</td><td class="small muted">The same pack verifies in a browser (<code>verify.html</code>/<code>index.html</code>), a stock Python install (<code>verify_case.py</code>), this server (<code>/verify</code>), and an AWS Lambda function running our pinned verifier — data and checking code come from different parties.</td></tr>
   <tr><td>Honest silence</td><td class="small muted"><code>history_poll_coverage</code> states how much of the window was watched; blind gaps are shown, not hidden.</td></tr>
 </table>
 </div>
