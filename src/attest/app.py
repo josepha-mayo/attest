@@ -221,6 +221,15 @@ def create_app(
             declared = 0
         if declared > limit:
             return JSONResponse({"error": "request body too large"}, status_code=413)
+        if request.method in ("POST", "PUT", "PATCH"):
+            # Content-Length can be absent (chunked) or lie — bound the actual
+            # stream, then cache it so form/body parsing replays the same bytes.
+            received = bytearray()
+            async for chunk in request.stream():
+                received += chunk
+                if len(received) > limit:
+                    return JSONResponse({"error": "request body too large"}, status_code=413)
+            request._body = bytes(received)
         return await call_next(request)
 
     app.state.store, app.state.engine, app.state.ring, app.state.signer = (
@@ -297,6 +306,22 @@ def create_app(
         resp.status_code = status_code
         return resp
 
+    @app.get("/qr.svg")
+    async def link_qr(target: str = ""):
+        """QR-code a worker link for the door-step scan: the coordinator shows
+        it, the aide's phone opens the check-in/review page directly. Scoped to
+        the worker-link path prefixes — QR encoding is not a capability, but
+        there is no reason to make this an open encoder."""
+        if not (target.startswith("/checkin/") or target.startswith("/review/")) or len(target) > 300:
+            raise HTTPException(400, "target must be a /checkin/ or /review/ path")
+        import io
+
+        import segno
+
+        buf = io.BytesIO()
+        segno.make(target, error="m").save(buf, kind="svg", xmldecl=False, dark="#1c2733", light=None)
+        return Response(buf.getvalue(), media_type="image/svg+xml", headers={"Cache-Control": "no-store"})
+
     @app.get("/checkin/{token}", response_class=HTMLResponse)
     async def checkin_page(request: Request, token: str = PathParam(max_length=128)):
         target = engine.checkin_target(token)
@@ -315,7 +340,10 @@ def create_app(
 
     @app.post("/checkin/{token}")
     async def checkin_submit(request: Request, token: str = PathParam(max_length=128)):
-        visit = await asyncio.to_thread(engine.check_in, token)
+        try:
+            visit = await asyncio.to_thread(engine.check_in, token)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
         if visit is None:
             return _dead_link(request, "check-in", status_code=410)
         return render(
@@ -344,6 +372,9 @@ def create_app(
             st["max_lag"] = max(st["lags"]) if st["lags"] else None
         stances = {v.id: reviews.countersign(v.id) for v in visits if v.receipt_id}
         attention = attention_items(store, reviews)
+        # The journal replay is O(rows) and holds the store lock — run it off
+        # the event loop so the 5s auto-reload can't stall ingest/poll writes.
+        journal = await asyncio.to_thread(store.verify_journal)
         return render(
             request,
             "dashboard.html",
@@ -353,7 +384,7 @@ def create_app(
             schedules={x.id: x for x in store.schedules()},
             upcoming=store.schedules()[:20],
             chain=ledger.verify_chain(store.receipts(), public_key=signer.public_key_b64),
-            journal=store.verify_journal(),
+            journal=journal,
             worker_stats=worker_stats,
             queue=inbox.counts(),
             failed_deliveries=[e for e in inbox.entries(limit=50) if e["status"] == "failed"],
@@ -409,6 +440,55 @@ def create_app(
             verified=ledger.verify_receipt(receipt, public_key=signer.public_key_b64) if receipt else None,
             countersign=reviews.countersign(visit_id) if bundle else None,
             late_count=len(late),
+        )
+
+    @app.get("/visits/{visit_id}/household", response_class=HTMLResponse)
+    async def household_page(request: Request, visit_id: str = PathParam(max_length=128)):
+        """The household's view of one record — plain language, no console.
+
+        The coordinator dashboard answers "what does the operation need?"; this
+        answers "was anyone at my mother's door on Tuesday?" in words a
+        non-operator can act on — with the same honesty constraints, since a
+        worried family member deserves the boundary more than anyone.
+        """
+        v = store.visit(visit_id)
+        if v is None:
+            raise HTTPException(404)
+        receipt = store.receipt_for_visit(visit_id)
+        bundle = reviews.bundle(visit_id) if receipt else None
+        site = store.site(v.site_id)
+        schedule = store.schedule(v.schedule_id) if v.schedule_id else None
+        evidence = store.evidence_for(visit_id)
+        from .coverage import coverage_report
+        from .timeline import timeline_strip
+
+        cov = receipt.payload.get("history_poll_coverage") if receipt else None
+        if cov is None and site and schedule:
+            device = site.door_camera_id or site.door_sensor_id
+            start = schedule.window_start
+            end = min(schedule.window_end, engine.clock.now())
+            if end > start:
+                cov = coverage_report(store, device, start, end, now=engine.clock.now())
+        strip = timeline_strip(
+            schedule=schedule,
+            evidence=evidence,
+            checked_in_at=v.checked_in_at,
+            coverage=cov,
+            late_events=[],
+        )
+        return render(
+            request,
+            "household.html",
+            visit=v,
+            timeline=strip,
+            site=site,
+            worker=store.worker(v.worker_id) if v.worker_id else None,
+            schedule=schedule,
+            evidence=evidence,
+            receipt=receipt,
+            reviews=bundle.reviews if bundle else [],
+            countersign=reviews.countersign(visit_id) if bundle else None,
+            coverage=cov,
         )
 
     @app.get("/visits/{visit_id}/media/{name}")
@@ -913,9 +993,34 @@ def create_app(
 
     @app.get("/healthz")
     async def healthz():
-        return {"ok": True, "summarizer": summarizer.name, "ring_base_url": s.ring_base_url}
+        # Unauthenticated liveness only — deployment details (Ring endpoint,
+        # summarizer) are not broadcast to whoever can reach the port.
+        return {"ok": True}
 
     return app
+
+
+class _BoundedZip:
+    """z.read wrapper enforcing per-file and cumulative decompressed caps —
+    central-directory file_size entries can lie, so reads are capped on the
+    actual inflated stream."""
+
+    def __init__(self, z, *, per_file: int = 64 * 1024 * 1024, total: int = 256 * 1024 * 1024):
+        self._z, self.per_file, self.total, self.seen = z, per_file, total, 0
+
+    def namelist(self):
+        return self._z.namelist()
+
+    def read(self, name: str) -> bytes:
+        with self._z.open(name) as f:
+            chunks, n = [], 0
+            while chunk := f.read(1 << 20):
+                n += len(chunk)
+                self.seen += len(chunk)
+                if n > self.per_file or self.seen > self.total:
+                    raise ValueError("pack expands beyond the 256 MB verification bound")
+                chunks.append(chunk)
+        return b"".join(chunks)
 
 
 def _verify_pack(data: bytes, public_key: str) -> tuple[bool, str]:
@@ -929,6 +1034,7 @@ def _verify_pack(data: bytes, public_key: str) -> tuple[bool, str]:
         # Bound total decompressed size — a small zip can expand unboundedly.
         if sum(i.file_size for i in z.infolist()) > 256 * 1024 * 1024:
             return False, "pack expands beyond the 256 MB verification bound"
+        z = _BoundedZip(z)
         names = set(z.namelist())
         if "manifest.json" in names:
             return _verify_case_pack(z, public_key)

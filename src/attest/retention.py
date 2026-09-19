@@ -149,7 +149,7 @@ def _candidates(store: Store, inbox: Any | None, media_root: Path, now: datetime
         ("review", g) for g in store.review_grants()
     ]:
         is_used = grant.used_at is not None
-        is_expired = grant.expires_at < now - timedelta(days=policy.grants_days)
+        is_expired = _aware(grant.expires_at) < now - timedelta(days=policy.grants_days)
         used += is_used
         expired += is_expired
         if is_used or is_expired:
@@ -172,7 +172,7 @@ def _candidates(store: Store, inbox: Any | None, media_root: Path, now: datetime
             "closed_at": (v.closed_at or v.last_activity_at).isoformat(),
         }
         for v in closed
-        if (v.closed_at or v.last_activity_at) < visit_cutoff
+        if _aware(v.closed_at or v.last_activity_at) < visit_cutoff
     ]
 
     media_cutoff = now - timedelta(days=policy.media_days)
@@ -182,7 +182,7 @@ def _candidates(store: Store, inbox: Any | None, media_root: Path, now: datetime
         visit = store.visit(visit_id)
         if visit is None:
             media_candidates.append({**f, "reason": "no matching visit record"})
-        elif visit.state in _CLOSED and (visit.closed_at or visit.last_activity_at) < media_cutoff:
+        elif visit.state in _CLOSED and _aware(visit.closed_at or visit.last_activity_at) < media_cutoff:
             media_candidates.append({**f, "reason": "visit past media retention"})
 
     seen_total, seen_ids = store.stale_seen(now - timedelta(days=policy.seen_days), limit=_CAP)
@@ -190,8 +190,10 @@ def _candidates(store: Store, inbox: Any | None, media_root: Path, now: datetime
     late = []
     for row in store.late_event_rows():
         at = _late_event_at(row["body"])
-        if at is None or at < now - timedelta(days=policy.late_events_days):
-            late.append({"id": row["id"], "site_id": row["site_id"], "at": at and at.isoformat()})
+        # Unparseable timestamps keep the row — a malformed timestamp must not
+        # turn a late-event record into a deletion candidate.
+        if at is not None and at < now - timedelta(days=policy.late_events_days):
+            late.append({"id": row["id"], "site_id": row["site_id"], "at": at.isoformat()})
 
     poll_cutoff = now - timedelta(days=policy.poll_observations_days)
     poll_obs = [
@@ -270,6 +272,12 @@ def _delete_media(media_root: Path, paths: list[str]) -> int:
             except OSError:
                 pass
     return removed
+
+
+def _aware(dt: datetime) -> datetime:
+    """Rows may carry naive timestamps (legacy data, manual edits) — compare
+    them as UTC rather than crashing the report."""
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
 def _late_event_at(body: dict) -> datetime | None:

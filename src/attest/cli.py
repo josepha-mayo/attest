@@ -249,13 +249,17 @@ def _replay(args: argparse.Namespace) -> None:
             else:
                 schedule_id = seeded["schedule"]
             if pattern == "no_show":
-                # Polls must still bracket the empty window — a no-observation
-                # receipt only means something if the pipeline was watching.
-                # Poll at window start and again after the window closes so the
-                # coverage rows say "watched, and saw nothing", not "blind".
-                api.post("/api/poll").raise_for_status()
-                advance(api, day_start + timedelta(minutes=args.window_minutes + 1))
-                api.post("/api/poll").raise_for_status()
+                # Polls must tile the empty window — a no-observation receipt
+                # only means something if the pipeline was watching. Each poll
+                # attests only its own 30-min lookback, so step the clock in
+                # lookback-sized strides from the window's actual start (the
+                # schedule opens 5 min before day_start) to just past its end.
+                t = day_start - timedelta(minutes=5)
+                window_end = day_start + timedelta(minutes=args.window_minutes + 1)
+                while t < window_end:
+                    t = min(t + timedelta(minutes=30), window_end)
+                    advance(api, t)
+                    api.post("/api/poll").raise_for_status()
                 print(
                     f"Day {day}: window watched with no events — the schedule will lapse to no_observation",
                     flush=True,
@@ -578,7 +582,12 @@ def _verify(args: argparse.Namespace) -> None:
         sys.exit(f"not a JSON artifact: {path.name}\n  a .zip pack verifies directly — pass the zip itself.")
     except json.JSONDecodeError as exc:
         sys.exit(f"not valid JSON: {exc}")
-    pinned = " (against the supplied issuer key)" if args.key else ""
+    pinned = " (against the pinned issuer key)" if args.key else ""
+    trust_note = (
+        "under that key"
+        if args.key
+        else "under the artifact's self-declared issuer key — pin a trusted key with --key"
+    )
 
     if isinstance(data, list):
         receipts = [Receipt.model_validate(r) for r in data]
@@ -586,7 +595,7 @@ def _verify(args: argparse.Namespace) -> None:
         if not ok:
             sys.exit(f"verification failed: {reason}")
         print(f"OK{pinned}: {reason}.")
-        print("Note: a valid chain proves record integrity under that key, not physical truth.")
+        print(f"Note: a valid chain proves record integrity {trust_note}, not physical truth.")
         return
 
     if isinstance(data, dict) and "payload" in data and "signature" in data:
@@ -596,7 +605,7 @@ def _verify(args: argparse.Namespace) -> None:
             sys.exit(f"verification failed: {reason}")
         kind = receipt.payload.get("record_type") or receipt.payload.get("schema")
         print(f"OK{pinned}: {kind} {receipt.id} — {reason}.")
-        print("Note: a valid signature proves record integrity under that key, not physical truth.")
+        print(f"Note: a valid signature proves record integrity {trust_note}, not physical truth.")
         _report_sibling_ots(Path(args.bundle))
         return
 
@@ -614,7 +623,7 @@ def _verify(args: argparse.Namespace) -> None:
     print(f"OK{pinned}: {reason}.")
     stance = reviews.countersign_status(bundle)
     print(f"Worker stance: {stance['state']} — {stance['detail']}")
-    print("Note: a valid signature proves record integrity under that key, not physical truth.")
+    print(f"Note: a valid signature proves record integrity {trust_note}, not physical truth.")
 
 
 def _verify_zip(raw: bytes, pinned_key: str | None) -> None:
@@ -645,7 +654,13 @@ def _verify_zip(raw: bytes, pinned_key: str | None) -> None:
     if not ok:
         sys.exit(f"verification failed: {detail}")
     print(f"OK: {detail}")
-    print("Note: a valid pack proves record integrity under the issuer key, not physical truth.")
+    if pinned_key:
+        print("Note: a valid pack proves record integrity under the pinned issuer key, not physical truth.")
+    else:
+        print(
+            "Note: a valid pack proves record integrity under the pack's self-declared "
+            "issuer key — pin a trusted key with --key. Signatures are not physical truth."
+        )
 
 
 def _report_sibling_ots(path) -> None:
@@ -917,11 +932,15 @@ def _digest(args: argparse.Namespace) -> None:
             sys.exit("--from and --to must be ISO timestamps with timezone")
         receipt = _cli_engine(store).issue_period_digest(site, start, end)
         counts = receipt.payload["counts"]
+        resolved = f", {counts['records_resolved']} resolved"
+        if counts.get("median_resolution_minutes") is not None:
+            resolved += f" (median {counts['median_resolution_minutes']} min to conclusion)"
         print(
             f"signed {receipt.id} — {counts['visits_observed']} observed, "
             f"{counts['visits_no_observation']} no-observation, "
             f"{counts['visits_unmatched']} unmatched, "
             f"{counts['worker_disputes']}/{counts['worker_statements']} worker disputes/statements"
+            f"{resolved}"
         )
     finally:
         store.close()
@@ -1110,11 +1129,13 @@ def _attack_demo(args: argparse.Namespace) -> None:
 def _diff(args: argparse.Namespace) -> None:
     """Compare two exports (case pack, dispute pack, or bundle.json) — append-only
     drift is normal; vanished or altered records are anomalies."""
+    import zipfile
+
     from .packdiff import diff
 
     try:
-        lines, anomalies = diff(args.old, args.new)
-    except (ValueError, OSError, KeyError) as exc:
+        lines, anomalies = diff(args.old, args.new, key=args.key)
+    except (ValueError, OSError, KeyError, TypeError, AttributeError, zipfile.BadZipFile) as exc:
         sys.exit(f"cannot compare: {exc}")
     for line in lines:
         print(line)
@@ -1163,8 +1184,14 @@ def _explain(args: argparse.Namespace) -> None:
         reviews = ReviewService(store, engine.signer, engine.clock)
 
         print(f"{visit.id} — {visit.state.value} at {site.name if site else visit.site_id}")
-        if visit.arrived_at:
+        if visit.has_observations:
             print(f"  observed {visit.arrived_at.isoformat()} -> {visit.last_activity_at.isoformat()}")
+        elif visit.arrived_at:
+            # no_observation records stamp the scheduled window bounds — say so
+            print(
+                f"  scheduled window {visit.arrived_at.isoformat()} -> {visit.last_activity_at.isoformat()}"
+            )
+            print("  no device observations were received in that window")
         for f in visit.flags:
             print(f"  review note: {f.code} ({f.severity})")
         print()
@@ -1381,6 +1408,10 @@ def main(argv: list[str] | None = None) -> None:
     )
     s.add_argument("old", help="earlier export: case pack, pack.zip, or bundle.json")
     s.add_argument("new", help="later export")
+    s.add_argument(
+        "--key",
+        help="trusted issuer public key (base64) — verify against this, not the pack's self-declared key",
+    )
     s.set_defaults(fn=_diff)
 
     s = sub.add_parser(

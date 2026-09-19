@@ -20,6 +20,7 @@ dependencies = [
   "pydantic-settings>=2.4",
   "cryptography>=43",
   "python-multipart>=0.0.9",
+  "segno>=1.6",
   "tzdata>=2024.1",
 ]
 

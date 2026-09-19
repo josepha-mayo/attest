@@ -65,6 +65,34 @@ def test_period_digest_counts_records_signs_and_chains(engine, store, household,
     assert ok, why
 
 
+def test_period_digest_measures_the_dispute_loop_closing(engine, store, household, schedule, t0):
+    """Resolved records and median time-to-resolution are ledger metrics —
+    the digest shows the review loop actually closing, not just counting."""
+    from ring_sandbox import WebhookEvent, webhooks
+
+    from attest.models import ResolutionInput, ReviewInput
+    from attest.reviews import ReviewService
+
+    site = household[0]
+    event = WebhookEvent.model_validate(
+        webhooks.build_event(event_type="button_press", device_id=household[2].id, occurred_at=t0)
+    )
+    visit = engine.ingest(event).visit
+    engine.close_for_review(visit.id)
+    service = ReviewService(store, engine.signer, engine.clock)
+    token = service.issue_worker_link(visit.id)
+    service.worker_review(token, ReviewInput(decision="dispute", statement="I was early."))
+    service.resolve(visit.id, ResolutionInput(outcome="account_accepted", statement="Camera confirms."))
+
+    receipt = engine.issue_period_digest(site, t0 - timedelta(hours=1), t0 + timedelta(hours=4))
+    counts = receipt.payload["counts"]
+    assert counts["worker_disputes"] == 1
+    assert counts["coordinator_resolutions"] == 1
+    assert counts["records_resolved"] == 1
+    assert counts["median_resolution_minutes"] is not None
+    assert counts["median_resolution_minutes"] >= 0
+
+
 def test_period_digest_is_idempotent_per_range(engine, store, household, schedule, t0):
     site = household[0]
     engine.sweep(t0 + timedelta(hours=2))

@@ -8,7 +8,10 @@
     <h1>{{ site.name }} <span class="pill {{ visit.state }}">{{ visit.state.replace("_"," ") }}</span></h1>
     <div class="muted">{% if worker and visit.checked_in_at %}Check-in self-reported using {{ worker.name }}'s link{% else %}No worker check-in received{% endif %}. Identity not verified.</div>
   </div>
-  {% if receipt %}<a class="btn secondary" href="/receipts/{{ receipt.id }}.json">Download signed record</a>{% endif %}
+  <div class="row" style="gap:8px">
+    <a class="btn secondary" href="/visits/{{ visit.id }}/household" title="Plain-language view for the household">Household view</a>
+    {% if receipt %}<a class="btn secondary" href="/receipts/{{ receipt.id }}.json">Download signed record</a>{% endif %}
+  </div>
 </div>
 <p class="muted">A valid signature proves record integrity, not identity, attendance, or time worked. Review observations alongside the worker's account.</p>
 {% if visit.summary %}<p class="summary" style="margin:22px 0">{{ visit.summary }}</p>{% endif %}
@@ -25,6 +28,7 @@
   <button class="btn" id="issue-link">Issue a check-in link</button>
   <p class="small muted">Valid for this record only, expires after 15 minutes, usable once. Issuing a replacement invalidates the previous link.</p>
   <a id="issued-link" style="color:var(--accent);overflow-wrap:anywhere"></a>
+  <img id="issued-qr" alt="QR code for the issued check-in link" style="display:none;width:120px;height:120px;margin-top:8px;border:1px solid var(--line);border-radius:8px">
   <p id="issue-status" role="status"></p>
 </div>
 <script>
@@ -36,7 +40,10 @@ document.getElementById('issue-link').onclick = async () => {
   const link = document.getElementById('issued-link');
   link.href = data.path;
   link.textContent = new URL(data.path, location.origin).href;
-  document.getElementById('issue-status').textContent = 'Share privately with the scheduled worker.';
+  const qr = document.getElementById('issued-qr');
+  qr.src = '/qr.svg?target=' + encodeURIComponent(data.path);
+  qr.style.display = 'block';
+  document.getElementById('issue-status').textContent = 'Share privately, or let the worker scan the code at the door.';
 };
 </script>
 {% endif %}
@@ -137,6 +144,7 @@ document.getElementById('close-record').onclick = async () => {
 {% if receipt.payload.scheduled_worker %}
 <button class="btn secondary" id="issue-review">Request worker's account</button>
 <a id="worker-review-link" style="display:block;overflow-wrap:anywhere;color:var(--accent)"></a>
+<img id="worker-review-qr" alt="QR code for the worker review link" style="display:none;width:120px;height:120px;margin-top:8px;border:1px solid var(--line);border-radius:8px">
 <p id="review-link-status" role="status" class="small muted"></p>
 {% endif %}
 {% for review in reviews %}
@@ -177,10 +185,13 @@ const requestReview = document.getElementById('issue-review');
 if (requestReview) requestReview.onclick = async () => {
   const response = await fetch('/api/visits/{{ visit.id }}/review-link', {method: 'POST'});
   const data = await response.json();
-  document.getElementById('review-link-status').textContent = response.ok ? 'Share privately. Expires in 24 hours; single use.' : data.detail;
+  document.getElementById('review-link-status').textContent = response.ok ? 'Share privately, or let the worker scan the code. Expires in 24 hours; single use.' : data.detail;
   if (response.ok) {
     const link = document.getElementById('worker-review-link');
     link.href = data.path; link.textContent = new URL(data.path, location.origin).href;
+    const qr = document.getElementById('worker-review-qr');
+    qr.src = '/qr.svg?target=' + encodeURIComponent(data.path);
+    qr.style.display = 'block';
   }
 };
 document.getElementById('coordinator-review').onsubmit = async event => {

@@ -131,3 +131,72 @@ def test_diff_flags_an_altered_signed_record(exports, tmp_path):
     lines, anomalies = diff(first, forged)
     assert anomalies >= 1
     assert any("cannot change" in line for line in lines)
+
+
+def _repack(zin, out_path, mutate=None, drop=frozenset()):
+    """Rewrite a case pack, optionally mutating manifest.json before re-zipping."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zout:
+        for name in zin.namelist():
+            if name in drop:
+                continue
+            data = zin.read(name)
+            if name == "manifest.json" and mutate:
+                data = json.dumps(mutate(json.loads(data)))
+            zout.writestr(name, data)
+    out_path.write_bytes(buf.getvalue())
+    return out_path
+
+
+def test_diff_flags_a_manifest_claim_lying_about_the_bundle(exports, tmp_path):
+    """The manifest's listed payload_hash must match the bundle it ships —
+    otherwise the unsigned summary can quietly contradict the signed record."""
+    first, second, v1, _ = exports
+    zin = zipfile.ZipFile(second)
+
+    def lie(m):
+        m["signature_receipt"] = None  # don't trip the content-hash check first
+        for v in m["visits"]:
+            if v["visit_id"] == v1:
+                v["payload_hash"] = "f" * 64
+        return m
+
+    forged = _repack(zin, second.with_name("forged-claim.zip"), mutate=lie)
+    lines, anomalies = diff(first, forged)
+    assert anomalies >= 1
+    assert any("manifest claims" in line for line in lines)
+
+
+def test_diff_flags_a_duplicate_manifest_entry(exports, tmp_path):
+    first, second, v1, _ = exports
+    zin = zipfile.ZipFile(second)
+
+    def dup(m):
+        m["signature_receipt"] = None
+        m["visits"] = m["visits"] + [dict(m["visits"][0])]
+        return m
+
+    forged = _repack(zin, second.with_name("forged-dup.zip"), mutate=dup)
+    lines, anomalies = diff(first, forged)
+    assert anomalies >= 1
+    assert any("listed twice" in line for line in lines)
+
+
+def test_diff_notes_an_unsigned_manifest(exports, tmp_path):
+    first, second, _, _ = exports
+    zin = zipfile.ZipFile(second)
+    forged = _repack(
+        zin,
+        second.with_name("unsigned.zip"),
+        mutate=lambda m: {**m, "signature_receipt": None},
+    )
+    lines, _ = diff(first, forged)
+    assert any("unsigned manifest" in line for line in lines)
+
+
+def test_diff_verify_pins_the_supplied_key(exports, tmp_path):
+    """--key must not trust the pack's self-declared issuer — a wrong pin fails."""
+    first, second, _, _ = exports
+    lines, anomalies = diff(first, second, key="A" * 43 + "=")
+    assert anomalies >= 1
+    assert any("fails verification" in line for line in lines)

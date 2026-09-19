@@ -33,6 +33,27 @@ _SHA256_OP = 0x08
 _BITCOIN_ATTEST = bytes.fromhex("0588960d73d71901")
 _PENDING_ATTEST = bytes.fromhex("83dfe30d2ef90c8e")
 
+# Hosts a crafted .ots may not redirect us to — pending-attestation URIs are
+# attacker-controlled bytes, so upgrades only follow https:// on the public
+# calendar domains.
+_CALENDAR_HOST_SUFFIXES = (
+    ".opentimestamps.org",
+    ".eternitywall.com",
+    ".catallaxy.com",
+)
+
+
+def _trusted_calendar(uri: str) -> bool:
+    from urllib.parse import urlsplit
+
+    try:
+        host = urlsplit(uri).hostname or ""
+    except ValueError:
+        return False
+    return uri.startswith("https://") and any(
+        host == s.lstrip(".") or host.endswith(s) for s in _CALENDAR_HOST_SUFFIXES
+    )
+
 
 def stamp_bytes(payload: bytes, calendars=CALENDARS, poster=None) -> tuple[bytes, str]:
     """Submit sha256(payload) to the calendars; return (ots_bytes, calendar).
@@ -119,7 +140,7 @@ def _pending_calendars(ots: bytes) -> list[str]:
             _, k = _varint(ots, j)  # skip the attestation payload length
             n, k = _varint(ots, k)  # the URI is a varstr inside the payload
             uri = ots[k : k + n].decode()
-            if uri.startswith("http"):
+            if _trusted_calendar(uri):
                 out.append(uri)
         except Exception:  # noqa: BLE001 — best-effort parse only
             pass

@@ -328,6 +328,35 @@ def test_worker_and_coordinator_review_flow_keeps_original(api, store, household
     assert store.receipt_for_visit(visit.id).model_dump_json() == original
 
 
+def test_household_page_is_plain_language_and_honest(api, store, household, t0):
+    """The household view renders the same facts without console jargon —
+    observed activity, the worker's own words, and the honesty footer."""
+    _post_hook(api, household[2].id, "button_press", t0)
+    visit = store.active_visit(household[0].id)
+    assert api.post(f"/api/visits/{visit.id}/close").status_code == 200
+    link = api.post(f"/api/visits/{visit.id}/review-link").json()["path"]
+    r = api.post(link, auth=None, data={"decision": "dispute", "statement": "I arrived earlier."})
+    assert r.status_code == 200
+    page = api.get(f"/visits/{visit.id}/household")
+    assert page.status_code == 200
+    assert "Activity was observed" in page.text
+    assert "I arrived earlier." in page.text  # the worker's words, quoted
+    assert "not proof nobody came" in page.text  # the claim boundary is always stated
+    assert "not identity, attendance, or time worked" in page.text
+    # coordinator jargon must not leak into the household view
+    assert "payload_hash" not in page.text and "Ed25519" not in page.text
+
+
+def test_link_qr_encodes_worker_paths_only(api):
+    """The QR helper exists for the door-step scan — scoped to worker-link
+    paths, not an open encoder."""
+    r = api.get("/qr.svg", params={"target": "/checkin/" + "a" * 40})
+    assert r.status_code == 200 and r.headers["content-type"].startswith("image/svg")
+    assert "<svg" in r.text
+    assert api.get("/qr.svg", params={"target": "https://evil.example/"}).status_code == 400
+    assert api.get("/qr.svg", params={"target": "/api/state"}).status_code == 400
+
+
 def test_setup_forms_discover_create_and_cancel_without_cli(api, store, ring_world, t0):
     assert api.get("/setup", auth=None).status_code == 401
     page = api.get("/setup?discover=true")

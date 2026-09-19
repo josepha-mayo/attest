@@ -77,6 +77,14 @@ def _sha(s: str) -> str:
     return hashlib.sha256(s.encode()).hexdigest()
 
 
+def _late_event_hash(site_id: str, body: str) -> str:
+    """late_events bodies are raw webhook payloads — the denormalized site_id
+    lives outside them, so it is bound into the journaled hash alongside the
+    body. (Pre-binding journals hashed the body alone; verify_journal accepts
+    that legacy spelling for entries written before this change.)"""
+    return _sha(json.dumps({"body": body, "site_id": site_id}, sort_keys=True))
+
+
 # Tables covered by the mutation journal, with the column that identifies a row.
 _JOURNALED_KEYS = {
     "sites": "id",
@@ -100,6 +108,67 @@ _JOURNALED_CONTENT = {
     "seen_requests": ("request_id", "seen_at"),
     "ingestion_sources": ("site_id", "source"),
 }
+
+
+def _index_specs() -> dict:
+    """table -> (body model, {index column: expected value from the parsed body}).
+
+    Journal body hashes authenticate `body`, but queries run on denormalized
+    columns written alongside it — token_hash, visit_id, polled_at, state. A
+    direct UPDATE to one of those columns changes what the app reads without
+    touching the signed content, so verify_journal recomputes each column from
+    the parsed body and flags divergence. late_events is omitted: its body is a
+    raw event payload that does not contain the denormalized site_id — its
+    site_id is bound into the journaled row hash instead (see _late_event_hash).
+    """
+    return {
+        "sites": (
+            Site,
+            {
+                "ring_account_id": lambda m: m.ring_account_id,
+                "door_camera_id": lambda m: m.door_camera_id,
+                "door_sensor_id": lambda m: m.door_sensor_id,
+            },
+        ),
+        "workers": (Worker, {"checkin_token": lambda m: m.checkin_token}),
+        "checkin_grants": (CheckinGrant, {"token_hash": lambda m: m.token_hash}),
+        "review_grants": (ReviewGrant, {"token_hash": lambda m: m.token_hash}),
+        "schedules": (
+            Schedule,
+            {
+                "site_id": lambda m: m.site_id,
+                "worker_id": lambda m: m.worker_id,
+                "window_start": lambda m: _iso(m.window_start),
+                "window_end": lambda m: _iso(m.window_end),
+            },
+        ),
+        "visits": (
+            Visit,
+            {
+                "site_id": lambda m: m.site_id,
+                "schedule_id": lambda m: m.schedule_id,
+                "state": lambda m: m.state,
+                "arrived_at": lambda m: _iso(m.arrived_at),
+            },
+        ),
+        "evidence": (Evidence, {"visit_id": lambda m: m.visit_id, "at": lambda m: _iso(m.at)}),
+        "receipts": (
+            Receipt,
+            {"visit_id": lambda m: m.visit_id, "sequence": lambda m: m.sequence},
+        ),
+        "reviews": (
+            ReviewEntry,
+            {"visit_id": lambda m: m.visit_id, "revision": lambda m: m.revision},
+        ),
+        "poll_observations": (
+            PollObservation,
+            {
+                "site_id": lambda m: m.site_id,
+                "device_id": lambda m: m.device_id,
+                "polled_at": lambda m: _iso(m.polled_at),
+            },
+        ),
+    }
 
 
 def atomic(method):
@@ -190,6 +259,11 @@ class Store:
                 if r is None:
                     return None
                 return _sha(json.dumps(dict(zip(_JOURNALED_CONTENT[table], r, strict=True)), sort_keys=True))
+            if table == "late_events":
+                r = self._conn.execute(
+                    "SELECT site_id, body FROM late_events WHERE id=?", (row_id,)
+                ).fetchone()
+                return _late_event_hash(*r) if r else None
             r = self._conn.execute(f"SELECT body FROM {table} WHERE {key}=?", (row_id,)).fetchone()
             return _sha(r[0]) if r else None
 
@@ -200,15 +274,23 @@ class Store:
             return row[0] if row else "0" * 64
 
     def _pinned_journal_heads(self) -> list[str]:
-        """journal_head values signed into original and review receipts."""
+        """journal_head values signed into original and review receipts.
+        Bodies that fail to parse are already flagged by the content-hash pass;
+        they must not crash this one."""
         with self._lock:
             heads = []
             for (body,) in self._conn.execute("SELECT body FROM receipts"):
-                head = json.loads(body).get("payload", {}).get("journal_head")
+                try:
+                    head = json.loads(body).get("payload", {}).get("journal_head")
+                except Exception:  # noqa: BLE001 — corrupt body flags elsewhere
+                    continue
                 if head:
                     heads.append(head)
             for (body,) in self._conn.execute("SELECT body FROM reviews"):
-                head = json.loads(body).get("receipt", {}).get("payload", {}).get("journal_head")
+                try:
+                    head = json.loads(body).get("receipt", {}).get("payload", {}).get("journal_head")
+                except Exception:  # noqa: BLE001
+                    continue
                 if head:
                     heads.append(head)
             return heads
@@ -265,12 +347,46 @@ class Store:
                 elif current is None:
                     mismatches.append(f"{table}:{row_id} journaled '{op}' but row vanished")
                 elif current != body_hash:
+                    if table == "late_events":
+                        # Pre-composite journals hashed the body alone; accept
+                        # that spelling (their site_id was never authenticated).
+                        legacy = self._conn.execute(
+                            "SELECT body FROM late_events WHERE id=?", (row_id,)
+                        ).fetchone()
+                        if legacy and _sha(legacy[0]) == body_hash:
+                            continue
                     mismatches.append(f"{table}:{row_id} content changed after seq {seq}")
 
             untracked = 0
             for table, key in _JOURNALED_KEYS.items():
                 ids = [r[0] for r in self._conn.execute(f"SELECT {key} FROM {table}")]
                 untracked += sum(1 for rid in ids if (table, rid) not in tracked)
+
+            # Index columns are outside the body hash — recompute each from the
+            # parsed body and compare. A direct UPDATE to token_hash, visit_id,
+            # polled_at, state, … changes query results without touching signed
+            # content; that divergence must surface here.
+            for table, (model, cols) in _index_specs().items():
+                key = _JOURNALED_KEYS[table]
+                collist = ",".join(cols)
+                for row in self._conn.execute(f"SELECT {key}, body, {collist} FROM {table}").fetchall():
+                    row_id, body, actual = row[0], row[1], dict(zip(cols, row[2:], strict=True))
+                    try:
+                        parsed = model.model_validate_json(body)
+                    except Exception:  # noqa: BLE001 — body hash check already flags corruption
+                        continue
+                    for name, derive in cols.items():
+                        try:
+                            expected = derive(parsed)
+                        except Exception:  # noqa: BLE001 — body parses but can't yield the column
+                            mismatches.append(
+                                f"{table}:{row_id} index column {name} underivable (body corrupt)"
+                            )
+                            continue
+                        if actual[name] != expected:
+                            mismatches.append(
+                                f"{table}:{row_id} index column {name} diverges from signed body"
+                            )
 
             chain_hashes = {h for *_, h in entries}
             pins = self._pinned_journal_heads()
@@ -557,7 +673,7 @@ class Store:
             self._conn.execute(
                 "INSERT INTO late_events (id, site_id, body) VALUES (?, ?, ?)", (event_id, site_id, body)
             )
-            self._journal("late_events", event_id, "put", _sha(body))
+            self._journal("late_events", event_id, "put", _late_event_hash(site_id, body))
 
     def late_events(self) -> list[dict]:
         with self._lock:

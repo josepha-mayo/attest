@@ -197,6 +197,18 @@ def test_replay_story_cycles_patterns_and_survives_late_events(tmp_path):
                 receipts = [Receipt.model_validate(r) for r in client.get("/receipts.json").json()]
                 assert len(receipts) == 4
                 assert verify_chain(receipts, public_key=app.state.signer.public_key_b64)[0]
+                # The no-show day's signed receipt must attest *watched* silence:
+                # polls tile the window in lookback-sized strides, so the whole
+                # window was queried and Ring returned nothing. The unmatched
+                # day's displaced schedule lapses with thinner coverage.
+                no_show = sorted(
+                    (v for v in visits if v["state"] == "no_observation"),
+                    key=lambda v: v["arrived_at"],
+                )[0]
+                receipt = next(r for r in receipts if r.visit_id == no_show["id"])
+                cov = receipt.payload["history_poll_coverage"]
+                assert cov["state"] == "observed" and cov["fraction"] >= 0.99, cov
+                assert cov["events"] == 0 and cov["gaps"] == []
 
 
 def test_replay_late_day_produces_source_divergence(tmp_path):

@@ -476,6 +476,44 @@ __rz(fake).then(async files=>{
 
 
 @pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_verify_html_escapes_hostile_extra_key_names(engine, store, household, schedule, t0, tmp_path):
+    """A forged bundle whose extra key name carries HTML must fail closed AND
+    render the name escaped — a raw key reaching innerHTML would let a crafted
+    pack fake VERIFIED (or run script on the hosted /verify-pack origin)."""
+    z = _case_pack(engine, store, household, schedule, t0, tmp_path)
+    bundle = json.loads(z.read(next(n for n in z.namelist() if n.endswith("bundle.json"))))
+    bundle['x"><img src=x onerror=alert(1)>'] = True  # hostile extra key
+    (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
+    (tmp_path / "bundle.json").write_text(json.dumps(bundle), encoding="utf-8")
+    driver = r"""
+const fs=require('fs');
+let src=fs.readFileSync(process.argv[2],'utf8').replace(/const dz=[\s\S]*$/,'');
+eval(src+';globalThis.__v=verifyFiles;');
+const txt=fs.readFileSync(process.argv[3],'utf8');
+const f={name:'bundle.json',text:async()=>txt,
+  arrayBuffer:async()=>new TextEncoder().encode(txt).buffer};
+__v([f]).then(html=>{
+  console.log('RAW:',html);
+  console.log('verdict:',(html.match(/VERIFIED[^<]*|FAILED[^<]*/)||['none'])[0]);
+}).catch(e=>{console.log('ERR',e.message);process.exit(2);});
+"""
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "verify.js", "bundle.json"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout
+    assert "FAILED" in out
+    # The hostile key must appear entity-escaped — never as live markup.
+    assert "<img src=x onerror" not in out
+    assert "&lt;img" in out
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
 def test_verify_html_fails_closed_when_listed_bundle_missing(
     engine, store, household, schedule, t0, tmp_path
 ):

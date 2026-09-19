@@ -83,6 +83,23 @@ def test_upgrade_prefers_the_uri_in_the_pending_attestation():
     assert ots_status(new).startswith("Bitcoin attestation tag present")
 
 
+def test_upgrade_never_follows_a_hostile_embedded_uri():
+    """A crafted .ots can name any URI in its pending attestation — upgrade
+    must not fetch it (SSRF via metadata endpoints, plain http, etc.)."""
+    ots, _ = stamp_bytes(b"x", poster=lambda url, body: _pending_body(uri=b"http://169.254.169.254/latest/"))
+    got = []
+
+    def getter(url):
+        got.append(url)
+        if "169.254" in url:
+            raise AssertionError("fetched an attacker-embedded URI")
+        return _confirmed_body()
+
+    upgrade(ots, getter=getter)
+    assert all("169.254" not in u for u in got)
+    assert got  # fell back to the trusted calendar list
+
+
 def test_upgrade_falls_back_to_all_calendars():
     ots = MAGIC + b"\x08" + b"\x00" * 32 + b"\x01\x02"  # no pending URI to parse
     got = []

@@ -180,7 +180,7 @@ async function checkBundle(root,key){
   if(kd!=="attest.review_bundle/1")return{ok:false,why:"unrecognized bundle kind"};
   const KNOWN=new Set(["kind","original","reviews"]);
   for(const[k]of root.v)if(!KNOWN.has(k))
-    return{ok:false,why:"unsigned extra field in bundle: "+k};
+    return{ok:false,why:"unsigned extra field in bundle: "+JSON.stringify(k)};
   const oNode=get(root,"original");
   if(!oNode)return{ok:false,why:"no original receipt"};
   const original=toJS(oNode);
@@ -330,7 +330,7 @@ async function verifyFiles(files){
       anyBad=true;
       say("bad",`manifest: unsupported schema ${esc(String(manifest.schema||"?"))}`);
     }
-    say("ok",`manifest: ${manifest.visits?.length||0} visit(s)`);
+    say("ok",`manifest: ${esc(String(Number(manifest.visits?.length)||0))} visit(s)`);
     for(const v of manifest.visits||[]){
       const t=await text(`visits/${v.visit_id}/bundle.json`);
       /* A manifest-listed bundle absent from the zip fails closed — the row is
@@ -356,7 +356,7 @@ async function verifyFiles(files){
        field in the file is unsigned forgery bait and is never consulted. */
     const st=deriveStance(js);
     const stance=st!=="no_statement"?` — worker: ${esc(st)}`:"";
-    say(c.ok?"ok":"bad",`${esc(vid)}: ${c.why}${stance}`);
+    say(c.ok?"ok":"bad",`${esc(vid)}: ${esc(c.why)}${stance}`);
     const svg=timelineSVG((js.original||{}).payload||{});
     if(svg)out.push(svg);
     const redT=await text(mNode?`visits/${vid}/redaction.json`:"redaction.json");
@@ -395,7 +395,7 @@ async function verifyFiles(files){
   if(mNode){
     const mc=await checkManifestNode(mNode,key);
     if(!mc.ok)anyBad=true;
-    say(mc.ok?"ok":"bad",`manifest: ${mc.why}`);
+    say(mc.ok?"ok":"bad",`manifest: ${esc(mc.why)}`);
     if(!manifest.issuer_key){
       anyBad=true;
       say("bad","manifest: missing issuer_key");
@@ -418,7 +418,7 @@ async function verifyFiles(files){
       if(key&&rjs.public_key!==key){
         anyBad=true;say("bad",`attestation ${esc(a.receipt_id)}: different issuer key`);continue;}
       const rc=await checkReceipt(aNode);
-      if(!rc.ok){anyBad=true;say("bad",`attestation ${esc(a.receipt_id)}: ${rc.why}`);continue;}
+      if(!rc.ok){anyBad=true;say("bad",`attestation ${esc(a.receipt_id)}: ${esc(rc.why)}`);continue;}
       if(rjs.payload_hash!==a.payload_hash||rjs.visit_id!==a.visit_id){
         anyBad=true;say("bad",`attestation ${esc(a.receipt_id)}: disagrees with signed manifest`);continue;}
       say("ok",`attestation ${esc(a.record_type||"record")}: signed and intact`);
@@ -494,21 +494,22 @@ async function readZipEntries(file){
   }
   return files;}
 async function go(fileList){
-  let files=[...fileList];if(!files.length)return;
-  if(files.length===1&&/\\.zip$/i.test(files[0].name))files=await readZipEntries(files[0]);
-  else files=files.map(f=>{
-    /* A folder pick (webkitdirectory) yields webkitRelativePath like
-       'pack/visits/vis_x/bundle.json' — strip the root segment so paths match
-       the zip layout. Plain multi-select has no relative path: keep the
-       basename (works for a single-visit pack's flat bundle.json). */
-    const rel=f.webkitRelativePath||"";
-    const stripped=rel.includes("/")?rel.split("/").slice(1).join("/"):"";
-    return{name:stripped||f.name,text:()=>f.text(),arrayBuffer:()=>f.arrayBuffer()};
-  });
   const out=document.getElementById("out");
-  out.innerHTML="<p>verifying "+files.length+" file(s)…</p>";
-  try{out.innerHTML=await verifyFiles(files);}
-  catch(e){out.innerHTML="<div class='row bad'>verifier error: "+e.message+"</div>";}}
+  try{
+    let files=[...fileList];if(!files.length)return;
+    if(files.length===1&&/\\.zip$/i.test(files[0].name))files=await readZipEntries(files[0]);
+    else files=files.map(f=>{
+      /* A folder pick (webkitdirectory) yields webkitRelativePath like
+         'pack/visits/vis_x/bundle.json' — strip the root segment so paths match
+         the zip layout. Plain multi-select has no relative path: keep the
+         basename (works for a single-visit pack's flat bundle.json). */
+      const rel=f.webkitRelativePath||"";
+      const stripped=rel.includes("/")?rel.split("/").slice(1).join("/"):"";
+      return{name:stripped||f.name,text:()=>f.text(),arrayBuffer:()=>f.arrayBuffer()};
+    });
+    out.innerHTML="<p>verifying "+files.length+" file(s)…</p>";
+    out.innerHTML=await verifyFiles(files);
+  }catch(e){out.innerHTML="<div class='row bad'>verifier error: "+esc(e.message)+"</div>";}}
 const dz=document.getElementById("drop");
 dz.ondragover=e=>{e.preventDefault();dz.classList.add("over");};
 dz.ondragleave=()=>dz.classList.remove("over");
@@ -641,15 +642,16 @@ function attestationHTML(p){
     const pct=cov.fraction!=null?Math.round(cov.fraction*100):null;
     return `<div class="row ok"><span class="pill">coverage</span> `
       +`<strong>coverage attestation</strong> — ${esc(w.start||"")} → ${esc(w.end||"")}</div>`
-      +`<small>watched ${pct!=null?pct+"%":"?"} of the window · ${cov.polls||0} poll(s)`
+      +`<small>watched ${pct!=null?pct+"%":"?"} of the window · ${esc(cov.polls||0)} poll(s)`
       +` · ${(cov.gaps||[]).length} gap(s) — silence is not absence</small>`;
   }
   if(t==="period_digest"){
     const i=p.interval||{};const c=p.counts||{};
     return `<div class="row ok"><span class="pill">digest</span> `
       +`<strong>period digest</strong> — ${esc(i.start||"")} → ${esc(i.end||"")}</div>`
-      +`<small>${c.visits_observed||0} observed · ${c.visits_no_observation||0} no-observation`
-      +` · ${c.worker_disputes||0} dispute(s) · ${c.coordinator_resolutions||0} resolution(s)</small>`;
+      +`<small>${esc(c.visits_observed||0)} observed · ${esc(c.visits_no_observation||0)}`
+      +` no-observation · ${esc(c.worker_disputes||0)} dispute(s)`
+      +` · ${esc(c.coordinator_resolutions||0)} resolution(s)</small>`;
   }
   if(t==="source_disconnected"){
     return `<div class="row bad"><span class="pill">disconnected</span> `
@@ -696,7 +698,7 @@ async function renderIndex(){
       +`<strong>${esc(tag.dataset.vid)}</strong>`
       +(p.scheduled_worker?` · worker ${esc(p.scheduled_worker.name||"")}`:"")
       +(stance!=="no_statement"?` · statement: ${esc(stance)}`:"")
-      +` — ${c.why}</div>`
+      +` — ${esc(c.why)}</div>`
       +`<small>${win} · ${ds.length} media digest(s)</small>`
       +timelineSVG(p)+corroborationHTML(p)+statementsHTML(js)+"</div>");
   }
@@ -707,7 +709,7 @@ async function renderIndex(){
     const mNode=parseKeep(d64(mtag.textContent));
     const mc=await checkManifestNode(mNode,key);
     if(!mc.ok)anyBad=true;
-    mLine=`<div class="row ${mc.ok?"ok":"bad"}">manifest: ${mc.why}</div>`;
+    mLine=`<div class="row ${mc.ok?"ok":"bad"}">manifest: ${esc(mc.why)}</div>`;
     const listedVids=new Set();
     for(const v of toJS(mNode).visits||[]){
       listedVids.add(v.visit_id);
@@ -738,13 +740,14 @@ async function renderIndex(){
       const listed=alist[tag.dataset.rid];
       const rid=esc(tag.dataset.rid);
       if(key&&rjs.public_key!==key){
-        anyBad=true;mLine+=`<div class="row bad">attestation ${rid}: different issuer key</div>`;continue;}
+        anyBad=true;mLine+=`<div class="row bad">attestation ${esc(rid)}: different issuer key</div>`;
+        continue;}
       const rc=await checkReceipt(aNode);
       if(!rc.ok){
         anyBad=true;mLine+=`<div class="row bad">attestation ${rid}: ${esc(rc.why)}</div>`;continue;}
       if(!listed||listed.payload_hash!==rjs.payload_hash||listed.visit_id!==rjs.visit_id){
         anyBad=true;
-        mLine+=`<div class="row bad">attestation ${rid}: not in the signed manifest</div>`;continue;}
+        mLine+=`<div class="row bad">attestation ${esc(rid)}: not in the signed manifest</div>`;continue;}
       mLine+=`<div class="row ok">attestation ${esc(listed.record_type||"record")}: signed and intact</div>`;
       cards.innerHTML+=`<div class="card">${attestationHTML(rjs.payload||{})}</div>`;
     }
@@ -764,7 +767,7 @@ async function renderIndex(){
 }
 renderIndex().catch(e=>{
   document.getElementById("verdict").innerHTML=
-    "<div class='row bad'>index error: "+e.message+"</div>";});
+    "<div class='row bad'>index error: "+esc(e.message)+"</div>";});
 """
 
 

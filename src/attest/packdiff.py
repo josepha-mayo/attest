@@ -93,20 +93,44 @@ def _verify_manifest_signature(manifest: dict, issuer: str | None) -> str | None
     return None
 
 
-def load_artifact(path: str | Path) -> dict:
+def _manifest_consistency(manifest: dict, bundles: dict, notes: list[str]) -> list[str]:
+    """Checks beyond signatures: duplicate visit entries and manifest-claimed
+    payload hashes must match the bundles actually shipped. Mirrors the parity
+    every other verifier enforces."""
+    failures = []
+    seen = set()
+    for v in manifest.get("visits", []):
+        vid = v.get("visit_id")
+        if vid in seen:
+            failures.append(f"{vid}: listed twice in manifest")
+            continue
+        seen.add(vid)
+        claimed = v.get("payload_hash")
+        bundle = bundles.get(vid)
+        if bundle and claimed and claimed != bundle["original"]["payload_hash"]:
+            actual = bundle["original"]["payload_hash"]
+            failures.append(f"{vid}: manifest claims {claimed[:12]}… but bundle hashes {actual[:12]}…")
+    if manifest.get("signature_receipt") is None:
+        notes.append("unsigned manifest — listed states and worker stances are unverified claims")
+    return failures
+
+
+def load_artifact(path: str | Path, key: str | None = None) -> dict:
     """Load a case pack, dispute pack, or bare bundle.json into a normalized map.
     Each artifact's signed contents are independently verified — a diff over
-    unverified receipts would silently compare forged data."""
+    unverified receipts would silently compare forged data. A pinned `key`
+    makes verification trust only that issuer."""
     path = Path(path)
     visits: dict[str, dict] = {}
     issuer = None
     failures: list[str] = []
+    notes: list[str] = []
     if zipfile.is_zipfile(path):
         with zipfile.ZipFile(path) as z:
             names = set(z.namelist())
             if "manifest.json" in names:
                 manifest = json.loads(z.read("manifest.json"))
-                issuer = manifest.get("issuer_key")
+                issuer = key or manifest.get("issuer_key")
                 attestations = {a["receipt_id"]: a for a in manifest.get("attestations", [])}
                 entries = {v["visit_id"]: v for v in manifest.get("visits", [])}
                 bundles = {}
@@ -117,6 +141,7 @@ def load_artifact(path: str | Path) -> dict:
                         failures.append(f"{vid}: bundle listed but missing from pack")
                         continue
                     visits[vid] = _visit_summary(bundles[vid], entries[vid])
+                failures += _manifest_consistency(manifest, bundles, notes)
                 failures += _verify_artifact_bundles(bundles, issuer)
                 failures += _verify_attestation_files(z, attestations, issuer)
                 mfail = _verify_manifest_signature(manifest, issuer)
@@ -128,10 +153,11 @@ def load_artifact(path: str | Path) -> dict:
                     "attestations": attestations,
                     "kind": "case-pack",
                     "verify_failures": failures,
+                    "notes": notes,
                 }
             if "bundle.json" in names:
                 bundle = json.loads(z.read("bundle.json"))
-                issuer = bundle["original"]["public_key"]
+                issuer = key or bundle["original"]["public_key"]
                 visits[bundle["original"]["visit_id"]] = _visit_summary(bundle)
                 failures += _verify_artifact_bundles({bundle["original"]["visit_id"]: bundle}, issuer)
                 return {
@@ -139,11 +165,12 @@ def load_artifact(path: str | Path) -> dict:
                     "visits": visits,
                     "kind": "pack",
                     "verify_failures": failures,
+                    "notes": notes,
                 }
             raise ValueError(f"{path}: zip contains neither manifest.json nor bundle.json")
     data = json.loads(path.read_text(encoding="utf-8"))
     if "original" in data:
-        issuer = data["original"]["public_key"]
+        issuer = key or data["original"]["public_key"]
         visits[data["original"]["visit_id"]] = _visit_summary(data)
         failures += _verify_artifact_bundles({data["original"]["visit_id"]: data}, issuer)
         return {
@@ -151,16 +178,23 @@ def load_artifact(path: str | Path) -> dict:
             "visits": visits,
             "kind": "bundle",
             "verify_failures": failures,
+            "notes": notes,
         }
     if "visits" in data:  # a bare manifest without its bundles
-        issuer = data.get("issuer_key")
+        issuer = key or data.get("issuer_key")
         mfail = _verify_manifest_signature(data, issuer)
         if mfail:
             failures.append(mfail)
         else:
             failures.append("bare manifest: bundle signatures cannot be checked without the packs")
+        seen = set()
         for v in data["visits"]:
-            visits[v["visit_id"]] = {
+            vid = v["visit_id"]
+            if vid in seen:
+                failures.append(f"{vid}: listed twice in manifest")
+                continue
+            seen.add(vid)
+            visits[vid] = {
                 "receipt_id": v.get("receipt_id"),
                 "payload_hash": v.get("payload_hash"),
                 "state": v.get("state"),
@@ -170,19 +204,23 @@ def load_artifact(path: str | Path) -> dict:
                 "manifest_hash": v.get("payload_hash"),
                 "countersign": (v.get("countersign") or {}).get("state"),
             }
+        if data.get("signature_receipt") is None:
+            notes.append("unsigned manifest — listed states and worker stances are unverified claims")
         return {
             "issuer": issuer,
             "visits": visits,
             "attestations": {a["receipt_id"]: a for a in data.get("attestations", [])},
             "kind": "manifest",
             "verify_failures": failures,
+            "notes": notes,
         }
     raise ValueError(f"{path}: unrecognized artifact (no 'original' or 'visits' key)")
 
 
-def diff(old_path: str | Path, new_path: str | Path) -> tuple[list[str], int]:
-    """Return (report lines, anomaly count). Order: old export, newer export."""
-    old, new = load_artifact(old_path), load_artifact(new_path)
+def diff(old_path: str | Path, new_path: str | Path, key: str | None = None) -> tuple[list[str], int]:
+    """Return (report lines, anomaly count). Order: old export, newer export.
+    `key` pins verification to a trusted issuer public key."""
+    old, new = load_artifact(old_path, key), load_artifact(new_path, key)
     lines = [f"{old_path} [{old['kind']}] -> {new_path} [{new['kind']}]"]
     anomalies = 0
 
@@ -190,10 +228,14 @@ def diff(old_path: str | Path, new_path: str | Path) -> tuple[list[str], int]:
         for fail in art.get("verify_failures") or []:
             lines.append(f"!! {label} artifact fails verification: {fail}")
             anomalies += 1
+        for note in art.get("notes") or []:
+            lines.append(f"~  {label} artifact: {note}")
         if art.get("verify_failures") is not None and not art.get("verify_failures"):
             issuer_note = (
                 f"issuer {art['issuer'][:20]}… (self-declared)" if art.get("issuer") else "no issuer"
             )
+            if key:
+                issuer_note = f"pinned issuer {key[:20]}…"
             lines.append(f"ok {label} artifact: all signed contents verify under the {issuer_note}")
 
     if old["issuer"] and new["issuer"] and old["issuer"] != new["issuer"]:

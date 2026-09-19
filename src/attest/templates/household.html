@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ site.name }} — visit record</title>
+<style>
+:root{--ink:#1c2733;--muted:#5c6b7a;--line:#e3e9ef;--card:#fff;--bg:#f4f7fa;--ok:#1a7f4b;--warn:#b4740c;--quiet:#7d8a97}
+*{box-sizing:border-box;margin:0}
+body{font:16px/1.55 -apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);padding:20px 14px 60px}
+.wrap{max-width:620px;margin:0 auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:14px}
+.brand{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--quiet);margin-bottom:26px}
+h1{font-size:26px;line-height:1.25;margin-bottom:4px}
+.date{color:var(--muted);font-size:15px}
+.hero{text-align:center;padding:30px 20px}
+.hero .mark{width:56px;height:56px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:28px;margin-bottom:12px}
+.hero.ok .mark{background:#e2f4ea;color:var(--ok)}
+.hero.warn .mark{background:#f9edd4;color:var(--warn)}
+.hero.quiet .mark{background:#e9eef3;color:var(--quiet)}
+.hero h2{font-size:22px;line-height:1.3;margin-bottom:8px}
+.hero p{color:var(--muted);font-size:15px}
+.facts{display:grid;gap:12px}
+.fact{display:flex;gap:12px}
+.fact .k{color:var(--muted);min-width:150px;font-size:14px;padding-top:2px}
+.fact .v{font-size:15px}
+.quote{border-left:3px solid var(--warn);padding:8px 14px;margin:8px 0;font-style:italic;color:#4a3d28}
+.timeline-card{padding:16px 8px 4px}
+.snap{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.snap img{width:100%;border-radius:8px;border:1px solid var(--line)}
+.snap figcaption{font-size:12px;color:var(--muted);margin-top:4px}
+.foot{font-size:13px;color:var(--quiet);line-height:1.6}
+.foot strong{color:var(--muted)}
+a{color:#2563a8}
+.row{display:flex;align-items:center}
+.small{font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+{% macro t(dt) %}{{ dt.astimezone(tz).strftime("%I:%M %p").lstrip("0") if dt else "—" }}{% endmacro %}
+<div class="brand">Attest · observation record</div>
+<h1>{{ site.name }}</h1>
+<div class="date">{% if schedule %}{{ schedule.window_start.astimezone(tz).strftime("%A, %B %d").replace(" 0", " ") }} · scheduled {{ t(schedule.window_start) }}–{{ t(schedule.window_end) }}{% else %}Unscheduled record{% endif %}{% if schedule and schedule.service %} · {{ schedule.service }}{% endif %}</div>
+
+<div style="height:18px"></div>
+
+{% if visit.state == "open" %}
+<div class="card hero quiet">
+  <div class="mark">&#9202;</div>
+  <h2>This visit is still in progress</h2>
+  <p>The window hasn't closed yet, so there is no signed record to review.</p>
+</div>
+{% elif visit.state == "unmatched" %}
+<div class="card hero warn">
+  <div class="mark">&#9888;</div>
+  <h2>Activity was recorded outside any scheduled visit</h2>
+  <p>The camera reported activity that doesn't match a scheduled window — flagged for a person to review.</p>
+</div>
+{% elif not visit.has_observations %}
+<div class="card hero quiet">
+  <div class="mark">&#9675;</div>
+  <h2>No activity was reported</h2>
+  <p>{% if coverage and coverage.fraction and coverage.fraction >= 0.99 %}The camera was checked {{ coverage.polls }} times across the whole window and reported nothing.
+  {% elif coverage and coverage.polls %}The camera was checked for {{ "%.0f"|format((coverage.fraction or 0)*100) }}% of the window and reported nothing{% if coverage.gaps %} — some of the window wasn't watched{% endif %}.
+  {% else %}The camera reported no activity during this window.{% endif %}
+  No activity is not proof nobody came — it only means the camera reported nothing.</p>
+</div>
+{% else %}
+<div class="card hero ok">
+  <div class="mark">&#10003;</div>
+  <h2>Activity was observed</h2>
+  <p>The camera reported activity between {{ t(visit.arrived_at) }} and {{ t(visit.last_activity_at) }}{% if visit.observed_span_minutes is not none %} — about {{ "%.0f"|format(visit.observed_span_minutes) }} minutes of observed span{% endif %}.</p>
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="facts">
+    {% if visit.has_observations %}
+    <div class="fact"><div class="k">First observation</div><div class="v">{{ t(visit.arrived_at) }}</div></div>
+    <div class="fact"><div class="k">Last observation</div><div class="v">{{ t(visit.last_activity_at) }}</div></div>
+    {% endif %}
+    {% if worker %}
+    <div class="fact"><div class="k">Scheduled worker</div><div class="v">{{ worker.name }}</div></div>
+    {% endif %}
+    {% if visit.checked_in_at %}
+    <div class="fact"><div class="k">Worker check-in</div><div class="v">{{ t(visit.checked_in_at) }} — self-reported from their link; identity isn't verified by the check-in itself.</div></div>
+    {% elif worker %}
+    <div class="fact"><div class="k">Worker check-in</div><div class="v">Not received</div></div>
+    {% endif %}
+    {% if countersign %}
+    <div class="fact"><div class="k">Worker's account</div><div class="v">
+      {% if countersign.state == "acknowledged" %}Agrees with this record
+      {% elif countersign.state == "contested" %}<strong>Disputes this record</strong> — see their words below
+      {% elif countersign.state == "corrected" %}Submitted a correction — see their words below
+      {% elif countersign.state == "resolved" %}Concluded by a coordinator
+      {% elif countersign.state == "inconclusive" %}Responded inconclusively
+      {% else %}Not recorded yet{% endif %}
+    </div></div>
+    {% if countersign.resolution %}
+    <div class="fact"><div class="k">Conclusion</div><div class="v">{{ countersign.resolution.outcome.replace('_',' ') }} — signed by the coordinator. The worker's statement stays in the record unchanged.</div></div>
+    {% endif %}
+    {% endif %}
+    {% if receipt %}
+    <div class="fact"><div class="k">Integrity</div><div class="v">Signed record #{{ receipt.sequence }} — tampering after signing is detectable. <a href="/visits/{{ visit.id }}">Full record</a></div></div>
+    {% endif %}
+  </div>
+</div>
+
+{% if countersign and countersign.state in ["contested", "corrected", "inconclusive"] %}
+{% set worker_reviews = reviews|rejectattr("receipt.payload.review.kind", "equalto", "resolution")|list %}
+{% if worker_reviews %}
+{% set lw = worker_reviews[-1].receipt.payload %}
+<div class="card">
+  <div class="small" style="color:var(--muted);margin-bottom:6px">In the worker's words</div>
+  <div class="quote">&ldquo;{{ lw.review.statement }}&rdquo;</div>
+  <div class="small" style="color:var(--muted)">— {{ lw.actor.name }}, appended to the signed record (never edited after)</div>
+</div>
+{% endif %}
+{% endif %}
+
+{% if timeline %}
+<div class="card timeline-card">
+{% include "_timeline.html" %}
+</div>
+{% endif %}
+
+{% set snaps = evidence|selectattr("kind","equalto","snapshot")|list %}
+{% if snaps %}
+<div class="card">
+  <div class="small" style="color:var(--muted);margin-bottom:10px">Camera snapshots</div>
+  <div class="snap">
+  {% for e in snaps %}<figure>
+    <img src="/visits/{{ visit.id }}/media/{{ e.media_path.replace('\\','/').split('/')[-1] }}" alt="Snapshot {{ t(e.at) }}">
+    <figcaption>{{ t(e.at) }} · fingerprint-verified</figcaption>
+  </figure>{% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<div class="foot">
+  <strong>What this record can and can't tell you.</strong>
+  The camera's report, the schedule, and the worker's account are kept separate — this page shows all three rather than picking one.
+  A signature proves the record hasn't been altered since it was signed — not identity, attendance, or time worked.
+  No reported activity is not proof nobody came.
+  {% if receipt %}<br><br>Anyone can check this record without trusting us: ask the coordinator for the export pack and open it in a browser — it verifies itself.{% endif %}
+</div>
+
+</div>
+</body>
+</html>

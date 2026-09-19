@@ -21,6 +21,7 @@ import hashlib
 import logging
 import secrets
 import sqlite3
+import statistics
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -578,6 +579,35 @@ class VisitEngine:
         resolution_entries = [
             e for e in entries if e.receipt.payload.get("review", {}).get("kind") == "resolution"
         ]
+        # The dispute loop closing is itself a ledger metric: how many records
+        # carry a signed conclusion, and how long first-worker-statement ->
+        # conclusion took. Ledger time, never physical truth.
+        resolved_records, resolution_lags = 0, []
+        for v in visits:
+            v_entries = self.store.reviews_for(v.id)
+            worker_at = next(
+                (
+                    e.receipt.payload.get("statement_received_at")
+                    for e in v_entries
+                    if e.receipt.payload.get("actor", {}).get("role") == "worker"
+                ),
+                None,
+            )
+            res_at = next(
+                (
+                    e.receipt.payload.get("statement_received_at")
+                    for e in reversed(v_entries)
+                    if e.receipt.payload.get("review", {}).get("kind") == "resolution"
+                ),
+                None,
+            )
+            if res_at:
+                resolved_records += 1
+                if worker_at:
+                    lag = (
+                        datetime.fromisoformat(res_at) - datetime.fromisoformat(worker_at)
+                    ).total_seconds() / 60
+                    resolution_lags.append(lag)
         receipts = {
             r.visit_id: r.payload_hash for r in self.store.receipts() if r.visit_id in {v.id for v in visits}
         }
@@ -591,6 +621,10 @@ class VisitEngine:
             ),
             "coordinator_statements": len(entries) - len(worker_entries) - len(resolution_entries),
             "coordinator_resolutions": len(resolution_entries),
+            "records_resolved": resolved_records,
+            "median_resolution_minutes": (
+                round(statistics.median(resolution_lags), 1) if resolution_lags else None
+            ),
         }
         device = site.door_camera_id or site.door_sensor_id
         prev = self.store.latest_receipt()

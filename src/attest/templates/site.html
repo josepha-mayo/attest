@@ -35,7 +35,9 @@
   Digest <a href="/receipts/{{ d.id }}.json"><code>{{ d.id }}</code></a> — {{ d.payload.counts.visits_observed }} observed,
   {{ d.payload.counts.visits_no_observation }} no-observation,
   {{ d.payload.counts.visits_unmatched }} unmatched,
-  {{ d.payload.counts.worker_disputes }} worker dispute(s) over
+  {{ d.payload.counts.worker_disputes }} worker dispute(s){% if d.payload.counts.records_resolved %},
+  {{ d.payload.counts.records_resolved }} resolved{% if d.payload.counts.median_resolution_minutes is not none %}
+  (median {{ d.payload.counts.median_resolution_minutes }} min to conclusion){% endif %}{% endif %} over
   {{ d.payload.summarized_receipts|length }} receipt(s) — verifies offline with the issuer key.
 </div>
 {% endfor %}

@@ -113,7 +113,7 @@ Story mode: `--days 5 --story observed,late,no_show,early_out,unmatched` cycles 
 ## Reviewing and correcting a record
 
 1. Open a record; if it is still active, choose **Close observations for review**. Closing does not certify a departure.
-2. Choose **Request worker's account** to create a private, visit-scoped review link. The worker can confirm their account, dispute an interpretation, or add a correction and optional reported interval.
+2. Choose **Request worker's account** to create a private, visit-scoped review link — shown as a shareable URL and a QR code for the door-step scan. The worker can confirm their account, dispute an interpretation, or add a correction and optional reported interval.
 3. Append a coordinator statement. The authenticated workspace administrator is recorded as the coordinator; this is not yet a multi-user identity system.
 4. Export **original + review chain**, then upload the bundle at `/verify`. Verification checks signatures, revision ordering, and links to the supplied original under the deployment's pinned public key. The same check runs offline: `attest verify bundle.json --key <issuer-public-key>` (omit `--key` to verify against the key embedded in the receipt).
 
@@ -121,7 +121,9 @@ Export surfaces: `GET /visits/{id}/pack.zip` (single-visit dispute pack), `GET /
 
 Two more integrity surfaces: `attest coverage --site S --from T0 --to T1` issues a signed coverage attestation for an arbitrary interval — poll count, fraction of the window actually watched, events seen, explicit gaps — so "silence" is never conflated with "unwatched". `attest anchor --out anchor.json` writes a standalone signed file pinning the journal head and receipt-chain head at that instant; `attest verify anchor.json` checks it. `--publish s3://bucket/key` also uploads the anchor with its sha256 and payload hash stamped into object metadata — verified live — so the checkpoint gets custody outside the deployment (versioned bucket recommended). `--timestamp` also notarizes the anchor on the public OpenTimestamps calendars (writes `anchor.json.ots`) — once the calendar commits to Bitcoin, anyone can prove the anchor existed before that block with the free `ots` tool; `attest stamp FILE` does the same for any file and `attest stamp --upgrade FILE.ots` refreshes a pending proof. `attest verify` reports a sibling `.ots` file's status automatically. Anchors let a third party hold a checkpoint that later truncation can't silently bypass. `attest status` audits a whole runtime offline: journal integrity, receipt chain, coverage count, inbox — exits non-zero on failure.
 
-`attest digest --from T0 --to T1` (or **Sign records digest** on a site page) signs a *period digest* — a chain-linked receipt counting the records written in the interval (observed / no-observation / unmatched, worker statements and disputes) and pinning the exact receipt set summarized. It's a statement about the ledger, never about physical presence — the weekly report a coordinator can hand upstream without handing over footage.
+`attest digest --from T0 --to T1` (or **Sign records digest** on a site page) signs a *period digest* — a chain-linked receipt counting the records written in the interval (observed / no-observation / unmatched, worker statements and disputes, resolved records and median time-to-resolution) and pinning the exact receipt set summarized. It's a statement about the ledger, never about physical presence — the weekly report a coordinator can hand upstream without handing over footage.
+
+`GET /visits/{id}/household` renders the **household view** — the same record in plain language for the family: one glanceable state, the observed facts, the worker's own words, the coordinator's conclusion, and the full claim boundary (observation ≠ attendance; silence ≠ absence). The coordinator console answers "what does the operation need?"; the household view answers "was anyone at my mother's door on Tuesday?"
 
 Corrections are separate human statements, not edits to camera evidence. Verification establishes integrity of the supplied chain, not attendance, truth of a statement, or completeness against a hidden/deleted tail. Never publish review/check-in links or personal records in the demo video.
 
@@ -184,7 +186,7 @@ triage never blocks on model access.
 
 Tests include rejected authentication, expired/reused links, concurrent arrivals, rollback after failure, source-switch rejection, late events, observation-versus-attendance semantics, history ordering, receipt/review tampering, setup validation, and fallback provenance. Socket-level tests run the CLI through real local emulator/Attest servers for sensor, camera-only, and no-observation scenarios, then append and verify worker/coordinator reviews.
 
-A fresh published checkout of both repositories passed 192 Attest tests and 38 companion tests in a new Windows Python 3.14 environment. The GitHub Actions workflow runs both suites, lint, format checks, a tracked-runtime-file guard, and wheel builds across Windows/Linux with Python 3.11/3.14. Actions, the companion commit, and `requirements-dev.txt` dependency pins make the run reproducible. CI does not receive live Ring or AWS credentials.
+A fresh published checkout of both repositories passed 205 Attest tests and 38 companion tests in a new Windows Python 3.14 environment. The GitHub Actions workflow runs both suites, lint, format checks, a tracked-runtime-file guard, and wheel builds across Windows/Linux with Python 3.11/3.14. Actions, the companion commit, and `requirements-dev.txt` dependency pins make the run reproducible. CI does not receive live Ring or AWS credentials.
 
 ## Before deployment or submission
 
