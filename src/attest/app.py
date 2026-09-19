@@ -8,6 +8,7 @@ import json
 import logging
 import secrets
 import sqlite3
+import statistics
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -339,8 +340,7 @@ def create_app(
                 st["visits"] += 1
                 st["lags"].append((v.checked_in_at - v.arrived_at).total_seconds() / 60)
         for st in worker_stats.values():
-            lags = sorted(st["lags"])
-            st["median_lag"] = lags[len(lags) // 2] if lags else None
+            st["median_lag"] = statistics.median(st["lags"]) if st["lags"] else None
         stances = {v.id: reviews.countersign(v.id) for v in visits if v.receipt_id}
         attention = attention_items(store, reviews)
         return render(

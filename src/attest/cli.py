@@ -249,8 +249,16 @@ def _replay(args: argparse.Namespace) -> None:
             else:
                 schedule_id = seeded["schedule"]
             if pattern == "no_show":
+                # Polls must still bracket the empty window — a no-observation
+                # receipt only means something if the pipeline was watching.
+                # Poll at window start and again after the window closes so the
+                # coverage rows say "watched, and saw nothing", not "blind".
+                api.post("/api/poll").raise_for_status()
+                advance(api, day_start + timedelta(minutes=args.window_minutes + 1))
+                api.post("/api/poll").raise_for_status()
                 print(
-                    f"Day {day}: no events replayed — the schedule will lapse to no_observation", flush=True
+                    f"Day {day}: window watched with no events — the schedule will lapse to no_observation",
+                    flush=True,
                 )
                 continue
             if pattern == "unmatched":

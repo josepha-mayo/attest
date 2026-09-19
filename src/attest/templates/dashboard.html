@@ -101,7 +101,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
     document.getElementById("triage-source").textContent =
       data.source === "strands-agent"
         ? "source: Strands agent over Bedrock " + (data.model || "")
-        : "source: deterministic triage — agent unavailable (" + (data.fallback_reason || "?") + ")";
+        : "source: deterministic triage — the baseline brief every agent answer is checked against (agent path: " + (data.fallback_reason || "not configured") + ")";
   } catch (e) {
     document.getElementById("triage-source").textContent = "triage failed: " + e.message;
   } finally {
