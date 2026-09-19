@@ -843,9 +843,16 @@ def _cli_engine(store):
     from .media import MediaStore
     from .summarize import TemplateSummarizer
 
+    # The store's persisted mode wins — a replay-runtime store must be read
+    # with a replay clock even when ATTEST_REPLAY_MODE isn't set in this shell.
+    mode = (store.setting("execution_mode") or {}).get("mode", "wall")
+    eff = settings.model_copy(update={"replay_mode": mode == "replay"})
+    base = settings.ring_base_url
+    if eff.replay_mode and urlsplit(base).hostname not in ("127.0.0.1", "localhost", "::1"):
+        base = "http://127.0.0.1:9"  # inert — satisfies the loopback-only guard
     return VisitEngine(
         store,
-        RingClient(settings.ring_access_token, base_url=settings.ring_base_url),
+        RingClient(settings.ring_access_token, base_url=base),
         load_or_create_signer(
             settings.data_dir / "attest-ed25519.key",
             kms_key_id=settings.kms_key_id,
@@ -853,7 +860,7 @@ def _cli_engine(store):
         ),
         MediaStore(settings.data_dir / "media"),
         TemplateSummarizer(settings.timezone),
-        settings,
+        eff,
     )
 
 
