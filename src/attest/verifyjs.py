@@ -622,7 +622,8 @@ function statementsHTML(js){
     const who=a.name?`${esc(a.name)} (${esc(a.role||"reviewer")})`:esc(a.role||"reviewer");
     const note=a.identity_verified===false?" — identity not independently verified":"";
     const window=rv.reported_start
-      ?` <small class="muted">reports ${hhmm(rv.reported_start)}–${hhmm(rv.reported_end)}</small>`:"";
+      ?` <small class="muted">reports ${esc(hhmm(rv.reported_start))}–`
+        +`${esc(hhmm(rv.reported_end))}</small>`:"";
     const label=rv.kind==="resolution"
       ?`resolution: ${String(rv.outcome||"").replaceAll("_"," ")}`
       :(rv.decision||"statement");
