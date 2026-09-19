@@ -108,7 +108,9 @@ These are architectural boundaries, not missing features:
   Unwrapping requires a live `Decrypt` — every unwrap is a CloudTrail event.
   A KMS path that cannot reach KMS fails loudly rather than downgrading to a
   plaintext key.
-- Without KMS, the key is a file with owner-only permissions in the data dir.
+- Without KMS, the key is a PEM file in the data dir — written `chmod 600`
+  (owner-only) on POSIX; on Windows it inherits the data dir's ACLs, so deploy
+  under a service-account directory or use KMS custody there.
 
 ## Ingestion boundary
 

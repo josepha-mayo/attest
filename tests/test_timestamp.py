@@ -80,7 +80,7 @@ def test_upgrade_prefers_the_uri_in_the_pending_attestation():
 
     new = upgrade(ots, getter=getter)
     assert got[0].startswith("https://a.pool.opentimestamps.org/timestamp/")
-    assert ots_status(new).startswith("confirmed")
+    assert ots_status(new).startswith("Bitcoin attestation tag present")
 
 
 def test_upgrade_falls_back_to_all_calendars():
@@ -95,7 +95,7 @@ def test_upgrade_falls_back_to_all_calendars():
 
     new = upgrade(ots, getter=getter)
     assert len(got) == 2
-    assert ots_status(new).startswith("confirmed")
+    assert ots_status(new).startswith("Bitcoin attestation tag present")
 
 
 def test_extract_digest_rejects_foreign_proofs():

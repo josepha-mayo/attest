@@ -48,7 +48,10 @@ def attention_items(store, reviews, *, limit: int = 50) -> list[dict]:
             )
         elif cs and cs["state"] == "awaiting":
             items.append({"visit": v, "why": "worker statement pending", "level": "muted"})
-    return items
+    # Contested records lead the queue — a worker dispute outranks housekeeping
+    # warnings. Stable sort keeps recency ordering inside each severity.
+    rank = {"bad": 0, "warn": 1, "muted": 2}
+    return sorted(items, key=lambda i: rank.get(i["level"], 3))
 
 
 def deterministic_brief(store, reviews) -> str:

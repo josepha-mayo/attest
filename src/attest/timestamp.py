@@ -97,9 +97,10 @@ def extract_digest(ots: bytes) -> bytes | None:
 
 def ots_status(ots: bytes) -> str:
     """Classify a proof by scanning for attestation tags — sufficient for
-    reporting, never a substitute for `ots verify`."""
+    reporting, never a substitute for `ots verify`. A tag's presence is not
+    proof the calendar committed this digest to a real Bitcoin block."""
     if _BITCOIN_ATTEST in ots:
-        return "confirmed (Bitcoin block-header attestation present)"
+        return "Bitcoin attestation tag present (verify the proof itself with `ots verify`)"
     if _PENDING_ATTEST in ots:
         return "pending (calendar has not yet committed to Bitcoin)"
     return "unrecognized proof — inspect with the ots reference tool"

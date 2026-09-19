@@ -38,7 +38,12 @@ aws lambda create-function --function-name attest-verify-pack `
   --runtime python3.13 --handler verify_lambda.handler `
   --zip-file fileb://verify-lambda.zip --role <lambda-exec-role-arn> `
   --timeout 30 --memory-size 256
+```
 
+The deployed function is **authenticated-invoke only**. To expose a public
+endpoint (e.g. for judges), opt in deliberately:
+
+```powershell
 aws lambda create-function-url-config --function-name attest-verify-pack --auth-type NONE
 aws lambda add-permission --function-name attest-verify-pack --action lambda:InvokeFunctionUrl `
   --principal "*" --function-url-auth-type NONE --statement-id public-url
@@ -47,6 +52,9 @@ aws lambda add-permission --function-name attest-verify-pack --action lambda:Inv
 ## Use
 
 ```powershell
+# authenticated invoke
+aws lambda invoke --function-name attest-verify-pack --payload fileb://event.json out.json
+# or, with the optional public URL:
 curl.exe -X POST <function-url> --data-binary @case.zip -H "Content-Type: application/zip"
 # {"ok": true, "output": "OK: 6 record(s) verified; ...", "verifier": "attest pinned stdlib verifier ..."}
 ```

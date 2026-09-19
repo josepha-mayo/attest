@@ -27,8 +27,8 @@
   {% for a in attention %}
   <tr>
     <td style="width:1rem"><span class="flag {{ 'warn' if a.level == 'warn' else a.level }}">&nbsp;</span></td>
-    <td><a href="/sites/{{ a.visit.site_id }}" style="color:var(--accent)">{{ sites[a.visit.site_id].name if a.visit.site_id in sites else a.visit.site_id }}</a>
-      <a href="/visits/{{ a.visit.id }}" class="muted small"> — {{ t(a.visit.arrived_at) if a.visit.has_observations else t(a.visit.created_at) }}</a>
+    <td><a href="/visits/{{ a.visit.id }}" style="color:var(--accent)">{{ t(a.visit.arrived_at) if a.visit.has_observations else t(a.visit.created_at) }}</a>
+      <a href="/sites/{{ a.visit.site_id }}" class="muted small"> — {{ sites[a.visit.site_id].name if a.visit.site_id in sites else a.visit.site_id }}</a>
       {% if a.visit.worker_id and a.visit.worker_id in workers %}<span class="muted small"> · {{ workers[a.visit.worker_id].name }}</span>{% endif %}</td>
     <td>{{ a.why }}</td>
   </tr>

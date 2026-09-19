@@ -168,6 +168,14 @@ def check_receipt(r, key):
 
 def check_bundle(bundle, key):
     """Verify one bundle's original + review chain. Returns (ok, detail, n_reviews)."""
+    # ReviewBundle is extra="forbid": honest files carry exactly kind,
+    # original, reviews. Any other top-level key (e.g. a forged
+    # countersign_status) is unsigned attacker content — fail, don't render it.
+    if bundle.get("kind") != "attest.review_bundle/1":
+        return False, "unrecognized bundle kind", 0
+    extra = set(bundle) - {"kind", "original", "reviews"}
+    if extra:
+        return False, f"unsigned extra field in bundle: {sorted(extra)[0]}", 0
     original = bundle["original"]
     ok, why = check_receipt(original, key)
     if not ok:
@@ -271,6 +279,8 @@ def main():
     key = None
     if "--key" in args:
         i = args.index("--key")
+        if i + 1 >= len(args):
+            sys.exit("FAIL --key requires a base64 public key value")
         key = args[i + 1]
         del args[i : i + 2]
     bundle = json.loads(Path(args[0]).read_text(encoding="utf-8"))
@@ -301,19 +311,50 @@ _VERIFIER = _VERIFIER_LIB + _BUNDLE_MAIN
 # manifest's receipt hashes, under one pinned issuer key.
 _CASE_MAIN = """\
 def main():
-    root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(".")
-    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
-    key = manifest["issuer_key"]
+    args = sys.argv[1:]
+    key = None
+    if "--key" in args:
+        i = args.index("--key")
+        if i + 1 >= len(args):
+            sys.exit("FAIL --key requires a base64 public key value")
+        key = args[i + 1]
+        del args[i : i + 2]
+    root = Path(args[0]) if args else Path(".")
+    try:
+        manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    except Exception as exc:
+        sys.exit(f"FAIL manifest.json unreadable: {exc}")
+    declared = manifest.get("issuer_key")
+    if not declared:
+        sys.exit("FAIL manifest: missing issuer_key")
+    if key is not None and declared != key:
+        sys.exit("FAIL manifest: issuer_key disagrees with the pinned --key")
+    # Without --key the issuer is self-declared by the pack — the signatures
+    # still verify, but 'who signed' is only as trustworthy as the source of
+    # this file. Pin --key to rule out a whole-pack forgery under another key.
+    key = key or declared
+    if manifest.get("schema") != "attest.case-pack/1":
+        sys.exit(f"FAIL manifest: unsupported schema {manifest.get('schema')!r}")
+    visits = manifest.get("visits")
+    if not isinstance(visits, list):
+        sys.exit("FAIL manifest: visits is missing or not a list")
     failed = 0
-    for v in manifest["visits"]:
-        vid = v["visit_id"]
-        bundle = json.loads((root / "visits" / vid / "bundle.json").read_text(encoding="utf-8"))
+    listed_vids = set()
+    for v in visits:
+        vid = v.get("visit_id", "?")
+        listed_vids.add(vid)
+        try:
+            bundle = json.loads((root / "visits" / vid / "bundle.json").read_text(encoding="utf-8"))
+        except Exception as exc:
+            print(f"FAIL {vid}: bundle listed but missing or unreadable ({exc})")
+            failed += 1
+            continue
         ok, why, n = check_bundle(bundle, key)
         if not ok:
             print(f"FAIL {vid}: {why}")
             failed += 1
             continue
-        if bundle["original"]["payload_hash"] != v["payload_hash"]:
+        if bundle["original"]["payload_hash"] != v.get("payload_hash"):
             print(f"FAIL {vid}: manifest hash disagrees with signed original")
             failed += 1
             continue
@@ -334,30 +375,43 @@ def main():
             failed += 1
             continue
         redact_note = f", {held} withheld" if held else ""
-        print(f"OK   {vid}: {v['state']} — {v['countersign']['state']}"
+        cs = (v.get("countersign") or {}).get("state", "?")
+        print(f"OK   {vid}: {v.get('state', '?')} — {cs}"
               f" ({n} receipt(s), {checked} media digest(s){redact_note})")
     for a in manifest.get("attestations", []):
-        apath = root / "attestations" / f"{a['receipt_id']}.json"
+        rid = a.get("receipt_id", "?")
+        apath = root / "attestations" / f"{rid}.json"
         if not apath.exists():
-            print(f"FAIL attestation {a['receipt_id']}: manifest lists it but the file is missing")
+            print(f"FAIL attestation {rid}: manifest lists it but the file is missing")
             failed += 1
             continue
-        ar = json.loads(apath.read_text(encoding="utf-8"))
+        try:
+            ar = json.loads(apath.read_text(encoding="utf-8"))
+        except Exception as exc:
+            print(f"FAIL attestation {rid}: unreadable ({exc})")
+            failed += 1
+            continue
         aok, awhy = check_receipt(ar, key)
         if not aok:
-            print(f"FAIL attestation {a['receipt_id']}: {awhy}")
+            print(f"FAIL attestation {rid}: {awhy}")
             failed += 1
-        elif ar["payload_hash"] != a["payload_hash"] or ar["visit_id"] != a["visit_id"]:
-            print(f"FAIL attestation {a['receipt_id']}: disagrees with the signed manifest")
+        elif ar["payload_hash"] != a.get("payload_hash") or ar["visit_id"] != a.get("visit_id"):
+            print(f"FAIL attestation {rid}: disagrees with the signed manifest")
             failed += 1
         else:
-            print(f"OK   attestation {a.get('record_type') or 'record'} ({a['receipt_id'][:20]}...)")
+            print(f"OK   attestation {a.get('record_type') or 'record'} ({rid[:20]}...)")
     adir = root / "attestations"
     if adir.exists():
-        listed = {f"{a['receipt_id']}.json" for a in manifest.get("attestations", [])}
+        listed = {f"{a.get('receipt_id')}.json" for a in manifest.get("attestations", [])}
         extra = {p.name for p in adir.glob("*.json")} - listed
         if extra:
             print(f"FAIL {len(extra)} attestation file(s) present but not in the signed manifest")
+            failed += 1
+    vdir = root / "visits"
+    if vdir.exists():
+        extra_v = {p.name for p in vdir.iterdir() if p.is_dir()} - listed_vids
+        if extra_v:
+            print(f"FAIL {len(extra_v)} visit dir(s) present but not in the signed manifest")
             failed += 1
     mok, mwhy = check_manifest(manifest, key)
     print(f"{'OK  ' if mok else 'FAIL'} manifest: {mwhy}")
@@ -365,8 +419,10 @@ def main():
         failed += 1
     if failed:
         sys.exit(f"{failed} record(s) failed verification")
-    print(f"OK: {len(manifest['visits'])} visit records verified under issuer key")
+    print(f"OK: {len(visits)} visit records verified under issuer key")
     print(f"    {key[:16]}...")
+    if declared == key and "--key" not in sys.argv:
+        print("    (issuer self-declared by the pack — pass --key to pin it)")
     print("Integrity only — not identity, attendance, or absence.")
 
 
@@ -386,6 +442,8 @@ index.html          START HERE — a self-contained offline record browser. It
 manifest.json       Every visit's receipt hash, state, and worker stance.
 visits/<id>/        Per-visit bundle.json + the media bytes it references.
 verify_case.py      Offline verifier. Run:  python verify_case.py .
+                    Pass --key <base64> to pin the expected issuer key —
+                    without it the issuer is self-declared by the pack.
 verify.html         Zero-install verifier — open in any browser and drop the
                     pack files in. Same checks, pure JavaScript, works offline.
                     Also checks the media bytes index.html can only list.

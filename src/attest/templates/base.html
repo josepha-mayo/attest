@@ -26,7 +26,9 @@
   .pill.open, .pill.in_progress { color:var(--info); border-color:var(--info) }
   .pill.closed { color:var(--ok); border-color:var(--ok) }
   .pill.unmatched { color:var(--warn); border-color:var(--warn) }
-  .pill.no_observation, .pill.no_show { color:var(--crit); border-color:var(--crit) }
+  /* no_observation is absence of evidence — a watched silence, not an alarm.
+     Amber, not red: the coverage column says how much the silence means. */
+  .pill.no_observation, .pill.no_show { color:var(--warn); border-color:var(--warn) }
   .flag { display:inline-block; padding:2px 8px; border-radius:6px; font-size:12px; margin:2px 4px 2px 0 }
   .flag.info { background:#1d2a44; color:var(--info) } .flag.warn { background:#3b2f14; color:var(--warn) } .flag.critical { background:#3f1620; color:var(--crit) }
   table { width:100%; border-collapse:collapse } td, th { padding:9px 10px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top } th { color:var(--muted); font-weight:600; font-size:13px }

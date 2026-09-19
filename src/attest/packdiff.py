@@ -14,6 +14,25 @@ import zipfile
 from pathlib import Path
 
 
+def _verify_artifact_bundles(visits_bundles: dict, issuer: str | None) -> list[str]:
+    """Independently verify each bundle in an artifact before trusting its
+    contents — a diff over unverified receipts is meaningless."""
+    from .models import ReviewBundle
+    from .reviews import verify_bundle
+
+    failures = []
+    for vid, bundle in visits_bundles.items():
+        try:
+            parsed = ReviewBundle.model_validate(bundle)
+        except Exception as exc:  # noqa: BLE001
+            failures.append(f"{vid}: not a valid bundle ({exc})")
+            continue
+        ok, why = verify_bundle(parsed, public_key=issuer or parsed.original.public_key)
+        if not ok:
+            failures.append(f"{vid}: {why}")
+    return failures
+
+
 def _visit_summary(bundle: dict, manifest_entry: dict | None = None) -> dict:
     """Normalize one visit into a comparable record."""
     original = bundle["original"]
@@ -34,11 +53,54 @@ def _visit_summary(bundle: dict, manifest_entry: dict | None = None) -> dict:
     return out
 
 
+def _verify_attestation_files(z, attestations: dict, issuer: str | None) -> list[str]:
+    """Verify each attestation receipt file the manifest lists."""
+    from .ledger import verify_receipt
+    from .models import Receipt
+
+    failures = []
+    for rid in attestations:
+        try:
+            att = Receipt.model_validate(json.loads(z.read(f"attestations/{rid}.json")))
+        except Exception as exc:  # noqa: BLE001
+            failures.append(f"attestation {rid}: missing or invalid ({exc})")
+            continue
+        ok, why = verify_receipt(att, public_key=issuer or att.public_key)
+        if not ok:
+            failures.append(f"attestation {rid}: {why}")
+    return failures
+
+
+def _verify_manifest_signature(manifest: dict, issuer: str | None) -> str | None:
+    """Verify the manifest's signature_receipt and its hash-cover over the
+    visit list — returns a failure string or None."""
+    from .ledger import payload_hash, verify_receipt
+    from .models import Receipt
+
+    sig = manifest.get("signature_receipt")
+    if sig is None:
+        return None
+    try:
+        receipt = Receipt.model_validate(sig)
+    except Exception as exc:  # noqa: BLE001
+        return f"manifest signature_receipt invalid ({exc})"
+    ok, why = verify_receipt(receipt, public_key=issuer or receipt.public_key)
+    if not ok:
+        return f"manifest signature: {why}"
+    core = {k: v for k, v in manifest.items() if k != "signature_receipt"}
+    if payload_hash(core) != sig["payload"].get("manifest_sha256"):
+        return "manifest content hash mismatch (manifest was altered)"
+    return None
+
+
 def load_artifact(path: str | Path) -> dict:
-    """Load a case pack, dispute pack, or bare bundle.json into a normalized map."""
+    """Load a case pack, dispute pack, or bare bundle.json into a normalized map.
+    Each artifact's signed contents are independently verified — a diff over
+    unverified receipts would silently compare forged data."""
     path = Path(path)
     visits: dict[str, dict] = {}
     issuer = None
+    failures: list[str] = []
     if zipfile.is_zipfile(path):
         with zipfile.ZipFile(path) as z:
             names = set(z.namelist())
@@ -47,31 +109,56 @@ def load_artifact(path: str | Path) -> dict:
                 issuer = manifest.get("issuer_key")
                 attestations = {a["receipt_id"]: a for a in manifest.get("attestations", [])}
                 entries = {v["visit_id"]: v for v in manifest.get("visits", [])}
+                bundles = {}
                 for vid in entries:
                     try:
-                        bundle = json.loads(z.read(f"visits/{vid}/bundle.json"))
+                        bundles[vid] = json.loads(z.read(f"visits/{vid}/bundle.json"))
                     except KeyError:
+                        failures.append(f"{vid}: bundle listed but missing from pack")
                         continue
-                    visits[vid] = _visit_summary(bundle, entries[vid])
+                    visits[vid] = _visit_summary(bundles[vid], entries[vid])
+                failures += _verify_artifact_bundles(bundles, issuer)
+                failures += _verify_attestation_files(z, attestations, issuer)
+                mfail = _verify_manifest_signature(manifest, issuer)
+                if mfail:
+                    failures.append(mfail)
                 return {
                     "issuer": issuer,
                     "visits": visits,
                     "attestations": attestations,
                     "kind": "case-pack",
+                    "verify_failures": failures,
                 }
             if "bundle.json" in names:
                 bundle = json.loads(z.read("bundle.json"))
                 issuer = bundle["original"]["public_key"]
                 visits[bundle["original"]["visit_id"]] = _visit_summary(bundle)
-                return {"issuer": issuer, "visits": visits, "kind": "pack"}
+                failures += _verify_artifact_bundles({bundle["original"]["visit_id"]: bundle}, issuer)
+                return {
+                    "issuer": issuer,
+                    "visits": visits,
+                    "kind": "pack",
+                    "verify_failures": failures,
+                }
             raise ValueError(f"{path}: zip contains neither manifest.json nor bundle.json")
     data = json.loads(path.read_text(encoding="utf-8"))
     if "original" in data:
         issuer = data["original"]["public_key"]
         visits[data["original"]["visit_id"]] = _visit_summary(data)
-        return {"issuer": issuer, "visits": visits, "kind": "bundle"}
+        failures += _verify_artifact_bundles({data["original"]["visit_id"]: data}, issuer)
+        return {
+            "issuer": issuer,
+            "visits": visits,
+            "kind": "bundle",
+            "verify_failures": failures,
+        }
     if "visits" in data:  # a bare manifest without its bundles
         issuer = data.get("issuer_key")
+        mfail = _verify_manifest_signature(data, issuer)
+        if mfail:
+            failures.append(mfail)
+        else:
+            failures.append("bare manifest: bundle signatures cannot be checked without the packs")
         for v in data["visits"]:
             visits[v["visit_id"]] = {
                 "receipt_id": v.get("receipt_id"),
@@ -88,6 +175,7 @@ def load_artifact(path: str | Path) -> dict:
             "visits": visits,
             "attestations": {a["receipt_id"]: a for a in data.get("attestations", [])},
             "kind": "manifest",
+            "verify_failures": failures,
         }
     raise ValueError(f"{path}: unrecognized artifact (no 'original' or 'visits' key)")
 
@@ -97,6 +185,13 @@ def diff(old_path: str | Path, new_path: str | Path) -> tuple[list[str], int]:
     old, new = load_artifact(old_path), load_artifact(new_path)
     lines = [f"{old_path} [{old['kind']}] -> {new_path} [{new['kind']}]"]
     anomalies = 0
+
+    for label, art in (("old", old), ("new", new)):
+        for fail in art.get("verify_failures") or []:
+            lines.append(f"!! {label} artifact fails verification: {fail}")
+            anomalies += 1
+        if art.get("verify_failures") is not None and not art.get("verify_failures"):
+            lines.append(f"ok {label} artifact: all signed contents verify independently")
 
     if old["issuer"] and new["issuer"] and old["issuer"] != new["issuer"]:
         lines.append("!! issuer key differs between exports — one was not signed by this deployment")

@@ -44,6 +44,23 @@ document.getElementById('issue-link').onclick = async () => {
 <h2>Review notes</h2>
 <div class="card">{% for f in visit.flags %}<div><span class="flag {{ f.severity }}">{{ f.code }}</span> {{ f.message }}</div>{% endfor %}</div>
 {% endif %}
+{% if receipt and countersign %}
+<div class="card" style="margin-bottom:12px">
+  <div class="muted small">Record agreement</div>
+  <div style="font-size:20px;font-weight:600;margin:4px 0">
+    {% if countersign.state == "acknowledged" %}<span class="ok">Worker acknowledges this record</span>
+    {% elif countersign.state == "resolved" %}<span class="ok">Resolved — coordinator's conclusion signed</span>
+    {% elif countersign.state == "contested" %}<span class="bad">Worker disputes this record</span>
+    {% elif countersign.state == "corrected" %}<span class="warn">Worker submitted a correction</span>
+    {% elif countersign.state == "inconclusive" %}<span class="warn">Worker response inconclusive</span>
+    {% elif countersign.state == "awaiting" %}<span class="muted">Awaiting worker statement</span>
+    {% elif countersign.state == "unacknowledged" %}<span class="muted">Worker link expired unused</span>
+    {% else %}<span class="muted">No worker statement requested</span>{% endif %}
+  </div>
+  <div class="small muted">{{ countersign.detail }}{% if countersign.at %} — received {{ countersign.at }}{% endif %}. An acknowledgment binds to this record's hash; it does not certify identity or attendance.</div>
+  {% if countersign.resolution %}<div class="small muted">Conclusion: {{ countersign.resolution.outcome.replace('_', ' ') }} — appended as revision {{ countersign.resolution.revision }}. The worker's statement remains in the chain unchanged.</div>{% endif %}
+</div>
+{% endif %}
 {% set snaps = evidence|selectattr("kind","equalto","snapshot")|list %}
 {% if snaps %}
 <h2>Camera snapshots</h2>
@@ -104,23 +121,6 @@ document.getElementById('close-record').onclick = async () => {
 {% endif %}
 {% if receipt %}
 <h2>Review and corrections</h2>
-{% if countersign %}
-<div class="card" style="margin-bottom:12px">
-  <div class="muted small">Record agreement</div>
-  <div style="font-size:20px;font-weight:600;margin:4px 0">
-    {% if countersign.state == "acknowledged" %}<span class="ok">Worker acknowledges this record</span>
-    {% elif countersign.state == "resolved" %}<span class="ok">Resolved — coordinator's conclusion signed</span>
-    {% elif countersign.state == "contested" %}<span class="bad">Worker disputes this record</span>
-    {% elif countersign.state == "corrected" %}<span class="warn">Worker submitted a correction</span>
-    {% elif countersign.state == "inconclusive" %}<span class="warn">Worker response inconclusive</span>
-    {% elif countersign.state == "awaiting" %}<span class="muted">Awaiting worker statement</span>
-    {% elif countersign.state == "unacknowledged" %}<span class="muted">Worker link expired unused</span>
-    {% else %}<span class="muted">No worker statement requested</span>{% endif %}
-  </div>
-  <div class="small muted">{{ countersign.detail }}{% if countersign.at %} — received {{ countersign.at }}{% endif %}. An acknowledgment binds to this record's hash; it does not certify identity or attendance.</div>
-  {% if countersign.resolution %}<div class="small muted">Conclusion: {{ countersign.resolution.outcome.replace('_', ' ') }} — appended as revision {{ countersign.resolution.revision }}. The worker's statement remains in the chain unchanged.</div>{% endif %}
-</div>
-{% endif %}
 <div class="card">
 <p class="{{ 'ok' if review_verification[0] else 'bad' }}">{{ review_verification[1] }}</p>
 <a class="btn secondary" href="/visits/{{ visit.id }}/bundle.json">Export original + review chain</a>

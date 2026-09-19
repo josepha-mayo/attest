@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 import uuid
 from pathlib import Path
 from typing import Any
@@ -61,6 +62,10 @@ class Signer:
                 serialization.NoEncryption(),
             )
         )
+        # Owner-only permissions where the OS honors chmod; on Windows the file
+        # inherits the data dir's ACLs (THREATMODEL.md states this honestly).
+        if os.name == "posix":
+            os.chmod(path, 0o600)
         return cls(sk)
 
     @classmethod
@@ -119,7 +124,20 @@ def verify_receipt(receipt: Receipt | dict[str, Any], *, public_key: str | None 
     if r.payload.get("visit_id") != r.visit_id:
         return False, "visit id disagrees with signed payload"
     if r.payload.get("schema") == "attest.receipt/2":
-        if r.payload.get("receipt_id") != r.id or r.payload.get("issued_at") != r.issued_at.isoformat():
+        # issued_at serializes "+00:00" in the signed payload but may spell
+        # "Z" or another offset in the unsigned envelope — compare instants.
+        from datetime import datetime
+
+        raw_issued = r.payload.get("issued_at")
+        try:
+            payload_issued = (
+                raw_issued
+                if isinstance(raw_issued, datetime)
+                else datetime.fromisoformat(str(raw_issued).replace("Z", "+00:00"))
+            )
+        except ValueError:
+            return False, "receipt envelope identity disagrees with signed payload"
+        if r.payload.get("receipt_id") != r.id or payload_issued != r.issued_at:
             return False, "receipt envelope identity disagrees with signed payload"
     elif r.payload.get("schema") != "attest.receipt/1":
         return False, "unsupported receipt schema"

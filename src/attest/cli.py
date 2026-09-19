@@ -278,7 +278,12 @@ def _replay(args: argparse.Namespace) -> None:
                 shift = (args.window_minutes + settings.arrival_grace_minutes + 10) * 60
                 steps = [dataclasses.replace(s, offset_s=s.offset_s + shift) for s in steps]
             previous_offset = 0
-            for index, step in enumerate(steps):
+            did_checkin = False
+            # On a "late" day the check-in lands well after the shifted arrival
+            # cluster — the worker's own self-report diverges from the camera's
+            # observation, and the corroboration panel says so explicitly.
+            checkin_at_s = 3300 if pattern == "late" else 0
+            for step in steps:
                 time.sleep((step.offset_s - previous_offset) / args.speed)
                 at = day_start + timedelta(seconds=step.offset_s)
                 advance(api, at)
@@ -312,7 +317,7 @@ def _replay(args: argparse.Namespace) -> None:
                 response.raise_for_status()
                 drain(api)
                 api.post("/api/poll").raise_for_status()
-                if index == 0 and args.auto_checkin:
+                if not did_checkin and step.offset_s >= checkin_at_s and args.auto_checkin:
                     visits = api.get("/api/state").json()["visits"]
                     for visit in visits:
                         if visit["state"] == "open" and visit["schedule_id"] == schedule_id:
@@ -323,6 +328,7 @@ def _replay(args: argparse.Namespace) -> None:
                                     "Simulated check-in rejected. "
                                     "Inspect the record without exposing the link."
                                 )
+                            did_checkin = True
                 print(f"Replayed {step.type} at {at.isoformat()} (local simulation)", flush=True)
                 last_event_at = max(last_event_at, at)
                 previous_offset = step.offset_s
@@ -354,8 +360,12 @@ def _replay(args: argparse.Namespace) -> None:
             ]
             if not targets:
                 sys.exit("no observed visit to post the worker review against")
-            # /api/state lists newest first — review the most recent observed visit.
-            target = targets[0]
+            # Prefer the late day for a dispute: "I arrived earlier than the
+            # record shows" is a claim about ARRIVAL — on the early_out day the
+            # open question is departure and the canned statement reads wrong.
+            # Fall back to the newest observed visit (state lists newest first).
+            late = [v for v in targets if any(f["code"] == "late" for f in v.get("flags", []))]
+            target = late[0] if late else targets[0]
             response = api.post(f"/api/visits/{target['id']}/review-link")
             response.raise_for_status()
             decision, statement = (
@@ -975,7 +985,7 @@ def _status(args: argparse.Namespace) -> None:
         if journal.get("pinned_heads"):
             line += f", {journal['pinned_heads']} signature-pinned heads"
         if journal["untracked_rows"]:
-            line += f", {len(journal['untracked_rows'])} untracked rows (run `attest journal --baseline`)"
+            line += f", {journal['untracked_rows']} untracked rows (run `attest journal --baseline`)"
         if journal["mismatches"]:
             line += f", {len(journal['mismatches'])} mismatches"
         print(line)

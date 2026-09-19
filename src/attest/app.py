@@ -925,6 +925,9 @@ def _verify_pack(data: bytes, public_key: str) -> tuple[bool, str]:
 
     try:
         z = zipfile.ZipFile(io.BytesIO(data))
+        # Bound total decompressed size — a small zip can expand unboundedly.
+        if sum(i.file_size for i in z.infolist()) > 256 * 1024 * 1024:
+            return False, "pack expands beyond the 256 MB verification bound"
         names = set(z.namelist())
         if "manifest.json" in names:
             return _verify_case_pack(z, public_key)
@@ -1015,6 +1018,17 @@ def _verify_case_pack(z, public_key: str) -> tuple[bool, str]:
             return False, f"attestation {rid}: {why}"
         if att.visit_id != a.get("visit_id") or att.payload_hash != a.get("payload_hash"):
             return False, f"attestation {rid}: does not match the manifest's signed entry"
+    # Fail closed on files the signed manifest does not name — a smuggled
+    # attestation or visit bundle would otherwise pass unverified.
+    listed_atts = {f"attestations/{a.get('receipt_id')}.json" for a in manifest.get("attestations", [])}
+    listed_visits = {f"visits/{v.get('visit_id')}/" for v in manifest.get("visits", [])}
+    for name in z.namelist():
+        if name.endswith("/"):
+            continue
+        if name.startswith("attestations/") and name not in listed_atts:
+            return False, f"{name}: file is present but not in the signed manifest"
+        if name.startswith("visits/") and not any(name.startswith(prefix) for prefix in listed_visits):
+            return False, f"{name}: file is present but not in the signed manifest"
     return True, f"case pack verified — {total} visit record(s) intact ({manifest_note}): " + "; ".join(lines)
 
 

@@ -487,3 +487,63 @@ def test_site_page_lists_coverage_attestations(api, household, t0):
     assert cert.id in page.text
     assert "Coverage" in page.text
     assert "never a claim of absence" in page.text
+
+
+def test_verify_pack_rejects_smuggled_attestation(api, household, t0):
+    """An attestations/*.json file the signed manifest does not list must fail
+    _verify_pack — parity with the embedded verifier's sweep."""
+    import io
+    import zipfile
+    from datetime import timedelta
+
+    site, _, cam, _ = household
+    r = _post_hook(api, cam.id, "motion_detected", t0, "human")
+    assert r.status_code == 202
+    vid = api.attest_state.store.active_visit(site.id).id
+    assert api.post(f"/api/visits/{vid}/close").status_code == 200
+    api.attest_state.engine.issue_coverage_attestation(site, t0 - timedelta(hours=1), t0 + timedelta(hours=2))
+    pack = api.get(f"/sites/{site.id}/pack.zip")
+    zin = zipfile.ZipFile(io.BytesIO(pack.content))
+    att_name = next(n for n in zin.namelist() if n.startswith("attestations/"))
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zout:
+        for n in zin.namelist():
+            zout.writestr(n, zin.read(n))
+        zout.writestr("attestations/smuggled.json", zin.read(att_name))
+
+    from attest.app import _verify_pack
+
+    ok, detail = _verify_pack(buf.getvalue(), api.attest_state.signer.public_key_b64)
+    assert not ok
+    assert "not in the signed manifest" in detail
+
+
+def test_status_survives_untracked_journal_rows(tmp_path, monkeypatch):
+    """A store with rows written outside the journal used to crash `attest
+    status` with TypeError — it must print the untracked count instead."""
+    import argparse
+    import contextlib
+    import io as _io
+    import sqlite3
+
+    from attest import cli
+    from attest.models import Role, Worker
+    from attest.store import Store
+
+    store = Store(tmp_path / "attest.sqlite3")
+    store.put_worker(Worker(name="Maria Chen", role=Role.HOME_HEALTH_AIDE))
+    store.close()
+    # Out-of-band write — invisible to the mutation journal.
+    conn = sqlite3.connect(tmp_path / "attest.sqlite3")
+    conn.execute("INSERT INTO workers (id, checkin_token, body) VALUES ('wkr_oob', 'x', '{}')")
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(cli.settings, "data_dir", tmp_path)
+    monkeypatch.setattr(cli.settings, "kms_key_id", None)
+    buf = _io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cli._status(argparse.Namespace())
+    out = buf.getvalue()
+    assert "untracked" in out

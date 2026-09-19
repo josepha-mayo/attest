@@ -6,6 +6,7 @@ Skipped when node is not installed (CI without a JS runtime still passes).
 """
 
 import io
+import json
 import re
 import shutil
 import subprocess
@@ -55,6 +56,7 @@ def _bundle(r1, r2) -> str:
 
     return json.dumps(
         {
+            "kind": "attest.review_bundle/1",
             "original": r1.model_dump(mode="json"),
             "reviews": [
                 {
@@ -439,3 +441,213 @@ __rz(fake).then(async files=>{
     assert "media-ok:" in out, out
     assert "att-ok: true" in out, out
     assert "export signed" in out, out
+
+
+def _drive_zip(tmp_path, z, name="case.zip"):
+    """Write zipfile contents to a real .zip + the node driver; returns stdout."""
+    pack = tmp_path / name
+    with zipfile.ZipFile(pack, "w", zipfile.ZIP_DEFLATED) as out:
+        for item in z.infolist():
+            out.writestr(item.filename, z.read(item.filename))
+    (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
+    driver = r"""
+const fs=require('fs');
+let src=fs.readFileSync(process.argv[2],'utf8').replace(/const dz=[\s\S]*$/,'');
+eval(src+';globalThis.__v=verifyFiles;globalThis.__rz=readZipEntries;');
+const bytes=fs.readFileSync(process.argv[3]);
+const fake={name:'p.zip',
+  arrayBuffer:async()=>bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength)};
+__rz(fake).then(async files=>{
+  const html=await __v(files);
+  console.log('verdict:',(html.match(/VERIFIED[^<]*|FAILED[^<]*/)||['none'])[0]);
+  console.log(html.replace(/<[^>]+>/g,' ').replace(/\s+/g,' '));
+}).catch(e=>{console.log('ERR',e.message);process.exit(2);});
+"""
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "verify.js", name],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return proc.stdout
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_verify_html_fails_closed_when_listed_bundle_missing(
+    engine, store, household, schedule, t0, tmp_path
+):
+    """A manifest-listed visit whose bundle.json was deleted from the zip must
+    fail closed — red row AND FAILED verdict, never VERIFIED."""
+    z = _case_pack(engine, store, household, schedule, t0, tmp_path)
+    vid = json.loads(z.read("manifest.json"))["visits"][0]["visit_id"]
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as out:
+        for name in z.namelist():
+            if name == f"visits/{vid}/bundle.json":
+                continue  # the dropped record
+            out.writestr(name, z.read(name))
+    buf.seek(0)
+    out = _drive_zip(tmp_path, zipfile.ZipFile(buf))
+    assert "FAILED" in out, out
+    assert "VERIFIED" not in out, out
+    assert "listed but missing" in out, out
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_verify_html_rejects_smuggled_attestation_file(engine, store, household, schedule, t0, tmp_path):
+    """An attestations/*.json file the signed manifest does not list fails
+    closed in the browser — parity with the embedded verifier's sweep."""
+    from datetime import timedelta
+
+    site = store.sites()[0]
+    engine.issue_coverage_attestation(site, t0 - timedelta(hours=1), t0 + timedelta(hours=2))
+    z = _case_pack(engine, store, household, schedule, t0, tmp_path)
+    att_name = next(n for n in z.namelist() if n.startswith("attestations/"))
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as out:
+        for name in z.namelist():
+            out.writestr(name, z.read(name))
+        out.writestr("attestations/smuggled.json", z.read(att_name))
+    buf.seek(0)
+    out = _drive_zip(tmp_path, zipfile.ZipFile(buf))
+    assert "FAILED" in out, out
+    assert "VERIFIED" not in out, out
+    assert "not in the signed manifest" in out, out
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_verify_html_rejects_forged_countersign_status(engine, store, household, schedule, t0, tmp_path):
+    """An unsigned countersign_status slipped into bundle.json is
+    extra="forbid" content — the browser must FAIL, not render a fake worker
+    stance under a VERIFIED banner."""
+    z = _case_pack(engine, store, household, schedule, t0, tmp_path)
+    vid = json.loads(z.read("manifest.json"))["visits"][0]["visit_id"]
+    bundle = json.loads(z.read(f"visits/{vid}/bundle.json"))
+    bundle["countersign_status"] = {"state": "acknowledged", "detail": "worker confirmed"}
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as out:
+        for name in z.namelist():
+            if name == f"visits/{vid}/bundle.json":
+                out.writestr(name, json.dumps(bundle))
+            else:
+                out.writestr(name, z.read(name))
+    buf.seek(0)
+    out = _drive_zip(tmp_path, zipfile.ZipFile(buf))
+    assert "FAILED" in out, out
+    assert "VERIFIED" not in out, out
+    assert "unsigned extra field" in out, out
+    assert "acknowledged" not in out, out
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_verify_html_rejects_forged_redaction_masking_deleted_media(
+    engine, store, household, schedule, t0, tmp_path
+):
+    """Delete a media file and drop an unsigned redaction.json claiming the
+    digest was withheld — the signed manifest's empty media_withheld list must
+    expose the lie. This is the audit's core browser-vs-Python asymmetry."""
+    z = _case_pack(engine, store, household, schedule, t0, tmp_path)
+    vid = json.loads(z.read("manifest.json"))["visits"][0]["visit_id"]
+    bundle = json.loads(z.read(f"visits/{vid}/bundle.json"))
+    digest = next(
+        e["media_sha256"] for e in bundle["original"]["payload"]["evidence"] if e.get("media_sha256")
+    )
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as out:
+        for name in z.namelist():
+            if name.startswith(f"visits/{vid}/media/"):
+                continue  # the stolen evidence
+            out.writestr(name, z.read(name))
+        out.writestr(
+            f"visits/{vid}/redaction.json",
+            json.dumps(
+                {
+                    "media_redacted": True,
+                    "withheld_digests": [digest],
+                    "note": "forged marker",
+                }
+            ),
+        )
+    buf.seek(0)
+    out = _drive_zip(tmp_path, zipfile.ZipFile(buf))
+    assert "FAILED" in out, out
+    assert "VERIFIED" not in out, out
+    assert "redaction list disagrees" in out, out
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_verify_html_redacted_pack_still_verifies(engine, store, household, schedule, t0, tmp_path):
+    """The honest redacted pack — manifest media_withheld + redaction.json
+    agree — still VERIFIES with 'withheld' rows, so the parity check doesn't
+    over-correct into rejecting legitimate redaction."""
+    from ring_sandbox import WebhookEvent, webhooks
+
+    from attest.disputepack import build_case_pack
+    from attest.reviews import ReviewService, countersign_status
+
+    event = WebhookEvent.model_validate(
+        webhooks.build_event(event_type="button_press", device_id=household[2].id, occurred_at=t0)
+    )
+    visit = engine.ingest(event).visit
+    engine.close_for_review(visit.id)
+    bundle = ReviewService(store, engine.signer, engine.clock).bundle(visit.id)
+    site = store.sites()[0]
+    data = build_case_pack(
+        store,
+        tmp_path / "media",
+        site,
+        [(visit, bundle, countersign_status(bundle))],
+        manifest_signer=lambda m: engine.issue_export_manifest(site, m),
+        redact_media=True,
+    )
+    out = _drive_zip(tmp_path, zipfile.ZipFile(io.BytesIO(data)))
+    assert "VERIFIED" in out, out
+    assert "FAILED" not in out, out
+    assert "withheld" in out, out
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_js_canonicalization_matches_python_on_edge_cases(tmp_path):
+    """Astral-plane key ordering and verbatim float spellings must canonicalize
+    identically to Python's json.dumps(sort_keys=True) — or the signature
+    check fails on honest records (or worse, diverges on adversarial ones)."""
+    s = Signer.ephemeral()
+    # An astral char sorts after all BMP chars by code point but BEFORE some
+    # by UTF-16 unit; a 34.0 float spelling must survive verbatim.
+    r = s.issue(
+        visit_id="vis_edge",
+        sequence=1,
+        prev_hash="00" * 32,
+        facts={
+            "record_type": "visit",
+            "\U0001f600key": "astral",
+            "z_bmp": "after",
+            "float_spelling": 34.0,
+            "statement": "émojis 👍 and — dashes",
+        },
+    )
+    (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
+    (tmp_path / "r.json").write_text(r.model_dump_json(indent=2), encoding="utf-8")
+    driver = """
+const fs=require('fs');
+let src=fs.readFileSync(process.argv[2],'utf8').replace(/const dz=[\\s\\S]*$/,'');
+const rt=fs.readFileSync(process.argv[3],'utf8');
+eval(src + `
+const receiptText=${JSON.stringify(rt)};
+(async()=>{
+  console.log('edge:',JSON.stringify(await checkReceipt(parseKeep(receiptText))));
+})();`);
+"""
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "verify.js", "r.json"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert 'edge: {"ok":true}' in proc.stdout, proc.stdout

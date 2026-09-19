@@ -14,8 +14,16 @@ Pure standard library: no layer, no boto3, no outbound calls. Deploy:
     aws lambda create-function --function-name attest-verify-pack \
         --runtime python3.13 --handler verify_lambda.handler \
         --zip-file fileb://verify-lambda.zip --role <exec-role-arn>
+
+Default posture is authenticated invoke only (as deployed). For a public
+endpoint — e.g. letting judges POST packs without AWS credentials — add a
+function URL deliberately:
+
     aws lambda create-function-url-config --function-name attest-verify-pack \
-        --auth-type NONE   # POST the pack .zip bytes; get {"ok": ..., "output": ...}
+        --auth-type NONE
+    aws lambda add-permission --function-name attest-verify-pack \
+        --action lambda:InvokeFunctionUrl --principal "*" \
+        --function-url-auth-type NONE --statement-id public-url
 """
 
 import base64
@@ -70,6 +78,9 @@ def handler(event, context):
         return _respond(400, {"ok": False, "error": "body is not a zip pack"})
     if not _safe_names(zf):
         return _respond(400, {"ok": False, "error": "unsafe paths in pack"})
+    # Bound decompressed size — a small zip can expand past /tmp's 512 MiB.
+    if sum(i.file_size for i in zf.infolist()) > 256 * 1024 * 1024:
+        return _respond(400, {"ok": False, "error": "pack expands beyond the 256 MB bound"})
     names = set(zf.namelist())
     if "manifest.json" in names:
         script, argv = "verifier_case.py", []

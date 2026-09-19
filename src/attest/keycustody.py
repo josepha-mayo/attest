@@ -47,8 +47,9 @@ class KmsBox:
         blob = resp["CiphertextBlob"]
         nonce = os.urandom(12)
         ct = AESGCM(data_key).encrypt(nonce, plaintext, json.dumps(_context(self.key_id)).encode())
-        for b in (data_key,):
-            del b  # best-effort: don't keep the data key alive longer than needed
+        # Drop our references promptly — CPython can't guarantee erasure of
+        # immutable bytes, but keeping the window small is the honest best.
+        del data_key, resp
         return {
             "schema": "attest.kms-wrapped-key/1",
             "key_id": self.key_id,
