@@ -191,7 +191,10 @@ def diff(old_path: str | Path, new_path: str | Path) -> tuple[list[str], int]:
             lines.append(f"!! {label} artifact fails verification: {fail}")
             anomalies += 1
         if art.get("verify_failures") is not None and not art.get("verify_failures"):
-            lines.append(f"ok {label} artifact: all signed contents verify independently")
+            issuer_note = (
+                f"issuer {art['issuer'][:20]}… (self-declared)" if art.get("issuer") else "no issuer"
+            )
+            lines.append(f"ok {label} artifact: all signed contents verify under the {issuer_note}")
 
     if old["issuer"] and new["issuer"] and old["issuer"] != new["issuer"]:
         lines.append("!! issuer key differs between exports — one was not signed by this deployment")
