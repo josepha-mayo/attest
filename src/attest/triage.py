@@ -51,7 +51,7 @@ def attention_items(store, reviews, *, limit: int = 50) -> list[dict]:
             # The coordinator's signed conclusion post-dates the latest worker
             # statement — the dispute stays in the chain but needs no action.
             continue
-        elif v.state.value == "unmatched":
+        elif v.state.value == "unmatched" or any(f.code == "unscheduled" for f in notable):
             items.append({"visit": v, "why": "observation matched no schedule", "level": "warn"})
         elif notable:
             items.append(
