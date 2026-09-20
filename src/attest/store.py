@@ -803,6 +803,17 @@ class Store:
                 "seen_requests": {"total": seen[0], "oldest": seen[1]},
             }
 
+    def poll_coverage_by_site(self) -> dict[str, dict]:
+        """Per-site poll-observation counts and the most recent poll — how much
+        watching evidence exists per location, without reading bodies."""
+        with self._lock:
+            return {
+                site_id: {"count": n, "last": last}
+                for site_id, n, last in self._conn.execute(
+                    "SELECT site_id, COUNT(*), MAX(polled_at) FROM poll_observations GROUP BY site_id"
+                ).fetchall()
+            }
+
     def dump(self) -> dict:
         return {
             "sites": [json.loads(s.model_dump_json()) for s in self.sites()],

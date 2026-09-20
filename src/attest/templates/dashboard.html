@@ -16,6 +16,7 @@
     <br><a href="/sites/{{ sid }}/pack.zip" style="color:var(--accent)" title="Every signed record for this site, one manifest, offline verifier">Case pack: {{ site.name }}</a>
     <span class="muted">— unzip and open index.html: it verifies every record in the browser, no install</span>
     {% endfor %}
+    <br><a href="/integrity" style="color:var(--accent)" title="Chain, journal, custody, coverage — the runtime's self-audit">Integrity posture &rarr;</a>
     <br><a href="/verify-pack" style="color:var(--accent)" title="The same verifier every pack embeds — drop a .zip; nothing uploads">Verify a pack in-browser</a>
     <br><button id="refresh-toggle" class="muted" style="background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;font-size:13px">Pause auto-refresh</button>
   </div>

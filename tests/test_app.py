@@ -571,6 +571,31 @@ def test_site_page_lists_coverage_attestations(api, household, t0):
     assert "never a claim of absence" in page.text
 
 
+def test_integrity_page_renders_self_audit(api, household, t0):
+    """/integrity surfaces the offline audit: chain, journal, custody, coverage."""
+    site, _, cam, _ = household
+    r = _post_hook(api, cam.id, "motion_detected", t0, "human")
+    assert r.status_code == 202
+    vid = api.attest_state.store.active_visit(site.id).id
+    assert api.post(f"/api/visits/{vid}/close").status_code == 200
+
+    page = api.get("/integrity")
+    assert page.status_code == 200
+    assert "Self-audit passes" in page.text
+    assert "Receipt chain" in page.text and "chain intact" in page.text
+    assert "Mutation journal" in page.text and "intact" in page.text
+    assert "Signing key" in page.text and "local key file" in page.text
+    assert "Watching evidence per site" in page.text
+    assert "doesn't prove" in page.text  # the claims boundary stays on the page
+
+    # Tamper out-of-band — the page must flip to attention, not stay green.
+    store = api.attest_state.store
+    store._conn.execute("UPDATE visits SET body=? WHERE id=?", ('{"forged":true}', vid))
+    page = api.get("/integrity")
+    assert "Attention" in page.text
+    assert "content changed" in page.text
+
+
 def test_verify_pack_rejects_smuggled_attestation(api, household, t0):
     """An attestations/*.json file the signed manifest does not list must fail
     _verify_pack — parity with the embedded verifier's sweep."""

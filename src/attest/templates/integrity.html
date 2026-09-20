@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Attest — integrity posture{% endblock %}
+{% block body %}
+{% macro t(dt) %}{{ dt.astimezone(tz).strftime("%b %d, %I:%M %p").replace(" 0", " ") if dt else "—" }}{% endmacro %}
+<h1>Integrity posture</h1>
+<div class="muted">The runtime's own audit — the same checks <code>attest status</code> runs
+offline, rendered live. This page describes the evidence system's health, not whether any
+worker was honest.</div>
+
+<div class="card" style="margin-top:14px">
+  {% if healthy %}
+  <span class="ok">&#10003; Self-audit passes</span> — receipt chain and mutation journal both verify.
+  {% else %}
+  <span class="bad">&#10007; Attention</span> — at least one integrity check failed. Investigate before trusting new records.
+  {% endif %}
+</div>
+
+<div class="grid" style="margin-top:16px">
+  <div class="card">
+    <h3 style="margin-top:0">Receipt chain</h3>
+    {% if chain[0] %}<span class="ok">&#10003; {{ chain[1] }}</span>
+    {% else %}<span class="bad">&#10007; {{ chain[1] }}</span>{% endif %}
+    <div class="muted small" style="margin-top:.5rem">
+      {{ stats.receipts.total }} signed receipts · latest sequence #{{ stats.receipts.latest_sequence or 0 }}
+    </div>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0">Mutation journal</h3>
+    {% if journal.intact %}<span class="ok">&#10003; {{ journal.entries }} entries, intact</span>
+    {% else %}<span class="bad">&#10007; violated</span>{% endif %}
+    <div class="muted small" style="margin-top:.5rem">
+      {{ journal.pinned_heads }} signature-pinned heads · head <code>{{ journal.head[:12] }}…</code>
+      {% if journal.untracked_rows %}<br>{{ journal.untracked_rows }} rows predate journaling{% endif %}
+    </div>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0">Signing key</h3>
+    {{ custody }}
+    <div class="muted small" style="margin-top:.5rem">
+      Issuer <code>{{ issuer[:16] }}…</code> · clock mode <code>{{ mode }}</code>
+    </div>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0">Delivery inbox</h3>
+    {{ queue.get('pending', 0) }} pending · {{ queue.get('processing', 0) }} in flight ·
+    {{ queue.get('failed', 0) }} failed
+    <div class="muted small" style="margin-top:.5rem">Failed deliveries requeue, never vanish.</div>
+  </div>
+</div>
+
+{% if journal.mismatches %}
+<h2>Journal mismatches</h2>
+<div class="card">
+  <ul style="margin:0">
+  {% for m in journal.mismatches %}<li class="bad small">{{ m }}</li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<h2>Signed attestations on record</h2>
+<div class="card table-wrap" style="padding:0">
+<table>
+  <thead><tr><th>Kind</th><th>Count</th><th>Latest issued</th></tr></thead>
+  <tbody>
+  {% for kind, a in attestations|dictsort %}
+  <tr><td>{{ kind }}</td><td>{{ a.count }}</td><td class="muted">{{ t(a.latest) }}</td></tr>
+  {% else %}
+  <tr><td colspan="3" class="muted">None yet — coverage certificates, period digests, export manifests, and disconnect receipts appear here.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="small muted">Site-level chain events — the ledger's signed record of watching, summarizing, exporting, and consent.</p>
+
+<h2>Watching evidence per site</h2>
+<div class="card table-wrap" style="padding:0">
+<table>
+  <thead><tr><th>Site</th><th>Poll observations</th><th>Most recent</th></tr></thead>
+  <tbody>
+  {% for sid, p in poll|dictsort %}
+  <tr>
+    <td><a href="/sites/{{ sid }}" style="color:var(--accent)">{{ sites[sid].name if sid in sites else sid }}</a></td>
+    <td>{{ p.count }}</td>
+    <td class="muted">{{ p.last }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="3" class="muted">No poll observations — nothing has been watched yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="small muted">Poll rows prove <em>watching</em>, not events — "we checked" is a different claim from "something happened".</p>
+
+<h2>Store contents</h2>
+<div class="card table-wrap" style="padding:0">
+<table>
+  <tbody>
+  <tr><td class="muted">Visits</td><td>{{ stats.visits.total }}</td>
+      <td class="muted small">{% for st, n in stats.visits.by_state|dictsort %}{{ st }}={{ n }} {% endfor %}</td></tr>
+  <tr><td class="muted">Evidence rows</td><td>{{ stats.evidence.total }}</td><td></td></tr>
+  <tr><td class="muted">Reviews</td><td>{{ stats.reviews }}</td><td></td></tr>
+  <tr><td class="muted">Late events retained</td><td>{{ stats.late_events }}</td>
+      <td class="muted small">arrived after close — kept for review, never silently dropped</td></tr>
+  <tr><td class="muted">Dedupe keys</td><td>{{ stats.seen_requests.total }}</td><td></td></tr>
+  <tr><td class="muted">Grants</td><td>{{ stats.checkin_grants + stats.review_grants + stats.family_grants }}</td>
+      <td class="muted small">{{ stats.checkin_grants }} check-in · {{ stats.review_grants }} review · {{ stats.family_grants }} family</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <strong>What this page proves:</strong> the signed chain links, the mutation journal replays
+  cleanly, and every issued receipt pinned the journal head at signing — a store edited outside
+  the pipeline shows up here. <strong>What it doesn't prove:</strong> physical attendance,
+  identity, or time worked — those are the records' own claims boundary, unchanged.
+</div>
+{% endblock %}

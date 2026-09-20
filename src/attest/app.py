@@ -412,6 +412,42 @@ def create_app(
             triage_source=(getattr(app.state, "last_triage", None) or {}).get("source_label"),
         )
 
+    @app.get("/integrity", response_class=HTMLResponse)
+    async def integrity(request: Request):
+        """The self-audit surface — the same checks `attest status` runs,
+        rendered for the coordinator: chain, journal, custody, coverage."""
+        receipts = store.receipts()
+        # Journal replay is O(rows) and holds the store lock — off the loop.
+        journal = await asyncio.to_thread(store.verify_journal)
+        chain = await asyncio.to_thread(ledger.verify_chain, receipts, public_key=signer.public_key_b64)
+        att_types: dict[str, dict] = {}
+        for r in receipts:
+            if ":" in r.visit_id:
+                rtype = r.payload.get("record_type") or "record"
+                slot = att_types.setdefault(rtype, {"count": 0, "latest": None})
+                slot["count"] += 1
+                if slot["latest"] is None or r.issued_at > slot["latest"]:
+                    slot["latest"] = r.issued_at
+        return render(
+            request,
+            "integrity.html",
+            stats=await asyncio.to_thread(store.stats),
+            journal=journal,
+            chain=chain,
+            attestations=att_types,
+            poll=store.poll_coverage_by_site(),
+            sites={x.id: x for x in store.sites()},
+            queue=inbox.counts(),
+            custody=(
+                f"AWS KMS envelope — unwrap audited (key …{s.kms_key_id[-8:]})"
+                if s.kms_key_id
+                else "local key file — plaintext at rest"
+            ),
+            mode=(store.setting("execution_mode") or {}).get("mode", "wall"),
+            issuer=signer.public_key_b64,
+            healthy=journal["intact"] and chain[0],
+        )
+
     @app.get("/visits/{visit_id}", response_class=HTMLResponse)
     async def visit_page(request: Request, visit_id: str = PathParam(max_length=128)):
         v = store.visit(visit_id)
