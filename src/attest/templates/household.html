@@ -48,11 +48,11 @@ a:focus-visible{outline:2px solid #2563a8;outline-offset:2px;border-radius:3px}
 
 <div style="height:18px"></div>
 
-{% if visit.state == "open" %}
+{% if visit.state in ["open", "in_progress"] %}
 <div class="card hero quiet">
   <div class="mark" aria-hidden="true">&#9202;</div>
   <h2>This visit is still in progress</h2>
-  <p>The window hasn't closed yet, so there is no signed record to review.</p>
+  <p>This record hasn't been closed and signed yet — what you see below is what has been received so far.</p>
 </div>
 {% elif visit.state == "unmatched" %}
 <div class="card hero warn">
@@ -64,7 +64,7 @@ a:focus-visible{outline:2px solid #2563a8;outline-offset:2px;border-radius:3px}
 <div class="card hero quiet">
   <div class="mark" aria-hidden="true">&#9675;</div>
   <h2>No activity was reported</h2>
-  <p>{% if coverage and coverage.fraction and coverage.fraction >= 0.99 %}The camera was checked {{ coverage.polls }} times across the whole window and reported nothing.
+  <p>{% if coverage and coverage.fraction and coverage.fraction >= 0.999 %}The camera was checked {{ coverage.polls }} times across the whole window and reported nothing.
   {% elif coverage and coverage.polls %}The camera was checked for {{ "%.0f"|format((coverage.fraction or 0)*100) }}% of the window and reported nothing{% if coverage.gaps %} — some of the window wasn't watched{% endif %}.
   {% else %}The camera reported no activity during this window.{% endif %}
   No activity is not proof nobody came — it only means the camera reported nothing.</p>
@@ -105,21 +105,26 @@ a:focus-visible{outline:2px solid #2563a8;outline-offset:2px;border-radius:3px}
     {% endif %}
     {% endif %}
     {% if receipt %}
-    <div class="fact"><div class="k">Integrity</div><div class="v">Signed record #{{ receipt.sequence }} — tampering after signing is detectable. <a href="/visits/{{ visit.id }}">Full record</a></div></div>
+    <div class="fact"><div class="k">Integrity</div><div class="v">Signed record #{{ receipt.sequence }} — tampering after signing is detectable.{% if not via_link %} <a href="/visits/{{ visit.id }}">Full record</a>{% endif %}</div></div>
     {% endif %}
   </div>
 </div>
 
-{% if countersign and countersign.state in ["contested", "corrected", "inconclusive"] %}
-{% set worker_reviews = reviews|rejectattr("receipt.payload.review.kind", "equalto", "resolution")|list %}
-{% if worker_reviews %}
+{% set worker_reviews = reviews|selectattr("receipt.payload.actor.role", "equalto", "worker")|list %}
+{% if worker_reviews and countersign and countersign.state in ["contested", "corrected", "inconclusive"] %}
 {% set lw = worker_reviews[-1].receipt.payload %}
 <div class="card">
   <div class="small" style="color:var(--muted);margin-bottom:6px">In the worker's words</div>
   <div class="quote">&ldquo;{{ lw.review.statement }}&rdquo;</div>
   <div class="small" style="color:var(--muted)">— {{ lw.actor.name }}, appended to the signed record (never edited after)</div>
 </div>
-{% endif %}
+{% elif worker_reviews and countersign and countersign.state == "resolved" %}
+{% set lw = worker_reviews[-1].receipt.payload %}
+<div class="card">
+  <div class="small" style="color:var(--muted);margin-bottom:6px">In the worker's words — concluded, kept on record</div>
+  <div class="quote">&ldquo;{{ lw.review.statement }}&rdquo;</div>
+  <div class="small" style="color:var(--muted)">— {{ lw.actor.name }}{% if countersign.resolution %}; concluded by the coordinator: {{ countersign.resolution.statement }}{% endif %}</div>
+</div>
 {% endif %}
 
 {% if timeline %}
@@ -134,7 +139,7 @@ a:focus-visible{outline:2px solid #2563a8;outline-offset:2px;border-radius:3px}
   <div class="small" style="color:var(--muted);margin-bottom:10px">Camera snapshots</div>
   <div class="snap">
   {% for e in snaps %}<figure>
-    <img src="/visits/{{ visit.id }}/media/{{ e.media_path.replace('\\','/').split('/')[-1] }}" alt="Snapshot {{ t(e.at) }}">
+    <img src="{{ media_base }}/media/{{ e.media_path.replace('\\','/').split('/')[-1] }}" alt="Snapshot {{ t(e.at) }}">
     <figcaption>{{ t(e.at) }} · fingerprint-verified</figcaption>
   </figure>{% endfor %}
   </div>

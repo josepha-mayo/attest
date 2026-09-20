@@ -357,6 +357,36 @@ def test_link_qr_encodes_worker_paths_only(api):
     assert api.get("/qr.svg", params={"target": "/api/state"}).status_code == 400
 
 
+def test_family_link_is_scoped_read_only_access(api, store, household, t0):
+    """A scoped family link opens the household view without admin auth —
+    multi-use until expiry, and the admin 'Full record' link stays hidden."""
+    _post_hook(api, household[2].id, "button_press", t0)
+    visit = store.active_visit(household[0].id)
+    assert api.post(f"/api/visits/{visit.id}/close").status_code == 200
+
+    # without a link the household page is admin-only
+    assert api.get(f"/visits/{visit.id}/household", auth=None).status_code == 401
+
+    issued = api.post(f"/api/visits/{visit.id}/family-link")
+    assert issued.status_code == 200
+    path = issued.json()["path"]
+    assert path.startswith("/family/")
+
+    page = api.get(path, auth=None)
+    assert page.status_code == 200
+    assert "Activity was observed" in page.text
+    assert "not proof nobody came" in page.text  # the boundary travels with the view
+    assert "Full record" not in page.text  # admin chrome stays hidden for link viewers
+    assert api.get(path, auth=None).status_code == 200  # multi-use, not consumed
+
+    # an unknown or revoked token lands on the styled dead-link page, never data
+    dead = api.get("/family/" + "z" * 40, auth=None)
+    assert dead.status_code == 404 and "invalid, expired" in dead.text
+
+    # the QR helper encodes family paths too
+    assert api.get("/qr.svg", params={"target": path}).status_code == 200
+
+
 def test_setup_forms_discover_create_and_cancel_without_cli(api, store, ring_world, t0):
     assert api.get("/setup", auth=None).status_code == 401
     page = api.get("/setup?discover=true")

@@ -66,7 +66,7 @@ document.getElementById('issue-link').onclick = async () => {
   </div>
   <div class="small muted">{{ countersign.detail }}{% if countersign.at %} — received {{ countersign.at }}{% endif %}. An acknowledgment binds to this record's hash; it does not certify identity or attendance.</div>
   {% if countersign.resolution %}<div class="small muted">Conclusion: {{ countersign.resolution.outcome.replace('_', ' ') }} — appended as revision {{ countersign.resolution.revision }}. The worker's statement remains in the chain unchanged.</div>{% endif %}
-  {% set worker_reviews = reviews|rejectattr("receipt.payload.review.kind", "equalto", "resolution")|list %}
+  {% set worker_reviews = reviews|selectattr("receipt.payload.actor.role", "equalto", "worker")|list %}
   {% if countersign.state in ["contested", "corrected", "inconclusive"] and worker_reviews %}
   {% set lw = worker_reviews[-1].receipt.payload %}
   <blockquote class="dispute-quote">“{{ lw.review.statement }}”<br>
@@ -147,6 +147,10 @@ document.getElementById('close-record').onclick = async () => {
 <img id="worker-review-qr" alt="QR code for the worker review link" style="display:none;width:120px;height:120px;margin-top:8px;border:1px solid var(--line);border-radius:8px">
 <p id="review-link-status" role="status" class="small muted"></p>
 {% endif %}
+<button class="btn secondary" id="issue-family">Share the household view</button>
+<a id="family-view-link" style="display:block;overflow-wrap:anywhere;color:var(--accent)"></a>
+<img id="family-view-qr" alt="QR code for the household view link" style="display:none;width:120px;height:120px;margin-top:8px;border:1px solid var(--line);border-radius:8px">
+<p id="family-link-status" role="status" class="small muted"></p>
 {% for review in reviews %}
 {% set facts = review.receipt.payload %}
 <article style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
@@ -190,6 +194,19 @@ if (requestReview) requestReview.onclick = async () => {
     const link = document.getElementById('worker-review-link');
     link.href = data.path; link.textContent = new URL(data.path, location.origin).href;
     const qr = document.getElementById('worker-review-qr');
+    qr.src = '/qr.svg?target=' + encodeURIComponent(data.path);
+    qr.style.display = 'block';
+  }
+};
+const issueFamily = document.getElementById('issue-family');
+if (issueFamily) issueFamily.onclick = async () => {
+  const response = await fetch('/api/visits/{{ visit.id }}/family-link', {method: 'POST'});
+  const data = await response.json();
+  document.getElementById('family-link-status').textContent = response.ok ? 'Text or show the code to the family — read-only view, expires in 7 days.' : data.detail;
+  if (response.ok) {
+    const link = document.getElementById('family-view-link');
+    link.href = data.path; link.textContent = new URL(data.path, location.origin).href;
+    const qr = document.getElementById('family-view-qr');
     qr.src = '/qr.svg?target=' + encodeURIComponent(data.path);
     qr.style.display = 'block';
   }

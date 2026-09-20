@@ -14,6 +14,29 @@ import zipfile
 from pathlib import Path
 
 
+class BoundedZip:
+    """z.read wrapper enforcing per-file and cumulative decompressed caps —
+    central-directory file_size entries can lie, so reads are capped on the
+    actual inflated stream."""
+
+    def __init__(self, z, *, per_file: int = 64 * 1024 * 1024, total: int = 256 * 1024 * 1024):
+        self._z, self.per_file, self.total, self.seen = z, per_file, total, 0
+
+    def namelist(self):
+        return self._z.namelist()
+
+    def read(self, name: str) -> bytes:
+        with self._z.open(name) as f:
+            chunks, n = [], 0
+            while chunk := f.read(1 << 20):
+                n += len(chunk)
+                self.seen += len(chunk)
+                if n > self.per_file or self.seen > self.total:
+                    raise ValueError("pack expands beyond the 256 MB verification bound")
+                chunks.append(chunk)
+        return b"".join(chunks)
+
+
 def _verify_artifact_bundles(visits_bundles: dict, issuer: str | None) -> list[str]:
     """Independently verify each bundle in an artifact before trusting its
     contents — a diff over unverified receipts is meaningless."""
@@ -54,16 +77,27 @@ def _visit_summary(bundle: dict, manifest_entry: dict | None = None) -> dict:
 
 
 def _verify_attestation_files(z, attestations: dict, issuer: str | None) -> list[str]:
-    """Verify each attestation receipt file the manifest lists."""
+    """Verify each attestation receipt file the manifest lists — signature AND
+    the manifest's claimed visit_id/payload_hash, so a swapped (but validly
+    signed) receipt file cannot pass as the listed attestation."""
     from .ledger import verify_receipt
     from .models import Receipt
 
     failures = []
-    for rid in attestations:
+    for rid, entry in attestations.items():
         try:
             att = Receipt.model_validate(json.loads(z.read(f"attestations/{rid}.json")))
         except Exception as exc:  # noqa: BLE001
             failures.append(f"attestation {rid}: missing or invalid ({exc})")
+            continue
+        if att.id != rid:
+            failures.append(f"attestation {rid}: file contains receipt {att.id}")
+            continue
+        if entry.get("payload_hash") and entry["payload_hash"] != att.payload_hash:
+            failures.append(f"attestation {rid}: payload hash differs from manifest entry")
+            continue
+        if entry.get("visit_id") and entry["visit_id"] != att.visit_id:
+            failures.append(f"attestation {rid}: visit_id differs from manifest entry")
             continue
         ok, why = verify_receipt(att, public_key=issuer or att.public_key)
         if not ok:
@@ -126,7 +160,8 @@ def load_artifact(path: str | Path, key: str | None = None) -> dict:
     failures: list[str] = []
     notes: list[str] = []
     if zipfile.is_zipfile(path):
-        with zipfile.ZipFile(path) as z:
+        with zipfile.ZipFile(path) as raw:
+            z = BoundedZip(raw)
             names = set(z.namelist())
             if "manifest.json" in names:
                 manifest = json.loads(z.read("manifest.json"))
@@ -144,6 +179,19 @@ def load_artifact(path: str | Path, key: str | None = None) -> dict:
                 failures += _manifest_consistency(manifest, bundles, notes)
                 failures += _verify_artifact_bundles(bundles, issuer)
                 failures += _verify_attestation_files(z, attestations, issuer)
+                # Fail closed on smuggled content the signed manifest does not
+                # name — parity with _verify_case_pack.
+                listed_atts = {f"attestations/{rid}.json" for rid in attestations}
+                listed_visits = {f"visits/{vid}/" for vid in entries}
+                for name in names:
+                    if name.endswith("/"):
+                        continue
+                    if name.startswith("attestations/") and name not in listed_atts:
+                        failures.append(f"{name}: present but not in the signed manifest")
+                    elif name.startswith("visits/") and not any(
+                        name.startswith(prefix) for prefix in listed_visits
+                    ):
+                        failures.append(f"{name}: present but not in the signed manifest")
                 mfail = _verify_manifest_signature(manifest, issuer)
                 if mfail:
                     failures.append(mfail)

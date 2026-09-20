@@ -53,7 +53,7 @@ against a live store:
 | Re-sign a receipt under a foreign key | Signature fails under the pinned issuer key |
 | Replay a delivered webhook | `seen_requests` dedupe; delivery lands rejected in the durable inbox |
 | Insert a row out-of-band | Journal continuity and receipt-pin mismatches |
-| Update a denormalized index column directly (token_hash, visit_id, state, polled_at) | `verify_journal` re-derives every index column from the signed body and flags divergence; `late_events.site_id` is bound into the journaled row hash itself |
+| Update a denormalized index column directly (token_hash, visit_id, state, polled_at) | `verify_journal` re-derives every index column from the signed body and flags divergence; `late_events.site_id` is bound into the journaled row hash itself — residual: for a late_events row journaled after the last receipt pin, rewriting the whole tail could hide a site_id change, since no second check covers it — the same tail-truncation boundary anchors exist to close |
 | Drop a file from an exported pack | Verifier reports missing media or missing bundle explicitly |
 | Drop or swap a record inside a case pack | Signed `case_export` manifest names the exact visit→hash map; mismatch fails closed |
 | Drop, swap, or smuggle a site attestation in a case pack | The manifest's signed `attestations` list pins receipt_id + visit_id + payload_hash; every verifier checks signature + manifest equality, and a file the list does not name fails closed |

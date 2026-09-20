@@ -41,6 +41,7 @@ from .models import (
     ReviewInput,
     Schedule,
     Site,
+    Visit,
     VisitState,
     Worker,
     utcnow,
@@ -181,7 +182,7 @@ def create_app(
                 origin is not None and origin != expected_origin
             ):
                 raise HTTPException(403, "cross-origin writes are not allowed")
-        if request.url.path.startswith(("/checkin/", "/review/")):
+        if request.url.path.startswith(("/checkin/", "/review/", "/family/")):
             return
         if s.admin_token is None:
             raise HTTPException(503, "Configure ATTEST_ADMIN_TOKEN before using the application")
@@ -312,8 +313,9 @@ def create_app(
         it, the aide's phone opens the check-in/review page directly. Scoped to
         the worker-link path prefixes — QR encoding is not a capability, but
         there is no reason to make this an open encoder."""
-        if not (target.startswith("/checkin/") or target.startswith("/review/")) or len(target) > 300:
-            raise HTTPException(400, "target must be a /checkin/ or /review/ path")
+        allowed = target.startswith(("/checkin/", "/review/", "/family/"))
+        if not allowed or len(target) > 300:
+            raise HTTPException(400, "target must be a /checkin/, /review/, or /family/ path")
         import io
 
         import segno
@@ -442,23 +444,14 @@ def create_app(
             late_count=len(late),
         )
 
-    @app.get("/visits/{visit_id}/household", response_class=HTMLResponse)
-    async def household_page(request: Request, visit_id: str = PathParam(max_length=128)):
-        """The household's view of one record — plain language, no console.
-
-        The coordinator dashboard answers "what does the operation need?"; this
-        answers "was anyone at my mother's door on Tuesday?" in words a
-        non-operator can act on — with the same honesty constraints, since a
-        worried family member deserves the boundary more than anyone.
-        """
-        v = store.visit(visit_id)
-        if v is None:
-            raise HTTPException(404)
-        receipt = store.receipt_for_visit(visit_id)
-        bundle = reviews.bundle(visit_id) if receipt else None
+    def _household_render(request: Request, v: Visit, media_base: str, via_link: bool = False):
+        """Shared context for the coordinator's /visits/{id}/household and the
+        scoped /family/{token} view — same record, same honesty constraints."""
+        receipt = store.receipt_for_visit(v.id)
+        bundle = reviews.bundle(v.id) if receipt else None
         site = store.site(v.site_id)
         schedule = store.schedule(v.schedule_id) if v.schedule_id else None
-        evidence = store.evidence_for(visit_id)
+        evidence = store.evidence_for(v.id)
         from .coverage import coverage_report
         from .timeline import timeline_strip
 
@@ -476,20 +469,74 @@ def create_app(
             coverage=cov,
             late_events=[],
         )
+        # "Scheduled worker" means the schedule's worker — the signed
+        # receipt names the same person under payload.scheduled_worker.
+        scheduled_worker = (
+            schedule.worker_id
+            if schedule
+            else ((receipt.payload.get("scheduled_worker") or {}).get("id") if receipt else None)
+        )
         return render(
             request,
             "household.html",
             visit=v,
             timeline=strip,
             site=site,
-            worker=store.worker(v.worker_id) if v.worker_id else None,
+            worker=store.worker(scheduled_worker) if scheduled_worker else None,
             schedule=schedule,
             evidence=evidence,
             receipt=receipt,
             reviews=bundle.reviews if bundle else [],
-            countersign=reviews.countersign(visit_id) if bundle else None,
+            countersign=reviews.countersign(v.id) if bundle else None,
             coverage=cov,
+            media_base=media_base,
+            via_link=via_link,
         )
+
+    @app.get("/visits/{visit_id}/household", response_class=HTMLResponse)
+    async def household_page(request: Request, visit_id: str = PathParam(max_length=128)):
+        """The household's view of one record — plain language, no console.
+
+        The coordinator dashboard answers "what does the operation need?"; this
+        answers "was anyone at my mother's door on Tuesday?" in words a
+        non-operator can act on — with the same honesty constraints, since a
+        worried family member deserves the boundary more than anyone.
+        """
+        v = store.visit(visit_id)
+        if v is None:
+            raise HTTPException(404)
+        return _household_render(request, v, f"/visits/{v.id}")
+
+    @app.post("/api/visits/{visit_id}/family-link")
+    async def issue_family_link(visit_id: str = PathParam(max_length=128)):
+        """Issue a scoped read-only link to the household view — the coordinator
+        texts it to the family; the token is the authorization (hashed at rest,
+        expires in 7 days, revocable by deleting the grant)."""
+        try:
+            token = await action(engine.issue_family_link, visit_id)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return {"path": f"/family/{token}", "expires_in_seconds": 604800}
+
+    @app.get("/family/{token}", response_class=HTMLResponse)
+    async def family_page(request: Request, token: str = PathParam(max_length=128)):
+        visit = await action(engine.family_target, token)
+        if visit is None:
+            return _dead_link(request, "family view")
+        return _household_render(request, visit, f"/family/{token}", via_link=True)
+
+    @app.get("/family/{token}/media/{name}")
+    async def family_media(token: str = PathParam(max_length=128), name: str = PathParam(max_length=255)):
+        visit = await action(engine.family_target, token)
+        if visit is None:
+            raise HTTPException(404)
+        for e in store.evidence_for(visit.id):
+            if e.media_path and Path(e.media_path).name == name:
+                data = media.read(e.media_path)
+                if data is None:
+                    raise HTTPException(404)
+                return Response(content=data, media_type="image/jpeg")
+        raise HTTPException(404)
 
     @app.get("/visits/{visit_id}/media/{name}")
     async def visit_media(visit_id: str = PathParam(max_length=128), name: str = PathParam(max_length=255)):
@@ -1000,29 +1047,6 @@ def create_app(
     return app
 
 
-class _BoundedZip:
-    """z.read wrapper enforcing per-file and cumulative decompressed caps —
-    central-directory file_size entries can lie, so reads are capped on the
-    actual inflated stream."""
-
-    def __init__(self, z, *, per_file: int = 64 * 1024 * 1024, total: int = 256 * 1024 * 1024):
-        self._z, self.per_file, self.total, self.seen = z, per_file, total, 0
-
-    def namelist(self):
-        return self._z.namelist()
-
-    def read(self, name: str) -> bytes:
-        with self._z.open(name) as f:
-            chunks, n = [], 0
-            while chunk := f.read(1 << 20):
-                n += len(chunk)
-                self.seen += len(chunk)
-                if n > self.per_file or self.seen > self.total:
-                    raise ValueError("pack expands beyond the 256 MB verification bound")
-                chunks.append(chunk)
-        return b"".join(chunks)
-
-
 def _verify_pack(data: bytes, public_key: str) -> tuple[bool, str]:
     """Verify an exported pack: dispute pack (bundle.json) or site case pack
     (manifest.json + visits/<id>/bundle.json) — signatures + media digests."""
@@ -1034,7 +1058,9 @@ def _verify_pack(data: bytes, public_key: str) -> tuple[bool, str]:
         # Bound total decompressed size — a small zip can expand unboundedly.
         if sum(i.file_size for i in z.infolist()) > 256 * 1024 * 1024:
             return False, "pack expands beyond the 256 MB verification bound"
-        z = _BoundedZip(z)
+        from .packdiff import BoundedZip
+
+        z = BoundedZip(z)
         names = set(z.namelist())
         if "manifest.json" in names:
             return _verify_case_pack(z, public_key)

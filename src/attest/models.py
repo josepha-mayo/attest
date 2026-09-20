@@ -249,6 +249,18 @@ class ReviewGrant(CheckinGrant):
     original_hash: str
 
 
+class FamilyGrant(BaseModel):
+    """Read-only scoped link to one visit's household view. Multi-use until
+    expiry — the family opens it like any link; revocation deletes the row.
+    The token is the authorization, so it stays out of logs and is stored
+    only as a hash, like every other grant."""
+
+    id: str
+    token_hash: str
+    expires_at: datetime
+    used_at: datetime | None = None
+
+
 class ReviewEntry(BaseModel):
     id: str
     visit_id: str

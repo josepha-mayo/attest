@@ -126,9 +126,11 @@ def apply(
         "poll_observations": store.delete_poll_observations([o["id"] for o in cands["poll_observations"]]),
         "media_files": _delete_media(media_root, [f["path"] for f in cands["media_files"]]),
     }
-    deleted["grants"] = store.delete_checkin_grants(
-        [g["id"] for g in cands["grants"] if g["kind"] == "checkin"]
-    ) + store.delete_review_grants([g["id"] for g in cands["grants"] if g["kind"] == "review"])
+    deleted["grants"] = (
+        store.delete_checkin_grants([g["id"] for g in cands["grants"] if g["kind"] == "checkin"])
+        + store.delete_review_grants([g["id"] for g in cands["grants"] if g["kind"] == "review"])
+        + store.delete_family_grants([g["id"] for g in cands["grants"] if g["kind"] == "family"])
+    )
 
     return {
         "applied_at": now.isoformat(),
@@ -145,9 +147,11 @@ def _candidates(store: Store, inbox: Any | None, media_root: Path, now: datetime
     """Full candidate lists. seen_requests is capped at _CAP so apply() removes
     exactly the set the preview showed."""
     grants, used, expired = [], 0, 0
-    for kind, grant in [("checkin", g) for g in store.checkin_grants()] + [
-        ("review", g) for g in store.review_grants()
-    ]:
+    for kind, grant in (
+        [("checkin", g) for g in store.checkin_grants()]
+        + [("review", g) for g in store.review_grants()]
+        + [("family", g) for g in store.family_grants()]
+    ):
         is_used = grant.used_at is not None
         is_expired = _aware(grant.expires_at) < now - timedelta(days=policy.grants_days)
         used += is_used

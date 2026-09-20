@@ -6,6 +6,8 @@ A caregiver says she was there Tuesday. The family says nobody came. Today that 
 
 Built for the Amazon Developer Hackathon (Ring track; AWS Builder + Open Source mini-challenges). A working prototype with honest boundaries — not an EVV-compliant system, and never a claim of attendance. The proposed customer is a household or service coordinator reviewing a scheduled visit alongside the worker's own account.
 
+**What makes it different.** Attendance tools answer with a verdict; Attest ships evidence you don't have to trust. The export pack **verifies itself** — open it in a browser or a stock Python install and every record re-checks, with no Attest dependency and no trust in the issuer. Silence is signed too: receipts attest *how much of the window was watched*, so "we checked and saw nothing" is provably different from "we weren't watching." The dispute loop is bilateral — the worker's words land in the same signed chain the coordinator concludes on, and appends never rewrite. And the project names exactly what it cannot prove (identity, attendance, completeness of a hidden tail) in the record boundary, the threat model, and a seven-attack demo that fails against itself.
+
 ## What the record means
 
 - A schedule records an expectation, not the identity of a person at the camera.
@@ -123,7 +125,7 @@ Two more integrity surfaces: `attest coverage --site S --from T0 --to T1` issues
 
 `attest digest --from T0 --to T1` (or **Sign records digest** on a site page) signs a *period digest* — a chain-linked receipt counting the records written in the interval (observed / no-observation / unmatched, worker statements and disputes, resolved records and median time-to-resolution) and pinning the exact receipt set summarized. It's a statement about the ledger, never about physical presence — the weekly report a coordinator can hand upstream without handing over footage.
 
-`GET /visits/{id}/household` renders the **household view** — the same record in plain language for the family: one glanceable state, the observed facts, the worker's own words, the coordinator's conclusion, and the full claim boundary (observation ≠ attendance; silence ≠ absence). The coordinator console answers "what does the operation need?"; the household view answers "was anyone at my mother's door on Tuesday?" Accessibility follows WCAG AA — ≥4.5:1 text contrast, visible focus rings, skip link, keyboard-operable table rows, `prefers-reduced-motion` honored (dashboard auto-refresh pauses), and `prefers-contrast` support.
+`GET /visits/{id}/household` renders the **household view** — the same record in plain language for the family: one glanceable state, the observed facts, the worker's own words, the coordinator's conclusion, and the full claim boundary (observation ≠ attendance; silence ≠ absence). The coordinator console answers "what does the operation need?"; the household view answers "was anyone at my mother's door on Tuesday?" **Share the household view** on the visit page issues a scoped, hashed, 7-day read-only link (`/family/{token}`, QR-rendered) — the family opens the record itself, no admin credentials, no footage beyond that visit's own. Accessibility follows WCAG AA — ≥4.5:1 text contrast, visible focus rings, skip link, keyboard-operable table rows, `prefers-reduced-motion` honored (dashboard auto-refresh pauses), and `prefers-contrast` support.
 
 Corrections are separate human statements, not edits to camera evidence. Verification establishes integrity of the supplied chain, not attendance, truth of a statement, or completeness against a hidden/deleted tail. Never publish review/check-in links or personal records in the demo video.
 
@@ -186,7 +188,7 @@ triage never blocks on model access.
 
 Tests include rejected authentication, expired/reused links, concurrent arrivals, rollback after failure, source-switch rejection, late events, observation-versus-attendance semantics, history ordering, receipt/review tampering, setup validation, and fallback provenance. Socket-level tests run the CLI through real local emulator/Attest servers for sensor, camera-only, and no-observation scenarios, then append and verify worker/coordinator reviews.
 
-A fresh published checkout of both repositories passed 205 Attest tests and 38 companion tests in a new Windows Python 3.14 environment. The GitHub Actions workflow runs both suites, lint, format checks, a tracked-runtime-file guard, and wheel builds across Windows/Linux with Python 3.11/3.14. Actions, the companion commit, and `requirements-dev.txt` dependency pins make the run reproducible. CI does not receive live Ring or AWS credentials.
+A fresh published checkout of both repositories passed 206 Attest tests and 38 companion tests in a new Windows Python 3.14 environment. The GitHub Actions workflow runs both suites, lint, format checks, a tracked-runtime-file guard, and wheel builds across Windows/Linux with Python 3.11/3.14. Actions, the companion commit, and `requirements-dev.txt` dependency pins make the run reproducible. CI does not receive live Ring or AWS credentials.
 
 ## Before deployment or submission
 

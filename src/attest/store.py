@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from .models import (
     CheckinGrant,
     Evidence,
+    FamilyGrant,
     PollObservation,
     Receipt,
     ReviewEntry,
@@ -59,6 +60,7 @@ CREATE INDEX IF NOT EXISTS ix_poll_obs_device ON poll_observations(device_id, po
 CREATE TABLE IF NOT EXISTS reviews (id TEXT PRIMARY KEY, visit_id TEXT NOT NULL, revision INTEGER NOT NULL,
                                     body TEXT NOT NULL, UNIQUE(visit_id, revision));
 CREATE TABLE IF NOT EXISTS review_grants (id TEXT PRIMARY KEY, token_hash TEXT UNIQUE, body TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS family_grants (id TEXT PRIMARY KEY, token_hash TEXT UNIQUE, body TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS ix_visits_site_state ON visits(site_id, state);
 CREATE INDEX IF NOT EXISTS ix_evidence_visit ON evidence(visit_id, at);
 CREATE INDEX IF NOT EXISTS ix_schedules_site ON schedules(site_id, window_start);
@@ -96,6 +98,7 @@ _JOURNALED_KEYS = {
     "reviews": "id",
     "review_grants": "id",
     "checkin_grants": "id",
+    "family_grants": "id",
     "late_events": "id",
     "poll_observations": "id",
     "settings": "name",
@@ -133,6 +136,7 @@ def _index_specs() -> dict:
         "workers": (Worker, {"checkin_token": lambda m: m.checkin_token}),
         "checkin_grants": (CheckinGrant, {"token_hash": lambda m: m.token_hash}),
         "review_grants": (ReviewGrant, {"token_hash": lambda m: m.token_hash}),
+        "family_grants": (FamilyGrant, {"token_hash": lambda m: m.token_hash}),
         "schedules": (
             Schedule,
             {
@@ -624,6 +628,15 @@ class Store:
     def review_grants(self) -> list[ReviewGrant]:
         return self._rows(ReviewGrant, "SELECT body FROM review_grants ORDER BY id")
 
+    def put_family_grant(self, grant: FamilyGrant) -> None:
+        self._put("family_grants", grant, token_hash=grant.token_hash)
+
+    def family_grant(self, token_hash: str) -> FamilyGrant | None:
+        return self._one(FamilyGrant, "SELECT body FROM family_grants WHERE token_hash=?", (token_hash,))
+
+    def family_grants(self) -> list[FamilyGrant]:
+        return self._rows(FamilyGrant, "SELECT body FROM family_grants ORDER BY id")
+
     # ------------------------------------------------------------- poll coverage
 
     def put_poll_observation(self, obs: PollObservation) -> None:
@@ -749,6 +762,9 @@ class Store:
     def delete_review_grants(self, ids: Iterable[str]) -> int:
         return self._delete_ids("review_grants", "id", ids)
 
+    def delete_family_grants(self, ids: Iterable[str]) -> int:
+        return self._delete_ids("family_grants", "id", ids)
+
     def delete_poll_observations(self, ids: Iterable[str]) -> int:
         return self._delete_ids("poll_observations", "id", ids)
 
@@ -780,6 +796,7 @@ class Store:
                 "poll_observations": row("SELECT COUNT(*) FROM poll_observations")[0],
                 "checkin_grants": row("SELECT COUNT(*) FROM checkin_grants")[0],
                 "review_grants": row("SELECT COUNT(*) FROM review_grants")[0],
+                "family_grants": row("SELECT COUNT(*) FROM family_grants")[0],
                 "visits": {"total": visits[0], "oldest_arrival": visits[1], "by_state": by_state},
                 "evidence": {"total": evidence[0], "oldest": evidence[1]},
                 "receipts": {"total": receipts[0], "latest_sequence": receipts[1]},

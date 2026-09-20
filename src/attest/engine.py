@@ -35,6 +35,7 @@ from .models import (
     CheckinGrant,
     Evidence,
     EvidenceKind,
+    FamilyGrant,
     Flag,
     Receipt,
     Schedule,
@@ -229,6 +230,26 @@ class VisitEngine:
             )
         )
         return token
+
+    def issue_family_link(self, visit_id: str) -> str:
+        visit = self.store.visit(visit_id)
+        if visit is None:
+            raise ValueError("unknown visit")
+        token = secrets.token_urlsafe(32)
+        self.store.put_family_grant(
+            FamilyGrant(
+                id=visit.id,
+                token_hash=hashlib.sha256(token.encode()).hexdigest(),
+                expires_at=utcnow() + timedelta(days=7),
+            )
+        )
+        return token
+
+    def family_target(self, token: str) -> Visit | None:
+        grant = self.store.family_grant(hashlib.sha256(token.encode()).hexdigest())
+        if grant is None or grant.expires_at <= utcnow():
+            return None
+        return self.store.visit(grant.id)
 
     def checkin_target(self, token: str):
         grant = self.store.checkin_grant(hashlib.sha256(token.encode()).hexdigest())
@@ -581,32 +602,38 @@ class VisitEngine:
         ]
         # The dispute loop closing is itself a ledger metric: how many records
         # carry a signed conclusion, and how long first-worker-statement ->
-        # conclusion took. Ledger time, never physical truth.
+        # conclusion took. "Resolved" uses the same derivation every other
+        # surface does — latest resolution post-dates latest worker statement —
+        # so a re-opened record does not count as resolved. Ledger time only.
         resolved_records, resolution_lags = 0, []
         for v in visits:
             v_entries = self.store.reviews_for(v.id)
-            worker_at = next(
-                (
-                    e.receipt.payload.get("statement_received_at")
-                    for e in v_entries
-                    if e.receipt.payload.get("actor", {}).get("role") == "worker"
-                ),
-                None,
-            )
-            res_at = next(
-                (
-                    e.receipt.payload.get("statement_received_at")
-                    for e in reversed(v_entries)
-                    if e.receipt.payload.get("review", {}).get("kind") == "resolution"
-                ),
-                None,
-            )
-            if res_at:
-                resolved_records += 1
-                if worker_at:
-                    lag = (
-                        datetime.fromisoformat(res_at) - datetime.fromisoformat(worker_at)
-                    ).total_seconds() / 60
+            worker_ats = [
+                e.receipt.payload.get("statement_received_at")
+                for e in v_entries
+                if e.receipt.payload.get("actor", {}).get("role") == "worker"
+            ]
+            res_ats = [
+                e.receipt.payload.get("statement_received_at")
+                for e in v_entries
+                if e.receipt.payload.get("review", {}).get("kind") == "resolution"
+            ]
+            if not res_ats or res_ats[-1] is None:
+                continue
+            try:
+                latest_res = datetime.fromisoformat(res_ats[-1])
+                latest_worker = (
+                    datetime.fromisoformat(worker_ats[-1]) if worker_ats and worker_ats[-1] else None
+                )
+                first_worker = datetime.fromisoformat(worker_ats[0]) if worker_ats and worker_ats[0] else None
+            except (TypeError, ValueError):
+                continue  # corrupt journal-adjacent data — omit rather than sign garbage
+            if latest_worker and latest_worker > latest_res:
+                continue  # a later worker statement re-opened the record
+            resolved_records += 1
+            if first_worker:
+                lag = (latest_res - first_worker).total_seconds() / 60
+                if lag >= 0:
                     resolution_lags.append(lag)
         receipts = {
             r.visit_id: r.payload_hash for r in self.store.receipts() if r.visit_id in {v.id for v in visits}
