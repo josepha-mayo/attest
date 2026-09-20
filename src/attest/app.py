@@ -550,7 +550,8 @@ def create_app(
                 data = media.read(e.media_path)
                 if data is None:
                     raise HTTPException(404)
-                return Response(content=data, media_type="image/jpeg")
+                mime = "image/png" if data.startswith(b"\x89PNG") else "image/jpeg"
+                return Response(content=data, media_type=mime)
         raise HTTPException(404)
 
     @app.get("/visits/{visit_id}/media/{name}")
