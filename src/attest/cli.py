@@ -141,20 +141,18 @@ def _replay(args: argparse.Namespace) -> None:
     from pathlib import Path
 
     from ring_sandbox import webhooks
-    from ring_sandbox.scenarios import BUILTIN, load_yaml
+    from ring_sandbox.scenarios import resolve
 
     if not settings.admin_token or not math.isfinite(args.speed) or args.speed <= 0:
         sys.exit("Replay requires admin authentication and a finite positive speed.")
     if args.days < 1:
         sys.exit("--days must be at least 1")
-    if args.scenario.endswith((".yml", ".yaml")):
-        if not Path(args.scenario).exists():
-            sys.exit(f"no scenario file at {args.scenario}")
-        scenario = load_yaml(args.scenario)
-    elif args.scenario in BUILTIN:
-        scenario = BUILTIN[args.scenario]
-    else:
-        sys.exit(f"unknown scenario {args.scenario!r}; built-ins: {', '.join(sorted(BUILTIN))}")
+    if args.scenario.endswith((".yml", ".yaml")) and not Path(args.scenario).exists():
+        sys.exit(f"no scenario file at {args.scenario}")
+    try:
+        scenario = resolve(args.scenario)
+    except KeyError as exc:
+        sys.exit(str(exc.args[0]))
     for address in (args.ring_url, args.public_url):
         parsed = urlsplit(address)
         if (
@@ -1564,8 +1562,9 @@ def main(argv: list[str] | None = None) -> None:
         if name == "replay":
             s.add_argument(
                 "scenario",
-                help="a ring_sandbox built-in name (home_aide_visit, short_visit, no_show, "
-                "device_flap, camera_only_visit, delivery) or a .yml/.yaml scenario file",
+                help="a ring_sandbox scenario name — built-in (home_aide_visit, short_visit, "
+                "no_show, device_flap, camera_only_visit, delivery) or wheel-shipped example "
+                "(late_arrival, partial_blackout, visitor_not_worker) — or a .yml/.yaml file",
             )
             s.add_argument("--speed", type=float, default=60)
             s.add_argument(

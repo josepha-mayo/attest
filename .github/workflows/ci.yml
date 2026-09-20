@@ -32,7 +32,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           repository: josepha-mayo/ring-sandbox
-          ref: 09848913a954d26d43531122f9c5b935a0fa858c
+          ref: 235acf6f9025398f94f1aca87d0bfd0b3273328a
           path: ring-sandbox
           persist-credentials: false
       - name: Set up Python

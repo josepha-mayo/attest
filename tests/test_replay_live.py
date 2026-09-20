@@ -312,6 +312,82 @@ def test_replay_story_rejects_unknown_pattern(tmp_path):
             assert "bogus" in result.stderr + result.stdout
 
 
+@pytest.mark.parametrize(
+    "scenario,extra_args,expected_flags,checked_in,deliveries",
+    [
+        # Camera dies 20 min in: arrival + check-in observed, departure never.
+        ("partial_blackout", ["--auto-checkin"], {"departure_unconfirmed"}, True, 6),
+        # Courier in the aide's window: doorstep activity, no door cycle, no check-in.
+        ("visitor_not_worker", [], {"departure_unconfirmed", "no_checkin"}, False, 5),
+    ],
+)
+def test_replay_named_example_scenarios_stay_honest(
+    tmp_path, scenario, extra_args, expected_flags, checked_in, deliveries
+):
+    """The wheel-shipped example scenarios resolve by name and produce honest
+    records: observed activity is never upgraded to worker attendance."""
+    token = secrets.token_urlsafe(32)
+    with serve(sandbox_app()) as ring_url:
+        settings = Settings(
+            _env_file=None,
+            admin_token=token,
+            replay_mode=True,
+            data_dir=tmp_path,
+            ring_base_url=ring_url,
+            timezone="UTC",
+            summarizer="template",
+        )
+        app = create_app(settings)
+        with serve(app) as app_url:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "attest.cli",
+                    "replay",
+                    scenario,  # name only — resolved from the wheel-shipped examples
+                    "--speed",
+                    "100000",
+                    "--ring-url",
+                    ring_url,
+                    "--public-url",
+                    app_url,
+                    *extra_args,
+                ],
+                env={
+                    **os.environ,
+                    "ATTEST_ADMIN_TOKEN": token,
+                    "ATTEST_REPLAY_MODE": "true",
+                    "ATTEST_RING_BASE_URL": ring_url,
+                    "ATTEST_SUMMARIZER": "template",
+                },
+                capture_output=True,
+                text=True,
+                timeout=45,
+            )
+            assert result.returncode == 0, result.stdout + result.stderr
+            with httpx.Client(base_url=app_url, auth=("admin", token)) as client:
+                receipts = [Receipt.model_validate(r) for r in client.get("/receipts.json").json()]
+                assert len(receipts) == 1
+                assert verify_chain(receipts, public_key=app.state.signer.public_key_b64)[0]
+                payload = receipts[0].payload
+                flag_codes = {f["code"] for f in payload["flags"]}
+                assert expected_flags <= flag_codes
+                assert payload["departed_at"] is None
+                assert payload["assessment"]["departure_verified"] is False
+                assert payload["assessment"]["identity_verified"] is False
+                # Only the arrival/doorstep cluster was observed — the record
+                # never inflates it into continuous presence.
+                assert payload["observed_span_minutes"] < 5
+                if checked_in:
+                    assert payload["checked_in_at"] is not None
+                    assert payload["assessment"]["attendance"] == "self_reported"
+                else:
+                    assert payload["checked_in_at"] is None
+                    assert payload["assessment"]["attendance"] == "unknown"
+                assert client.get("/api/webhook-queue").json() == {"done": deliveries}
+
+
 def test_demo_command_spins_up_full_stack(tmp_path):
     """attest demo must boot emulator + server + story replay and leave a live dashboard."""
     import re

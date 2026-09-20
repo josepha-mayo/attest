@@ -193,7 +193,7 @@ triage never blocks on model access.
 
 Tests include rejected authentication, expired/reused links, concurrent arrivals, rollback after failure, source-switch rejection, late events, observation-versus-attendance semantics, history ordering, receipt/review tampering, setup validation, and fallback provenance. Socket-level tests run the CLI through real local emulator/Attest servers for sensor, camera-only, and no-observation scenarios, then append and verify worker/coordinator reviews.
 
-A fresh published checkout of both repositories passed 208 Attest tests and 38 companion tests in a new Windows Python 3.14 environment. The GitHub Actions workflow runs both suites, lint, format checks, a tracked-runtime-file guard, and wheel builds across Windows/Linux with Python 3.11/3.14. Actions, the companion commit, and `requirements-dev.txt` dependency pins make the run reproducible. CI does not receive live Ring or AWS credentials.
+A fresh published checkout of both repositories passed 210 Attest tests and 40 companion tests in a new Windows Python 3.14 environment. The GitHub Actions workflow runs both suites, lint, format checks, a tracked-runtime-file guard, and wheel builds across Windows/Linux with Python 3.11/3.14. Actions, the companion commit, and `requirements-dev.txt` dependency pins make the run reproducible. CI does not receive live Ring or AWS credentials.
 
 ## Before deployment or submission
 
