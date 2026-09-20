@@ -74,23 +74,25 @@ The signing key itself can be wrapped under an AWS KMS CMK (`ATTEST_KMS_KEY_ID`)
 
 ## 60-second demo
 
-Clone Attest and ring-sandbox into sibling directories. From the Attest directory:
+Clone Attest. From the Attest directory:
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python -m pip install -r requirements-dev.txt -e "../ring-sandbox[server]" -e ".[dev]"
+.\.venv\Scripts\python -m pip install -r requirements-dev.txt -e ".[dev]"
 .\.venv\Scripts\attest demo
 ```
+
+(ring-sandbox resolves from PyPI — `pip install` pulls it automatically. To hack on the emulator alongside, clone it as a sibling directory and add `-e "../ring-sandbox[server]"` to the install line.)
 
 One command boots the in-process Ring emulator, the Attest server, and a 5-day `--story` replay — an on-time visit, a late arrival, a no-show, a departure-unconfirmed visit, an unmatched observation, and a signed worker dispute — then prints a ready Basic-auth dashboard URL. No Ring account, no credentials, no env vars; everything is clearly labeled simulated. `--data-dir DIR` keeps the runtime; `--days`/`--story` reshape it.
 
 ## Local development on Windows
 
-Clone Attest and ring-sandbox into sibling directories. From the Attest directory:
+From the Attest directory (ring-sandbox resolves from PyPI; to develop the emulator alongside, clone it as a sibling and add `-e "../ring-sandbox[server]"` to the install line):
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python -m pip install -r requirements-dev.txt -e "../ring-sandbox[server]" -e ".[dev]"
+.\.venv\Scripts\python -m pip install -r requirements-dev.txt -e ".[dev]"
 $env:ATTEST_ADMIN_TOKEN = [System.Net.NetworkCredential]::new("", (Read-Host "Private admin password (32+ characters)" -AsSecureString)).Password
 $env:ATTEST_REPLAY_MODE = "true"
 $env:ATTEST_DATA_DIR = ".\data-replay-" + [guid]::NewGuid().ToString("N")

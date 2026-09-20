@@ -1,5 +1,7 @@
 # Tested dependency set (Python 3.11 and 3.14, Windows + Linux CI).
-# Install with: pip install -r requirements-dev.txt -e "../ring-sandbox[server]" -e ".[dev]"
+# Install with: pip install -r requirements-dev.txt -e ".[dev]"
+# (ring-sandbox resolves from PyPI; to develop it alongside, clone it as a
+# sibling and add -e "../ring-sandbox[server]" to the install line.)
 # Regenerate after deliberate upgrades; keep floors in pyproject.toml honest.
 annotated-doc==0.0.5
 annotated-types==0.8.0
@@ -34,6 +36,7 @@ python-dateutil==2.9.0.post0
 python-dotenv==1.2.3
 python-multipart==0.0.32
 PyYAML==6.0.3
+ring-sandbox==0.2.0
 ruff==0.16.7
 s3transfer==0.19.2
 segno==1.6.6
