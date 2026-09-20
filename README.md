@@ -1,5 +1,8 @@
 # Attest
 
+[![CI](https://github.com/josepha-mayo/attest/actions/workflows/ci.yml/badge.svg)](https://github.com/josepha-mayo/attest/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **Tamper-evident visit records for home services — what the Ring devices observed, what the worker reported, what a human concluded. Signed, reviewable, verifiable offline.**
 
 A caregiver says she was there Tuesday. The family says nobody came. Today that dispute is "he said / she said." Attest replaces it with a signed record that keeps the evidence apart from the conclusions: door-camera and contact-sensor observations, how much of the window the pipeline actually watched, the worker's own account, and the coordinator's review — each linkable, each checkable without trusting Attest itself.
