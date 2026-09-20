@@ -656,7 +656,14 @@ function statementsHTML(js){
    mirroring /household on the server. The pack carries the data; this renders
    it for someone who has never seen a coordinator console. */
 function plainHTML(p,js){
-  const cov=p.history_poll_coverage||{},st=String(p.state||""),hasObs=!!p.first_observed_at;
+  const cov=p.history_poll_coverage||{},st=String(p.state||"");
+  /* Schema-tolerant reads: receipts signed before the first_observed_at/
+     scheduled_worker fields existed carry arrived_at/departed_at/worker
+     instead — an old pack must render the same honest story. */
+  const obsA=p.first_observed_at||p.arrived_at||null;
+  const obsB=p.last_observed_at||p.departed_at||obsA;
+  const span=p.observed_span_minutes!=null?p.observed_span_minutes:p.duration_minutes;
+  const hasObs=!!obsA;
   const reviews=js.reviews||[];
   const workerEntries=reviews.filter(e=>((((e||{}).receipt||{}).payload||{}).actor||{}).role==="worker");
   const resEntries=reviews.filter(e=>((((e||{}).receipt||{}).payload||{}).review||{}).kind==="resolution");
@@ -683,16 +690,15 @@ function plainHTML(p,js){
       line+" No activity is not proof nobody came — it only means the camera reported nothing.","quiet"];
   }else
     hero=["&#10003;","Activity was observed",
-      `The camera reported activity between ${esc(hhmm(p.first_observed_at))}`
-      +` and ${esc(hhmm(p.last_observed_at))}`
-      +(p.observed_span_minutes!=null
-        ?` — about ${Math.round(p.observed_span_minutes)} minutes of observed span`:"")
+      `The camera reported activity between ${esc(hhmm(obsA))}`
+      +` and ${esc(hhmm(obsB))}`
+      +(span!=null?` — about ${Math.round(span)} minutes of observed span`:"")
       +".","ok"];
   const facts=[];
   if(hasObs){
-    facts.push(["First observation",esc(hhmm(p.first_observed_at))]);
-    facts.push(["Last observation",esc(hhmm(p.last_observed_at))]);}
-  const sw=p.scheduled_worker||null;
+    facts.push(["First observation",esc(hhmm(obsA))]);
+    facts.push(["Last observation",esc(hhmm(obsB))]);}
+  const sw=p.scheduled_worker||(p.worker?{name:p.worker}:null);
   if(sw&&sw.name)facts.push(["Scheduled worker",esc(sw.name)]);
   if(p.checked_in_at)
     facts.push(["Worker check-in",
