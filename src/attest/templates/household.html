@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ site.name }} — visit record</title>
 <style>
-:root{--ink:#1c2733;--muted:#5c6b7a;--line:#e3e9ef;--card:#fff;--bg:#f4f7fa;--ok:#1a7f4b;--warn:#b4740c;--quiet:#7d8a97}
+:root{--ink:#1c2733;--muted:#5c6b7a;--line:#e3e9ef;--card:#fff;--bg:#f4f7fa;--ok:#1a7f4b;--warn:#b4740c;--quiet:#5f6e7c}
 *{box-sizing:border-box;margin:0}
 body{font:16px/1.55 -apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);padding:20px 14px 60px}
 .wrap{max-width:620px;margin:0 auto}
@@ -34,10 +34,13 @@ h1{font-size:26px;line-height:1.25;margin-bottom:4px}
 a{color:#2563a8}
 .row{display:flex;align-items:center}
 .small{font-size:13px}
+a:focus-visible{outline:2px solid #2563a8;outline-offset:2px;border-radius:3px}
+@media(prefers-contrast:more){:root{--muted:#3f4c58;--quiet:#55636f;--line:#b8c2cc}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 </style>
 </head>
 <body>
-<div class="wrap">
+<main class="wrap">
 {% macro t(dt) %}{{ dt.astimezone(tz).strftime("%I:%M %p").lstrip("0") if dt else "—" }}{% endmacro %}
 <div class="brand">Attest · observation record</div>
 <h1>{{ site.name }}</h1>
@@ -47,19 +50,19 @@ a{color:#2563a8}
 
 {% if visit.state == "open" %}
 <div class="card hero quiet">
-  <div class="mark">&#9202;</div>
+  <div class="mark" aria-hidden="true">&#9202;</div>
   <h2>This visit is still in progress</h2>
   <p>The window hasn't closed yet, so there is no signed record to review.</p>
 </div>
 {% elif visit.state == "unmatched" %}
 <div class="card hero warn">
-  <div class="mark">&#9888;</div>
+  <div class="mark" aria-hidden="true">&#9888;</div>
   <h2>Activity was recorded outside any scheduled visit</h2>
   <p>The camera reported activity that doesn't match a scheduled window — flagged for a person to review.</p>
 </div>
 {% elif not visit.has_observations %}
 <div class="card hero quiet">
-  <div class="mark">&#9675;</div>
+  <div class="mark" aria-hidden="true">&#9675;</div>
   <h2>No activity was reported</h2>
   <p>{% if coverage and coverage.fraction and coverage.fraction >= 0.99 %}The camera was checked {{ coverage.polls }} times across the whole window and reported nothing.
   {% elif coverage and coverage.polls %}The camera was checked for {{ "%.0f"|format((coverage.fraction or 0)*100) }}% of the window and reported nothing{% if coverage.gaps %} — some of the window wasn't watched{% endif %}.
@@ -68,7 +71,7 @@ a{color:#2563a8}
 </div>
 {% else %}
 <div class="card hero ok">
-  <div class="mark">&#10003;</div>
+  <div class="mark" aria-hidden="true">&#10003;</div>
   <h2>Activity was observed</h2>
   <p>The camera reported activity between {{ t(visit.arrived_at) }} and {{ t(visit.last_activity_at) }}{% if visit.observed_span_minutes is not none %} — about {{ "%.0f"|format(visit.observed_span_minutes) }} minutes of observed span{% endif %}.</p>
 </div>
@@ -146,6 +149,6 @@ a{color:#2563a8}
   {% if receipt %}<br><br>Anyone can check this record without trusting us: ask the coordinator for the export pack and open it in a browser — it verifies itself.{% endif %}
 </div>
 
-</div>
+</main>
 </body>
 </html>

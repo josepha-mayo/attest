@@ -17,6 +17,7 @@
     <span class="muted">— unzip and open index.html: it verifies every record in the browser, no install</span>
     {% endfor %}
     <br><a href="/verify-pack" style="color:var(--accent)" title="The same verifier every pack embeds — drop a .zip; nothing uploads">Verify a pack in-browser</a>
+    <br><button id="refresh-toggle" class="muted" style="background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;font-size:13px">Pause auto-refresh</button>
   </div>
 </div>
 
@@ -26,7 +27,9 @@
 <table>
   <tbody>
   {% for a in attention %}
-  <tr class="link" onclick="location.href='/visits/{{ a.visit.id }}'">
+  <tr class="link" tabindex="0" role="link" aria-label="Open record for {{ t(a.visit.arrived_at) if a.visit.has_observations else t(a.visit.created_at) }}"
+      onclick="location.href='/visits/{{ a.visit.id }}'"
+      onkeydown="if(event.key==='Enter')location.href='/visits/{{ a.visit.id }}'">
     <td style="width:1rem"><span class="flag {{ 'warn' if a.level == 'warn' else a.level }}">&nbsp;</span></td>
     <td><a href="/visits/{{ a.visit.id }}" style="color:var(--accent)">{{ t(a.visit.arrived_at) if a.visit.has_observations else t(a.visit.created_at) }}</a>
       <a href="/sites/{{ a.visit.site_id }}" class="muted small"> — {{ sites[a.visit.site_id].name if a.visit.site_id in sites else a.visit.site_id }}</a>
@@ -185,14 +188,24 @@ document.getElementById("triage-run").addEventListener("click", async () => {
 </table>
 </div>
 <script>
-setInterval(() => {
-  if (window.triageRunning) return;  // don't kill an in-flight agent brief
-  sessionStorage.setItem('dash-scroll', String(window.scrollY));
-  location.reload();
-}, 5000);
-addEventListener('DOMContentLoaded', () => {
+(() => {
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let paused = reduced || sessionStorage.getItem('dash-pause') === '1';
+  const btn = document.getElementById('refresh-toggle');
+  const paint = () => { if (btn) btn.textContent = paused ? 'Resume auto-refresh' : 'Pause auto-refresh'; };
+  if (btn) btn.addEventListener('click', () => {
+    paused = !paused;
+    sessionStorage.setItem('dash-pause', paused ? '1' : '0');
+    paint();
+  });
+  paint();
+  setInterval(() => {
+    if (paused || window.triageRunning) return;  // don't kill an in-flight agent brief
+    sessionStorage.setItem('dash-scroll', String(window.scrollY));
+    location.reload();
+  }, 5000);
   const y = sessionStorage.getItem('dash-scroll');
   if (y) { window.scrollTo(0, Number(y)); sessionStorage.removeItem('dash-scroll'); }
-});
+})();
 </script>
 {% endblock %}

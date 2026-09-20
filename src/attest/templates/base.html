@@ -51,16 +51,23 @@
   button:disabled, fieldset:disabled { opacity:.5; cursor:not-allowed }
   .table-wrap { overflow-x:auto }
   .replay-banner { padding:10px 28px; background:#332810; color:var(--warn); font-size:13px }
+  a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible, tr.link:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:4px }
+  tr.link:focus-visible { background:#1c2029 }
+  .skip-link { position:absolute; left:-9999px; top:0; background:var(--accent); color:#0b0d11; padding:8px 16px; z-index:10; font-weight:700; border-radius:0 0 8px 0 }
+  .skip-link:focus { left:0 }
+  @media(prefers-contrast:more) { :root { --muted:#c3cadb; --line:#4a5265 } .flag { border:1px solid currentColor } }
+  @media(prefers-reduced-motion:reduce) { * { animation:none!important; transition:none!important; scroll-behavior:auto!important } }
   @media(max-width:720px) { header { flex-wrap:wrap; padding:14px 16px } header .meta { margin-left:0; width:100% } main { padding:20px 16px } .row label { width:100% } }
 </style>
 </head>
 <body>
+<a class="skip-link" href="#main">Skip to content</a>
 <header>
   <div class="brand">Attest<span>.</span></div>
   <nav><a href="/">Records</a><a href="/setup">Setup &amp; schedules</a><a href="/verify">Verify</a><a href="/about">Claim boundary</a><a href="/receipts.json">Export originals</a></nav>
   <div class="meta">{% if settings.ring_base_url == "https://api.amazonvision.com" %}Ring API configured{% else %}Local / test data{% endif %} &middot; configured summary provider: {{ summarizer }}</div>
 </header>
 {% if clock.mode == "replay" %}<div class="replay-banner">LOCAL REPLAY — not a live visit. Event clock: {{ clock.now or "not started" }}. Security expiry and signature issuance use real time.</div>{% endif %}
-<main>{% block body %}{% endblock %}</main>
+<main id="main">{% block body %}{% endblock %}</main>
 </body>
 </html>
