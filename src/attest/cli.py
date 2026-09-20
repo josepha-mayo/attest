@@ -25,6 +25,28 @@ from .config import settings
 from .models import Role, Schedule, Site, Worker
 
 
+def _terminal_qr(data: str) -> list[str] | None:
+    """QR as ANSI background-color rows — pure ASCII + escape codes, so it
+    survives cp1252 consoles where half-block glyphs can't encode. Returns
+    None when segno is unavailable."""
+    try:
+        import segno
+    except ImportError:
+        return None
+    m = segno.make(data, error="m").matrix
+    w = len(m[0])
+    border = "\033[47m" + " " * (2 * w + 8) + "\033[0m"
+    rows = [border, border]
+    for bits in m:
+        rows.append(
+            "\033[47m    "
+            + "".join("\033[40m  " if b else "\033[47m  " for b in bits)
+            + "\033[47m    \033[0m"
+        )
+    rows += [border, border]
+    return rows
+
+
 def _serve(args: argparse.Namespace) -> None:
     import uvicorn
 
@@ -565,6 +587,9 @@ def _demo(args: argparse.Namespace) -> None:
     print("  ever add — never rewrite.", flush=True)
     if family_url:
         print(f"  Family view, pre-issued on the disputed visit: {family_url}", flush=True)
+        if sys.stdout.isatty():
+            for line in _terminal_qr(family_url) or []:
+                print(f"    {line}", flush=True)
     print("", flush=True)
     print("Press Ctrl+C to stop.", flush=True)
     try:
