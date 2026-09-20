@@ -547,6 +547,8 @@ def _demo(args: argparse.Namespace) -> None:
     print("  3. Download a pack, then 'Verify a pack in-browser' on the dashboard —", flush=True)
     print("     drop the .zip; it self-verifies, no install, no unzip. Site packs", flush=True)
     print("     carry the signed coverage cert: 'was anyone watching?'", flush=True)
+    print("     Open the pack's index.html — each record toggles between the", flush=True)
+    print("     technical view and a plain-language family view.", flush=True)
     print("  In another terminal, point at the demo's store first:", flush=True)
     print(f'    $env:ATTEST_DATA_DIR="{data_dir}"   (PowerShell)', flush=True)
     print(f"    ATTEST_DATA_DIR={data_dir} <cmd>      (POSIX)", flush=True)

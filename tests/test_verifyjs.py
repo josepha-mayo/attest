@@ -393,6 +393,85 @@ __r().then(()=>{
 
 
 @pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_index_plain_view_renders_contested_record(engine, store, household, schedule, t0, tmp_path):
+    """The pack's family-facing toggle must render the dispute in plain
+    language from signed data only: the worker's quote verbatim, the
+    contested stance, and the honesty boundary — never attendance claims."""
+    from datetime import timedelta
+
+    from attest.disputepack import build_case_pack
+    from attest.models import ReviewInput
+    from attest.reviews import ReviewService, countersign_status
+
+    site = store.sites()[0]
+    engine.issue_coverage_attestation(site, t0 - timedelta(hours=1), t0 + timedelta(hours=2))
+    rv = ReviewService(store, engine.signer, engine.clock)
+    z1 = _case_pack(engine, store, household, schedule, t0, tmp_path)
+    vid = re.search(r'data-vid="(vis_[0-9a-f]+)">', z1.read("index.html").decode()).group(1)
+    token = rv.issue_worker_link(vid)
+    rv.worker_review(token, ReviewInput(decision="dispute", statement="I arrived earlier than logged."))
+    visit = store.visit(vid)
+    bundle = rv.bundle(vid)
+    data = build_case_pack(
+        store,
+        tmp_path / "media",
+        site,
+        [(visit, bundle, countersign_status(bundle))],
+        manifest_signer=lambda m: engine.issue_export_manifest(site, m),
+    )
+    z = zipfile.ZipFile(io.BytesIO(data))
+    html = z.read("index.html").decode()
+    meta = re.search(r'id="packmeta">([A-Za-z0-9+/=]+)</script>', html).group(1)
+    script = re.search(r'<script>\n("use strict";.*?)</script>', html, re.S).group(1)
+    (tmp_path / "idx.js").write_text(script, encoding="utf-8")
+    (tmp_path / "meta.b64").write_text(meta, encoding="utf-8")
+    driver = """
+const fs=require('fs');
+const html=fs.readFileSync(process.argv[2],'utf8');
+const bundles=[...html.matchAll(/data-vid="([^"]+)">([A-Za-z0-9+/=]+)<\\/script>/g)]
+  .map(m=>({dataset:{vid:m[1]},textContent:m[2]}));
+const attags=[...html.matchAll(/class="attestation" data-rid="([^"]+)">([A-Za-z0-9+/=]+)<\\/script>/g)]
+  .map(m=>({dataset:{rid:m[1]},textContent:m[2]}));
+const mm=html.match(/id="packmanifest">([A-Za-z0-9+/=]+)<\\/script>/);
+const els={packmeta:{textContent:fs.readFileSync(process.argv[4],'utf8')}};
+if(mm)els.packmanifest={packmanifest:1,textContent:mm[1]};
+const get=id=>els[id]||(els[id]={textContent:'',innerHTML:''});
+global.document={querySelectorAll:s=>s==='script.bundle'?bundles:s==='script.attestation'?attags:[],getElementById:get};
+let src=fs.readFileSync(process.argv[3],'utf8');
+src=src.replace(/renderIndex\\(\\)\\.catch[\\s\\S]*$/,'');
+eval(src+';globalThis.__r=renderIndex;');
+__r().then(()=>{
+  const c=els.cards.innerHTML;
+  console.log('verdict:',els.verdict.innerHTML.slice(0,120));
+  console.log('hero:',c.includes('plain-hero'));
+  console.log('toggle:',c.includes('view-toggle'));
+  console.log('quote:',c.includes('I arrived earlier than logged.'));
+  console.log('stance:',c.includes('Disputes this record'));
+  console.log('boundary:',c.includes('not proof nobody came'));
+  console.log('noattend:',!c.includes('attended')&&!c.includes('was present'));
+});
+"""
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+    (tmp_path / "index.html").write_text(html, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "index.html", "idx.js", "meta.b64"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout
+    assert "VERIFIED" in out, out
+    assert "hero: true" in out, out
+    assert "toggle: true" in out, out
+    assert "quote: true" in out, out
+    assert "stance: true" in out, out
+    assert "boundary: true" in out, out
+    assert "noattend: true" in out, out
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
 def test_verify_html_reads_the_zip_directly(engine, store, household, schedule, t0, tmp_path):
     """verify.html must verify a dropped .zip: readZipEntries parses stored +
     deflate entries (node's DecompressionStream stands in for the browser's),
