@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Attest — hosted pack verifier</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 44rem; margin: 4rem auto; padding: 0 1.25rem; color: #1c2330; line-height: 1.55; }
+  h1 { font-size: 1.5rem; margin-bottom: .25rem; }
+  .sub { color: #5a6572; margin-top: 0; }
+  a { color: #2456a6; }
+  code { background: #f0f2f5; padding: .1em .35em; border-radius: 4px; }
+  .card { border: 1px solid #d8dee6; border-radius: 8px; padding: 1rem 1.25rem; margin: 1.5rem 0; }
+  footer { margin-top: 3rem; font-size: .85rem; color: #5a6572; border-top: 1px solid #e3e7ec; padding-top: 1rem; }
+</style>
+</head>
+<body>
+<main>
+<h1>Attest pack verifier</h1>
+<p class="sub">Verify an exported Attest case or dispute pack — entirely in your browser.</p>
+
+<div class="card">
+  <p><a href="verify.html"><strong>Open the verifier &rarr;</strong></a></p>
+  <p>Drop a <code>pack.zip</code> exported from Attest. Every signature, payload
+  hash, chain link, and manifest entry is checked locally — nothing is
+  uploaded anywhere.</p>
+</div>
+
+<p><strong>What verification proves:</strong> the records in the pack are the
+records the issuing deployment signed, and nothing was added, removed, or
+altered since. It does <em>not</em> prove physical attendance, identity, or
+time worked — that boundary is the point of the project.</p>
+
+<footer>
+  <p>
+    <a href="https://github.com/josepha-mayo/attest">Attest</a> &middot;
+    <a href="https://github.com/josepha-mayo/ring-sandbox">ring-sandbox</a> &middot;
+    <a href="https://pypi.org/project/ring-sandbox/">PyPI</a>
+    <br>This page is generated documentation for the hackathon prototype; the
+    verifier source lives in <code>src/attest/verifyjs.py</code> and the hosted
+    copy is kept in sync by a test.
+  </p>
+</footer>
+</main>
+</body>
+</html>

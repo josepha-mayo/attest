@@ -1,0 +1,519 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Attest pack verifier</title>
+<style>
+ body{font:15px/1.5 system-ui,sans-serif;max-width:760px;margin:2rem auto;padding:0 1rem;color:#1c1c1e}
+ h1{font-size:1.3rem} h2{font-size:1.05rem;margin-top:1.6rem}
+ .drop{border:2px dashed #999;border-radius:10px;padding:2rem;text-align:center;color:#555}
+ .drop.over{border-color:#2563eb;background:#eff6ff}
+ .ok{color:#146c2e}.bad{color:#b3261e}.warn{color:#8a5a00}
+ .row{display:flex;gap:.5rem;align-items:baseline}
+ .row.ok::before{content:"\2713 "}.row.bad::before{content:"\2717 "}
+ .row.warn::before{content:"\26a0 "}
+ small{color:#666}
+</style>
+</head>
+<body>
+<h1>Attest pack verifier</h1>
+<p>This page verifies an exported Attest pack <strong>in your browser</strong>. Nothing is
+uploaded — all hashing and signature checks run locally, offline. Drop the
+<strong>.zip pack itself</strong>, select every extracted file, or just bundle.json for a
+single-visit pack.</p>
+<div class="drop" id="drop">Drop the pack .zip here, or
+pick files: <input type="file" id="pick" multiple aria-label="Choose pack files">
+or the extracted folder: <input type="file" id="pickdir" webkitdirectory
+aria-label="Choose the extracted pack folder"></div>
+<div id="out" role="status" aria-live="polite"></div>
+<h2>What this does and does not establish</h2>
+<p><small>A green result proves the signed records are intact and were issued under the pinned
+issuer key — integrity, not physical truth. It does not prove anyone was present, absent, or
+honest; it proves the evidence chain was not altered after signing. Media reported as
+"withheld" was deliberately redacted, not lost.</small></p>
+<p><small><strong>Trust note:</strong> this verifier file traveled inside the pack it is
+checking. For a dispute that matters, re-verify with a verifier obtained independently —
+the deployment's <code>/verify-pack</code> page, <code>verify_case.py</code> pinned from
+the issuing deployment, or the operator's hosted verifier — never trust only the copy a
+pack carries about itself.</small></p>
+<script>
+"use strict";
+/* ---------- canonical JSON (mirrors attest.ledger.canonical) ----------
+   Parses the document keeping every string/number literal verbatim, then
+   re-emits with sorted keys and no whitespace — identical bytes to
+   json.dumps(payload, sort_keys=True, separators=(",",":"), ensure_ascii=False)
+   for any document Python itself serialized. */
+function parseKeep(text){
+  let i=0;const n=text.length;
+  const ws=()=>{while(i<n&&" \t\n\r".includes(text[i]))i++;};
+  function literal(){const m=/^-?\d+(\.\d+)?([eE][+-]?\d+)?/.exec(text.slice(i));
+    if(m){i+=m[0].length;return{t:"lit",r:m[0]};}
+    if(text.startsWith("true",i)){i+=4;return{t:"lit",r:"true"};}
+    if(text.startsWith("false",i)){i+=5;return{t:"lit",r:"false"};}
+    if(text.startsWith("null",i)){i+=4;return{t:"lit",r:"null"};}
+    throw new Error("bad literal at "+i);}
+  function str(){if(text[i]!=='"')throw new Error("expected string at "+i);
+    const st=i;i++;let esc=false;
+    while(i<n){const c=text[i];
+      if(esc){esc=false;i++;}
+      else if(c==="\\"){esc=true;i++;}
+      else if(c==='"'){i++;return{t:"lit",r:text.slice(st,i),str:JSON.parse(text.slice(st,i))};}
+      else i++;}
+    throw new Error("unterminated string");}
+  function val(){ws();const c=text[i];
+    if(c==='"')return str();
+    if(c==="{"){i++;const o=[];
+      ws();if(text[i]==="}"){i++;return{t:"obj",v:o};}
+      for(;;){ws();const k=str();ws();
+        if(text[i++]!==":")throw new Error("expected :");
+        o.push([k.str,val()]);ws();
+        if(text[i]==="}"){i++;return{t:"obj",v:o};}
+        if(text[i++]!==",")throw new Error("expected , or }");}}
+    if(c==="["){i++;const a=[];
+      ws();if(text[i]==="]"){i++;return{t:"arr",v:a};}
+      for(;;){a.push(val());ws();
+        if(text[i]==="]"){i++;return{t:"arr",v:a};}
+        if(text[i++]!==",")throw new Error("expected , or ]");}}
+    return literal();}
+  const v=val();ws();if(i!==n)throw new Error("trailing bytes");return v;}
+function toJS(n){
+  if(n.t==="lit")return n.str!==undefined?n.str:JSON.parse(n.r);
+  if(n.t==="arr")return n.v.map(toJS);
+  const o={};for(const[k,v]of n.v)o[k]=toJS(v);return o;}
+function canonical(n){
+  /* Strings re-serialize through JSON.stringify — the decoded value's canonical
+     spelling — so `—` and `—` in a file canonicalize identically, matching
+     Python's ensure_ascii=False. Non-string literals keep the file's verbatim
+     spelling (float spellings like 34.0 must survive). */
+  if(n.t==="lit")return n.str!==undefined?JSON.stringify(n.str):n.r;
+  if(n.t==="arr")return "["+n.v.map(canonical).join(",")+"]";
+  /* Duplicate keys: last wins — same as toJS/JSON.parse — and keys sort by
+     codepoint (Python order), not UTF-16 units: astral chars would differ. */
+  const m=new Map(n.v);
+  const keys=[...m.keys()].sort((a,b)=>{
+    const A=[...a],B=[...b];
+    for(let i=0;;i++){
+      const x=i<A.length?A[i].codePointAt(0):undefined;
+      const y=i<B.length?B[i].codePointAt(0):undefined;
+      if(x===undefined&&y===undefined)return 0;
+      if(x===undefined)return-1;
+      if(y===undefined)return 1;
+      if(x!==y)return x-y;}});
+  return "{"+keys.map(k=>JSON.stringify(k)+":"+canonical(m.get(k))).join(",")+"}";}
+function get(node,k){
+  /* Duplicate keys: last wins — matching toJS/canonical/JSON.parse so the
+     value hashed is always the value semantically checked. */
+  if(node.t!=="obj")return null;
+  let hit=null;for(const[kk,vv]of node.v)if(kk===k)hit=vv;return hit;}
+/* ---------- hashing ---------- */
+async function sha256hex(b){const d=await crypto.subtle.digest("SHA-256",b);
+  return[...new Uint8Array(d)].map(x=>x.toString(16).padStart(2,"0")).join("");}
+async function sha512(b){return new Uint8Array(await crypto.subtle.digest("SHA-512",b));}
+const enc=s=>new TextEncoder().encode(s);
+const hex2b=h=>Uint8Array.from(h.match(/../g).map(x=>parseInt(x,16)));
+const b64d=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+/* ---------- Ed25519 verification (pure BigInt, RFC 8032) ---------- */
+const P=(1n<<255n)-19n,L=(1n<<252n)+27742317777372353535851937790883648493n;
+const mod=(a,m=P)=>((a%m)+m)%m;
+function pow(a,e){let r=1n,b=mod(a);while(e){if(e&1n)r=mod(r*b);b=mod(b*b);e>>=1n;}return r;}
+const D=mod(-121665n*pow(121666n,P-2n));
+const I=pow(2n,(P-1n)/4n);
+function le(b){let x=0n;for(let i=b.length-1;i>=0;i--)x=(x<<8n)|BigInt(b[i]);return x;}
+function decodePoint(bytes){
+  const y=le(bytes)&((1n<<255n)-1n),sign=bytes[31]>>7;
+  if(y>=P)return null;
+  const u=mod(y*y-1n),v=mod(D*y*y+1n);
+  let x=mod(u*pow(v,3n)*pow(mod(u*pow(v,7n)),(P-5n)/8n));
+  const vx2=()=>mod(v*x*x);
+  if(vx2()!==u){if(mod(vx2()+u)===0n)x=mod(x*I);}
+  if(vx2()!==u)return null;
+  if(x===0n&&sign)return null;
+  if((x&1n)!==BigInt(sign))x=P-x;
+  return{x,y};}
+const B=decodePoint(Uint8Array.from({length:32},(_,i)=>i===0?0x58:0x66));
+function pAdd(p,q){
+  const xx=mod(p.x*q.x),yy=mod(p.y*q.y),dxy=mod(D*xx*yy);
+  const x=mod(mod(p.x*q.y+p.y*q.x)*pow(mod(1n+dxy),P-2n));
+  const y=mod(mod(yy+xx)*pow(mod(1n-dxy),P-2n));
+  return{x,y};}
+function pMul(p,n){let r={x:0n,y:1n},b=p;while(n){if(n&1n)r=pAdd(r,b);b=pAdd(b,b);n>>=1n;}return r;}
+async function edVerify(sig,pk,msg){
+  if(sig.length!==64||pk.length!==32)return false;
+  const R=decodePoint(sig.slice(0,32)),A=decodePoint(pk);
+  if(!R||!A)return false;
+  const S=le(sig.slice(32));if(S>=L)return false;
+  const h=mod(le(await sha512(Uint8Array.from([...sig.slice(0,32),...pk,...msg]))),L);
+  const lhs=pMul(B,S),rhs=pAdd(R,pMul(A,h));
+  return lhs.x===rhs.x&&lhs.y===rhs.y;}
+/* ---------- receipt + chain checks (mirrors ledger.verify_*) ---------- */
+async function checkReceipt(rNode){
+  const r=toJS(rNode);
+  const canon=canonical(get(rNode,"payload"));
+  const h=await sha256hex(enc(canon));
+  if(h!==r.payload_hash)return{ok:false,why:"payload hash mismatch (payload was altered)"};
+  const p=r.payload;
+  if(p.sequence!==r.sequence||p.prev_hash!==r.prev_hash)
+    return{ok:false,why:"envelope fields disagree with signed payload"};
+  if(p.visit_id!==r.visit_id)return{ok:false,why:"visit id disagrees with signed payload"};
+  if(p.schema==="attest.receipt/2"){
+    /* issued_at serializes as "...Z" in the envelope but "+00:00" in the
+       signed payload — compare parsed instants, mirroring the embedded
+       Python verifier (ledger uses exact strings on in-model objects). */
+    const sameInstant=Date.parse(p.issued_at||"")===Date.parse(r.issued_at||"");
+    if(p.receipt_id!==r.id||!sameInstant)
+      return{ok:false,why:"receipt envelope identity disagrees with signed payload"};
+  }else if(p.schema!=="attest.receipt/1")return{ok:false,why:"unsupported receipt schema"};
+  const ok=await edVerify(b64d(r.signature),b64d(r.public_key),hex2b(r.payload_hash));
+  return ok?{ok:true}:{ok:false,why:"signature invalid"};}
+async function checkBundle(root,key){
+  /* Full parity with attest.reviews.verify_bundle: each review entry binds its
+     id/visit_id to the original, revision==sequence==position, prev_hash links
+     to the previous receipt, record_type is 'review', and the signed
+     original_receipt anchor names this original's id + payload_hash. The
+     original's own sequence is a GLOBAL chain position that legitimately
+     interleaves with other receipts, so it is checked as a receipt only. */
+  /* ReviewBundle is extra="forbid" — honest files carry exactly kind,
+     original, reviews. Any other top-level key (e.g. a forged
+     countersign_status) is unsigned attacker content: fail, don't render it. */
+  const kd=toJS(get(root,"kind")||{t:"lit",str:null});
+  if(kd!=="attest.review_bundle/1")return{ok:false,why:"unrecognized bundle kind"};
+  const KNOWN=new Set(["kind","original","reviews"]);
+  for(const[k]of root.v)if(!KNOWN.has(k))
+    return{ok:false,why:"unsigned extra field in bundle: "+JSON.stringify(k)};
+  const oNode=get(root,"original");
+  if(!oNode)return{ok:false,why:"no original receipt"};
+  const original=toJS(oNode);
+  if(key&&original.public_key!==key)return{ok:false,why:"original: different issuer key"};
+  const c0=await checkReceipt(oNode);
+  if(!c0.ok)return{ok:false,why:"original: "+c0.why};
+  let prev=original.payload_hash,n=0;
+  const rev=get(root,"reviews");
+  const entries=rev&&rev.t==="arr"?rev.v:[];
+  for(let i=0;i<entries.length;i++){
+    n=i+1;
+    const e=toJS(entries[i]);
+    const rNode=get(entries[i],"receipt");
+    if(!rNode)return{ok:false,why:`review ${n}: entry has no receipt`};
+    const r=toJS(rNode);
+    if(key&&r.public_key!==key)return{ok:false,why:`review ${n}: different issuer key`};
+    const c=await checkReceipt(rNode);
+    if(!c.ok)return{ok:false,why:`review ${n}: ${c.why}`};
+    if(e.id!==r.id||e.visit_id!==original.visit_id||r.visit_id!==original.visit_id)
+      return{ok:false,why:`review ${n}: identity does not match original`};
+    if(e.revision!==n||r.sequence!==n||r.prev_hash!==prev)
+      return{ok:false,why:`review ${n}: sequence or previous hash mismatch`};
+    const p=r.payload||{},a=p.original_receipt||{};
+    if(p.record_type!=="review"||a.id!==original.id||a.hash!==original.payload_hash)
+      return{ok:false,why:`review ${n}: not anchored to this original`};
+    prev=r.payload_hash;}
+  return{ok:true,why:`original and ${n} review(s) verified (integrity only)`};}
+/* ---------- timeline renderer (mirrors attest.timeline semantics) ---------- */
+const _ESC={"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"};
+function esc(s){return String(s).replace(/[&<>"']/g,c=>_ESC[c]);}
+function timelineSVG(p){
+  const iso=s=>s?Date.parse(s)/1000:null;
+  const pts=[];
+  const ws=p.schedule?iso(p.schedule.window_start):null,
+    we=p.schedule?iso(p.schedule.window_end):null;
+  if(ws)pts.push(ws,we);
+  for(const e of p.evidence||[])pts.push(iso(e.at));
+  const ci=iso(p.checked_in_at);if(ci)pts.push(ci);
+  const cov=p.history_poll_coverage;
+  for(const iv of(cov&&cov.covered)||[])pts.push(iso(iv.start),iso(iv.end));
+  if(!pts.length)return"";
+  let lo=Math.min.apply(null,pts),hi=Math.max.apply(null,pts);
+  if(hi-lo<600){const m=(lo+hi)/2;lo=m-300;hi=m+300;}
+  const pad=(hi-lo)*0.04;lo-=pad;hi+=pad;const span=hi-lo;
+  const x=t=>(Math.min(Math.max((t-lo)/span,0),1)*100).toFixed(2);
+  const w=(a,b)=>Math.max(0.4,x(b)-x(a)).toFixed(2);
+  let s='<svg viewBox="0 0 100 34" preserveAspectRatio="none" '
+    +'style="width:100%;height:64px;display:block;margin:4px 0">';
+  if(ws)s+=`<rect x="${x(ws)}" y="4" width="${w(ws,we)}" height="20" rx="1.5" `
+    +'fill="#3b4a63" opacity="0.55"><title>scheduled window</title></rect>';
+  if(cov){
+    const bands=(cov.covered||[]).map(i=>[i,true]).concat((cov.gaps||[]).map(i=>[i,false]));
+    for(const[iv,watched]of bands){
+      const a=iso(iv.start),b=iso(iv.end);
+      const fill=watched?"#2f9e63":"#9aa3b2",
+        title=watched?"watched by polling":"coverage gap — not watched";
+      s+=`<rect x="${x(a)}" y="25" width="${w(a,b)}" height="3.2" `
+        +`fill="${fill}"><title>${title}</title></rect>`;
+    }
+  }
+  const KIND={arrival_motion:"motion",doorbell:"doorbell",door_opened:"door opened",
+    door_closed:"door closed",activity:"activity",departure_motion:"departure cue",
+    on_demand:"on-demand media",snapshot:"snapshot",late:"late-arriving event",
+    checkin:"worker check-in"};
+  for(const e of p.evidence||[]){
+    const k=KIND[e.kind]||String(e.kind||"activity").replace(/_/g," ");
+    const col=String(e.kind).indexOf("departure")===0?"#c05a5a":"#5aa2e8";
+    const X=x(iso(e.at)),title=esc(k+" — "+e.at);
+    s+=`<line x1="${X}" y1="8" x2="${X}" y2="24" stroke="${col}" `
+      +`stroke-width="0.7"><title>${title}</title></line>`
+      +`<circle cx="${X}" cy="7" r="1.1" fill="${col}"><title>${title}</title></circle>`;
+  }
+  if(ci){
+    const X=x(ci),title=esc("worker check-in — "+p.checked_in_at);
+    s+=`<line x1="${X}" y1="8" x2="${X}" y2="24" stroke="#e8b93e" `
+      +`stroke-width="0.7"><title>${title}</title></line>`
+      +`<circle cx="${X}" cy="7" r="1.1" fill="#e8b93e"><title>${title}</title></circle>`;
+  }
+  return s+"</svg>";
+}
+/* ---------- signed export manifest (engine.issue_export_manifest) ---------- */
+function dropKey(node,k){
+  if(node.t!=="obj")return node;
+  return{t:"obj",v:node.v.filter(([kk])=>kk!==k)};}
+async function checkManifestNode(mNode,key){
+  /* A signed manifest makes the export itself a chain event: it names exactly
+     which receipt hashes it carries, so a pack that drops or swaps a record
+     fails here — not just on a missing file. Pre-signature packs report
+     unsigned rather than failing. */
+  const m=toJS(mNode);
+  const sig=get(mNode,"signature_receipt");
+  if(!sig)return{ok:true,why:"unsigned manifest (pre-signature pack)"};
+  const c=await checkReceipt(sig);
+  if(!c.ok)return{ok:false,why:"manifest signature: "+c.why};
+  const js=toJS(sig);
+  if(key&&js.public_key!==key)return{ok:false,why:"manifest signed by a different key"};
+  const p=js.payload;
+  const h=await sha256hex(enc(canonical(dropKey(mNode,"signature_receipt"))));
+  if(h!==p.manifest_sha256)
+    return{ok:false,why:"manifest content hash mismatch (manifest was altered)"};
+  const signed=p.receipt_hashes||{};
+  const listed={};for(const v of m.visits||[])listed[v.visit_id]=v.payload_hash;
+  const same=Object.keys(listed).length===Object.keys(signed).length
+    &&Object.keys(listed).every(k=>listed[k]===signed[k]);
+  if(!same)return{ok:false,why:"manifest visit list disagrees with the signed export"};
+  return{ok:true,why:`export signed: ${Object.keys(listed).length} record(s)`};}
+/* ---------- shared pack helpers ---------- */
+function digests(o,out=[]){
+  if(Array.isArray(o))o.forEach(v=>digests(v,out));
+  else if(o&&typeof o==="object"){
+    if(typeof o.media_sha256==="string")out.push(o.media_sha256);
+    for(const v of Object.values(o))digests(v,out);}
+  return out;}
+function deriveStance(js){
+  /* Derive the worker stance from the SIGNED review chain — mirrors
+     countersign_status(). A file-level countersign_status field is unsigned
+     and ignored: ReviewBundle serializes only kind/original/reviews, so that
+     field can only exist in a forged pack (checkBundle now rejects it). */
+  const ST={confirm:"acknowledged",dispute:"contested",correction:"corrected",inconclusive:"inconclusive"};
+  let lastWorker=null,lastRes=null;
+  for(const e of js.reviews||[]){
+    const p=((e||{}).receipt||{}).payload||{};
+    if((p.actor||{}).role==="worker")lastWorker=e;
+    if((p.review||{}).kind==="resolution")lastRes=e;
+  }
+  let state="no_statement";
+  if(lastWorker)state=ST[(lastWorker.receipt.payload.review||{}).decision]||"reviewed";
+  if(lastRes&&lastRes.revision>(lastWorker?lastWorker.revision:0))state="resolved";
+  return state;}
+/* ---------- pack driver ---------- */
+async function verifyFiles(files){
+  const byName={};for(const f of files)byName[f.name]=f;
+  const out=[];const say=(c,m)=>out.push(`<div class="row ${c}">${m}</div>`);
+  const text=async n=>byName[n]?await byName[n].text():null;
+  const bundles=[];let mNode=null,manifest=null;
+  let anyBad=false,key=null;const actual={};
+  const mText=await text("manifest.json");
+  if(mText){
+    mNode=parseKeep(mText);
+    manifest=toJS(mNode);
+    /* Structural claims on the manifest itself — unsigned manifests have no
+       hash-cover over these fields, so check them explicitly (the server-side
+       verifier requires both). */
+    if(manifest.schema!=="attest.case-pack/1"){
+      anyBad=true;
+      say("bad",`manifest: unsupported schema ${esc(String(manifest.schema||"?"))}`);
+    }
+    say("ok",`manifest: ${esc(String(Number(manifest.visits?.length)||0))} visit(s)`);
+    for(const v of manifest.visits||[]){
+      const t=await text(`visits/${v.visit_id}/bundle.json`);
+      /* A manifest-listed bundle absent from the zip fails closed — the row is
+         red AND the verdict fails; anything less fails open on a dropped record. */
+      if(!t){anyBad=true;say("bad",`${esc(v.visit_id)}: bundle listed but missing from pack`);continue;}
+      bundles.push([v.visit_id,parseKeep(t)]);
+    }
+  }else{
+    const t=await text("bundle.json");
+    if(!t)return"<div class='row bad'>no bundle.json or manifest.json in the selected files</div>";
+    const root=parseKeep(t);
+    const vid=toJS(get(root,"original")||{t:"obj",v:[]}).visit_id||"visit";
+    bundles.push([vid,root]);
+  }
+  for(const[vid,root]of bundles){
+    const oNode=get(root,"original");
+    if(!key)key=toJS(get(oNode,"public_key"));
+    const c=await checkBundle(root,key);
+    if(!c.ok)anyBad=true;
+    const js=toJS(root);
+    actual[vid]=(js.original||{}).payload_hash;
+    /* Stance derives from the verified review chain — a countersign_status
+       field in the file is unsigned forgery bait and is never consulted. */
+    const st=deriveStance(js);
+    const stance=st!=="no_statement"?` — worker: ${esc(st)}`:"";
+    say(c.ok?"ok":"bad",`${esc(vid)}: ${esc(c.why)}${stance}`);
+    const svg=timelineSVG((js.original||{}).payload||{});
+    if(svg)out.push(svg);
+    const redT=await text(mNode?`visits/${vid}/redaction.json`:"redaction.json");
+    const rj=redT?JSON.parse(redT):{};
+    /* Python's redaction_for recognizes only withheld_digests — the browser
+       must be at least as strict, so no alias fallback here. */
+    const withheld=new Set(rj.withheld_digests||[]);
+    /* The marker file is unsigned — the signed manifest's media_withheld list
+       is the authority. If they disagree, a "withheld" claim may be masking a
+       deletion: fail closed, mirroring _verify_case_pack. */
+    if(manifest){
+      const mv=(manifest.visits||[]).find(x=>x.visit_id===vid);
+      const listed=new Set((mv&&mv.media_withheld)||[]);
+      if(listed.size!==withheld.size||[...listed].some(d=>!withheld.has(d))){
+        anyBad=true;
+        say("bad",`${esc(vid)}: manifest redaction list disagrees with redaction.json`);
+      }
+    }
+    /* Media is matched by CONTENT hash, not filename — the pack stores files as
+       media/<vid>/<label>.<digest-prefix>.png, mirroring _check_pack_bundle.
+       Case packs nest under visits/<vid>/; single packs use media/ flat.
+       Digests come only from the signed original payload — unsigned extra
+       keys must not be able to inject "verified" media rows. */
+    const mprefix=mNode?`visits/${vid}/media/`:"media/";
+    const found=new Set();
+    for(const name of Object.keys(byName)){
+      if(name.startsWith(mprefix)&&!name.endsWith("/"))
+        found.add(await sha256hex(new Uint8Array(await byName[name].arrayBuffer())));
+    }
+    for(const d of digests((js.original||{}).payload||{})){
+      if(withheld.has(d)){say("warn",`  media ${esc(d.slice(0,12))}… withheld by redaction`);continue;}
+      if(found.has(d))say("ok",`  media ${esc(d.slice(0,12))}… digest matches`);
+      else{say("bad",`  media ${esc(d.slice(0,12))}… missing (not listed as withheld)`);anyBad=true;}
+    }
+  }
+  if(mNode){
+    const mc=await checkManifestNode(mNode,key);
+    if(!mc.ok)anyBad=true;
+    say(mc.ok?"ok":"bad",`manifest: ${esc(mc.why)}`);
+    if(!manifest.issuer_key){
+      anyBad=true;
+      say("bad","manifest: missing issuer_key");
+    }else if(key&&manifest.issuer_key!==key){
+      anyBad=true;
+      say("bad","manifest: issuer_key disagrees with the bundles' issuer");
+    }
+    for(const v of manifest.visits||[]){
+      if(actual[v.visit_id]&&actual[v.visit_id]!==v.payload_hash){
+        anyBad=true;
+        say("bad",`${esc(v.visit_id)}: manifest hash disagrees with signed original`);
+      }
+    }
+    /* Site attestations (coverage certs, digests, prior exports, disconnects)
+       travel in the pack — each must verify and match the manifest entry. */
+    for(const a of manifest.attestations||[]){
+      const at=await text(`attestations/${a.receipt_id}.json`);
+      if(!at){anyBad=true;say("bad",`attestation ${esc(a.receipt_id)}: missing from pack`);continue;}
+      const aNode=parseKeep(at);const rjs=toJS(aNode);
+      if(key&&rjs.public_key!==key){
+        anyBad=true;say("bad",`attestation ${esc(a.receipt_id)}: different issuer key`);continue;}
+      const rc=await checkReceipt(aNode);
+      if(!rc.ok){anyBad=true;say("bad",`attestation ${esc(a.receipt_id)}: ${esc(rc.why)}`);continue;}
+      if(rjs.payload_hash!==a.payload_hash||rjs.visit_id!==a.visit_id){
+        anyBad=true;say("bad",`attestation ${esc(a.receipt_id)}: disagrees with signed manifest`);continue;}
+      say("ok",`attestation ${esc(a.record_type||"record")}: signed and intact`);
+    }
+    /* Fail closed on pack files the signed manifest does not name — a smuggled
+       attestation or visit bundle would otherwise pass unverified. */
+    const listedAtts=new Set((manifest.attestations||[]).map(a=>`attestations/${a.receipt_id}.json`));
+    const listedVids=new Set((manifest.visits||[]).map(v=>`visits/${v.visit_id}/`));
+    for(const name of Object.keys(byName)){
+      if(name.endsWith("/"))continue;
+      if(name.startsWith("attestations/")&&!listedAtts.has(name)){
+        anyBad=true;say("bad",`${esc(name)}: present but not in the signed manifest`);
+      }
+      if(name.startsWith("visits/")&&![...listedVids].some(p=>name.startsWith(p))){
+        anyBad=true;say("bad",`${esc(name)}: present but not in the signed manifest`);
+      }
+    }
+  }
+  say(anyBad?"bad":"ok",anyBad
+    ?"FAILED — do not rely on this pack"
+    :"VERIFIED — chain intact under issuer key "+esc((key||"").slice(0,16))+"…");
+  return out.join("");}
+/* ---------- minimal zip reader: stored + deflate via DecompressionStream ---------- */
+async function inflate(raw){
+  const ds=new DecompressionStream("deflate-raw");
+  const reader=new Blob([raw]).stream().pipeThrough(ds).getReader();
+  /* Declared sizes can lie — cap actual decompressed bytes while streaming. */
+  const chunks=[];let total=0;
+  for(;;){
+    const{done,value}=await reader.read();
+    if(done)break;
+    total+=value.length;
+    if(total>256*1024*1024){reader.cancel();throw new Error("entry expands beyond the 256 MB bound");}
+    chunks.push(value);
+  }
+  const out=new Uint8Array(total);let o=0;
+  for(const c of chunks){out.set(c,o);o+=c.length;}
+  return out;}
+async function readZipEntries(file){
+  /* Parse the EOCD + central directory; returns File-like {name,text,arrayBuffer}. */
+  const buf=new Uint8Array(await file.arrayBuffer());
+  const dv=new DataView(buf.buffer);
+  let eocd=-1;
+  for(let i=buf.length-22;i>=Math.max(0,buf.length-22-65536);i--){
+    if(dv.getUint32(i,true)===0x06054b50){eocd=i;break;}
+  }
+  if(eocd<0)throw new Error("not a zip file (no end-of-central-directory)");
+  const n=dv.getUint16(eocd+10,true),cdOff=dv.getUint32(eocd+16,true);
+  const dec=new TextDecoder();let p=cdOff;const files=[];
+  let totalUncompressed=0;
+  for(let e=0;e<n;e++){
+    if(dv.getUint32(p,true)!==0x02014b50)throw new Error("corrupt central directory");
+    const method=dv.getUint16(p+10,true),csize=dv.getUint32(p+20,true);
+    const usize=dv.getUint32(p+24,true);
+    /* Bound total decompressed bytes — a small zip can expand unboundedly. */
+    totalUncompressed+=usize;
+    if(totalUncompressed>256*1024*1024)
+      throw new Error("pack expands beyond the 256 MB verification bound");
+    const nlen=dv.getUint16(p+28,true),elen=dv.getUint16(p+30,true),clen=dv.getUint16(p+32,true);
+    const lhoff=dv.getUint32(p+42,true);
+    const name=dec.decode(buf.slice(p+46,p+46+nlen));
+    const lnlen=dv.getUint16(lhoff+26,true),lelen=dv.getUint16(lhoff+28,true);
+    const start=lhoff+30+lnlen+lelen;
+    const raw=buf.slice(start,start+csize);
+    let data;
+    if(method===0)data=raw;
+    else if(method===8)data=await inflate(raw);
+    else continue;  // unsupported compression — skip, the verifier reports it missing
+    files.push({name,
+      arrayBuffer:async()=>data.buffer.slice(data.byteOffset,data.byteOffset+data.byteLength),
+      text:async()=>dec.decode(data)});
+    p+=46+nlen+elen+clen;
+  }
+  return files;}
+async function go(fileList){
+  const out=document.getElementById("out");
+  try{
+    let files=[...fileList];if(!files.length)return;
+    if(files.length===1&&/\.zip$/i.test(files[0].name))files=await readZipEntries(files[0]);
+    else files=files.map(f=>{
+      /* A folder pick (webkitdirectory) yields webkitRelativePath like
+         'pack/visits/vis_x/bundle.json' — strip the root segment so paths match
+         the zip layout. Plain multi-select has no relative path: keep the
+         basename (works for a single-visit pack's flat bundle.json). */
+      const rel=f.webkitRelativePath||"";
+      const stripped=rel.includes("/")?rel.split("/").slice(1).join("/"):"";
+      return{name:stripped||f.name,text:()=>f.text(),arrayBuffer:()=>f.arrayBuffer()};
+    });
+    out.innerHTML="<p>verifying "+files.length+" file(s)…</p>";
+    out.innerHTML=await verifyFiles(files);
+  }catch(e){out.innerHTML="<div class='row bad'>verifier error: "+esc(e.message)+"</div>";}}
+const dz=document.getElementById("drop");
+dz.ondragover=e=>{e.preventDefault();dz.classList.add("over");};
+dz.ondragleave=()=>dz.classList.remove("over");
+dz.ondrop=e=>{e.preventDefault();dz.classList.remove("over");go(e.dataTransfer.files);};
+document.getElementById("pick").onchange=e=>go(e.target.files);
+document.getElementById("pickdir").onchange=e=>go(e.target.files);
+</script>
+</body>
+</html>

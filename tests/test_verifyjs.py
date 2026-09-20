@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import zipfile
+from pathlib import Path
 
 import pytest
 
@@ -213,6 +214,16 @@ def test_verify_html_is_self_contained():
     assert "http://" not in VERIFY_HTML and "https://" not in VERIFY_HTML  # no CDN
     assert "crypto.subtle" in VERIFY_HTML  # real hashing, not a stub
     assert "BigInt" in VERIFY_HTML or "n<<" in VERIFY_HTML  # BigInt ed25519
+
+
+def test_hosted_verifier_copy_stays_in_sync():
+    # docs/verify.html is the GitHub Pages copy — regenerate with:
+    #   python -c "from pathlib import Path; from attest.verifyjs import VERIFY_HTML; \
+    #       Path('docs/verify.html').write_bytes(VERIFY_HTML.encode('utf-8'))"
+    committed = Path(__file__).resolve().parents[1] / "docs" / "verify.html"
+    assert committed.read_bytes() == VERIFY_HTML.encode("utf-8"), (
+        "docs/verify.html drifted from attest.verifyjs.VERIFY_HTML — regenerate it"
+    )
 
 
 def _case_pack(engine, store, household, schedule, t0, tmp_path):
