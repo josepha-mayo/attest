@@ -89,6 +89,26 @@ def test_rejects_bad_signature(api, household, t0):
     assert r.status_code == 401
 
 
+def test_chaos_duplicated_deliveries_collapse_to_one_event(api, store, household, t0):
+    """The emulator's chaos.duplicate sends the same signed delivery over and
+    over — identical request_ids must collapse at intake, not into duplicate
+    events. Ten deliveries, one visit, one evidence row."""
+    body = webhooks.encode(
+        webhooks.build_event(event_type="button_press", device_id=household[2].id, occurred_at=t0)
+    )
+    headers = {
+        "Content-Type": "application/json",
+        webhooks.SIGNATURE_HEADER: webhooks.sign(KEY, body),
+    }
+    statuses = [api.post("/webhooks/ring", content=body, headers=headers).status_code for _ in range(10)]
+    assert all(s == 202 for s in statuses)  # every copy acked — none silently dropped
+    assert api.post("/api/process-webhooks").status_code == 200
+    visit = store.active_visit(household[0].id)
+    assert visit is not None
+    device_events = [e for e in store.evidence_for(visit.id) if e.ring_request_id or e.kind == "doorbell"]
+    assert len(device_events) == 1
+
+
 def test_webhook_to_receipt(api, store, household, schedule, t0):
     site, worker, cam, sensor = household
     t = t0 + timedelta(minutes=1)

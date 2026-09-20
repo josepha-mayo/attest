@@ -547,9 +547,11 @@ _INDEX_BODY = """<h1 id="site">Attest case record</h1>
 <div id="verdict" role="status" aria-live="polite"></div>
 <div id="cards"></div>
 <h2>Verify the media bytes</h2>
-<p><small>This page verifies every signed record and renders its timeline offline.
-Signed media digests are listed per record; to check the media bytes themselves, open
-<code>verify.html</code> and drop every file from this extracted pack onto it.</small></p>
+<p><small>This page verifies every signed record and renders its timeline offline — and every
+record can be toggled between the technical view and the plain-language family view
+(&ldquo;View as the family sees it&rdquo;). Signed media digests are listed per record;
+to check the media bytes themselves, open <code>verify.html</code> and drop every file
+from this extracted pack onto it.</small></p>
 <h2>What this does and does not establish</h2>
 <p><small>A green result proves the signed records are intact and were issued under the pinned
 issuer key — integrity, not physical truth. It does not prove anyone was present, absent, or
@@ -566,6 +568,23 @@ for a dispute that matters, re-verify the pack with a verifier obtained independ
  .corr td{border-top:1px solid #eee;padding:.15rem .4rem .15rem 0;vertical-align:top}
  .corr td:first-child{white-space:nowrap;font-weight:600;width:1%}
  .stmt{border-left:3px solid #ccd3df;padding:.15rem .6rem;margin:.4rem 0;font-size:.85rem}
+ .plain-hero{text-align:center;padding:1.2rem .5rem .8rem}
+ .plain-mark{width:52px;height:52px;border-radius:50%;display:inline-flex;align-items:center;
+   justify-content:center;font-size:26px;margin-bottom:.5rem}
+ .plain-hero.ok .plain-mark{background:#e2f4ea;color:#1a7f4b}
+ .plain-hero.warn .plain-mark{background:#f9edd4;color:#b4740c}
+ .plain-hero.quiet .plain-mark{background:#e9eef3;color:#5f6e7c}
+ .plain-h2{font-size:1.2rem;font-weight:600;line-height:1.3;margin-bottom:.3rem}
+ .plain-p{color:#5c6b7a;font-size:.9rem}
+ .plain-facts{border-collapse:collapse;margin:.8rem 0;font-size:.9rem}
+ .plain-facts td{padding:.25rem .8rem .25rem 0;vertical-align:top;border-bottom:1px solid #eef1f6}
+ .plain-facts td.k{color:#5c6b7a;white-space:nowrap}
+ .plain-quote{border-left:3px solid #b4740c;padding:.3rem .8rem;margin:.5rem 0;
+  font-style:italic;color:#4a3d28}
+ .plain-byline{color:#5f6e7c;font-size:.8rem}
+ .plain-foot{margin-top:1rem;color:#5f6e7c;font-size:.8rem;line-height:1.5;
+  border-top:1px solid #eee;padding-top:.7rem}
+ .view-toggle{display:inline-block;margin-top:.6rem;color:#2563a8;text-decoration:underline;cursor:pointer}
 </style>
 """
 
@@ -633,6 +652,83 @@ function statementsHTML(js){
   }
   return out.join("");
 }
+/* Plain-language view of the same verified payload — the family-facing read,
+   mirroring /household on the server. The pack carries the data; this renders
+   it for someone who has never seen a coordinator console. */
+function plainHTML(p,js){
+  const cov=p.history_poll_coverage||{},st=String(p.state||""),hasObs=!!p.first_observed_at;
+  const reviews=js.reviews||[];
+  const workerEntries=reviews.filter(e=>((((e||{}).receipt||{}).payload||{}).actor||{}).role==="worker");
+  const resEntries=reviews.filter(e=>((((e||{}).receipt||{}).payload||{}).review||{}).kind==="resolution");
+  const stance=deriveStance(js);
+  let hero;
+  if(st==="open"||st==="in_progress")
+    hero=["&#9202;","This visit is still in progress",
+      "This record hasn't been closed and signed yet — shown is what has been received so far.","quiet"];
+  else if(st==="unmatched")
+    hero=["&#9888;","Activity was recorded outside any scheduled visit",
+      "The camera reported activity that doesn't match a scheduled window —"
+      +" flagged for a person to review.","warn"];
+  else if(!hasObs){
+    let line;
+    if(cov.fraction!=null&&cov.fraction>=0.999)
+      line=`The camera was checked ${esc(String(Number(cov.polls)||0))} times`
+        +" across the whole window and reported nothing.";
+    else if(cov.polls)
+      line=`The camera was checked for ${Math.round((cov.fraction||0)*100)}%`
+        +" of the window and reported nothing"
+        +((cov.gaps||[]).length?" — some of the window wasn't watched":"")+".";
+    else line="The camera reported no activity during this window.";
+    hero=["&#9675;","No activity was reported",
+      line+" No activity is not proof nobody came — it only means the camera reported nothing.","quiet"];
+  }else
+    hero=["&#10003;","Activity was observed",
+      `The camera reported activity between ${esc(hhmm(p.first_observed_at))}`
+      +` and ${esc(hhmm(p.last_observed_at))}`
+      +(p.observed_span_minutes!=null
+        ?` — about ${Math.round(p.observed_span_minutes)} minutes of observed span`:"")
+      +".","ok"];
+  const facts=[];
+  if(hasObs){
+    facts.push(["First observation",esc(hhmm(p.first_observed_at))]);
+    facts.push(["Last observation",esc(hhmm(p.last_observed_at))]);}
+  const sw=p.scheduled_worker||null;
+  if(sw&&sw.name)facts.push(["Scheduled worker",esc(sw.name)]);
+  if(p.checked_in_at)
+    facts.push(["Worker check-in",
+      esc(hhmm(p.checked_in_at))
+      +" — self-reported from their link; identity isn't verified by the check-in itself."]);
+  else if(sw)facts.push(["Worker check-in","Not received"]);
+  if(stance!=="no_statement"){
+    const label={acknowledged:"Agrees with this record",contested:"<strong>Disputes this record</strong>",
+      corrected:"Submitted a correction",resolved:"Concluded by a coordinator",
+      inconclusive:"Responded inconclusively"}[stance]||"Recorded";
+    facts.push(["Worker's account",label]);}
+  if(resEntries.length){
+    const lp=resEntries[resEntries.length-1].receipt.payload;
+    facts.push(["Conclusion",
+      esc(String((lp.review||{}).outcome||"").replaceAll("_"," "))
+      +" — signed by the coordinator. The worker's statement stays in the record unchanged."]);}
+  let quote="";
+  if(workerEntries.length&&(stance==="contested"||stance==="corrected"||stance==="inconclusive")){
+    const lw=workerEntries[workerEntries.length-1].receipt.payload;
+    quote=`<div class="plain-quote">&ldquo;${esc((lw.review||{}).statement||"")}&rdquo;</div>`
+      +`<div class="plain-byline">— ${esc((lw.actor||{}).name||"worker")},`
+      +` appended to the signed record (never edited after)</div>`;
+  }else if(workerEntries.length&&stance==="resolved"){
+    const lw=workerEntries[workerEntries.length-1].receipt.payload;
+    quote=`<div class="plain-quote">&ldquo;${esc((lw.review||{}).statement||"")}&rdquo;</div>`
+      +`<div class="plain-byline">— ${esc((lw.actor||{}).name||"worker")}; concluded, kept on record</div>`;
+  }
+  return `<div class="plain-hero ${hero[3]}"><div class="plain-mark" aria-hidden="true">${hero[0]}</div>`
+    +`<div class="plain-h2">${esc(hero[1])}</div><div class="plain-p">${hero[2]}</div></div>`
+    +`<table class="plain-facts">${facts.map(f=>
+      `<tr><td class="k">${esc(f[0])}</td><td>${f[1]}</td></tr>`).join("")}</table>`
+    +quote
+    +`<div class="plain-foot">The camera's report, the schedule, and the worker's account are kept separate.
+    A signature proves the record hasn't been altered since it was signed — not identity, attendance, or
+    time worked. No reported activity is not proof nobody came.</div>`;
+}
 /* Site-level attestations render as provenance cards, not just verify rows —
    the coverage cert is the pack's answer to "was anyone watching?". */
 function attestationHTML(p){
@@ -699,10 +795,19 @@ async function renderIndex(){
       +(p.scheduled_worker?` · worker ${esc(p.scheduled_worker.name||"")}`:"")
       +(stance!=="no_statement"?` · statement: ${esc(stance)}`:"")
       +` — ${esc(c.why)}</div>`
-      +`<small>${win} · ${ds.length} media digest(s)</small>`
-      +timelineSVG(p)+corroborationHTML(p)+statementsHTML(js)+"</div>");
+      +`<div class="tech"><small>${win} · ${ds.length} media digest(s)</small>`
+      +timelineSVG(p)+corroborationHTML(p)+statementsHTML(js)+`</div>`
+      +`<div class="plain" style="display:none">${plainHTML(p,js)}</div>`
+      +`<a href="#" class="view-toggle muted"><small>View as the family sees it</small></a></div>`);
   }
   cards.innerHTML=rows.join("");
+  cards.onclick=e=>{
+    const a=e.target.closest(".view-toggle");if(!a)return;e.preventDefault();
+    const card=a.closest(".card"),t=card.querySelector(".tech"),pl=card.querySelector(".plain");
+    const showPlain=pl.style.display==="none";
+    pl.style.display=showPlain?"":"none";t.style.display=showPlain?"none":"";
+    a.innerHTML="<small>"+(showPlain?"View the technical record":"View as the family sees it")+"</small>";
+  };
   let mLine="";
   const mtag=document.getElementById("packmanifest");
   if(mtag&&mtag.textContent){

@@ -524,8 +524,7 @@ def _demo(args: argparse.Namespace) -> None:
         # the tour can hand the judge the family view in one click.
         for v in store.visits():
             if any(
-                e.receipt.payload.get("actor", {}).get("role") == "worker"
-                for e in store.reviews_for(v.id)
+                e.receipt.payload.get("actor", {}).get("role") == "worker" for e in store.reviews_for(v.id)
             ):
                 family_url = f"{app_url}/family/{engine.issue_family_link(v.id)}"
                 break
