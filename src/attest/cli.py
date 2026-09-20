@@ -498,6 +498,7 @@ def _demo(args: argparse.Namespace) -> None:
     from .summarize import TemplateSummarizer
 
     store = Store(data_dir / "attest.sqlite3")
+    family_url = None
     try:
         engine = VisitEngine(
             store,
@@ -519,6 +520,15 @@ def _demo(args: argparse.Namespace) -> None:
                 f" ({cov['fraction'] * 100:.0f}%) over the story window.",
                 flush=True,
             )
+        # Pre-issue a scoped family link on the record the worker disputed —
+        # the tour can hand the judge the family view in one click.
+        for v in store.visits():
+            if any(
+                e.receipt.payload.get("actor", {}).get("role") == "worker"
+                for e in store.reviews_for(v.id)
+            ):
+                family_url = f"{app_url}/family/{engine.issue_family_link(v.id)}"
+                break
     finally:
         store.close()
 
@@ -552,6 +562,8 @@ def _demo(args: argparse.Namespace) -> None:
     print("  the worker links. --redact-media exports keep signed digests while", flush=True)
     print("  withholding footage; attest diff A.zip B.zip proves appends only", flush=True)
     print("  ever add — never rewrite.", flush=True)
+    if family_url:
+        print(f"  Family view, pre-issued on the disputed visit: {family_url}", flush=True)
     print("", flush=True)
     print("Press Ctrl+C to stop.", flush=True)
     try:

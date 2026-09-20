@@ -149,6 +149,7 @@ document.getElementById('close-record').onclick = async () => {
 {% endif %}
 <button class="btn secondary" id="issue-family">Share the household view</button>
 <a id="family-view-link" style="display:block;overflow-wrap:anywhere;color:var(--accent)"></a>
+<a id="family-mailto" class="muted small" style="display:none" href="#">Send by email</a>
 <img id="family-view-qr" alt="QR code for the household view link" style="display:none;width:120px;height:120px;margin-top:8px;border:1px solid var(--line);border-radius:8px">
 <p id="family-link-status" role="status" class="small muted"></p>
 {% for review in reviews %}
@@ -206,6 +207,10 @@ if (issueFamily) issueFamily.onclick = async () => {
   if (response.ok) {
     const link = document.getElementById('family-view-link');
     link.href = data.path; link.textContent = new URL(data.path, location.origin).href;
+    const mail = document.getElementById('family-mailto');
+    mail.href = 'mailto:?subject=' + encodeURIComponent('Your visit record')
+      + '&body=' + encodeURIComponent('Your visit record is ready to view (read-only link, expires in 7 days):\n\n' + link.textContent);
+    mail.style.display = 'inline';
     const qr = document.getElementById('family-view-qr');
     qr.src = '/qr.svg?target=' + encodeURIComponent(data.path);
     qr.style.display = 'block';
