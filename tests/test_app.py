@@ -381,7 +381,7 @@ def test_family_link_is_scoped_read_only_access(api, store, household, t0):
 
     # an unknown or revoked token lands on the styled dead-link page, never data
     dead = api.get("/family/" + "z" * 40, auth=None)
-    assert dead.status_code == 404 and "invalid, expired" in dead.text
+    assert dead.status_code == 404 and "invalid or expired" in dead.text
 
     # the QR helper encodes family paths too
     assert api.get("/qr.svg", params={"target": path}).status_code == 200

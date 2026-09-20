@@ -299,10 +299,25 @@ def create_app(
     # ------------------------------------------------------------------ worker check-in
 
     def _dead_link(request: Request, what: str, status_code: int = 404):
+        if what == "family view":
+            mechanics = (
+                "Family view links are visit-scoped and expire after 7 days — "
+                "the link itself is the authorization to view that one record."
+            )
+            gates = "reading the record"
+        else:
+            mechanics = (
+                "Worker check-in and review links are visit-scoped, expire, and are "
+                "single-use — a link that was already used or has expired cannot be reopened."
+            )
+            gates = "adding a statement"
+        tail = "invalid or expired." if what == "family view" else "invalid, expired, or already used."
         resp = render(
             request,
             "link_expired.html",
-            detail=f"This {what} link is invalid, expired, or already used.",
+            detail=f"This {what} link is {tail}",
+            mechanics=mechanics,
+            gates=gates,
         )
         resp.status_code = status_code
         return resp
