@@ -157,11 +157,14 @@ document.getElementById('close-record').onclick = async () => {
 <article style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
 {% if facts.review.kind == "resolution" %}
 <strong>Revision {{ review.revision }}: resolution — {{ facts.review.outcome.replace('_', ' ') }} — {{ facts.actor.name }} ({{ facts.actor.role }})</strong>
+{% elif facts.review.kind == "household_account" %}
+<strong>Revision {{ review.revision }}: household account — {{ facts.review.perception.replace('_', ' ') }} — {{ facts.actor.name }} ({{ facts.actor.role }})</strong>
 {% else %}
 <strong>Revision {{ review.revision }}: {{ facts.review.decision }} — {{ facts.actor.name }} ({{ facts.actor.role }})</strong>
 {% endif %}
 <p style="white-space:pre-wrap">{{ facts.review.statement }}</p>
 {% if facts.review.reported_start %}<p class="small">Reported interval: {{ facts.review.reported_start }} to {{ facts.review.reported_end }}</p>{% endif %}
+{% if facts.actor.role == "household" %}<p class="small muted">Household account via the family link — self-reported; identity not independently verified. It doesn't alter the worker or coordinator stances.</p>{% endif %}
 <div class="muted small">Received {{ facts.statement_received_at }} &middot; hash {{ review.receipt.payload_hash[:16] }}…</div>
 </article>
 {% else %}<p class="muted">No human review yet. A coordinator can record an assessment below or request the worker's account.</p>{% endfor %}
@@ -203,13 +206,13 @@ const issueFamily = document.getElementById('issue-family');
 if (issueFamily) issueFamily.onclick = async () => {
   const response = await fetch('/api/visits/{{ visit.id }}/family-link', {method: 'POST'});
   const data = await response.json();
-  document.getElementById('family-link-status').textContent = response.ok ? 'Text or show the code to the family — read-only view, expires in 7 days.' : data.detail;
+  document.getElementById('family-link-status').textContent = response.ok ? 'Text or show the code to the family — they can view the record and add their own account; expires in 7 days.' : data.detail;
   if (response.ok) {
     const link = document.getElementById('family-view-link');
     link.href = data.path; link.textContent = new URL(data.path, location.origin).href;
     const mail = document.getElementById('family-mailto');
     mail.href = 'mailto:?subject=' + encodeURIComponent('Your visit record')
-      + '&body=' + encodeURIComponent('Your visit record is ready to view (read-only link, expires in 7 days):\n\n' + link.textContent);
+      + '&body=' + encodeURIComponent('Your visit record is ready — open this link to see what the camera reported, what the worker said, and to add your own account (expires in 7 days):\n\n' + link.textContent);
     mail.style.display = 'inline';
     const qr = document.getElementById('family-view-qr');
     qr.src = '/qr.svg?target=' + encodeURIComponent(data.path);

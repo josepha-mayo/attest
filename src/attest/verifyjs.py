@@ -581,6 +581,7 @@ for a dispute that matters, re-verify the pack with a verifier obtained independ
  .plain-facts td.k{color:#5c6b7a;white-space:nowrap}
  .plain-quote{border-left:3px solid #b4740c;padding:.3rem .8rem;margin:.5rem 0;
   font-style:italic;color:#4a3d28}
+ .plain-quote.household{border-left-color:#2563a8;color:#26374a}
  .plain-byline{color:#5f6e7c;font-size:.8rem}
  .plain-foot{margin-top:1rem;color:#5f6e7c;font-size:.8rem;line-height:1.5;
   border-top:1px solid #eee;padding-top:.7rem}
@@ -646,6 +647,8 @@ function statementsHTML(js){
         +`${esc(hhmm(rv.reported_end))}</small>`:"";
     const label=rv.kind==="resolution"
       ?`resolution: ${String(rv.outcome||"").replaceAll("_"," ")}`
+      :rv.kind==="household_account"
+      ?`household account: ${String(rv.perception||"").replaceAll("_"," ")}`
       :(rv.decision||"statement");
     out.push(`<div class="stmt"><strong>${esc(label)}</strong> by ${who}${note}:`
       +` ${esc(rv.statement||"")}`+window+`</div>`);
@@ -726,12 +729,22 @@ function plainHTML(p,js){
     quote=`<div class="plain-quote">&ldquo;${esc((lw.review||{}).statement||"")}&rdquo;</div>`
       +`<div class="plain-byline">— ${esc((lw.actor||{}).name||"worker")}; concluded, kept on record</div>`;
   }
+  const hhEntries=reviews.filter(e=>((((e||{}).receipt||{}).payload||{}).actor||{}).role==="household");
+  for(const he of hhEntries){
+    const hp=he.receipt.payload,hrv=hp.review||{};
+    quote+=`<div class="plain-quote household">&ldquo;${esc(hrv.statement||"")}&rdquo;</div>`
+      +`<div class="plain-byline">— household account`
+      +(hrv.perception?` (${String(hrv.perception).replaceAll("_"," ")})`:"")
+      +` via the family link — self-reported; it doesn't change the camera's`
+      +` observations or the worker's account</div>`;
+  }
   return `<div class="plain-hero ${hero[3]}"><div class="plain-mark" aria-hidden="true">${hero[0]}</div>`
     +`<div class="plain-h2">${esc(hero[1])}</div><div class="plain-p">${hero[2]}</div></div>`
     +`<table class="plain-facts">${facts.map(f=>
       `<tr><td class="k">${esc(f[0])}</td><td>${f[1]}</td></tr>`).join("")}</table>`
     +quote
-    +`<div class="plain-foot">The camera's report, the schedule, and the worker's account are kept separate.
+    +`<div class="plain-foot">The camera's report, the schedule, the worker's account, and the household's
+    account are kept separate.
     A signature proves the record hasn't been altered since it was signed — not identity, attendance, or
     time worked. No reported activity is not proof nobody came.</div>`;
 }

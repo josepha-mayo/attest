@@ -34,6 +34,25 @@ Rules:
 _ROUTINE_FLAGS = {"departure_unconfirmed"}
 
 
+def household_conflict(reviews, visit) -> bool:
+    """True when the latest household statement contradicts the observation —
+    ``no_one_seen`` on an observed visit, or ``saw_someone`` on a silent one.
+    Corroborating and unsure accounts are informational, never queued."""
+    if not visit.receipt_id:
+        return False
+    entries = [
+        r
+        for r in reviews.bundle(visit.id).reviews
+        if r.receipt.payload.get("actor", {}).get("role") == "household"
+    ]
+    if not entries:
+        return False
+    perception = entries[-1].receipt.payload.get("review", {}).get("perception")
+    return (perception == "no_one_seen" and visit.has_observations) or (
+        perception == "saw_someone" and not visit.has_observations
+    )
+
+
 def attention_items(store, reviews, *, limit: int = 50) -> list[dict]:
     """The same attention computation the dashboard renders — the deterministic
     baseline the agent brief is compared against."""
@@ -51,6 +70,16 @@ def attention_items(store, reviews, *, limit: int = 50) -> list[dict]:
             # The coordinator's signed conclusion post-dates the latest worker
             # statement — the dispute stays in the chain but needs no action.
             continue
+        elif household_conflict(reviews, v):
+            # A household account that disagrees with the observation queues a
+            # human look — flagging the disagreement, never adjudicating it.
+            items.append(
+                {
+                    "visit": v,
+                    "why": "household account contradicts the observation",
+                    "level": "warn",
+                }
+            )
         elif v.state.value == "unmatched" or any(f.code == "unscheduled" for f in notable):
             items.append({"visit": v, "why": "observation matched no schedule", "level": "warn"})
         elif notable:

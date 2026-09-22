@@ -7,6 +7,7 @@ from datetime import timedelta
 from .clock import ExecutionClock
 from .ledger import Signer, verify_receipt
 from .models import (
+    HouseholdStatementInput,
     ResolutionInput,
     ReviewBundle,
     ReviewEntry,
@@ -288,3 +289,24 @@ class ReviewService:
         grant.used_at = utcnow()
         self.store.put_review_grant(grant)
         return entry
+
+    @atomic
+    def household_statement(self, token: str, data: HouseholdStatementInput) -> ReviewEntry:
+        """Append the household's own account via the scoped family link. The
+        multi-use grant is not consumed — the link stays view+append until
+        expiry. A household statement is self-reported like the worker's
+        check-in: it joins the chain verbatim, never verifies presence, and
+        never changes the derived worker/coordinator stance."""
+        grant = self.store.family_grant(hashlib.sha256(token.encode()).hexdigest())
+        if grant is None or grant.expires_at <= utcnow():
+            raise ValueError("invalid or expired family link")
+        return self._append(
+            grant.id,
+            data,
+            {
+                "role": "household",
+                "authentication": "family_link",
+                "name": "Household member",
+                "identity_verified": False,
+            },
+        )

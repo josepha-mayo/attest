@@ -422,8 +422,13 @@ def test_demo_command_spins_up_full_stack(tmp_path):
             out += line
         assert "Demo is live" in out, out
         url = re.search(r"dashboard\s+(http://\S+)", out).group(1)
+        # Browsers send URL userinfo as Basic auth; httpx keeps it in the URL
+        # but never promotes it to a header — split it out and pass auth=.
+        parsed = httpx.URL(url)
+        creds = (parsed.username, parsed.password)
+        clean = parsed.copy_with(username=None, password=None)
         with httpx.Client() as client:
-            assert client.get(url).status_code == 200
+            assert client.get(clean, auth=creds).status_code == 200
     finally:
         proc.terminate()
         proc.wait(timeout=15)

@@ -597,6 +597,9 @@ class VisitEngine:
         ]
         entries = [e for v in visits for e in self.store.reviews_for(v.id)]
         worker_entries = [e for e in entries if e.receipt.payload.get("actor", {}).get("role") == "worker"]
+        household_entries = [
+            e for e in entries if e.receipt.payload.get("actor", {}).get("role") == "household"
+        ]
         resolution_entries = [
             e for e in entries if e.receipt.payload.get("review", {}).get("kind") == "resolution"
         ]
@@ -646,7 +649,11 @@ class VisitEngine:
             "worker_disputes": sum(
                 1 for e in worker_entries if e.receipt.payload.get("review", {}).get("decision") == "dispute"
             ),
-            "coordinator_statements": len(entries) - len(worker_entries) - len(resolution_entries),
+            "household_statements": len(household_entries),
+            "coordinator_statements": len(entries)
+            - len(worker_entries)
+            - len(household_entries)
+            - len(resolution_entries),
             "coordinator_resolutions": len(resolution_entries),
             "records_resolved": resolved_records,
             "median_resolution_minutes": (

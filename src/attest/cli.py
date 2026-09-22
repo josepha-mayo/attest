@@ -154,10 +154,14 @@ def _replay(args: argparse.Namespace) -> None:
     except KeyError as exc:
         sys.exit(str(exc.args[0]))
     for address in (args.ring_url, args.public_url):
-        parsed = urlsplit(address)
+        try:
+            parsed = urlsplit(address)
+            host = parsed.hostname
+        except ValueError:
+            sys.exit(f"malformed URL {address!r}")
         if (
             parsed.scheme != "http"
-            or parsed.hostname not in ("127.0.0.1", "localhost", "::1")
+            or host not in ("127.0.0.1", "localhost", "::1")
             or parsed.username
             or parsed.password
         ):
@@ -319,11 +323,14 @@ def _replay(args: argparse.Namespace) -> None:
                 time.sleep((step.offset_s - previous_offset) / args.speed)
                 at = day_start + timedelta(seconds=step.offset_s)
                 advance(api, at)
-                device_id = (
-                    seeded["camera"]
-                    if step.device is None
-                    else next(d["id"] for d in devices if step.device in (d["id"], d["name"]))
-                )
+                if step.device is None:
+                    device_id = seeded["camera"]
+                else:
+                    match = [d["id"] for d in devices if step.device in (d["id"], d["name"])]
+                    if not match:
+                        known = ", ".join(d["name"] for d in devices)
+                        sys.exit(f"scenario step names unknown device {step.device!r}; known: {known}")
+                    device_id = match[0]
                 response = sandbox.post(
                     "/_sandbox/events",
                     json={
@@ -541,12 +548,28 @@ def _demo(args: argparse.Namespace) -> None:
                 flush=True,
             )
         # Pre-issue a scoped family link on the record the worker disputed —
-        # the tour can hand the judge the family view in one click.
+        # the tour can hand the judge the family view in one click. The
+        # household's own (contradicting) account is appended too, so the
+        # showcase record is trilateral: camera vs worker vs household.
+        from .models import HouseholdStatementInput
+        from .reviews import ReviewService
+
         for v in store.visits():
             if any(
                 e.receipt.payload.get("actor", {}).get("role") == "worker" for e in store.reviews_for(v.id)
             ):
-                family_url = f"{app_url}/family/{engine.issue_family_link(v.id)}"
+                family_token = engine.issue_family_link(v.id)
+                ReviewService(store, engine.signer, engine.clock).household_statement(
+                    family_token,
+                    HouseholdStatementInput(
+                        perception="no_one_seen",
+                        statement=(
+                            "My mother was home all morning and says the doorbell "
+                            "never rang — nobody came to the door before ten."
+                        ),
+                    ),
+                )
+                family_url = f"{app_url}/family/{family_token}"
                 break
     finally:
         store.close()
@@ -589,6 +612,8 @@ def _demo(args: argparse.Namespace) -> None:
     print("  ever add — never rewrite.", flush=True)
     if family_url:
         print(f"  Family view, pre-issued on the disputed visit: {family_url}", flush=True)
+        print("    (carries camera vs worker vs household accounts — the family", flush=True)
+        print("     can add their own account from that page; it signs in verbatim)", flush=True)
         if sys.stdout.isatty():
             for line in _terminal_qr(family_url) or []:
                 print(f"    {line}", flush=True)
@@ -982,7 +1007,8 @@ def _digest(args: argparse.Namespace) -> None:
             f"signed {receipt.id} — {counts['visits_observed']} observed, "
             f"{counts['visits_no_observation']} no-observation, "
             f"{counts['visits_unmatched']} unmatched, "
-            f"{counts['worker_disputes']}/{counts['worker_statements']} worker disputes/statements"
+            f"{counts['worker_disputes']}/{counts['worker_statements']} worker disputes/statements, "
+            f"{counts.get('household_statements', 0)} household statement(s)"
             f"{resolved}"
         )
     finally:
@@ -1261,6 +1287,8 @@ def _explain(args: argparse.Namespace) -> None:
                 label = (
                     f"resolution: {rv['outcome'].replace('_', ' ')}"
                     if rv.get("kind") == "resolution"
+                    else f"household account: {rv.get('perception', '').replace('_', ' ')}"
+                    if rv.get("kind") == "household_account"
                     else rv.get("decision", "statement")
                 )
                 print(f"  rev {r.revision}: {label} — {actor.get('name', '?')} ({actor.get('role')})")

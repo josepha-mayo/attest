@@ -30,7 +30,7 @@ worker was honest.</div>
     {% else %}<span class="bad">&#10007; violated</span>{% endif %}
     <div class="muted small" style="margin-top:.5rem">
       {{ journal.pinned_heads }} signature-pinned heads · head <code>{{ journal.head[:12] }}…</code>
-      {% if journal.untracked_rows %}<br>{{ journal.untracked_rows }} rows predate journaling{% endif %}
+      {% if journal.untracked_rows %}<br>{{ journal.untracked_rows }} rows not covered by the journal — pre-journal data or written outside the pipeline{% endif %}
     </div>
   </div>
   <div class="card">
@@ -44,7 +44,7 @@ worker was honest.</div>
     <h3 style="margin-top:0">Delivery inbox</h3>
     {{ queue.get('pending', 0) }} pending · {{ queue.get('processing', 0) }} in flight ·
     {{ queue.get('failed', 0) }} failed
-    <div class="muted small" style="margin-top:.5rem">Failed deliveries requeue, never vanish.</div>
+    <div class="muted small" style="margin-top:.5rem">Failed deliveries requeue — kept until requeued or explicitly purged via retention.</div>
   </div>
 </div>
 
@@ -110,8 +110,9 @@ worker was honest.</div>
 
 <div class="card" style="margin-top:16px">
   <strong>What this page proves:</strong> the signed chain links, the mutation journal replays
-  cleanly, and every issued receipt pinned the journal head at signing — a store edited outside
-  the pipeline shows up here. <strong>What it doesn't prove:</strong> physical attendance,
+  cleanly, and issued receipts pin the journal head at signing — a store edited outside
+  the pipeline shows up here (receipts signed before pinning leave that one check uncovered).
+  <strong>What it doesn't prove:</strong> physical attendance,
   identity, or time worked — those are the records' own claims boundary, unchanged.
 </div>
 {% endblock %}

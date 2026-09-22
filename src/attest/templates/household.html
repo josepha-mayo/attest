@@ -30,6 +30,19 @@ h1{font-size:26px;line-height:1.25;margin-bottom:4px}
 .fact .k{color:var(--muted);min-width:150px;font-size:14px;padding-top:2px}
 .fact .v{font-size:15px}
 .quote{border-left:3px solid var(--warn);padding:8px 14px;margin:8px 0;font-style:italic;color:#4a3d28}
+.quote.household{border-left-color:#2563a8;color:#26374a}
+fieldset{border:0;padding:0;margin:0 0 14px}
+legend{font-size:14px;color:var(--muted);margin-bottom:8px}
+.choice{display:flex;align-items:flex-start;gap:9px;padding:9px 12px;border:1px solid var(--line);border-radius:9px;margin-bottom:8px;cursor:pointer;font-size:15px}
+.choice input{margin-top:4px}
+textarea{width:100%;font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:9px;resize:vertical}
+label.lab{display:block;font-size:14px;color:var(--muted);margin-bottom:6px}
+.btn{font:inherit;padding:11px 18px;border:0;border-radius:9px;background:#2563a8;color:#fff;cursor:pointer;font-weight:600}
+.btn:hover{background:#1d4f87}
+.note{font-size:13px;color:var(--quiet);margin-top:10px}
+.flash{padding:11px 14px;border-radius:9px;font-size:14px;margin-bottom:14px}
+.flash.ok{background:#e2f4ea;color:#175c38;border:1px solid #b8e2c9}
+.flash.err{background:#fbe9e7;color:#8c2f22;border:1px solid #f0c6bf}
 .timeline-card{padding:16px 8px 4px}
 .snap{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
 .snap img{width:100%;border-radius:8px;border:1px solid var(--line)}
@@ -132,6 +145,40 @@ a:focus-visible{outline:2px solid #2563a8;outline-offset:2px;border-radius:3px}
 </div>
 {% endif %}
 
+{% set household_reviews = reviews|selectattr("receipt.payload.actor.role", "equalto", "household")|list %}
+{% for hr in household_reviews %}
+{% set hp = hr.receipt.payload %}
+<div class="card">
+  <div class="small" style="color:var(--muted);margin-bottom:6px">In the household's words — {{ hp.review.perception.replace('_', ' ') }}</div>
+  <div class="quote household">&ldquo;{{ hp.review.statement }}&rdquo;</div>
+  <div class="small" style="color:var(--muted)">— household account via the family link, appended to the signed record. Self-reported; it doesn't change the camera's observations or the worker's account.</div>
+</div>
+{% endfor %}
+
+{% if via_link %}
+{% if statement_posted %}
+<div class="flash ok" role="status">Your account was added to the signed record — it now sits alongside the camera's observations and the worker's report. It can't be edited or removed.</div>
+{% elif statement_error %}
+<div class="flash err" role="alert">{{ statement_error }}</div>
+{% endif %}
+<div class="card">
+  <form method="post" action="{{ media_base }}/statement">
+    <fieldset>
+      <legend>What did you see or hear around this visit?</legend>
+      <label class="choice"><input type="radio" name="perception" value="saw_someone" required> <span><strong>Someone was there</strong> — you saw or heard a person at the door</span></label>
+      <label class="choice"><input type="radio" name="perception" value="no_one_seen"> <span><strong>No one was seen</strong> — as far as you know, nobody came</span></label>
+      <label class="choice"><input type="radio" name="perception" value="unsure"> <span><strong>Not sure</strong> — you can't say either way</span></label>
+    </fieldset>
+    <label class="lab" for="hh-statement">In your own words</label>
+    <textarea id="hh-statement" name="statement" rows="4" maxlength="2000" required
+      placeholder="What you saw, heard, or know — e.g. &ldquo;I was home and the doorbell never rang&rdquo; or &ldquo;My neighbor saw someone at 10:15&rdquo;."></textarea>
+    <div style="height:12px"></div>
+    <button class="btn" type="submit">Add your account to the record</button>
+    <p class="note">This is appended to the signed record as <strong>the household's own account</strong> — like the worker's statement, it's self-reported. It isn't proof on its own and never changes what the camera reported; a coordinator weighs all three separately. You can come back to this page until the link expires.</p>
+  </form>
+</div>
+{% endif %}
+
 {% if timeline %}
 <div class="card timeline-card">
 {% include "_timeline.html" %}
@@ -153,7 +200,7 @@ a:focus-visible{outline:2px solid #2563a8;outline-offset:2px;border-radius:3px}
 
 <div class="foot">
   <strong>What this record can and can't tell you.</strong>
-  The camera's report, the schedule, and the worker's account are kept separate — this page shows all three rather than picking one.
+  The camera's report, the schedule, the worker's account, and the household's account are kept separate — this page shows them side by side rather than picking one.
   A signature proves the record hasn't been altered since it was signed — not identity, attendance, or time worked.
   No reported activity is not proof nobody came.
   {% if receipt %}<br><br>Anyone can check this record without trusting us: ask the coordinator for the export pack and open it in a browser — it verifies itself.{% endif %}

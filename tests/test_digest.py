@@ -84,10 +84,21 @@ def test_period_digest_measures_the_dispute_loop_closing(engine, store, househol
     service.worker_review(token, ReviewInput(decision="dispute", statement="I was early."))
     service.resolve(visit.id, ResolutionInput(outcome="account_accepted", statement="Camera confirms."))
 
+    # the household's voice counts as its own kind — never inflating the
+    # worker's or the coordinator's signed numbers
+    from attest.models import HouseholdStatementInput
+
+    family = engine.issue_family_link(visit.id)
+    service.household_statement(
+        family, HouseholdStatementInput(perception="no_one_seen", statement="Nobody came.")
+    )
+
     receipt = engine.issue_period_digest(site, t0 - timedelta(hours=1), t0 + timedelta(hours=4))
     counts = receipt.payload["counts"]
     assert counts["worker_disputes"] == 1
     assert counts["coordinator_resolutions"] == 1
+    assert counts["household_statements"] == 1
+    assert counts["coordinator_statements"] == 0
     assert counts["records_resolved"] == 1
     assert counts["median_resolution_minutes"] is not None
     assert counts["median_resolution_minutes"] >= 0

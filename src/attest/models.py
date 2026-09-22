@@ -235,6 +235,17 @@ class ReviewInput(BaseModel):
         return self
 
 
+class HouseholdStatementInput(BaseModel):
+    """The household's own account of a visit — appended verbatim to the signed
+    review chain as a third voice. Self-reported like the worker's check-in:
+    the signature authenticates the record, never the speaker's presence."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    kind: Literal["household_account"] = "household_account"
+    perception: Literal["saw_someone", "no_one_seen", "unsure"]
+    statement: str = Field(min_length=1, max_length=2000)
+
+
 class ResolutionInput(BaseModel):
     """A coordinator's terminal conclusion over a worker stance — appended as a
     signed review, never an edit. The worker's statement stays in the chain;
@@ -250,10 +261,12 @@ class ReviewGrant(CheckinGrant):
 
 
 class FamilyGrant(BaseModel):
-    """Read-only scoped link to one visit's household view. Multi-use until
-    expiry — the family opens it like any link; revocation deletes the row.
-    The token is the authorization, so it stays out of logs and is stored
-    only as a hash, like every other grant."""
+    """Scoped link to one visit's household view — read plus household-account
+    append, multi-use until expiry. The family opens it like any link;
+    revocation deletes the row. Statements appended through it are signed
+    `role: "household"` entries and never consume the grant. The token is the
+    authorization, so it stays out of logs and is stored only as a hash, like
+    every other grant."""
 
     id: str
     token_hash: str

@@ -20,6 +20,7 @@ from fastapi import Path as PathParam
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.security import HTTPBasic
 from fastapi.templating import Jinja2Templates
+from pydantic import ValidationError
 from ring_sandbox import RingAPIError, RingClient, webhooks
 
 from . import ledger, retention
@@ -32,6 +33,7 @@ from .inbox import WebhookInbox
 from .ledger import Signer
 from .media import MediaStore
 from .models import (
+    HouseholdStatementInput,
     Receipt,
     ReplayTime,
     RequeueDeliveries,
@@ -416,36 +418,47 @@ def create_app(
     async def integrity(request: Request):
         """The self-audit surface — the same checks `attest status` runs,
         rendered for the coordinator: chain, journal, custody, coverage."""
-        receipts = store.receipts()
-        # Journal replay is O(rows) and holds the store lock — off the loop.
-        journal = await asyncio.to_thread(store.verify_journal)
-        chain = await asyncio.to_thread(ledger.verify_chain, receipts, public_key=signer.public_key_b64)
-        att_types: dict[str, dict] = {}
-        for r in receipts:
-            if ":" in r.visit_id:
-                rtype = r.payload.get("record_type") or "record"
-                slot = att_types.setdefault(rtype, {"count": 0, "latest": None})
-                slot["count"] += 1
-                if slot["latest"] is None or r.issued_at > slot["latest"]:
-                    slot["latest"] = r.issued_at
+
+        def gather() -> dict:
+            # Every read holds the store lock — collect once, off the loop.
+            receipts = store.receipts()
+            att_types: dict[str, dict] = {}
+            for r in receipts:
+                if ":" in r.visit_id:
+                    rtype = r.payload.get("record_type") or "record"
+                    slot = att_types.setdefault(rtype, {"count": 0, "latest": None})
+                    slot["count"] += 1
+                    if slot["latest"] is None or r.issued_at > slot["latest"]:
+                        slot["latest"] = r.issued_at
+            return {
+                "stats": store.stats(),
+                "journal": store.verify_journal(),
+                "chain": ledger.verify_chain(receipts, public_key=signer.public_key_b64),
+                "attestations": att_types,
+                "poll": {
+                    sid: {
+                        "count": p["count"],
+                        "last": datetime.fromisoformat(p["last"]) if p["last"] else None,
+                    }
+                    for sid, p in store.poll_coverage_by_site().items()
+                },
+                "sites": {x.id: x for x in store.sites()},
+                "queue": inbox.counts(),
+                "mode": (store.setting("execution_mode") or {}).get("mode", "wall"),
+            }
+
+        data = await asyncio.to_thread(gather)
         return render(
             request,
             "integrity.html",
-            stats=await asyncio.to_thread(store.stats),
-            journal=journal,
-            chain=chain,
-            attestations=att_types,
-            poll=store.poll_coverage_by_site(),
-            sites={x.id: x for x in store.sites()},
-            queue=inbox.counts(),
             custody=(
-                f"AWS KMS envelope — unwrap audited (key …{s.kms_key_id[-8:]})"
+                f"AWS KMS envelope — unwrap audited (key {s.kms_key_id})"
                 if s.kms_key_id
                 else "local key file — plaintext at rest"
             ),
-            mode=(store.setting("execution_mode") or {}).get("mode", "wall"),
             issuer=signer.public_key_b64,
-            healthy=journal["intact"] and chain[0],
+            healthy=data["journal"]["intact"] and data["chain"][0],
+            **data,
         )
 
     @app.get("/visits/{visit_id}", response_class=HTMLResponse)
@@ -495,7 +508,13 @@ def create_app(
             late_count=len(late),
         )
 
-    def _household_render(request: Request, v: Visit, media_base: str, via_link: bool = False):
+    def _household_render(
+        request: Request,
+        v: Visit,
+        media_base: str,
+        via_link: bool = False,
+        **extra,
+    ):
         """Shared context for the coordinator's /visits/{id}/household and the
         scoped /family/{token} view — same record, same honesty constraints."""
         receipt = store.receipt_for_visit(v.id)
@@ -542,6 +561,7 @@ def create_app(
             coverage=cov,
             media_base=media_base,
             via_link=via_link,
+            **extra,
         )
 
     @app.get("/visits/{visit_id}/household", response_class=HTMLResponse)
@@ -560,7 +580,7 @@ def create_app(
 
     @app.post("/api/visits/{visit_id}/family-link")
     async def issue_family_link(visit_id: str = PathParam(max_length=128)):
-        """Issue a scoped read-only link to the household view — the coordinator
+        """Issue a scoped view+statement link to the household view — the coordinator
         texts it to the family; the token is the authorization (hashed at rest,
         expires in 7 days, revocable by deleting the grant)."""
         try:
@@ -575,6 +595,32 @@ def create_app(
         if visit is None:
             return _dead_link(request, "family view")
         return _household_render(request, visit, f"/family/{token}", via_link=True)
+
+    @app.post("/family/{token}/statement", response_class=HTMLResponse)
+    async def family_statement(request: Request, token: str = PathParam(max_length=128)):
+        """The household's own account, appended verbatim to the signed chain —
+        the family link stays view+append (never edit), multi-use until expiry."""
+        visit = await action(engine.family_target, token)
+        if visit is None:
+            return _dead_link(request, "family view")
+        try:
+            data = HouseholdStatementInput.model_validate(dict(await request.form()))
+        except ValidationError:
+            return _household_render(
+                request,
+                visit,
+                f"/family/{token}",
+                via_link=True,
+                statement_error=(
+                    "Your account needs both parts — pick what happened and "
+                    "write it in your own words (2000 characters max)."
+                ),
+            )
+        try:
+            await action(reviews.household_statement, token, data)
+        except ValueError:
+            return _dead_link(request, "family view")
+        return _household_render(request, visit, f"/family/{token}", via_link=True, statement_posted=True)
 
     @app.get("/family/{token}/media/{name}")
     async def family_media(token: str = PathParam(max_length=128), name: str = PathParam(max_length=255)):

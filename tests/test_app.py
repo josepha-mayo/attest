@@ -377,7 +377,7 @@ def test_link_qr_encodes_worker_paths_only(api):
     assert api.get("/qr.svg", params={"target": "/api/state"}).status_code == 400
 
 
-def test_family_link_is_scoped_read_only_access(api, store, household, t0):
+def test_family_link_is_scoped_view_access(api, store, household, t0):
     """A scoped family link opens the household view without admin auth —
     multi-use until expiry, and the admin 'Full record' link stays hidden."""
     _post_hook(api, household[2].id, "button_press", t0)
@@ -405,6 +405,155 @@ def test_family_link_is_scoped_read_only_access(api, store, household, t0):
 
     # the QR helper encodes family paths too
     assert api.get("/qr.svg", params={"target": path}).status_code == 200
+
+
+def test_family_statement_appends_the_households_voice(api, store, household, t0):
+    """The family link is read+append: the household's account joins the signed
+    chain verbatim as a third voice — without consuming the link, altering the
+    worker/coordinator stance, or claiming to verify anyone's presence."""
+    from attest.reviews import ReviewService, verify_bundle
+
+    _post_hook(api, household[2].id, "button_press", t0)
+    visit = store.active_visit(household[0].id)
+    assert api.post(f"/api/visits/{visit.id}/close").status_code == 200
+    path = api.post(f"/api/visits/{visit.id}/family-link").json()["path"]
+
+    # the page offers the form only through the scoped link, with honest framing
+    page = api.get(path, auth=None)
+    assert 'name="perception"' in page.text and "/statement" in page.text
+    assert "isn't proof on its own" in page.text
+    admin_view = api.get(f"/visits/{visit.id}/household")
+    assert admin_view.status_code == 200 and 'name="perception"' not in admin_view.text
+
+    posted = api.post(
+        f"{path}/statement",
+        auth=None,
+        data={"perception": "saw_someone", "statement": "I saw a courier at 10:15, not our aide."},
+    )
+    assert posted.status_code == 200
+    assert "Your account was added to the signed record" in posted.text
+    assert "I saw a courier at 10:15" in posted.text  # echoed back verbatim in the chain
+
+    # multi-use: the link still opens after appending
+    again = api.get(path, auth=None)
+    assert again.status_code == 200 and "household's words" in again.text
+
+    # the signed entry carries the honest actor metadata
+    bundle = api.get(f"/visits/{visit.id}/bundle.json").json()
+    entry = bundle["reviews"][-1]["receipt"]["payload"]
+    assert entry["record_type"] == "review"
+    assert entry["actor"]["role"] == "household"
+    assert entry["actor"]["authentication"] == "family_link"
+    assert entry["actor"]["identity_verified"] is False
+    assert entry["review"]["kind"] == "household_account"
+    assert entry["review"]["perception"] == "saw_someone"
+    assert entry["independently_verified_attendance"] is False
+
+    # a second statement appends a new revision — nothing is edited in place
+    api.post(
+        f"{path}/statement",
+        auth=None,
+        data={"perception": "unsure", "statement": "Actually it may have been later."},
+    )
+    bundle = api.get(f"/visits/{visit.id}/bundle.json").json()
+    roles = [r["receipt"]["payload"]["actor"]["role"] for r in bundle["reviews"]]
+    assert roles == ["household", "household"]
+    assert bundle["reviews"][1]["revision"] == 2
+
+    # the household voice never shifts the worker/coordinator derivation
+    svc = ReviewService(store, api.attest_state.signer, api.attest_state.engine.clock)
+    assert svc.countersign(visit.id)["state"] == "unrequested"
+    assert verify_bundle(svc.bundle(visit.id), public_key=api.attest_state.signer.public_key_b64)[0]
+
+
+def test_family_statement_rejects_bad_input_and_dead_tokens(api, store, household, t0):
+    _post_hook(api, household[2].id, "button_press", t0)
+    visit = store.active_visit(household[0].id)
+    assert api.post(f"/api/visits/{visit.id}/close").status_code == 200
+    path = api.post(f"/api/visits/{visit.id}/family-link").json()["path"]
+
+    # missing fields / a smuggled extra field re-render the form with an error,
+    # never a raw JSON 422 and never a partial append
+    r = api.post(f"{path}/statement", auth=None, data={"statement": "no perception picked"})
+    assert r.status_code == 200 and "needs both parts" in r.text
+    r = api.post(
+        f"{path}/statement",
+        auth=None,
+        data={"perception": "unsure", "statement": "x", "role": "coordinator"},
+    )
+    assert r.status_code == 200 and "needs both parts" in r.text
+    bundle = api.get(f"/visits/{visit.id}/bundle.json").json()
+    assert bundle["reviews"] == []
+
+    # unknown token → styled dead link on both GET and POST
+    dead = "z" * 40
+    r = api.post(f"/family/{dead}/statement", auth=None, data={})
+    assert r.status_code == 404 and "invalid or expired" in r.text
+
+    # a worker-link token is not a family token — the grant tables stay separate
+    worker_link = api.post(f"/api/visits/{visit.id}/review-link").json()["path"]
+    worker_token = worker_link.rsplit("/", 1)[-1]
+    r = api.post(
+        f"/family/{worker_token}/statement",
+        auth=None,
+        data={"perception": "unsure", "statement": "x"},
+    )
+    assert r.status_code == 404 and "invalid or expired" in r.text
+
+    # expired family link → dead link on GET and POST
+    import hashlib
+    from datetime import timedelta as _td
+
+    from attest.models import utcnow
+
+    token = path.rsplit("/", 1)[-1]
+    grant = store.family_grant(hashlib.sha256(token.encode()).hexdigest())
+    grant.expires_at = utcnow() - _td(seconds=1)
+    store.put_family_grant(grant)
+    assert api.get(path, auth=None).status_code == 404
+    r = api.post(
+        f"{path}/statement",
+        auth=None,
+        data={"perception": "unsure", "statement": "x"},
+    )
+    assert r.status_code == 404 and "invalid or expired" in r.text
+
+
+def test_household_voice_coexists_with_worker_dispute(api, store, household, t0):
+    """Three voices, one chain: worker dispute + household account + resolution
+    all verify, and the derivation still reads worker/coordinator only."""
+    from attest.reviews import ReviewService, verify_bundle
+
+    _post_hook(api, household[2].id, "button_press", t0)
+    visit = store.active_visit(household[0].id)
+    assert api.post(f"/api/visits/{visit.id}/close").status_code == 200
+    worker_link = api.post(f"/api/visits/{visit.id}/review-link").json()["path"]
+    api.post(worker_link, auth=None, data={"decision": "dispute", "statement": "I was there."})
+    family = api.post(f"/api/visits/{visit.id}/family-link").json()["path"]
+    api.post(
+        f"{family}/statement",
+        auth=None,
+        data={"perception": "no_one_seen", "statement": "Nobody knocked that morning."},
+    )
+    api.post(
+        f"/api/visits/{visit.id}/resolve",
+        json={"outcome": "inconclusive", "statement": "Accounts conflict; camera is inconclusive."},
+    )
+
+    svc = ReviewService(store, api.attest_state.signer, api.attest_state.engine.clock)
+    bundle = svc.bundle(visit.id)
+    assert verify_bundle(bundle, public_key=api.attest_state.signer.public_key_b64)[0]
+    roles = [r.receipt.payload["actor"]["role"] for r in bundle.reviews]
+    assert roles == ["worker", "household", "coordinator"]
+    # derivation: household did not reopen or soften the worker's dispute; the
+    # coordinator's resolution still owns the terminal state
+    assert svc.countersign(visit.id)["state"] == "resolved"
+
+    page = api.get(f"/visits/{visit.id}/household")
+    assert "Nobody knocked that morning." in page.text
+    assert "household account" in page.text
+    coordinator = api.get(f"/visits/{visit.id}")
+    assert "household account — no one seen" in coordinator.text
 
 
 def test_setup_forms_discover_create_and_cancel_without_cli(api, store, ring_world, t0):

@@ -1,5 +1,6 @@
 import json
 import sys
+from datetime import timedelta
 
 import pytest
 from ring_sandbox import WebhookEvent, webhooks
@@ -72,6 +73,56 @@ def test_resolved_record_leaves_the_queue(case):
     reviews.worker_review(token, ReviewInput(decision="dispute", statement="Not my visit."))
     assert any(i["visit"].id == visit.id for i in attention_items(store, reviews))
     reviews.resolve(visit.id, ResolutionInput(outcome="record_upheld", statement="Record stands."))
+    assert all(i["visit"].id != visit.id for i in attention_items(store, reviews))
+
+
+def test_contradicting_household_account_queues_for_review(store, engine, household, t0):
+    """The household's word vs the camera is exactly the disagreement the
+    product exists for — queue it for a human, never adjudicate it. Agreeing
+    or unsure accounts stay informational."""
+    from attest.models import HouseholdStatementInput
+
+    site = household[0]
+    visit = Visit(
+        site_id=site.id,
+        state=VisitState.CLOSED,
+        arrived_at=t0,
+        last_activity_at=t0 + timedelta(hours=1),
+        flags=[
+            Flag(
+                code="departure_unconfirmed",
+                severity="warn",
+                message="Record closed for review",
+            )
+        ],
+    )
+    store.put_visit(visit)
+    receipt = engine.signer.issue(
+        visit_id=visit.id, sequence=1, prev_hash=None, facts={"record_type": "visit"}
+    )
+    store.put_receipt(receipt)
+    visit.receipt_id = receipt.id
+    store.put_visit(visit)
+    reviews = ReviewService(store, engine.signer, engine.clock)
+
+    token = engine.issue_family_link(visit.id)
+    reviews.household_statement(
+        token, HouseholdStatementInput(perception="saw_someone", statement="Someone knocked.")
+    )
+    # camera observed + household saw someone → corroborating, not queued
+    assert all(i["visit"].id != visit.id for i in attention_items(store, reviews))
+
+    reviews.household_statement(
+        token,
+        HouseholdStatementInput(perception="no_one_seen", statement="Actually, nobody came."),
+    )
+    items = attention_items(store, reviews)
+    queued = [i for i in items if i["visit"].id == visit.id]
+    assert queued and queued[0]["level"] == "warn"
+    assert "household" in queued[0]["why"]
+
+    # a coordinator conclusion still clears the queue
+    reviews.resolve(visit.id, ResolutionInput(outcome="inconclusive", statement="Cannot reconcile."))
     assert all(i["visit"].id != visit.id for i in attention_items(store, reviews))
 
 

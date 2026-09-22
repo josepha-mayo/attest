@@ -72,7 +72,8 @@ async function signDigest() {
   box.innerHTML = 'Signed <code>' + receipt.id + '</code> — ' + c.visits_observed +
     ' observed, ' + c.visits_no_observation + ' no-observation, ' + c.visits_unmatched +
     ' unmatched, ' + c.worker_disputes + '/' + c.worker_statements +
-    ' worker disputes/statements. Counts of records, not physical presence.';
+    ' worker disputes/statements, ' + (c.household_statements || 0) +
+    ' household statement(s). Counts of records, not physical presence.';
 }
 async function disconnectSource() {
   if (!confirm('Disconnect this Ring source? Ingestion and polling stop; the ' +
