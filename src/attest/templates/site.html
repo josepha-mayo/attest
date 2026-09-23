@@ -124,6 +124,24 @@ async function disconnectSource() {
 </div>
 {% endif %}
 
+{% if coverage_events %}
+<h2>Ring lifecycle events</h2>
+<div class="card">
+  <p class="small muted" style="margin-top:0">Signed-channel facts that explain observation coverage — a camera offline or a subscription ending says *why* events stopped; it never says nobody came.</p>
+  <table>
+    <tbody>
+    {% for e in coverage_events %}
+      <tr>
+        <td class="small muted">{{ t(e.at) }}</td>
+        <td><span class="pill {{ 'warn' if e.interrupts else 'ok' }}">{{ e.kind.replace("_"," ") }}</span></td>
+        <td class="small muted">{{ e.device_id or "whole account" }}{% if e.detail.plan_id %} · plan {{ e.detail.plan_id }}{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
 <h2>Visit records</h2>
 <div class="card table-wrap" style="padding:0">
 <table>

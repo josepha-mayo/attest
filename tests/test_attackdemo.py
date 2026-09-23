@@ -14,6 +14,16 @@ def seeded(engine, store, household, schedule, t0):
         )
     )
     visit = engine.ingest(event).visit
+    # A lifecycle row too — the retimestamp attack needs one to edit.
+    engine.ingest(
+        WebhookEvent.model_validate(
+            webhooks.build_event(
+                event_type="device_offline",
+                device_id=household[2].id,
+                occurred_at=t0,
+            )
+        )
+    )
     engine.close_for_review(visit.id)
     return visit
 

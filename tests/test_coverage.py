@@ -2,7 +2,7 @@ import json
 from datetime import timedelta
 
 from attest.coverage import coverage_report
-from attest.models import PollObservation, Schedule
+from attest.models import CoverageEvent, CoverageEventKind, PollObservation, Schedule
 
 
 def _obs(store, device, polled_at, since, ok=True, events=0):
@@ -17,6 +17,12 @@ def _obs(store, device, polled_at, since, ok=True, events=0):
     )
     store.put_poll_observation(o)
     return o
+
+
+def _cov(store, site_id, device, at, kind, detail=None):
+    ev = CoverageEvent(site_id=site_id, device_id=device, at=at, kind=kind, detail=detail or {})
+    store.put_coverage_event(ev)
+    return ev
 
 
 def test_no_polls_means_no_claim(store, t0):
@@ -60,6 +66,113 @@ def test_other_devices_polls_do_not_count(store, t0):
     _obs(store, "other-cam", t0 + timedelta(hours=2), t0)
     report = coverage_report(store, "cam1", t0, t0 + timedelta(hours=1), now=t0 + timedelta(hours=3))
     assert report["state"] == "no_polls"
+
+
+def test_lifecycle_interruption_explains_a_gap(store, household, t0):
+    """A poll gap overlapping a signed-channel interruption reads explained —
+    silence with a recorded cause on file, still never proof of absence."""
+    site, _worker, cam, _sensor = household
+    _obs(store, cam.id, t0 + timedelta(minutes=20), t0 - timedelta(minutes=10))
+    _obs(store, cam.id, t0 + timedelta(hours=2), t0 + timedelta(minutes=50))
+    _cov(store, site.id, cam.id, t0 + timedelta(minutes=25), CoverageEventKind.DEVICE_OFFLINE)
+    _cov(store, site.id, cam.id, t0 + timedelta(minutes=45), CoverageEventKind.DEVICE_ONLINE)
+
+    report = coverage_report(
+        store, cam.id, t0, t0 + timedelta(hours=1), now=t0 + timedelta(hours=3), site_id=site.id
+    )
+    assert report["state"] == "partial" and len(report["gaps"]) == 1
+    gap = report["gaps"][0]
+    assert gap["explained"] is True
+    assert gap["explained_by"][0]["kind"] == "device_offline"
+    assert gap["explained_by"][0]["restored_by"] == "device_online"
+    assert [i["kind"] for i in report["interruptions"]] == ["device_offline", "device_online"]
+
+
+def test_unclosed_interruption_explains_silence_through_window_end(store, household, t0):
+    """A camera that never comes back online leaves an open-ended explanation —
+    the gap stays explained to the window edge, without claiming a restore."""
+    site, _worker, cam, _sensor = household
+    _obs(store, cam.id, t0 + timedelta(minutes=20), t0 - timedelta(minutes=10))
+    _cov(store, site.id, cam.id, t0 + timedelta(minutes=25), CoverageEventKind.DEVICE_OFFLINE)
+
+    report = coverage_report(
+        store, cam.id, t0, t0 + timedelta(hours=1), now=t0 + timedelta(hours=3), site_id=site.id
+    )
+    gap = report["gaps"][0]
+    assert gap["explained"] is True and gap["explained_by"][0]["restored_by"] is None
+
+
+def test_other_channels_lifecycle_does_not_explain(store, household, t0):
+    """Explanations are channel-scoped: the door sensor going dark says nothing
+    about why the camera's history went unpolled — the event is still listed
+    as site context, just never as the gap's cause."""
+    site, _worker, cam, sensor = household
+    _obs(store, cam.id, t0 + timedelta(minutes=20), t0 - timedelta(minutes=10))
+    _obs(store, cam.id, t0 + timedelta(hours=2), t0 + timedelta(minutes=50))
+    _cov(store, site.id, sensor.id, t0 + timedelta(minutes=25), CoverageEventKind.DEVICE_OFFLINE)
+
+    report = coverage_report(
+        store, cam.id, t0, t0 + timedelta(hours=1), now=t0 + timedelta(hours=3), site_id=site.id
+    )
+    assert "explained" not in report["gaps"][0]
+    assert [i["kind"] for i in report["interruptions"]] == ["device_offline"]
+
+
+def test_account_scoped_event_explains_every_device(store, household, t0):
+    """An unlink/subscription event names the account, not a device — it can
+    explain silence on any channel of the site."""
+    site, _worker, cam, _sensor = household
+    _obs(store, cam.id, t0 + timedelta(minutes=20), t0 - timedelta(minutes=10))
+    _obs(store, cam.id, t0 + timedelta(hours=2), t0 + timedelta(minutes=50))
+    _cov(store, site.id, None, t0 + timedelta(minutes=25), CoverageEventKind.APP_INTEGRATION_REMOVED)
+
+    report = coverage_report(
+        store, cam.id, t0, t0 + timedelta(hours=1), now=t0 + timedelta(hours=3), site_id=site.id
+    )
+    assert report["gaps"][0]["explained"] is True
+    assert report["gaps"][0]["explained_by"][0]["device_id"] is None
+
+
+def test_report_without_site_id_omits_lifecycle(store, household, t0):
+    """Without site context the report stays poll-only — lifecycle rows exist
+    but are not folded in, and gaps carry no explanation."""
+    site, _worker, cam, _sensor = household
+    _obs(store, cam.id, t0 + timedelta(minutes=20), t0 - timedelta(minutes=10))
+    _cov(store, site.id, cam.id, t0 + timedelta(minutes=25), CoverageEventKind.DEVICE_OFFLINE)
+
+    report = coverage_report(store, cam.id, t0, t0 + timedelta(hours=1), now=t0 + timedelta(hours=3))
+    assert "interruptions" not in report
+    assert "explained" not in report["gaps"][0]
+
+
+def test_receipt_coverage_carries_signed_interruptions(engine, store, household, schedule, t0):
+    """The lifecycle rows land inside the signed payload — purging the raw
+    coverage_events table can't take the explanation with it."""
+    from attest.ledger import verify_receipt
+
+    site, _worker, cam, _sensor = household
+    engine.ingest(_cam_ev(cam.id, "motion_detected", t0 + timedelta(minutes=2), "human"))
+    engine.ingest(_cam_ev(cam.id, "device_offline", t0 + timedelta(minutes=30)))
+    engine.ingest(_cam_ev(cam.id, "device_online", t0 + timedelta(minutes=45)))
+    engine.ingest(_cam_ev(cam.id, "motion_detected", t0 + timedelta(minutes=50), "human"))
+
+    visit = store.active_visit(site.id)
+    engine.close_for_review(visit.id)
+    receipt = store.receipt_for_visit(visit.id)
+    cov = receipt.payload["history_poll_coverage"]
+    assert [i["kind"] for i in cov["interruptions"]] == ["device_offline", "device_online"]
+    # Departure was never observed, so the signed window extends to the
+    # schedule's end — "could we have seen them leave?" not just "the last event".
+    assert cov["window"]["end"] == (t0 + timedelta(hours=1)).isoformat()
+    assert verify_receipt(receipt, public_key=engine.signer.public_key_b64)[0]
+
+
+def _cam_ev(device_id, etype, at, sub=None):
+    from ring_sandbox import WebhookEvent, webhooks
+
+    return WebhookEvent.model_validate(
+        webhooks.build_event(event_type=etype, device_id=device_id, occurred_at=at, sub_type=sub)
+    )
 
 
 def test_receipt_carries_signed_coverage(engine, store, household, schedule, t0):

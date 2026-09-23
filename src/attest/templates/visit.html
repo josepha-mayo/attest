@@ -262,7 +262,23 @@ document.getElementById('coordinator-resolve').onsubmit = async event => {
 {% if cov.gaps %}
 <div class="small" style="margin-top:8px">
   <span class="flag warn">coverage gap</span>
-  {% for g in cov.gaps %}<div class="muted">{{ g.start[11:19] }} – {{ g.end[11:19] }} UTC not watched by any successful poll</div>{% endfor %}
+  {% for g in cov.gaps %}
+    {% if g.explained %}
+      <div class="muted">{{ g.start[11:19] }} – {{ g.end[11:19] }} UTC not watched — <span class="ok">explained</span>:
+        {% for w in g.explained_by %}Ring reported <b>{{ w.kind.replace("_", " ") }}</b>{% if w.device_id %} ({{ w.device_id }}){% endif %}{% if w.restored_by %}, restored by {{ w.restored_by.replace("_", " ") }}{% else %}, never restored in window{% endif %}{{ "; " if not loop.last }}{% endfor %}
+      </div>
+    {% else %}
+      <div class="muted">{{ g.start[11:19] }} – {{ g.end[11:19] }} UTC not watched by any successful poll</div>
+    {% endif %}
+  {% endfor %}
+</div>
+{% endif %}
+{% if cov.interruptions %}
+<div class="small muted" style="margin-top:8px">
+  Ring lifecycle events in this window:
+  {% for i in cov.interruptions %}
+    <div>{{ i.at[11:19] }} UTC — {{ i.kind.replace("_", " ") }}{% if i.device_id %} ({{ i.device_id }}){% endif %}{% if i.detail.plan_id %} · plan {{ i.detail.plan_id }}{% endif %}</div>
+  {% endfor %}
 </div>
 {% endif %}
 </div>

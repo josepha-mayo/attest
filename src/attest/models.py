@@ -60,6 +60,48 @@ class PollObservation(BaseModel):
     error: str | None = Field(default=None, max_length=200)
 
 
+class CoverageEventKind(StrEnum):
+    """Ring lifecycle events that explain (or restore) observation coverage."""
+
+    DEVICE_OFFLINE = "device_offline"
+    DEVICE_ONLINE = "device_online"
+    DEVICE_ADDED = "device_added"
+    DEVICE_REMOVED = "device_removed"
+    SUBSCRIPTION_ACTIVATED = "subscription_activated"
+    SUBSCRIPTION_DEACTIVATED = "subscription_deactivated"
+    APP_INTEGRATION_ADDED = "app_integration_added"
+    APP_INTEGRATION_REMOVED = "app_integration_removed"
+
+
+# Kinds that interrupt observation; anything else in CoverageEventKind restores it.
+COVERAGE_INTERRUPTING = {
+    CoverageEventKind.DEVICE_OFFLINE,
+    CoverageEventKind.DEVICE_REMOVED,
+    CoverageEventKind.SUBSCRIPTION_DEACTIVATED,
+    CoverageEventKind.APP_INTEGRATION_REMOVED,
+}
+
+
+class CoverageEvent(BaseModel):
+    """A signed-channel lifecycle event explaining why observation stopped or resumed.
+
+    Silence is never absence — but a recorded reason for silence is stronger than an
+    unexplained gap. Raw evidence like poll rows: the signed coverage payloads copy
+    the relevant entries in, so these rows stay retention-purgeable."""
+
+    id: str = Field(default_factory=lambda: _id("cov"))
+    site_id: str
+    device_id: str | None = None  # None for account-scoped app_integration_* events
+    at: AwareDatetime
+    kind: CoverageEventKind
+    ring_request_id: str | None = None
+    detail: dict[str, str] = Field(default_factory=dict)  # e.g. plan_id, expires_at
+
+    @property
+    def interrupts(self) -> bool:
+        return self.kind in COVERAGE_INTERRUPTING
+
+
 class Site(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
     id: str = Field(default_factory=lambda: _id("site"), pattern=r"^[A-Za-z0-9_-]{1,80}$")

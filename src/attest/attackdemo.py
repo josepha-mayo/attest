@@ -149,6 +149,21 @@ def run(store: Store) -> dict:
 
     results.append(_attempt(store, "insert a row out-of-band (bypass the journal)", out_of_band))
 
+    def retimestamp_coverage() -> tuple[bool, str]:
+        """Slide a lifecycle event's denormalized `at` column — the signed body
+        is untouched, but which coverage gaps look 'explained' changes."""
+        row = store._conn.execute("SELECT id FROM coverage_events LIMIT 1").fetchone()
+        if not row:
+            return False, "no coverage events to retimestamp"
+        store._conn.execute("UPDATE coverage_events SET at='1999-01-01T00:00:00+00:00' WHERE id=?", (row[0],))
+        report = store.verify_journal()
+        hit = next((m for m in report["mismatches"] if "index column" in m), None)
+        return bool(hit), hit or "journal did not flag the column edit"
+
+    results.append(
+        _attempt(store, "retimestamp a lifecycle row's index column (re-explain a gap)", retimestamp_coverage)
+    )
+
     after = store.verify_journal()
     out = {
         "results": results,

@@ -211,6 +211,68 @@ def test_replay_story_cycles_patterns_and_survives_late_events(tmp_path):
                 assert cov["events"] == 0 and cov["gaps"] == []
 
 
+def test_replay_blackout_day_signs_the_lifecycle_explanation(tmp_path):
+    """The 'blackout' story day drops the camera mid-visit: arrival is observed,
+    departure never is — and the signed coverage must carry the device_offline/
+    device_online rows so the quiet span reads explained, not absent."""
+    token = secrets.token_urlsafe(32)
+    with serve(sandbox_app()) as ring_url:
+        settings = Settings(
+            _env_file=None,
+            admin_token=token,
+            replay_mode=True,
+            data_dir=tmp_path,
+            ring_base_url=ring_url,
+            timezone="UTC",
+            summarizer="template",
+        )
+        app = create_app(settings)
+        with serve(app) as app_url:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "attest.cli",
+                    "replay",
+                    "home_aide_visit",
+                    "--days",
+                    "1",
+                    "--story",
+                    "blackout",
+                    "--speed",
+                    "100000",
+                    "--ring-url",
+                    ring_url,
+                    "--public-url",
+                    app_url,
+                ],
+                env={
+                    **os.environ,
+                    "ATTEST_ADMIN_TOKEN": token,
+                    "ATTEST_REPLAY_MODE": "true",
+                    "ATTEST_RING_BASE_URL": ring_url,
+                    "ATTEST_SUMMARIZER": "template",
+                },
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert "camera drops offline mid-visit" in result.stdout
+            with httpx.Client(base_url=app_url, auth=("admin", token)) as client:
+                receipts = [Receipt.model_validate(r) for r in client.get("/receipts.json").json()]
+                assert len(receipts) == 1
+                assert verify_chain(receipts, public_key=app.state.signer.public_key_b64)[0]
+                cov = receipts[0].payload["history_poll_coverage"]
+                kinds = [i["kind"] for i in cov["interruptions"]]
+                assert kinds == ["device_offline", "device_online"], cov
+                # The departure was never observed — the signed window extends
+                # past the last event, so the interruption lands inside it.
+                assert cov["window"]["end"] > receipts[0].payload["last_observed_at"]
+                page = client.get(f"/visits/{receipts[0].visit_id}").text
+                assert "device offline" in page
+
+
 def test_replay_late_day_produces_source_divergence(tmp_path):
     """The 'late' story day defers the worker check-in ~65 min past the
     camera's first observation — the corroboration panel must surface the

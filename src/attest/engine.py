@@ -33,6 +33,8 @@ from .ledger import Signer
 from .media import MediaStore
 from .models import (
     CheckinGrant,
+    CoverageEvent,
+    CoverageEventKind,
     Evidence,
     EvidenceKind,
     FamilyGrant,
@@ -50,6 +52,20 @@ from .summarize import Summarizer
 log = logging.getLogger("attest.engine")
 
 _ARRIVAL_MOTION = {"human"}
+# Device-scoped lifecycle events recorded as coverage events — they explain why
+# observation stopped or resumed, they are never visit cues.
+_COVERAGE_DEVICE_EVENTS = {
+    "device_offline",
+    "device_online",
+    "device_added",
+    "device_removed",
+    "subscription_activated",
+    "subscription_deactivated",
+}
+_COVERAGE_ACCOUNT_EVENTS = {
+    CoverageEventKind.APP_INTEGRATION_ADDED,
+    CoverageEventKind.APP_INTEGRATION_REMOVED,
+}
 _DEPART_AFTER_DOOR_CLOSE = timedelta(minutes=2)
 _MIN_VISIT = timedelta(minutes=3)
 
@@ -82,6 +98,10 @@ class VisitEngine:
         if source not in ("webhook", "history"):
             raise ValueError("invalid ingestion source")
         ev = ev.model_copy(update={"meta": ev.meta.model_copy(update={"ingest_source": source})})
+        # Account-scoped lifecycle events name the account, not a device, as
+        # their source — they route to every site bound to that Ring account.
+        if ev.data.attributes.source_type == "accounts":
+            return self._on_account_event(ev, source)
         site = self.store.site_for_device(ev.device_id)
         if site is None:
             return Outcome(ignored_reason=f"device {ev.device_id} not bound to a site")
@@ -102,6 +122,25 @@ class VisitEngine:
             raise ValueError("event timestamp is in the future")
         is_camera = ev.device_id == site.door_camera_id
         et, sub = ev.event_type, ev.sub_type
+        if et in _COVERAGE_DEVICE_EVENTS:
+            # A lifecycle fact, not a visit cue: record it as coverage evidence
+            # (explains observation gaps) regardless of visit state.
+            detail: dict[str, str] = {}
+            if ev.data.attributes.plan_id:
+                detail["plan_id"] = ev.data.attributes.plan_id
+            if ev.data.attributes.expires_at:
+                detail["expires_at"] = ev.data.attributes.expires_at.isoformat()
+            self.store.put_coverage_event(
+                CoverageEvent(
+                    site_id=site.id,
+                    device_id=ev.device_id,
+                    at=at,
+                    kind=CoverageEventKind(et),
+                    ring_request_id=ev.request_id if source == "webhook" else None,
+                    detail=detail,
+                )
+            )
+            return Outcome(ignored_reason=None)
         recent = self.store.visits(site_id=site.id, limit=1)
         if recent and (
             at < recent[0].last_activity_at
@@ -134,6 +173,44 @@ class VisitEngine:
             self._touch(visit, at)
             return Outcome(visit, ["activity"])
         return Outcome(ignored_reason=f"{et}/{sub} not used by the visit engine")
+
+    def _on_account_event(self, ev: WebhookEvent, source: str) -> Outcome:
+        """Record an account-scoped lifecycle event (``app_integration_added`` /
+        ``app_integration_removed``) as a coverage event on every still-bound site
+        of that Ring account. An unlink does not disconnect sites — that stays an
+        explicit operator action — it records why observation stopped."""
+        et = ev.event_type
+        if et not in _COVERAGE_ACCOUNT_EVENTS:
+            return Outcome(ignored_reason=f"account-scoped {et} not used by the visit engine")
+        sites = self.store.sites_for_account(ev.meta.account_id or "")
+        if not sites:
+            return Outcome(ignored_reason=f"account {ev.meta.account_id} has no sites")
+        at = ev.occurred_at
+        if self.clock.replay and at > self.clock.now():
+            raise ValueError("advance the replay clock before submitting this event")
+        if at > utcnow() + timedelta(seconds=30):
+            raise ValueError("event timestamp is in the future")
+        recorded = 0
+        for site in sites:
+            if site.disconnected_at is not None:
+                continue
+            if not self.store.bind_source(site.id, source):
+                continue
+            # Per-site dedupe: one account event lands on each bound site once.
+            if not self.store.mark_seen(f"{site.ring_account_id}:{site.id}:{ev.request_id}", utcnow()):
+                continue
+            self.store.put_coverage_event(
+                CoverageEvent(
+                    site_id=site.id,
+                    at=at,
+                    kind=CoverageEventKind(et),
+                    ring_request_id=ev.request_id if source == "webhook" else None,
+                )
+            )
+            recorded += 1
+        if not recorded:
+            return Outcome(ignored_reason="duplicate request_id or no bound sites")
+        return Outcome(ignored_reason=None)
 
     # ------------------------------------------------------------------ cues
 
@@ -551,7 +628,7 @@ class VisitEngine:
         from .coverage import coverage_report
 
         device = site.door_camera_id or site.door_sensor_id
-        report = coverage_report(self.store, device, start, end, now=self.clock.now())
+        report = coverage_report(self.store, device, start, end, now=self.clock.now(), site_id=site.id)
         pseudo_id = f"coverage:{site.id}:{start.isoformat()}:{end.isoformat()}"
         existing = self.store.receipt_for_visit(pseudo_id)
         if existing:
@@ -672,7 +749,9 @@ class VisitEngine:
                 "interval": {"start": start.isoformat(), "end": end.isoformat()},
                 "counts": counts,
                 "summarized_receipts": receipts,
-                "coverage": coverage_report(self.store, device, start, end, now=self.clock.now()),
+                "coverage": coverage_report(
+                    self.store, device, start, end, now=self.clock.now(), site_id=site.id
+                ),
                 "boundary": (
                     "Counts the signed records this deployment wrote in the interval — "
                     "a statement about the ledger, never about physical presence or absence."
@@ -778,11 +857,17 @@ class VisitEngine:
         start = visit.arrived_at
         end = visit.last_activity_at
         sch = self._schedule(visit)
-        if not visit.has_observations and sch is not None:
-            start, end = sch.window_start, sch.window_end
+        if sch is not None:
+            if not visit.has_observations:
+                start, end = sch.window_start, sch.window_end
+            elif visit.departed_at is None:
+                # Departure was never observed — the coverage question is "could
+                # the pipeline have seen them leave?", so attest watching through
+                # the scheduled window's end, not just the last observed event.
+                end = max(end, sch.window_end)
         if end <= start:
             return None
-        return coverage_report(self.store, site.door_camera_id, start, end, now=utcnow())
+        return coverage_report(self.store, site.door_camera_id, start, end, now=utcnow(), site_id=site.id)
 
     def _reconcile_history(self, visit: Visit, site: Site) -> list[dict] | None:
         """Corroborate webhook evidence with Ring's own Event History for the visit window.

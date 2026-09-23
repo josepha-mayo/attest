@@ -108,6 +108,90 @@ def test_unscheduled_arrival_and_vehicle_ignored(engine, household, t0):
     assert out.visit.flags[0].code == "unscheduled"
 
 
+def test_lifecycle_events_record_coverage_not_visits(engine, store, household, schedule, t0):
+    """device_offline/device_online are journaled coverage evidence — they
+    explain observation gaps; they never open, close, or mutate a visit."""
+    from attest.models import CoverageEventKind
+
+    site, _worker, cam, _sensor = household
+    off = ev(cam.id, "device_offline", t0 + timedelta(minutes=30))
+    out = engine.ingest(off)
+    assert out.visit is None and out.ignored_reason is None
+    assert store.active_visit(site.id) is None
+
+    rows = store.coverage_events(site.id)
+    assert [e.kind for e in rows] == [CoverageEventKind.DEVICE_OFFLINE]
+    assert rows[0].device_id == cam.id and rows[0].ring_request_id == off.request_id
+    assert rows[0].interrupts is True
+
+    out2 = engine.ingest(ev(cam.id, "device_online", t0 + timedelta(minutes=50)))
+    assert out2.ignored_reason is None
+    assert [e.kind for e in store.coverage_events(site.id)] == [
+        CoverageEventKind.DEVICE_OFFLINE,
+        CoverageEventKind.DEVICE_ONLINE,
+    ]
+
+    # the delivery id dedupes — a replayed lifecycle webhook never double-journals
+    dup = engine.ingest(off)
+    assert dup.ignored_reason == "duplicate request_id"
+    assert len(store.coverage_events(site.id)) == 2
+
+
+def test_subscription_events_carry_plan_detail(engine, store, household, t0):
+    """Plan id and expiry ride along in the coverage row's detail — the signed
+    surface can say *which* subscription lapsed, not just that it did."""
+    from attest.models import CoverageEventKind
+
+    site, _worker, cam, _sensor = household
+    payload = webhooks.build_event(
+        event_type="subscription_deactivated",
+        device_id=cam.id,
+        occurred_at=t0,
+        extra_attributes={"plan_id": "ring_protect_pro", "expires_at": t0.isoformat()},
+    )
+    out = engine.ingest(WebhookEvent.model_validate(payload))
+    assert out.ignored_reason is None
+    row = store.coverage_events(site.id)[0]
+    assert row.kind == CoverageEventKind.SUBSCRIPTION_DEACTIVATED
+    assert row.detail["plan_id"] == "ring_protect_pro" and row.detail["expires_at"]
+    assert row.interrupts is True
+
+
+def test_account_lifecycle_event_records_on_bound_sites(engine, store, household, t0):
+    """app_integration_removed names the account, not a device — it lands on
+    every still-bound site of that Ring account, deduped per site."""
+    from attest.models import CoverageEventKind
+
+    site, _worker, cam, _sensor = household
+    payload = webhooks.build_event(
+        event_type="app_integration_removed", source_type="accounts", occurred_at=t0
+    )
+    out = engine.ingest(WebhookEvent.model_validate(payload))
+    assert out.ignored_reason is None
+
+    rows = store.coverage_events(site.id)
+    assert [r.kind for r in rows] == [CoverageEventKind.APP_INTEGRATION_REMOVED]
+    assert rows[0].device_id is None and rows[0].interrupts is True
+
+    out2 = engine.ingest(WebhookEvent.model_validate(payload))
+    assert "duplicate" in out2.ignored_reason
+    assert len(store.coverage_events(site.id)) == 1
+
+
+def test_lifecycle_after_disconnect_acknowledged_not_recorded(engine, store, household, schedule, t0):
+    """Consent revocation is source-bound too: a camera reporting offline after
+    the source disconnected is acknowledged by the inbox but never journaled —
+    the coverage log belongs to the bound source, not to the device."""
+    site, _worker, cam, _sensor = household
+    engine.ingest(ev(cam.id, "motion_detected", t0 + timedelta(minutes=2), "human"))
+    engine.close_for_review(store.active_visit(site.id).id)
+    engine.disconnect_site(site, "household revoked access")
+
+    out = engine.ingest(ev(cam.id, "device_offline", t0 + timedelta(minutes=10)))
+    assert out.visit is None and "disconnected" in out.ignored_reason
+    assert store.coverage_events(site.id) == []
+
+
 def test_duplicate_request_id_is_idempotent(engine, household, schedule, t0):
     site, worker, cam, sensor = household
     payload = webhooks.build_event(event_type="button_press", device_id=cam.id, occurred_at=t0)

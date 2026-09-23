@@ -30,7 +30,9 @@ Each visit produces a signed receipt whose payload captures, at issuance:
 - observed evidence with event kinds and timestamps (*observations*)
 - worker check-in time if one arrived (*a self-report*)
 - `history_poll_coverage` — how much of the window the pipeline actually
-  watched, including failed polls (*coverage honesty*)
+  watched, including failed polls (*coverage honesty*), plus any Ring lifecycle
+  events (`device_offline`, subscription or link changes) recorded in the
+  window — a signed *reason* the channel went quiet, still never absence
 - `journal_head` — the mutation-log tip at issuance (*integrity pin*)
 - the summary and its provenance — template, model name, or fallback reason
   (*a generated artifact, labeled*)
@@ -53,7 +55,7 @@ against a live store:
 | Re-sign a receipt under a foreign key | Signature fails under the pinned issuer key |
 | Replay a delivered webhook | `seen_requests` dedupe; delivery lands rejected in the durable inbox |
 | Insert a row out-of-band | Journal continuity and receipt-pin mismatches |
-| Update a denormalized index column directly (token_hash, visit_id, state, polled_at) | `verify_journal` re-derives every index column from the signed body and flags divergence; `late_events.site_id` is bound into the journaled row hash itself — residual: for a late_events row journaled after the last receipt pin, rewriting the whole tail could hide a site_id change, since no second check covers it — the same tail-truncation boundary anchors exist to close |
+| Update a denormalized index column directly (token_hash, visit_id, state, polled_at, coverage_events.at) | `verify_journal` re-derives every index column from the signed body and flags divergence; `late_events.site_id` is bound into the journaled row hash itself — residual: for a late_events row journaled after the last receipt pin, rewriting the whole tail could hide a site_id change, since no second check covers it — the same tail-truncation boundary anchors exist to close |
 | Drop a file from an exported pack | Verifier reports missing media or missing bundle explicitly |
 | Drop or swap a record inside a case pack | Signed `case_export` manifest names the exact visit→hash map; mismatch fails closed |
 | Drop, swap, or smuggle a site attestation in a case pack | The manifest's signed `attestations` list pins receipt_id + visit_id + payload_hash; every verifier checks signature + manifest equality, and a file the list does not name fails closed |

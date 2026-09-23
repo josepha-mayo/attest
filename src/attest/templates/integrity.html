@@ -75,21 +75,29 @@ worker was honest.</div>
 <h2>Watching evidence per site</h2>
 <div class="card table-wrap" style="padding:0">
 <table>
-  <thead><tr><th>Site</th><th>Poll observations</th><th>Most recent</th></tr></thead>
+  <thead><tr><th>Site</th><th>Poll observations</th><th>Most recent poll</th><th>Latest lifecycle event</th></tr></thead>
   <tbody>
   {% for sid, p in poll|dictsort %}
   <tr>
     <td><a href="/sites/{{ sid }}" style="color:var(--accent)">{{ sites[sid].name if sid in sites else sid }}</a></td>
     <td>{{ p.count }}</td>
     <td class="muted">{{ p.last }}</td>
+    <td class="muted">{% if sid in lifecycle %}{{ lifecycle[sid].last_kind.replace("_"," ") }} · {{ t(lifecycle[sid].last) }}{% else %}—{% endif %}</td>
   </tr>
   {% else %}
-  <tr><td colspan="3" class="muted">No poll observations — nothing has been watched yet.</td></tr>
+  <tr><td colspan="4" class="muted">No poll observations — nothing has been watched yet.</td></tr>
+  {% endfor %}
+  {% for sid, l in lifecycle|dictsort if sid not in poll %}
+  <tr>
+    <td><a href="/sites/{{ sid }}" style="color:var(--accent)">{{ sites[sid].name if sid in sites else sid }}</a></td>
+    <td class="muted">0</td><td class="muted">—</td>
+    <td class="muted">{{ l.last_kind.replace("_"," ") }} · {{ t(l.last) }}</td>
+  </tr>
   {% endfor %}
   </tbody>
 </table>
 </div>
-<p class="small muted">Poll rows prove <em>watching</em>, not events — "we checked" is a different claim from "something happened".</p>
+<p class="small muted">Poll rows prove <em>watching</em>, not events — "we checked" is a different claim from "something happened". Lifecycle events are the channel's signed account of why observation stopped or resumed; an explained gap is still silence, not absence.</p>
 
 <h2>Store contents</h2>
 <div class="card table-wrap" style="padding:0">
@@ -101,6 +109,8 @@ worker was honest.</div>
   <tr><td class="muted">Reviews</td><td>{{ stats.reviews }}</td><td></td></tr>
   <tr><td class="muted">Late events retained</td><td>{{ stats.late_events }}</td>
       <td class="muted small">arrived after close — kept for review, never silently dropped</td></tr>
+  <tr><td class="muted">Coverage events</td><td>{{ stats.coverage_events }}</td>
+      <td class="muted small">Ring lifecycle facts (offline/subscription/link) explaining gaps</td></tr>
   <tr><td class="muted">Dedupe keys</td><td>{{ stats.seen_requests.total }}</td><td></td></tr>
   <tr><td class="muted">Grants</td><td>{{ stats.checkin_grants + stats.review_grants + stats.family_grants }}</td>
       <td class="muted small">{{ stats.checkin_grants }} check-in · {{ stats.review_grants }} review · {{ stats.family_grants }} family</td></tr>

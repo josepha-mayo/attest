@@ -156,6 +156,9 @@ def make_tools(store, reviews):
                 ],
                 "coverage_fraction": cov.get("fraction"),
                 "coverage_gaps": len(cov.get("gaps", [])),
+                # Lifecycle events signed into the coverage claim — the channel's
+                # own account of why it went quiet (never proof of absence).
+                "coverage_interruptions": [i["kind"] for i in cov.get("interruptions", [])],
                 "stance": cs,
                 "flags": [{"code": f.code, "message": f.message} for f in v.flags],
             }

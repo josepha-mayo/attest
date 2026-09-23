@@ -148,6 +148,39 @@ def test_apply_deletes_only_the_reviewed_set(store, tmp_path):
     inbox.close()
 
 
+def test_coverage_events_purge_but_signed_claim_survives(engine, store, household, tmp_path):
+    """Raw lifecycle rows are retention-purgeable like poll rows — but the
+    signed coverage attestation already copied the interruptions into its
+    payload, so purging the log never rewrites the signed explanation."""
+    from attest.ledger import verify_receipt
+    from attest.models import CoverageEvent, CoverageEventKind
+
+    now = utcnow()
+    old = now - timedelta(days=400)
+    site, _worker, cam, _sensor = household
+    store.put_coverage_event(
+        CoverageEvent(site_id=site.id, device_id=cam.id, at=old, kind=CoverageEventKind.DEVICE_OFFLINE)
+    )
+    store.put_coverage_event(
+        CoverageEvent(
+            site_id=site.id,
+            device_id=cam.id,
+            at=now - timedelta(days=1),
+            kind=CoverageEventKind.DEVICE_ONLINE,
+        )
+    )
+
+    receipt = engine.issue_coverage_attestation(site, old - timedelta(hours=1), old + timedelta(hours=1))
+    assert [i["kind"] for i in receipt.payload["coverage"]["interruptions"]] == ["device_offline"]
+
+    report = retention.build_report(store, None, tmp_path / "media", now=now)
+    assert [e["kind"] for e in report["candidates"]["coverage_events"]["items"]] == ["device_offline"]
+    result = retention.apply(store, None, tmp_path / "media", now=now, confirm=report["apply_token"])
+    assert result["deleted"]["coverage_events"] == 1
+    assert [e.kind for e in store.coverage_events(site.id)] == [CoverageEventKind.DEVICE_ONLINE]
+    assert verify_receipt(receipt, public_key=engine.signer.public_key_b64)[0]
+
+
 def test_apply_endpoint_requires_matching_preview_token(settings, store, ring_client, household):
     from fastapi.testclient import TestClient
 

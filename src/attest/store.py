@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from .models import (
     CheckinGrant,
+    CoverageEvent,
     Evidence,
     FamilyGrant,
     PollObservation,
@@ -57,6 +58,9 @@ CREATE TABLE IF NOT EXISTS poll_observations (id TEXT PRIMARY KEY, site_id TEXT 
                                                device_id TEXT, polled_at TEXT NOT NULL,
                                                body TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS ix_poll_obs_device ON poll_observations(device_id, polled_at);
+CREATE TABLE IF NOT EXISTS coverage_events (id TEXT PRIMARY KEY, site_id TEXT NOT NULL,
+                                            device_id TEXT, at TEXT NOT NULL, body TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS ix_coverage_events_site ON coverage_events(site_id, at);
 CREATE TABLE IF NOT EXISTS reviews (id TEXT PRIMARY KEY, visit_id TEXT NOT NULL, revision INTEGER NOT NULL,
                                     body TEXT NOT NULL, UNIQUE(visit_id, revision));
 CREATE TABLE IF NOT EXISTS review_grants (id TEXT PRIMARY KEY, token_hash TEXT UNIQUE, body TEXT NOT NULL);
@@ -101,6 +105,7 @@ _JOURNALED_KEYS = {
     "family_grants": "id",
     "late_events": "id",
     "poll_observations": "id",
+    "coverage_events": "id",
     "settings": "name",
     "seen_requests": "request_id",
     "ingestion_sources": "site_id",
@@ -170,6 +175,14 @@ def _index_specs() -> dict:
                 "site_id": lambda m: m.site_id,
                 "device_id": lambda m: m.device_id,
                 "polled_at": lambda m: _iso(m.polled_at),
+            },
+        ),
+        "coverage_events": (
+            CoverageEvent,
+            {
+                "site_id": lambda m: m.site_id,
+                "device_id": lambda m: m.device_id,
+                "at": lambda m: _iso(m.at),
             },
         ),
     }
@@ -475,6 +488,9 @@ class Store:
             (device_id, device_id),
         )
 
+    def sites_for_account(self, ring_account_id: str) -> list[Site]:
+        return self._rows(Site, "SELECT body FROM sites WHERE ring_account_id=?", (ring_account_id,))
+
     # ----------------------------------------------------------------- workers
 
     def put_worker(self, w: Worker) -> Worker:
@@ -660,6 +676,41 @@ class Store:
             (device_id, _iso(start), _iso(until)),
         )
 
+    # ------------------------------------------------------------- coverage events
+
+    def put_coverage_event(self, ev: CoverageEvent) -> None:
+        self._put(
+            "coverage_events",
+            ev,
+            site_id=ev.site_id,
+            device_id=ev.device_id,
+            at=_iso(ev.at),
+        )
+
+    def coverage_events(
+        self,
+        site_id: str,
+        start: datetime | None = None,
+        until: datetime | None = None,
+        *,
+        limit: int = 500,
+    ) -> list[CoverageEvent]:
+        sql = "SELECT body FROM coverage_events WHERE site_id=?"
+        params: list[object] = [site_id]
+        if start is not None:
+            sql += " AND at>=?"
+            params.append(_iso(start))
+        if until is not None:
+            sql += " AND at<=?"
+            params.append(_iso(until))
+        return self._rows(CoverageEvent, sql + f" ORDER BY at LIMIT {int(limit)}", params)
+
+    def coverage_event_rows(self) -> list[CoverageEvent]:
+        return self._rows(CoverageEvent, "SELECT body FROM coverage_events ORDER BY at")
+
+    def delete_coverage_events(self, ids: Iterable[str]) -> int:
+        return self._delete_ids("coverage_events", "id", ids)
+
     # ----------------------------------------------------------------- idempotency
 
     def bind_source(self, site_id: str, source: str) -> bool:
@@ -794,6 +845,7 @@ class Store:
                 "reviews": row("SELECT COUNT(*) FROM reviews")[0],
                 "late_events": row("SELECT COUNT(*) FROM late_events")[0],
                 "poll_observations": row("SELECT COUNT(*) FROM poll_observations")[0],
+                "coverage_events": row("SELECT COUNT(*) FROM coverage_events")[0],
                 "checkin_grants": row("SELECT COUNT(*) FROM checkin_grants")[0],
                 "review_grants": row("SELECT COUNT(*) FROM review_grants")[0],
                 "family_grants": row("SELECT COUNT(*) FROM family_grants")[0],
@@ -812,6 +864,24 @@ class Store:
                 for site_id, n, last in self._conn.execute(
                     "SELECT site_id, COUNT(*), MAX(polled_at) FROM poll_observations GROUP BY site_id"
                 ).fetchall()
+            }
+
+    def lifecycle_by_site(self) -> dict[str, dict]:
+        """Per-site coverage-event counts and the latest lifecycle event — the
+        signed channel's own account of why observation stopped or resumed."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT site_id, COUNT(*), MAX(at) FROM coverage_events GROUP BY site_id"
+            ).fetchall()
+            latest: dict[str, str] = {}
+            for site_id, _n, last in rows:
+                body = self._conn.execute(
+                    "SELECT body FROM coverage_events WHERE site_id=? AND at=? ORDER BY id DESC LIMIT 1",
+                    (site_id, last),
+                ).fetchone()
+                latest[site_id] = CoverageEvent.model_validate_json(body[0]).kind.value if body else ""
+            return {
+                site_id: {"count": n, "last": last, "last_kind": latest[site_id]} for site_id, n, last in rows
             }
 
     def dump(self) -> dict:

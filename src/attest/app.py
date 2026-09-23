@@ -442,6 +442,14 @@ def create_app(
                     }
                     for sid, p in store.poll_coverage_by_site().items()
                 },
+                "lifecycle": {
+                    sid: {
+                        "count": p["count"],
+                        "last": datetime.fromisoformat(p["last"]) if p["last"] else None,
+                        "last_kind": p["last_kind"],
+                    }
+                    for sid, p in store.lifecycle_by_site().items()
+                },
                 "sites": {x.id: x for x in store.sites()},
                 "queue": inbox.counts(),
                 "mode": (store.setting("execution_mode") or {}).get("mode", "wall"),
@@ -480,7 +488,7 @@ def create_app(
             start = schedule.window_start
             end = min(schedule.window_end, engine.clock.now())
             if end > start:
-                cov = coverage_report(store, device, start, end, now=engine.clock.now())
+                cov = coverage_report(store, device, start, end, now=engine.clock.now(), site_id=site.id)
         late = [r["body"] for r in store.late_event_rows() if r["site_id"] == v.site_id]
         strip = timeline_strip(
             schedule=schedule,
@@ -531,7 +539,7 @@ def create_app(
             start = schedule.window_start
             end = min(schedule.window_end, engine.clock.now())
             if end > start:
-                cov = coverage_report(store, device, start, end, now=engine.clock.now())
+                cov = coverage_report(store, device, start, end, now=engine.clock.now(), site_id=site.id)
         strip = timeline_strip(
             schedule=schedule,
             evidence=evidence,
@@ -877,6 +885,7 @@ def create_app(
             schedules=schedules,
             countersign=stances,
             coverage=coverage_summaries,
+            coverage_events=await asyncio.to_thread(lambda: store.coverage_events(site.id, limit=20)[::-1]),
             receipts={v.id: store.receipt_for_visit(v.id) for v in visits},
             digests=digests,
             exports=exports,
@@ -1054,6 +1063,8 @@ def create_app(
             grants_days=s.retention_grants_days,
             seen_days=s.retention_seen_days,
             late_events_days=s.retention_late_days,
+            poll_observations_days=s.retention_poll_days,
+            coverage_events_days=s.retention_coverage_days,
         )
         return await asyncio.to_thread(
             retention.build_report, store, inbox, s.data_dir / "media", policy=policy
@@ -1070,6 +1081,8 @@ def create_app(
             grants_days=s.retention_grants_days,
             seen_days=s.retention_seen_days,
             late_events_days=s.retention_late_days,
+            poll_observations_days=s.retention_poll_days,
+            coverage_events_days=s.retention_coverage_days,
         )
         try:
             return await asyncio.to_thread(

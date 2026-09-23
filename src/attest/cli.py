@@ -241,7 +241,7 @@ def _replay(args: argparse.Namespace) -> None:
         devices = state_response.json()["devices"]
         if args.no_show_day is not None and not 0 <= args.no_show_day < args.days:
             sys.exit("--no-show-day must be a day index within --days")
-        story_patterns = {"observed", "late", "early_out", "no_show", "unmatched"}
+        story_patterns = {"observed", "late", "early_out", "no_show", "unmatched", "blackout"}
         patterns = [p.strip() for p in args.story.split(",") if p.strip()] if args.story else []
         if bad := set(patterns) - story_patterns:
             sys.exit(f"unknown --story pattern(s) {sorted(bad)}; choose from {sorted(story_patterns)}")
@@ -295,6 +295,12 @@ def _replay(args: argparse.Namespace) -> None:
                 print(
                     f"Day {day}: events replayed outside the window — unmatched + lapsed schedule", flush=True
                 )
+            elif pattern == "blackout":
+                print(
+                    f"Day {day}: camera drops offline mid-visit — departure unobserved, "
+                    "gap explained by lifecycle events",
+                    flush=True,
+                )
             # Poll history once at window start so coverage rows bracket the visit
             # (poll observations sit on the same logical clock as the events).
             api.post("/api/poll").raise_for_status()
@@ -310,6 +316,13 @@ def _replay(args: argparse.Namespace) -> None:
             elif pattern == "early_out":
                 # departure evidence never arrives — closes "departure unconfirmed"
                 steps = [s for s in steps if s.offset_s < 4800]
+            elif pattern == "blackout":
+                # The camera dies mid-visit: arrival is observed, departure never
+                # is — and the lifecycle events sign *why* the channel went quiet.
+                steps = [s for s in steps if s.offset_s < 3600]
+                off = dataclasses.replace(steps[0], type="device_offline", sub_type=None, offset_s=1500)
+                on = dataclasses.replace(steps[0], type="device_online", sub_type=None, offset_s=6000)
+                steps = sorted([*steps, off, on], key=lambda s: s.offset_s)
             elif pattern == "unmatched":
                 shift = (args.window_minutes + settings.arrival_grace_minutes + 10) * 60
                 steps = [dataclasses.replace(s, offset_s=s.offset_s + shift) for s in steps]
@@ -589,7 +602,10 @@ def _demo(args: argparse.Namespace) -> None:
     print("     record' signs the coordinator's call.", flush=True)
     print("  3. Download a pack, then 'Verify a pack in-browser' on the dashboard —", flush=True)
     print("     drop the .zip; it self-verifies, no install, no unzip. Site packs", flush=True)
-    print("     carry the signed coverage cert: 'was anyone watching?'", flush=True)
+    print("     carry the signed coverage cert: 'was anyone watching?' Day 2's", flush=True)
+    print("     camera dies mid-visit — the record signs the device_offline/", flush=True)
+    print("     device_online lifecycle, so the quiet span reads explained,", flush=True)
+    print("     not absent.", flush=True)
     print("     Open the pack's index.html — each record toggles between the", flush=True)
     print("     technical view and a plain-language family view. Or skip the", flush=True)
     print("     install entirely: josepha-mayo.github.io/attest/verify.html hosts", flush=True)
@@ -599,7 +615,7 @@ def _demo(args: argparse.Namespace) -> None:
     print("  In another terminal, point at the demo's store first:", flush=True)
     print(f'    $env:ATTEST_DATA_DIR="{data_dir}"   (PowerShell)', flush=True)
     print(f"    ATTEST_DATA_DIR={data_dir} <cmd>      (POSIX)", flush=True)
-    print("  5. attest attack-demo  — 7 tamper attempts, all caught and rolled back", flush=True)
+    print("  5. attest attack-demo  — 8 tamper attempts, all caught and rolled back", flush=True)
     print("  6. attest status       — audits the whole runtime offline", flush=True)
     print("  7. attest triage       — the week's brief (agent when AWS is reachable)", flush=True)
     print("  8. attest verify <zip> — verifies a downloaded pack without unzipping", flush=True)
@@ -971,9 +987,11 @@ def _coverage_cert(args: argparse.Namespace) -> None:
             sys.exit("--from and --to must be ISO timestamps with timezone")
         receipt = _cli_engine(store).issue_coverage_attestation(site, start, end)
         cov = receipt.payload["coverage"]
+        explained = sum(1 for g in cov["gaps"] if g.get("explained"))
         print(
             f"signed {receipt.id} — coverage {cov['state']} ({cov['fraction'] * 100:.1f}%), "
             f"{cov['polls']} polls, {cov['events']} events, {len(cov['gaps'])} gap(s)"
+            + (f" ({explained} explained by lifecycle events)" if explained else "")
         )
     finally:
         store.close()
@@ -1107,7 +1125,10 @@ def _status(args: argparse.Namespace) -> None:
         if journal["mismatches"]:
             line += f", {len(journal['mismatches'])} mismatches"
         print(line)
-        print(f"coverage: {stats['poll_observations']} poll observations on record")
+        print(
+            f"coverage: {stats['poll_observations']} poll observations, "
+            f"{stats['coverage_events']} lifecycle events on record"
+        )
         # Site-level chain events: coverage certs, digests, exports, disconnects —
         # the signed ledger's record of watching, summarizing, and consent.
         att_types: dict[str, int] = {}
@@ -1275,6 +1296,12 @@ def _explain(args: argparse.Namespace) -> None:
             digests = receipt.payload.get("media_digests") or []
             if digests:
                 print(f"  media digests signed: {len(digests)}")
+            interruptions = (receipt.payload.get("history_poll_coverage") or {}).get("interruptions") or []
+            if interruptions:
+                print("  lifecycle signed into coverage:")
+                for i in interruptions:
+                    dev = f" ({i['device_id']})" if i.get("device_id") else " (account)"
+                    print(f"    {i['at']} — {i['kind'].replace('_', ' ')}{dev}")
         else:
             print("No signed receipt — record still open.")
         bundle = reviews.bundle(visit.id) if receipt else None
@@ -1350,6 +1377,12 @@ def _explain_attestation(store, ident: str) -> None:
             f"{cov.get('polls')} poll(s), {cov.get('events')} event(s), "
             f"{len(cov.get('gaps', []))} gap(s) — silence is not absence"
         )
+        interruptions = cov.get("interruptions") or []
+        if interruptions:
+            print(f"  lifecycle interruptions signed in: {', '.join(i['kind'] for i in interruptions)}")
+        explained = sum(1 for g in cov.get("gaps", []) if g.get("explained"))
+        if explained:
+            print(f"  {explained} gap(s) carry a recorded cause — context, never absence")
     elif rtype == "period_digest":
         i = p.get("interval", {})
         c = p.get("counts", {})
@@ -1385,6 +1418,8 @@ def _retention(args: argparse.Namespace) -> None:
         grants_days=settings.retention_grants_days,
         seen_days=settings.retention_seen_days,
         late_events_days=settings.retention_late_days,
+        poll_observations_days=settings.retention_poll_days,
+        coverage_events_days=settings.retention_coverage_days,
     )
     store = Store(settings.data_dir / "attest.sqlite3")
     inbox_path = settings.data_dir / "webhooks.sqlite3"
@@ -1583,12 +1618,12 @@ def main(argv: list[str] | None = None) -> None:
                 default=None,
                 help="persist the demo runtime here (must be empty); default is a temp dir",
             )
-            s.add_argument("--days", type=int, default=5)
+            s.add_argument("--days", type=int, default=6)
             s.add_argument(
                 "--story",
-                default="observed,late,no_show,early_out,unmatched",
+                default="observed,late,blackout,no_show,early_out,unmatched",
                 metavar="PATTERNS",
-                help="day-pattern cycle: observed,late,early_out,no_show,unmatched",
+                help="day-pattern cycle: observed,late,blackout,early_out,no_show,unmatched",
             )
             s.add_argument("--speed", type=float, default=10000)
         if name == "replay":
@@ -1625,7 +1660,7 @@ def main(argv: list[str] | None = None) -> None:
                 "--story",
                 default=None,
                 metavar="PATTERNS",
-                help="comma list cycled across --days: observed,late,early_out,no_show,unmatched "
+                help="comma list cycled across --days: observed,late,blackout,early_out,no_show,unmatched "
                 "(e.g. --days 5 --story observed,late,no_show,early_out,observed)",
             )
         s.set_defaults(fn=fn)

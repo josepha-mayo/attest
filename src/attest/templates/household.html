@@ -85,6 +85,7 @@ a:focus-visible{outline:2px solid #2563a8;outline-offset:2px;border-radius:3px}
   <p>{% if coverage and coverage.fraction and coverage.fraction >= 0.999 %}The camera was checked {{ coverage.polls }} times across the whole window and reported nothing.
   {% elif coverage and coverage.polls %}The camera was checked for {{ "%.0f"|format((coverage.fraction or 0)*100) }}% of the window and reported nothing{% if coverage.gaps %} — some of the window wasn't watched{% endif %}.
   {% else %}The camera reported no activity during this window.{% endif %}
+  {% if coverage and coverage.interruptions %}{% set stopped = coverage.interruptions | selectattr("interrupts") | list %}{% if stopped %}The camera itself reported it stopped reporting for part of that time ({{ stopped[0].kind.replace("_", " ") }}) — that gap has a recorded cause.{% endif %}{% endif %}
   No activity is not proof nobody came — it only means the camera reported nothing.</p>
 </div>
 {% else %}

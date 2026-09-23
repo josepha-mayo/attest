@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     retention_grants_days: int = 7
     retention_seen_days: int = 30
     retention_late_days: int = 90
+    retention_poll_days: int = 90
+    retention_coverage_days: int = 90
 
     # Summaries
     summarizer: str = "template"  # template | bedrock
