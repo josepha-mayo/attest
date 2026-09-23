@@ -586,6 +586,11 @@ for a dispute that matters, re-verify the pack with a verifier obtained independ
  .plain-foot{margin-top:1rem;color:#5f6e7c;font-size:.8rem;line-height:1.5;
   border-top:1px solid #eee;padding-top:.7rem}
  .view-toggle{display:inline-block;margin-top:.6rem;color:#2563a8;text-decoration:underline;cursor:pointer}
+ .week-row{display:flex;align-items:center;gap:.6rem;margin:1px 0}
+ .week-label{width:6.5em;text-align:right;flex:none}
+ .week-strip{flex:1;min-width:0}
+ .week-legend{margin-bottom:.4rem;line-height:1.9}
+ .sw{display:inline-block;width:.9em;height:.7em;border-radius:2px;vertical-align:-1px;margin-left:.6em}
 </style>
 """
 
@@ -748,6 +753,87 @@ function plainHTML(p,js){
     A signature proves the record hasn't been altered since it was signed — not identity, attendance, or
     time worked. No reported activity is not proof nobody came.</div>`;
 }
+/* ---------- site-level week strip: the whole exported window at a glance.
+   Every mark derives from verified signed payloads only — the strip can show
+   what the receipts attest (coverage, interruptions, observations, the
+   worker's self-reported check-in), never anything more. */
+function weekSVG(payloads){
+  const iso=s=>s?Date.parse(s)/1000:null;
+  const DAY=86400,days={};
+  const key=t=>new Date(t*1000).toISOString().slice(0,10);
+  const slot=(t,k,v)=>{
+    const dk=key(t);
+    (days[dk]||(days[dk]={sched:[],cov:[],gap:[],intr:[],ev:[]}))[k].push(v);};
+  const eachDay=(a,b,fn)=>{ /* clip an interval to each UTC day it overlaps */
+    if(!(a<b))return;
+    for(let d=Math.floor(a/DAY)*DAY;d<b;d+=DAY){
+      const ca=Math.max(a,d),cb=Math.min(b,d+DAY);
+      if(ca<cb)fn(d,ca,cb);}};
+  for(const p of payloads){
+    const cov=p.history_poll_coverage||{};
+    if(p.schedule&&p.schedule.window_start)
+      eachDay(iso(p.schedule.window_start),iso(p.schedule.window_end||p.schedule.window_start),
+        (d,a,b)=>slot(a,"sched",[a,b]));
+    for(const iv of cov.covered||[])
+      eachDay(iso(iv.start),iso(iv.end),(d,a,b)=>slot(a,"cov",[a,b]));
+    for(const g of cov.gaps||[])
+      eachDay(iso(g.start),iso(g.end),(d,a,b)=>slot(a,"gap",[a,b,g.explained_by||null]));
+    for(const it of cov.interruptions||[]){const t=iso(it.at);if(t)slot(t,"intr",it);}
+    for(const e of p.evidence||[]){const t=iso(e.at);if(t)slot(t,"ev",e);}
+    const ci=iso(p.checked_in_at);
+    if(ci)slot(ci,"ev",{kind:"checkin",at:p.checked_in_at});
+  }
+  const keys=Object.keys(days).sort();
+  if(!keys.length)return"";
+  const WD=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+  const x=(d,t)=>((t-d)/DAY*100).toFixed(2);
+  const w=(d,a,b)=>Math.max(0.35,x(d,b)-x(d,a)).toFixed(2);
+  let html='<div class="week"><div class="week-legend muted"><small>UTC days:'
+    +' <span class="sw" style="background:#3b4a63"></span>scheduled window'
+    +' <span class="sw" style="background:#2f9e63"></span>watched by polling'
+    +' <span class="sw" style="background:#9aa3b2"></span>unwatched gap'
+    +' <span class="sw" style="background:#d97706"></span>gap with a signed channel interruption'
+    +' <span class="sw" style="background:#b45309"></span>lifecycle mark'
+    +' <span class="sw" style="background:#5aa2e8"></span>device observation'
+    +' <span class="sw" style="background:#7c5cc4"></span>worker check-in (self-report)'
+    +'<br>A quiet stretch is not proof nobody came; an interruption explains why the channel'
+    +' went silent, not what happened physically.</small></div>';
+  for(const k of keys){
+    const day=days[k],d=Date.parse(k+"T00:00:00Z")/1000;
+    let s='<svg viewBox="0 0 100 30" preserveAspectRatio="none" role="img"'
+      +' style="width:100%;height:30px;display:block">';
+    for(const[a,b]of day.sched)
+      s+=`<rect x="${x(d,a)}" y="5" width="${w(d,a,b)}" height="16" rx="1.5" `
+        +'fill="#3b4a63" opacity="0.5"><title>scheduled window</title></rect>';
+    for(const[a,b]of day.cov)
+      s+=`<rect x="${x(d,a)}" y="23" width="${w(d,a,b)}" height="3.4" fill="#2f9e63">`
+        +"<title>watched by Event History polling</title></rect>";
+    for(const[a,b,why]of day.gap){
+      const title=why
+        ?"unwatched gap — channel reported "+esc(String(why[0].kind||"").replaceAll("_"," "))
+          +" (explains the silence, not absence)"
+        :"unwatched gap — the pipeline was not polling";
+      s+=`<rect x="${x(d,a)}" y="23" width="${w(d,a,b)}" height="3.4" `
+        +`fill="${why?"#d97706":"#9aa3b2"}"><title>${title}</title></rect>`;}
+    for(const it of day.intr){
+      const X=Math.min(99.3,Math.max(0,x(d,iso(it.at))));
+      s+=`<rect x="${X}" y="0.6" width="0.7" height="3.6" fill="#b45309">`
+        +`<title>${esc(String(it.kind||"").replaceAll("_"," "))} — ${esc(it.at||"")}`
+        +(it.device_id?` · ${esc(it.device_id)}`:" · account-wide")+`</title></rect>`;}
+    for(const e of day.ev){
+      const X=Math.min(99.3,Math.max(0,x(d,iso(e.at))));
+      const isCk=e.kind==="checkin";
+      const fill=isCk?"#7c5cc4":String(e.kind).indexOf("departure")===0?"#c05a5a":"#5aa2e8";
+      s+=`<rect x="${X}" y="7" width="0.7" height="13" fill="${fill}"${isCk?' opacity="0.8"':""}>`
+        +`<title>${esc(String(e.kind||"").replaceAll("_"," "))} — ${esc(e.at||"")}`
+        +(isCk?" (self-reported)":"")+`</title></rect>`;}
+    s+="</svg>";
+    const wd=WD[new Date(d*1000).getUTCDay()];
+    html+=`<div class="week-row"><div class="week-label muted"><small>${esc(wd)} `
+      +`${esc(k.slice(5))}</small></div><div class="week-strip">${s}</div></div>`;
+  }
+  return html+"</div>";
+}
 /* Site-level attestations render as provenance cards, not just verify rows —
    the coverage cert is the pack's answer to "was anyone watching?". */
 function attestationHTML(p){
@@ -790,7 +876,7 @@ async function renderIndex(){
   const cards=document.getElementById("cards");
   const verdict=document.getElementById("verdict");
   let key=null,anyBad=false,n=0,declared=0;
-  const rows=[];const actual={};
+  const rows=[];const actual={};const payloads=[];
   for(const tag of document.querySelectorAll("script.bundle")){
     const root=parseKeep(d64(tag.textContent));
     const js=toJS(root);
@@ -801,6 +887,7 @@ async function renderIndex(){
     n++;
     actual[tag.dataset.vid]=(js.original||{}).payload_hash;
     const p=(js.original||{}).payload||{};
+    if(c.ok)payloads.push(p);
     const stance=deriveStance(js);
     const ds=digests((js.original||{}).payload||{});declared+=ds.length;
     const cls=c.ok?(STATE_CLS[p.state]||"ok"):"bad";
@@ -819,6 +906,12 @@ async function renderIndex(){
       +`<div class="plain" style="display:none">${plainHTML(p,js)}</div>`
       +`<a href="#" class="view-toggle muted"><small>View as the family sees it</small></a></div>`);
   }
+  const wk=weekSVG(payloads);
+  if(wk)rows.unshift(
+    `<div class="card"><div class="row ok"><span class="pill">week</span> `
+    +`<strong>the exported window at a glance</strong> `
+    +`<small class="muted">— assembled only from verified signed payloads</small></div>`
+    +wk+`</div>`);
   cards.innerHTML=rows.join("");
   cards.onclick=e=>{
     const a=e.target.closest(".view-toggle");if(!a)return;e.preventDefault();

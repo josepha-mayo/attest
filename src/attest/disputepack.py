@@ -28,8 +28,9 @@ verify.html    Zero-install verifier — open in any browser and drop the pack
                works from file://. Also renders each record's timeline
                (scheduled window, poll coverage, observations).
 index.html     Offline record browser — the record verified live in-browser
-               with its timeline, source-by-source corroboration, and any
-               signed worker/coordinator statements rendered verbatim.
+               with its timeline, a day-by-day strip of the whole window,
+               source-by-source corroboration, and any signed
+               worker/household/coordinator statements rendered verbatim.
 
 WHAT A VALID VERIFICATION PROVES
 - Every receipt in bundle.json is byte-identical to what was signed: the payload
@@ -437,8 +438,10 @@ ATTEST CASE PACK — a site's signed visit records for third-party review
 =======================================================================
 
 index.html          START HERE — a self-contained offline record browser. It
-                    verifies every signed record in your browser and renders
-                    each visit's timeline. No install, no network.
+                    verifies every signed record in your browser, opens with a
+                    day-by-day strip of the whole exported window (coverage,
+                    interruptions, observations), and renders each visit's
+                    timeline. No install, no network.
 manifest.json       Every visit's receipt hash, state, and worker stance.
 visits/<id>/        Per-visit bundle.json + the media bytes it references.
 verify_case.py      Offline verifier. Run:  python verify_case.py .

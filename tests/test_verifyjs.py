@@ -308,6 +308,8 @@ __r().then(()=>{
   console.log('timeline:',els.cards.innerHTML.includes('<svg'));
   console.log('corr:',(els.cards.innerHTML.match(/class="corr"/g)||[]).length);
   console.log('corrrows:',els.cards.innerHTML.includes('Pipeline coverage'));
+  console.log('week:',els.cards.innerHTML.includes('exported window at a glance')&&
+    els.cards.innerHTML.includes('scheduled window'));
   console.log('attline:',
     els.verdict.innerHTML.includes('attestation coverage_attestation: signed and intact'));
   console.log('attcard:',els.cards.innerHTML.includes('watched')&&
@@ -326,10 +328,11 @@ __r().then(()=>{
     assert proc.returncode == 0, proc.stderr
     out = proc.stdout
     assert "VERIFIED" in out, out
-    assert "cards: 2" in out, out  # visit card + coverage attestation card
+    assert "cards: 3" in out, out  # week strip + visit card + coverage attestation card
     assert "timeline: true" in out, out
     assert "corr: 1" in out, out
     assert "corrrows: true" in out, out
+    assert "week: true" in out, out
     assert "attline: true" in out, out
     assert "attcard: true" in out, out
 
@@ -385,6 +388,7 @@ __r().then(()=>{
   console.log('verdict:',els.verdict.innerHTML.slice(0,120));
   console.log('cards:',(els.cards.innerHTML.match(/class="card"/g)||[]).length);
   console.log('corr:',(els.cards.innerHTML.match(/class="corr"/g)||[]).length);
+  console.log('week:',els.cards.innerHTML.includes('exported window at a glance'));
 });
 """
     (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
@@ -399,8 +403,67 @@ __r().then(()=>{
     assert proc.returncode == 0, proc.stderr
     out = proc.stdout
     assert "VERIFIED" in out, out
-    assert "cards: 1" in out, out
+    assert "cards: 2" in out, out  # week strip + visit card
     assert "corr: 1" in out, out
+    assert "week: true" in out, out
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_week_strip_groups_signed_payloads_by_day(tmp_path):
+    """weekSVG clips intervals to UTC days, marks explained vs. unexplained
+    gaps differently, renders lifecycle marks and the worker's self-report —
+    and stays silent when a payload carries nothing to show."""
+    from attest.verifyjs import _INDEX_DRIVER, _JS_LIB
+
+    src = _JS_LIB + _INDEX_DRIVER
+    src = re.sub(r"renderIndex\(\)\.catch[\s\S]*$", "", src)
+    driver = """
+let src=fs.readFileSync(process.argv[2],'utf8');
+eval(src+';globalThis.__w=weekSVG;');
+const P={
+  schedule:{window_start:'2026-09-20T09:00:00+00:00',window_end:'2026-09-20T11:00:00+00:00'},
+  checked_in_at:'2026-09-20T09:05:00+00:00',
+  evidence:[{kind:'arrival_motion',at:'2026-09-20T09:10:00+00:00'},
+            {kind:'departure_motion',at:'2026-09-20T10:50:00+00:00'}],
+  history_poll_coverage:{
+    window:{start:'2026-09-20T09:00:00+00:00',end:'2026-09-20T11:00:00+00:00'},
+    covered:[{start:'2026-09-20T09:00:00+00:00',end:'2026-09-20T10:00:00+00:00'},
+             {start:'2026-09-20T10:30:00+00:00',end:'2026-09-20T11:00:00+00:00'}],
+    gaps:[{start:'2026-09-20T10:00:00+00:00',end:'2026-09-20T10:30:00+00:00',explained:true,
+           explained_by:[{kind:'device_offline',device_id:'dev_cam',start:'2026-09-20T09:55:00+00:00',
+                          end:'2026-09-20T10:40:00+00:00',restored_by:'device_online'}]},
+          {start:'2026-09-20T12:00:00+00:00',end:'2026-09-20T13:00:00+00:00'}],
+    interruptions:[{kind:'device_offline',at:'2026-09-20T09:55:00+00:00',device_id:'dev_cam',
+                    interrupts:true,detail:null},
+                   {kind:'device_online',at:'2026-09-20T10:40:00+00:00',device_id:'dev_cam',
+                    interrupts:false,detail:null}]}};
+/* a coverage span that crosses midnight clips into two day rows */
+const Q={
+  schedule:{window_start:'2026-09-21T23:00:00+00:00',window_end:'2026-09-22T02:00:00+00:00'},
+  history_poll_coverage:{
+    window:{start:'2026-09-21T23:00:00+00:00',end:'2026-09-22T02:00:00+00:00'},
+    covered:[{start:'2026-09-21T23:00:00+00:00',end:'2026-09-22T02:00:00+00:00'}],
+    gaps:[],interruptions:[]}};
+const html=__w([P,Q]);
+console.log('rows:',(html.match(/class="week-row"/g)||[]).length);
+console.log('explained:',html.includes('channel reported device offline'));
+console.log('unexplained:',html.includes('the pipeline was not polling'));
+console.log('intrmark:',html.includes('device offline — 2026-09-20T09:55:00+00:00 · dev_cam'));
+console.log('checkin:',html.includes('(self-reported)'));
+console.log('bound:',html.includes('not proof nobody came'));
+console.log('empty:',__w([{}])==='');
+console.log('order:',html.indexOf('09-20')<html.indexOf('09-21')&&html.indexOf('09-21')<html.indexOf('09-22'));
+"""
+    (tmp_path / "idx.js").write_text(src, encoding="utf-8")
+    (tmp_path / "drive.js").write_text("const fs=require('fs');\n" + driver, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "idx.js"], cwd=tmp_path, capture_output=True, text=True, timeout=60
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout
+    assert "rows: 3" in out, out  # the midnight-crossing schedule splits into two day rows
+    for needle in ("explained", "unexplained", "intrmark", "checkin", "bound", "empty", "order"):
+        assert f"{needle}: true" in out, out
 
 
 @pytest.mark.skipif(NODE is None, reason="node runtime not available")
