@@ -68,6 +68,74 @@ def test_other_devices_polls_do_not_count(store, t0):
     assert report["state"] == "no_polls"
 
 
+def test_liveview_sessions_overlap_into_signed_coverage(store, t0):
+    """A brokered live view overlapping the window is signed into the coverage
+    payload — session establishment is attested; viewership is not. Sessions
+    on other devices and outside the window are excluded."""
+    from attest.models import LiveViewSession
+
+    _obs(store, "cam1", t0 + timedelta(hours=2), t0)
+    store.put_liveview_session(
+        LiveViewSession(
+            site_id="site",
+            device_id="cam1",
+            session_url="/v1/devices/cam1/media/streaming/whep/sessions/s1",
+            opened_at=t0 + timedelta(minutes=10),
+            closed_at=t0 + timedelta(minutes=18),
+        )
+    )
+    # open (unclosed) session overlapping the window end still counts
+    store.put_liveview_session(
+        LiveViewSession(
+            site_id="site",
+            device_id="cam1",
+            session_url="/v1/devices/cam1/media/streaming/whep/sessions/s2",
+            opened_at=t0 + timedelta(minutes=55),
+        )
+    )
+    # a session on a different device does not corroborate this channel
+    store.put_liveview_session(
+        LiveViewSession(
+            site_id="site",
+            device_id="other-cam",
+            session_url="/v1/devices/other-cam/media/streaming/whep/sessions/s3",
+            opened_at=t0 + timedelta(minutes=10),
+            closed_at=t0 + timedelta(minutes=20),
+        )
+    )
+    # a session wholly before the window is excluded
+    store.put_liveview_session(
+        LiveViewSession(
+            site_id="site",
+            device_id="cam1",
+            session_url="/v1/devices/cam1/media/streaming/whep/sessions/s4",
+            opened_at=t0 - timedelta(hours=2),
+            closed_at=t0 - timedelta(hours=1),
+        )
+    )
+    # a failed attempt inside the window never established a stream —
+    # auditable in the store, but no corroboration for the channel
+    store.put_liveview_session(
+        LiveViewSession(
+            site_id="site",
+            device_id="cam1",
+            opened_at=t0 + timedelta(minutes=30),
+            state="failed",
+            failure_reason="Ring API HTTP 500",
+        )
+    )
+    report = coverage_report(
+        store, "cam1", t0, t0 + timedelta(hours=1), now=t0 + timedelta(hours=3), site_id="site"
+    )
+    sessions = report["live_sessions"]
+    assert len(sessions) == 2
+    assert {s["closed_at"] is not None for s in sessions} == {True, False}
+    assert all(s["device_id"] == "cam1" for s in sessions)
+    # without a site there is no session evidence — the field stays absent
+    bare = coverage_report(store, "cam1", t0, t0 + timedelta(hours=1), now=t0 + timedelta(hours=3))
+    assert "live_sessions" not in bare
+
+
 def test_lifecycle_interruption_explains_a_gap(store, household, t0):
     """A poll gap overlapping a signed-channel interruption reads explained —
     silence with a recorded cause on file, still never proof of absence."""

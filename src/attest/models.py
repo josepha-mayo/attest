@@ -102,6 +102,26 @@ class CoverageEvent(BaseModel):
         return self.kind in COVERAGE_INTERRUPTING
 
 
+class LiveViewSession(BaseModel):
+    """A WHEP live-view session brokered through Attest — human-attention
+    evidence, bounded honestly: the row proves a stream was established with
+    Ring at ``opened_at`` (and how long it stayed open). It never proves that
+    anyone watched, who watched, or what was on screen — Ring does not tell us
+    that, and this record does not pretend otherwise. Raw evidence like poll
+    rows: retention-purgeable once signed copies live in coverage payloads."""
+
+    id: str = Field(default_factory=lambda: _id("lv"))
+    site_id: str
+    device_id: str
+    session_url: str = ""  # Ring's Location header — the session's own identity
+    opened_at: AwareDatetime
+    closed_at: AwareDatetime | None = None
+    # open -> closed on clean close; "failed" when the brokered call reached
+    # Ring and failed — the attempt itself is the auditable fact.
+    state: str = "open"
+    failure_reason: str | None = None
+
+
 class Site(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
     id: str = Field(default_factory=lambda: _id("site"), pattern=r"^[A-Za-z0-9_-]{1,80}$")

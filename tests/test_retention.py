@@ -181,6 +181,44 @@ def test_coverage_events_purge_but_signed_claim_survives(engine, store, househol
     assert verify_receipt(receipt, public_key=engine.signer.public_key_b64)[0]
 
 
+def test_liveview_sessions_purge_but_signed_claim_survives(engine, store, household, tmp_path):
+    """Live-view rows are retention-purgeable — a coverage attestation signed
+    before the purge still carries the session in its payload."""
+    from attest.ledger import verify_receipt
+    from attest.models import LiveViewSession
+
+    now = utcnow()
+    old = now - timedelta(days=400)
+    site, _worker, cam, _sensor = household
+    store.put_liveview_session(
+        LiveViewSession(
+            site_id=site.id,
+            device_id=cam.id,
+            session_url="/v1/devices/x/media/streaming/whep/sessions/s1",
+            opened_at=old,
+            closed_at=old + timedelta(minutes=4),
+        )
+    )
+    store.put_liveview_session(
+        LiveViewSession(
+            site_id=site.id,
+            device_id=cam.id,
+            session_url="/v1/devices/x/media/streaming/whep/sessions/s2",
+            opened_at=now - timedelta(days=1),
+            closed_at=now - timedelta(days=1) + timedelta(minutes=4),
+        )
+    )
+    receipt = engine.issue_coverage_attestation(site, old - timedelta(hours=1), old + timedelta(hours=1))
+    assert len(receipt.payload["coverage"]["live_sessions"]) == 1
+
+    report = retention.build_report(store, None, tmp_path / "media", now=now)
+    assert report["candidates"]["liveview_sessions"]["total"] == 1
+    result = retention.apply(store, None, tmp_path / "media", now=now, confirm=report["apply_token"])
+    assert result["deleted"]["liveview_sessions"] == 1
+    assert len(store.liveview_sessions(site.id)) == 1
+    assert verify_receipt(receipt, public_key=engine.signer.public_key_b64)[0]
+
+
 def test_apply_endpoint_requires_matching_preview_token(settings, store, ring_client, household):
     from fastapi.testclient import TestClient
 

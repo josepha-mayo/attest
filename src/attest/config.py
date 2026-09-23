@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     retention_late_days: int = 90
     retention_poll_days: int = 90
     retention_coverage_days: int = 90
+    retention_liveview_days: int = 90
 
     # Summaries
     summarizer: str = "template"  # template | bedrock

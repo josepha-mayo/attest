@@ -400,6 +400,80 @@ def test_brief_page_carries_anchors_and_boundary(api, store, household, t0):
     assert api.get("/visits/vis_missing/brief").status_code == 404
 
 
+def test_liveview_sessions_journal_and_close(api, store, household):
+    """A brokered WHEP session journals as human-attention evidence: opening
+    POSTs the SDP offer to Ring and records the session URL; closing marks the
+    row — the record says 'a stream was established', never 'someone watched'."""
+    site = household[0]
+    offer = b"v=0\r\no=- 0 0 IN IP4 0.0.0.0\r\ns=attest\r\nt=0 0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\n"
+    r = api.post(f"/api/sites/{site.id}/liveview", content=offer)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["sdp_answer"].startswith("v=")
+    row = store.liveview_session(body["session_id"])
+    assert row.site_id == site.id and row.device_id == site.door_camera_id
+    assert row.session_url  # Ring's own session identity is on the record
+    assert row.closed_at is None
+
+    page = api.get(f"/sites/{site.id}")
+    assert "Live view" in page.text and "never proves anyone watched" in page.text
+
+    r2 = api.post(f"/api/sites/{site.id}/liveview/{row.id}/close")
+    assert r2.status_code == 200 and r2.json()["closed_at"]
+    assert store.liveview_session(row.id).closed_at is not None
+    assert store.verify_journal()["intact"]  # put+close both journaled
+
+
+def test_liveview_refuses_unknown_disconnected_and_bad_offer(api, store, household):
+    """Live view ends with consent: a disconnected site can't open a session,
+    and a malformed SDP offer is refused before any row is journaled."""
+    site = household[0]
+    assert api.post("/api/sites/site_nope/liveview", content=b"v=0").status_code == 409
+    assert api.post(f"/api/sites/{site.id}/liveview", content=b"not an offer").status_code == 409
+    assert api.post(f"/api/sites/{site.id}/liveview/{'lv_none'}/close").status_code == 409
+    assert store.stats()["liveview_sessions"] == 0
+
+    api.post(f"/api/sites/{site.id}/disconnect", json={"reason": "consent revoked"})
+    r = api.post(
+        f"/api/sites/{site.id}/liveview",
+        content=b"v=0\r\no=- 0 0 IN IP4 0.0.0.0\r\ns=x\r\nt=0 0\r\n",
+    )
+    assert r.status_code == 409 and "disconnect" in r.json()["detail"].lower()
+
+
+def test_liveview_ring_failure_returns_502_safely(api, store, household, monkeypatch):
+    """Ring down mid-broker: the API answers a sanitized 502 and journals a
+    'failed' row — the attempt is auditable, but it never claims a stream."""
+    site = household[0]
+    offer = b"v=0\r\no=- 0 0 IN IP4 0.0.0.0\r\ns=x\r\nt=0 0\r\n"
+
+    def boom(*a, **k):
+        raise httpx.ConnectError("stack internals should not leak")
+
+    monkeypatch.setattr(api.attest_state.engine.ring, "whep_session", boom)
+    r = api.post(f"/api/sites/{site.id}/liveview", content=offer)
+    assert r.status_code == 502
+    assert "stack internals" not in r.text
+    assert store.stats()["liveview_sessions"] == 1
+    failed = store.liveview_sessions(site.id)[0]
+    assert failed.state == "failed" and failed.failure_reason == "Ring unreachable"
+    assert not failed.session_url  # nothing was established — no identity to claim
+    assert store.verify_journal()["intact"]
+
+    monkeypatch.undo()
+    row, _ = api.attest_state.engine.open_liveview(site.id, offer.decode())
+
+    def boom_close(*a, **k):
+        raise httpx.ConnectError("unreachable")
+
+    monkeypatch.setattr(api.attest_state.engine.ring, "whep_close", boom_close)
+    r2 = api.post(f"/api/sites/{site.id}/liveview/{row.id}/close")
+    assert r2.status_code == 502
+    # Close Ring-side failed — the row stays open rather than lying 'closed'.
+    assert store.liveview_session(row.id).closed_at is None
+    assert store.liveview_session(row.id).state == "open"
+
+
 def test_link_qr_encodes_worker_paths_only(api):
     """The QR helper exists for the door-step scan — scoped to worker-link
     paths, not an open encoder."""

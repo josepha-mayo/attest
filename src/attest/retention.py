@@ -38,6 +38,7 @@ class RetentionPolicy:
     late_events_days: int = 90
     poll_observations_days: int = 90
     coverage_events_days: int = 90
+    liveview_sessions_days: int = 90
 
 
 def build_report(
@@ -81,6 +82,7 @@ def build_report(
             "late_events": _bucket(cands["late_events"]),
             "poll_observations": _bucket(cands["poll_observations"]),
             "coverage_events": _bucket(cands["coverage_events"]),
+            "liveview_sessions": _bucket(cands["liveview_sessions"]),
         },
         "apply_token": _apply_token(cands, policy),
         "apply_scope": sorted(
@@ -92,13 +94,14 @@ def build_report(
                 "media_files",
                 "poll_observations",
                 "coverage_events",
+                "liveview_sessions",
             }
         ),
         "note": "Preview only: nothing was deleted or modified. apply() deletes only the "
         "non-chain categories listed in apply_scope, and only for the exact set this token "
         "covers. Closed visits, evidence, receipts, and reviews are chain-linked and are not "
         "deleted in place. Signed history_poll_coverage claims (and their interruption "
-        "annotations) persist in receipts after the raw poll/coverage rows are purged.",
+        "annotations) persist in receipts after the raw poll/coverage/live-view rows are purged.",
     }
 
 
@@ -128,6 +131,7 @@ def apply(
         "late_events": store.delete_late_events([e["id"] for e in cands["late_events"]]),
         "poll_observations": store.delete_poll_observations([o["id"] for o in cands["poll_observations"]]),
         "coverage_events": store.delete_coverage_events([e["id"] for e in cands["coverage_events"]]),
+        "liveview_sessions": store.delete_liveview_sessions([s["id"] for s in cands["liveview_sessions"]]),
         "media_files": _delete_media(media_root, [f["path"] for f in cands["media_files"]]),
     }
     deleted["grants"] = (
@@ -217,6 +221,13 @@ def _candidates(store: Store, inbox: Any | None, media_root: Path, now: datetime
         if _aware(e.at) < cov_cutoff
     ]
 
+    lv_cutoff = now - timedelta(days=policy.liveview_sessions_days)
+    liveviews = [
+        {"id": s.id, "site_id": s.site_id, "opened_at": s.opened_at.isoformat()}
+        for s in store.liveview_session_rows()
+        if _aware(s.opened_at) < lv_cutoff
+    ]
+
     deliveries = []
     if inbox is not None:
         cutoff = (now - timedelta(days=policy.deliveries_days)).timestamp()
@@ -243,6 +254,7 @@ def _candidates(store: Store, inbox: Any | None, media_root: Path, now: datetime
         "late_events": late,
         "poll_observations": poll_obs,
         "coverage_events": coverage,
+        "liveview_sessions": liveviews,
     }
 
 
@@ -256,6 +268,7 @@ def _apply_token(cands: dict, policy: RetentionPolicy) -> str:
         "late_events": sorted(e["id"] for e in cands["late_events"]),
         "poll_observations": sorted(o["id"] for o in cands["poll_observations"]),
         "coverage_events": sorted(e["id"] for e in cands["coverage_events"]),
+        "liveview_sessions": sorted(s["id"] for s in cands["liveview_sessions"]),
         "media_files": sorted(f["path"] for f in cands["media_files"]),
     }
     return hashlib.sha256(json.dumps(canonical, sort_keys=True).encode()).hexdigest()[:32]

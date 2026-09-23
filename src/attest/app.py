@@ -918,6 +918,9 @@ def create_app(
             countersign=stances,
             coverage=coverage_summaries,
             coverage_events=await asyncio.to_thread(lambda: store.coverage_events(site.id, limit=20)[::-1]),
+            liveview_sessions=await asyncio.to_thread(
+                lambda: store.liveview_sessions(site.id, limit=20)[::-1]
+            ),
             receipts={v.id: store.receipt_for_visit(v.id) for v in visits},
             digests=digests,
             exports=exports,
@@ -959,6 +962,25 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
         return receipt.model_dump(mode="json")
+
+    @app.post("/api/sites/{site_id}/liveview")
+    async def liveview_open(request: Request, site_id: str = PathParam(max_length=128)):
+        """Broker a WHEP live-view session: the browser's SDP offer goes to Ring
+        verbatim, the session Ring actually establishes is journaled, and the
+        SDP answer comes back for the coordinator's RTCPeerConnection. The row
+        proves a stream was opened — never that anyone watched it."""
+        offer = (await request.body()).decode("utf-8", "replace")
+        row, answer = await action(engine.open_liveview, site_id, offer)
+        return {"session_id": row.id, "sdp_answer": answer}
+
+    @app.post("/api/sites/{site_id}/liveview/{session_id}/close")
+    async def liveview_close(
+        site_id: str = PathParam(max_length=128), session_id: str = PathParam(max_length=128)
+    ):
+        """End a brokered session — Ring-side first, then the journaled row
+        closes. An orphaned row reading 'open' would overstate attention."""
+        row = await action(engine.close_liveview, site_id, session_id)
+        return {"session_id": row.id, "closed_at": row.closed_at}
 
     @app.get("/sites/{site_id}/pack.zip")
     async def case_pack(site_id: str = PathParam(max_length=128), redact_media: bool = False):
@@ -1097,6 +1119,7 @@ def create_app(
             late_events_days=s.retention_late_days,
             poll_observations_days=s.retention_poll_days,
             coverage_events_days=s.retention_coverage_days,
+            liveview_sessions_days=s.retention_liveview_days,
         )
         return await asyncio.to_thread(
             retention.build_report, store, inbox, s.data_dir / "media", policy=policy
@@ -1115,6 +1138,7 @@ def create_app(
             late_events_days=s.retention_late_days,
             poll_observations_days=s.retention_poll_days,
             coverage_events_days=s.retention_coverage_days,
+            liveview_sessions_days=s.retention_liveview_days,
         )
         try:
             return await asyncio.to_thread(

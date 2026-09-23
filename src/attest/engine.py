@@ -25,7 +25,8 @@ import statistics
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from ring_sandbox import RingClient, WebhookEvent
+import httpx
+from ring_sandbox import RingAPIError, RingClient, WebhookEvent
 
 from .clock import ExecutionClock
 from .config import Settings
@@ -39,6 +40,7 @@ from .models import (
     EvidenceKind,
     FamilyGrant,
     Flag,
+    LiveViewSession,
     Receipt,
     Schedule,
     Site,
@@ -844,6 +846,73 @@ class VisitEngine:
         site.disconnected_reason = reason
         self.store.put_site(site)
         return receipt
+
+    # ------------------------------------------------------------------ live view
+
+    def open_liveview(self, site_id: str, sdp_offer: str) -> tuple[LiveViewSession, str]:
+        """Broker a WHEP live-view session: forward the browser's SDP offer to
+        Ring, journal the session Ring actually established, hand back the SDP
+        answer for the browser's RTCPeerConnection.
+
+        The journaled row is human-attention evidence with a hard boundary:
+        it proves a stream was established at ``opened_at`` — never that anyone
+        watched, who watched, or what was on screen. An attempt that reached
+        Ring and failed journals a ``failed`` row — the attempt is the
+        auditable fact; rejections before the call (unknown site, disconnected,
+        malformed offer, no camera) journal nothing."""
+        site = self.store.site(site_id)
+        if site is None:
+            raise ValueError("unknown site")
+        if site.disconnected_at is not None:
+            raise ValueError("site's Ring source is disconnected — live view ends with consent")
+        if not site.door_camera_id:
+            raise ValueError("site has no camera bound")
+        try:
+            session = self.ring.whep_session(device_id=site.door_camera_id, sdp_offer=sdp_offer)
+        except (RingAPIError, httpx.HTTPError) as exc:
+            self._liveview_failed(site, exc)
+            raise
+        return self._liveview_opened(site, session)
+
+    @atomic
+    def _liveview_opened(self, site: Site, session) -> tuple[LiveViewSession, str]:
+        row = LiveViewSession(
+            site_id=site.id,
+            device_id=site.door_camera_id,
+            session_url=session.session_url,
+            opened_at=self.clock.now(),
+        )
+        self.store.put_liveview_session(row)
+        return row, session.sdp_answer
+
+    @atomic
+    def _liveview_failed(self, site: Site, exc: Exception) -> None:
+        reason = f"Ring API HTTP {exc.status_code}" if isinstance(exc, RingAPIError) else "Ring unreachable"
+        self.store.put_liveview_session(
+            LiveViewSession(
+                site_id=site.id,
+                device_id=site.door_camera_id,
+                opened_at=self.clock.now(),
+                state="failed",
+                failure_reason=reason,
+            )
+        )
+
+    @atomic
+    def close_liveview(self, site_id: str, session_id: str) -> LiveViewSession:
+        """End a brokered session — DELETE it at Ring, then mark the journaled
+        row closed. Closing Ring-side first keeps 'still streaming' from ever
+        being recorded when it isn't; a failed close leaves the row open."""
+        row = self.store.liveview_session(session_id)
+        if row is None or row.site_id != site_id:
+            raise ValueError("unknown live-view session")
+        if row.closed_at is not None:
+            return row
+        self.ring.whep_close(row.session_url)
+        row.closed_at = self.clock.now()
+        row.state = "closed"
+        self.store.put_liveview_session(row)
+        return row
 
     def _coverage(self, visit: Visit, site: Site) -> dict | None:
         """How much of this visit's window Event History polling actually watched.

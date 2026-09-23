@@ -111,6 +111,8 @@ worker was honest.</div>
       <td class="muted small">arrived after close — kept for review, never silently dropped</td></tr>
   <tr><td class="muted">Coverage events</td><td>{{ stats.coverage_events }}</td>
       <td class="muted small">Ring lifecycle facts (offline/subscription/link) explaining gaps</td></tr>
+  <tr><td class="muted">Live-view sessions</td><td>{{ stats.liveview_sessions }}</td>
+      <td class="muted small">a stream was opened — records when and how long, never what it showed</td></tr>
   <tr><td class="muted">Dedupe keys</td><td>{{ stats.seen_requests.total }}</td><td></td></tr>
   <tr><td class="muted">Grants</td><td>{{ stats.checkin_grants + stats.review_grants + stats.family_grants }}</td>
       <td class="muted small">{{ stats.checkin_grants }} check-in · {{ stats.review_grants }} review · {{ stats.family_grants }} family</td></tr>

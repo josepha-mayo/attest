@@ -142,6 +142,76 @@ async function disconnectSource() {
 </div>
 {% endif %}
 
+{% if not site.disconnected_at %}
+<h2>Live view</h2>
+<div class="card">
+  <p class="small muted" style="margin-top:0">Open a WHEP live view on the door camera — brokered through
+  Attest so the session itself is journaled. The record proves a stream was established with Ring and
+  for how long; it never proves anyone watched or what was on screen. Sessions also surface in Ring
+  Event History as on-demand entries, so a signed visit overlapping one carries it as corroboration.</p>
+  <button class="btn secondary" id="lv-open">Open live view</button>
+  <button class="btn secondary" id="lv-close" style="display:none">End session</button>
+  <video id="lv-video" autoplay muted playsinline
+         style="display:none;width:100%;max-width:480px;border-radius:8px;background:#111;margin-top:10px"></video>
+  <p id="lv-status" class="small muted" role="status"></p>
+  {% if liveview_sessions %}
+  <table style="margin-top:10px"><tbody>
+    {% for s in liveview_sessions %}
+    <tr>
+      <td class="small muted">{{ t(s.opened_at) }}</td>
+      <td class="small">{% if s.state == "failed" %}<span class="pill failed">attempt failed</span>
+          <span class="muted">{{ s.failure_reason }}</span>
+        {% elif s.closed_at %}{{ ((s.closed_at - s.opened_at).total_seconds() / 60)|round(1) }} min session
+        {% else %}<span class="pill warn">open</span>{% endif %}</td>
+      <td class="small muted">{{ s.device_id }}</td>
+      <td>{% if s.state == "open" and not s.closed_at %}<button class="btn secondary lv-close-row" data-sid="{{ s.id }}">Close</button>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </tbody></table>
+  {% endif %}
+</div>
+<script>
+(function(){
+  let pc = null, sid = null;
+  const status = document.getElementById('lv-status');
+  const openBtn = document.getElementById('lv-open'), closeBtn = document.getElementById('lv-close');
+  const closeSession = async id => {
+    await fetch('/api/sites/{{ site.id }}/liveview/' + id + '/close', {method: 'POST'});
+    if (pc) { pc.close(); pc = null; }
+    location.reload();
+  };
+  document.querySelectorAll('.lv-close-row').forEach(b => b.onclick = () => closeSession(b.dataset.sid));
+  window.addEventListener('pagehide', () => {
+    if (sid) navigator.sendBeacon('/api/sites/{{ site.id }}/liveview/' + sid + '/close', new Blob([]));
+  });
+  openBtn.onclick = async () => {
+    openBtn.disabled = true;
+    try {
+      status.textContent = 'Creating WebRTC offer…';
+      pc = new RTCPeerConnection();
+      pc.addTransceiver('video', {direction: 'recvonly'});
+      pc.ontrack = e => {
+        const v = document.getElementById('lv-video');
+        v.srcObject = e.streams[0]; v.style.display = 'block';
+      };
+      await pc.setLocalDescription(await pc.createOffer());
+      status.textContent = 'Establishing session with Ring…';
+      const r = await fetch('/api/sites/{{ site.id }}/liveview', {
+        method: 'POST', headers: {'Content-Type': 'application/sdp'}, body: pc.localDescription.sdp});
+      const d = await r.json();
+      if (!r.ok) { status.textContent = d.detail || ('Could not open live view (' + r.status + ')'); pc.close(); pc = null; openBtn.disabled = false; return; }
+      sid = d.session_id;
+      try { await pc.setRemoteDescription({type: 'answer', sdp: d.sdp_answer}); }
+      catch (e) { status.textContent = 'Session established and journaled — this browser could not attach the stream (the record stands either way).'; }
+      else status.textContent = 'Live view open — journaled as a human-attention record: session time is attested, viewership is not.';
+      openBtn.style.display = 'none'; closeBtn.style.display = 'inline-block';
+      closeBtn.onclick = () => closeSession(sid);
+    } catch (e) { status.textContent = 'Live view failed: ' + e; if (pc) { pc.close(); pc = null; } openBtn.disabled = false; }
+  };
+})();
+</script>
+{% endif %}
+
 <h2>Visit records</h2>
 <div class="card table-wrap" style="padding:0">
 <table>

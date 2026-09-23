@@ -24,6 +24,9 @@ def seeded(engine, store, household, schedule, t0):
             )
         )
     )
+    # A live-view session too — the session-retimestamp attack needs one.
+    row, _answer = engine.open_liveview(household[0].id, "v=0\r\no=- 0 0 IN IP4 0.0.0.0\r\ns=x\r\nt=0 0\r\n")
+    engine.close_liveview(household[0].id, row.id)
     engine.close_for_review(visit.id)
     return visit
 

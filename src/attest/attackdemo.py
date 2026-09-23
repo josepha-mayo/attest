@@ -164,6 +164,24 @@ def run(store: Store) -> dict:
         _attempt(store, "retimestamp a lifecycle row's index column (re-explain a gap)", retimestamp_coverage)
     )
 
+    def retimestamp_liveview() -> tuple[bool, str]:
+        """Slide a live-view session's denormalized `opened_at` — the signed body
+        is untouched, but 'when a human was watching' moves on the record."""
+        row = store._conn.execute("SELECT id FROM liveview_sessions LIMIT 1").fetchone()
+        if not row:
+            return False, "no live-view sessions to retimestamp"
+        store._conn.execute(
+            "UPDATE liveview_sessions SET opened_at='1999-01-01T00:00:00+00:00' WHERE id=?",
+            (row[0],),
+        )
+        report = store.verify_journal()
+        hit = next((m for m in report["mismatches"] if "index column" in m), None)
+        return bool(hit), hit or "journal did not flag the column edit"
+
+    results.append(
+        _attempt(store, "retimestamp a live-view session (move human attention)", retimestamp_liveview)
+    )
+
     after = store.verify_journal()
     out = {
         "results": results,

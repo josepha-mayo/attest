@@ -615,10 +615,12 @@ def _demo(args: argparse.Namespace) -> None:
     print("     the verify steps. Media digests only — safe to hand over.", flush=True)
     print("  5. Dashboard → 'Integrity posture' — the runtime's self-audit, live:", flush=True)
     print("     chain verification, journal replay, key custody, per-site watching.", flush=True)
+    print("     Then the site page: 'Open live view' brokers a real WHEP stream —", flush=True)
+    print("     journaled as 'a stream was opened', never evidence of what it saw.", flush=True)
     print("  In another terminal, point at the demo's store first:", flush=True)
     print(f'    $env:ATTEST_DATA_DIR="{data_dir}"   (PowerShell)', flush=True)
     print(f"    ATTEST_DATA_DIR={data_dir} <cmd>      (POSIX)", flush=True)
-    print("  6. attest attack-demo  — 8 tamper attempts, all caught and rolled back", flush=True)
+    print("  6. attest attack-demo  — 9 tamper attempts, all caught and rolled back", flush=True)
     print("  7. attest status       — audits the whole runtime offline", flush=True)
     print("  8. attest triage       — the week's brief (agent when AWS is reachable)", flush=True)
     print("  9. attest verify <zip> — verifies a downloaded pack without unzipping", flush=True)
@@ -1423,6 +1425,7 @@ def _retention(args: argparse.Namespace) -> None:
         late_events_days=settings.retention_late_days,
         poll_observations_days=settings.retention_poll_days,
         coverage_events_days=settings.retention_coverage_days,
+        liveview_sessions_days=settings.retention_liveview_days,
     )
     store = Store(settings.data_dir / "attest.sqlite3")
     inbox_path = settings.data_dir / "webhooks.sqlite3"

@@ -19,6 +19,7 @@ from .models import (
     CoverageEvent,
     Evidence,
     FamilyGrant,
+    LiveViewSession,
     PollObservation,
     Receipt,
     ReviewEntry,
@@ -61,6 +62,10 @@ CREATE INDEX IF NOT EXISTS ix_poll_obs_device ON poll_observations(device_id, po
 CREATE TABLE IF NOT EXISTS coverage_events (id TEXT PRIMARY KEY, site_id TEXT NOT NULL,
                                             device_id TEXT, at TEXT NOT NULL, body TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS ix_coverage_events_site ON coverage_events(site_id, at);
+CREATE TABLE IF NOT EXISTS liveview_sessions (id TEXT PRIMARY KEY, site_id TEXT NOT NULL,
+                                              device_id TEXT, opened_at TEXT NOT NULL,
+                                              closed_at TEXT, body TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS ix_liveview_site ON liveview_sessions(site_id, opened_at);
 CREATE TABLE IF NOT EXISTS reviews (id TEXT PRIMARY KEY, visit_id TEXT NOT NULL, revision INTEGER NOT NULL,
                                     body TEXT NOT NULL, UNIQUE(visit_id, revision));
 CREATE TABLE IF NOT EXISTS review_grants (id TEXT PRIMARY KEY, token_hash TEXT UNIQUE, body TEXT NOT NULL);
@@ -106,6 +111,7 @@ _JOURNALED_KEYS = {
     "late_events": "id",
     "poll_observations": "id",
     "coverage_events": "id",
+    "liveview_sessions": "id",
     "settings": "name",
     "seen_requests": "request_id",
     "ingestion_sources": "site_id",
@@ -183,6 +189,15 @@ def _index_specs() -> dict:
                 "site_id": lambda m: m.site_id,
                 "device_id": lambda m: m.device_id,
                 "at": lambda m: _iso(m.at),
+            },
+        ),
+        "liveview_sessions": (
+            LiveViewSession,
+            {
+                "site_id": lambda m: m.site_id,
+                "device_id": lambda m: m.device_id,
+                "opened_at": lambda m: _iso(m.opened_at),
+                "closed_at": lambda m: _iso(m.closed_at) if m.closed_at else None,
             },
         ),
     }
@@ -711,6 +726,48 @@ class Store:
     def delete_coverage_events(self, ids: Iterable[str]) -> int:
         return self._delete_ids("coverage_events", "id", ids)
 
+    # ------------------------------------------------------------ live view
+
+    def put_liveview_session(self, sess: LiveViewSession) -> None:
+        self._put(
+            "liveview_sessions",
+            sess,
+            site_id=sess.site_id,
+            device_id=sess.device_id,
+            opened_at=_iso(sess.opened_at),
+            closed_at=_iso(sess.closed_at) if sess.closed_at else None,
+        )
+
+    def liveview_session(self, session_id: str) -> LiveViewSession | None:
+        return self._one(LiveViewSession, "SELECT body FROM liveview_sessions WHERE id=?", (session_id,))
+
+    def liveview_sessions(
+        self,
+        site_id: str,
+        start: datetime | None = None,
+        until: datetime | None = None,
+        *,
+        limit: int = 500,
+    ) -> list[LiveViewSession]:
+        """Sessions overlapping ``[start, until]`` — a session overlaps when it
+        opened before the window ends and closed (or is still open) after it
+        begins."""
+        sql = "SELECT body FROM liveview_sessions WHERE site_id=?"
+        params: list[object] = [site_id]
+        if until is not None:
+            sql += " AND opened_at<=?"
+            params.append(_iso(until))
+        rows = self._rows(LiveViewSession, sql + " ORDER BY opened_at LIMIT " + str(int(limit)), params)
+        if start is not None:
+            rows = [s for s in rows if s.closed_at is None or s.closed_at >= start]
+        return rows
+
+    def liveview_session_rows(self) -> list[LiveViewSession]:
+        return self._rows(LiveViewSession, "SELECT body FROM liveview_sessions ORDER BY opened_at")
+
+    def delete_liveview_sessions(self, ids: Iterable[str]) -> int:
+        return self._delete_ids("liveview_sessions", "id", ids)
+
     # ----------------------------------------------------------------- idempotency
 
     def bind_source(self, site_id: str, source: str) -> bool:
@@ -846,6 +903,7 @@ class Store:
                 "late_events": row("SELECT COUNT(*) FROM late_events")[0],
                 "poll_observations": row("SELECT COUNT(*) FROM poll_observations")[0],
                 "coverage_events": row("SELECT COUNT(*) FROM coverage_events")[0],
+                "liveview_sessions": row("SELECT COUNT(*) FROM liveview_sessions")[0],
                 "checkin_grants": row("SELECT COUNT(*) FROM checkin_grants")[0],
                 "review_grants": row("SELECT COUNT(*) FROM review_grants")[0],
                 "family_grants": row("SELECT COUNT(*) FROM family_grants")[0],

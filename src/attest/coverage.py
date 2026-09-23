@@ -169,4 +169,19 @@ def coverage_report(
             for ev in lifecycle
             if ev.at >= start
         ]
+        # Live-view sessions brokered through Attest overlap this window — a
+        # human opened the stream while the window ran. The rows attest that a
+        # session was established with Ring (and its duration), never that
+        # anyone watched or what was on screen.
+        report["live_sessions"] = [
+            {
+                "opened_at": s.opened_at.isoformat(),
+                "closed_at": s.closed_at.isoformat() if s.closed_at else None,
+                "device_id": s.device_id,
+            }
+            for s in store.liveview_sessions(site_id, start, end)
+            # "failed" sessions never established a stream — they attest the
+            # attempt in the audit table, not coverage of the window.
+            if s.device_id == device_id and s.state != "failed"
+        ]
     return report
