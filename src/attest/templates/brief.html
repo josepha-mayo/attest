@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Visit record brief — {{ site.name }} — {{ visit.id }}</title>
+<style>
+:root{--ink:#1c2733;--muted:#5c6b7a;--line:#d7dfe7;--ok:#1a7f4b;--warn:#b4740c;--quiet:#5f6e7c}
+*{box-sizing:border-box;margin:0}
+body{font:14px/1.5 "Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);background:#eef1f5;padding:24px 12px 60px}
+.sheet{max-width:760px;margin:0 auto;background:#fff;border:1px solid var(--line);border-radius:8px;padding:34px 38px}
+.brand{display:flex;justify-content:space-between;align-items:baseline;border-bottom:2px solid var(--ink);padding-bottom:10px;margin-bottom:18px}
+.brand .logo{font-size:13px;letter-spacing:.16em;text-transform:uppercase;font-weight:700}
+.brand .gen{font-size:12px;color:var(--muted)}
+h1{font-size:21px;margin-bottom:2px}
+.sub{color:var(--muted);font-size:13px;margin-bottom:16px}
+h2{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:20px 0 8px;border-bottom:1px solid var(--line);padding-bottom:4px}
+table{width:100%;border-collapse:collapse}
+td,th{padding:5px 10px 5px 0;vertical-align:top;font-size:13px;text-align:left}
+td.k{color:var(--muted);white-space:nowrap;width:1%}
+tr{border-bottom:1px solid #eef1f4}
+.mono{font-family:Consolas,Menlo,monospace;font-size:11.5px;word-break:break-all}
+.quote{border-left:3px solid var(--warn);padding:6px 12px;margin:8px 0;font-style:italic;color:#4a3d28}
+.quote.household{border-left-color:#2563a8;color:#26374a}
+.quote.coordinator{border-left-color:var(--ok);color:#1d3a2a}
+.byline{font-size:12px;color:var(--muted);margin:2px 0 10px}
+.state{display:inline-block;border-radius:99px;padding:1px 10px;font-size:12px;font-weight:600;border:1px solid var(--line)}
+.state.ok{background:#e2f4ea;color:#175c38;border-color:#b8e2c9}
+.state.warn{background:#f9edd4;color:#7a4f07;border-color:#ecd3a0}
+.state.quiet{background:#e9eef3;color:#45545f}
+.flag{background:#f9edd4;border:1px solid #ecd3a0;border-radius:6px;padding:6px 10px;font-size:12.5px;margin:4px 0;color:#5d3f06}
+.boundary{font-size:12px;color:var(--quiet);line-height:1.65;border-top:1px solid var(--line);margin-top:20px;padding-top:12px}
+.printbar{max-width:760px;margin:0 auto 12px;display:flex;justify-content:flex-end}
+.printbar button{font:inherit;padding:8px 16px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer}
+@media print{
+  body{background:#fff;padding:0}
+  .sheet{border:0;border-radius:0;max-width:none;padding:0}
+  .printbar{display:none}
+  a{color:var(--ink);text-decoration:none}
+}
+</style>
+</head>
+<body>
+{% macro t(dt) %}{{ dt.astimezone(tz).strftime("%I:%M %p").lstrip("0") if dt else "—" }}{% endmacro %}
+<div class="printbar"><button onclick="window.print()">Print / save as PDF</button></div>
+<main class="sheet">
+<div class="brand"><span class="logo">Attest &mdash; visit record brief</span><span class="gen">generated {{ generated_at.astimezone(tz).strftime("%Y-%m-%d %H:%M %Z") }}</span></div>
+
+<h1>{{ site.name }}</h1>
+<div class="sub">{% if schedule %}{{ schedule.window_start.astimezone(tz).strftime("%A, %B %d, %Y") }} · scheduled {{ t(schedule.window_start) }}&ndash;{{ t(schedule.window_end) }}{% if schedule.service %} · {{ schedule.service }}{% endif %}{% else %}Unscheduled record{% endif %}{% if worker %} · scheduled worker: {{ worker.name }}{% endif %}</div>
+
+<h2>Record state</h2>
+<table>
+<tr><td class="k">Record</td><td><code>{{ visit.id }}</code>
+  {% if visit.state in ["closed"] %}<span class="state ok">closed &amp; signed</span>
+  {% elif visit.state in ["open","in_progress"] %}<span class="state warn">in progress — not yet signed</span>
+  {% elif visit.state == "unmatched" %}<span class="state warn">unmatched — activity outside any schedule</span>
+  {% else %}<span class="state quiet">{{ visit.state.replace("_"," ") }}</span>{% endif %}</td></tr>
+{% if visit.has_observations %}
+<tr><td class="k">Observed activity</td><td>{{ t(visit.arrived_at) }} &ndash; {{ t(visit.last_activity_at) }}{% if visit.observed_span_minutes is not none %} ({{ "%.0f"|format(visit.observed_span_minutes) }} min observed span — not certified time worked){% endif %}</td></tr>
+{% else %}
+<tr><td class="k">Observed activity</td><td>none reported{% if coverage and coverage.polls %} — camera checked {{ coverage.polls }} time{{ "s" if coverage.polls != 1 }} across {{ "%.0f"|format((coverage.fraction or 0)*100) }}% of the window{% endif %}. No activity is not proof nobody came.</td></tr>
+{% endif %}
+{% if visit.checked_in_at %}
+<tr><td class="k">Worker check-in</td><td>{{ t(visit.checked_in_at) }} — self-reported via a single-use link; the check-in does not verify identity</td></tr>
+{% elif worker %}
+<tr><td class="k">Worker check-in</td><td>not received</td></tr>
+{% endif %}
+{% if countersign %}
+<tr><td class="k">Worker's account</td><td>
+  {% if countersign.state == "acknowledged" %}agrees with this record
+  {% elif countersign.state == "contested" %}disputes this record
+  {% elif countersign.state == "corrected" %}submitted a correction
+  {% elif countersign.state == "resolved" %}concluded by a coordinator
+  {% elif countersign.state == "inconclusive" %}responded inconclusively
+  {% else %}{{ countersign.state }}{% endif %}</td></tr>
+{% endif %}
+{% if coverage %}
+<tr><td class="k">Pipeline coverage</td><td>{{ {"observed":"fully watched","observed_with_events":"watched — events seen","partial":"partially watched","blind":"polls failed","no_polls":"not polled"}[coverage.state] if coverage.state in ["observed","observed_with_events","partial","blind","no_polls"] else coverage.state }}{% if coverage.fraction is not none %} — {{ "%.0f"|format(coverage.fraction*100) }}% of the window watched{% endif %}{% if coverage.gaps %}; {{ coverage.gaps|length }} unwatched gap{{ "s" if coverage.gaps|length != 1 }}{% set ex = coverage.gaps|selectattr("explained")|list %}{% if ex %} ({{ ex|length }} with a signed channel interruption{% endif %}{% if ex %}){% endif %}{% endif %}</td></tr>
+{% endif %}
+</table>
+
+{% for f in visit.flags %}<div class="flag">Flagged for human review: {{ f.message }}</div>{% endfor %}
+
+{% if timeline %}
+<h2>Timeline</h2>
+{% include "_timeline.html" %}
+{% endif %}
+
+<h2>Source by source</h2>
+<table>
+{% for r in corroboration %}
+<tr><td class="k">{{ r.source }}</td><td>{{ r.status }}{% if r.detail %} <span style="color:var(--muted)">— {{ r.detail }}</span>{% endif %}</td><td style="color:var(--muted);font-size:12px">{{ r.establishes }}</td></tr>
+{% endfor %}
+</table>
+
+{% if reviews %}
+<h2>Statements on the record</h2>
+{% for e in reviews %}
+{% set p = e.receipt.payload %}
+{% set rv = p.review or {} %}
+{% if rv.decision or rv.outcome or rv.statement %}
+<div>
+  <div class="quote {{ 'household' if p.actor.role == 'household' else ('coordinator' if rv.kind == 'resolution' else '') }}">&ldquo;{{ rv.statement }}&rdquo;</div>
+  <div class="byline">&mdash; {% if rv.kind == "resolution" %}coordinator conclusion: {{ rv.outcome.replace("_"," ") }}{% elif p.actor.role == "household" %}household account{% if rv.perception %} ({{ rv.perception.replace("_"," ") }}){% endif %}{% else %}worker {{ rv.decision or "statement" }}{% endif %}{% if p.actor.name %}, {{ p.actor.name }}{% endif %}{% if rv.reported_start %} · reports {{ rv.reported_start[11:16] }}&ndash;{{ rv.reported_end[11:16] }} UTC{% endif %} — signed {{ t(e.receipt.issued_at) }} · self-reported, appended verbatim, never edited</div>
+</div>
+{% endif %}
+{% endfor %}
+{% endif %}
+
+{% set snaps = evidence|selectattr("media_sha256")|list %}
+{% if snaps %}
+<h2>Media digests (bytes not included)</h2>
+<table>
+{% for e in snaps %}<tr><td class="k">{{ t(e.at) }}</td><td class="mono">sha256:{{ e.media_sha256 }}</td></tr>{% endfor %}
+</table>
+{% endif %}
+
+{% if receipt %}
+<h2>Signed anchors</h2>
+<table>
+<tr><td class="k">Receipt</td><td class="mono">{{ receipt.id }}</td></tr>
+<tr><td class="k">Payload hash</td><td class="mono">{{ receipt.payload_hash }}</td></tr>
+<tr><td class="k">Issuer key</td><td class="mono">{{ receipt.public_key }}</td></tr>
+<tr><td class="k">Chain</td><td>sequence #{{ receipt.sequence }}, hash-linked to the previous receipt{% if review_verification %} — {{ "verified: " + review_verification[1] if review_verification[0] else "verification FAILED: " + review_verification[1] }}{% endif %}</td></tr>
+<tr><td class="k">Signed at</td><td>{{ receipt.issued_at.astimezone(tz).strftime("%Y-%m-%d %H:%M:%S %Z") }}</td></tr>
+</table>
+{% endif %}
+
+<div class="boundary">
+<strong>What this brief is — and is not.</strong>
+This page is a rendering of a signed Attest record. The signature proves the underlying record has not been altered since it was signed — it does not prove identity, attendance, time worked, or physical presence. Observed activity is a device report, not certification of presence; a quiet window is not proof nobody came{% if coverage and coverage.interruptions %}; where the channel itself reported an interruption, that cause is shown, but it still does not establish what happened physically{% endif %}. Worker and household statements are self-reported accounts kept verbatim; a coordinator conclusion is a human judgment appended to the record.<br><br>
+<strong>To verify independently:</strong> ask the coordinator for the signed export pack (<code>pack.zip</code>) for this record. Open its <code>index.html</code> in any browser — it re-verifies every signature offline — or use the hosted verifier or <code>attest verify bundle.json --key &lt;issuer key above&gt;</code>. The hashes above must match the signed payload exactly; any alteration invalidates the signature.
+</div>
+</main>
+</body>
+</html>

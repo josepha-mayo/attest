@@ -141,6 +141,7 @@ document.getElementById('close-record').onclick = async () => {
 <a class="btn secondary" href="/visits/{{ visit.id }}/bundle.json">Export original + review chain</a>
 <a class="btn secondary" href="/visits/{{ visit.id }}/pack.zip" title="bundle + media + offline verifier in one zip">Download dispute pack</a>
 <a class="btn secondary" href="/visits/{{ visit.id }}/pack.zip?redact_media=1" title="media withheld, signed digests kept">Privacy export</a>
+<a class="btn secondary" href="/visits/{{ visit.id }}/brief" title="one printable page for a mediator or filing — anchors and verification steps, no media bytes">Printable brief</a>
 {% if receipt.payload.scheduled_worker %}
 <button class="btn secondary" id="issue-review">Request worker's account</button>
 <a id="worker-review-link" style="display:block;overflow-wrap:anywhere;color:var(--accent)"></a>

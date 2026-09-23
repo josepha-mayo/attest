@@ -367,6 +367,39 @@ def test_household_page_is_plain_language_and_honest(api, store, household, t0):
     assert "payload_hash" not in page.text and "Ed25519" not in page.text
 
 
+def test_brief_page_carries_anchors_and_boundary(api, store, household, t0):
+    """The printable brief is the hand-to-a-mediator artifact: record state,
+    source-by-source table, verbatim voices, signed anchors, verification
+    steps — and never media bytes."""
+    _post_hook(api, household[2].id, "button_press", t0)
+    visit = store.active_visit(household[0].id)
+    assert api.post(f"/api/visits/{visit.id}/close").status_code == 200
+    link = api.post(f"/api/visits/{visit.id}/review-link").json()["path"]
+    api.post(link, auth=None, data={"decision": "dispute", "statement": "I arrived earlier."})
+    flink = api.post(f"/api/visits/{visit.id}/family-link").json()["path"]
+    api.post(
+        flink + "/statement",
+        auth=None,
+        data={"perception": "saw_someone", "statement": "I saw her at the door myself."},
+    )
+    page = api.get(f"/visits/{visit.id}/brief")
+    assert page.status_code == 200
+    assert "visit record brief" in page.text
+    assert "disputes this record" in page.text
+    assert "I arrived earlier." in page.text
+    assert "I saw her at the door myself." in page.text  # the third voice travels
+    assert "household account" in page.text
+    assert "Payload hash" in page.text and "Issuer key" in page.text
+    assert "verified" in page.text  # the chain check reports on the sheet
+    assert "To verify independently" in page.text
+    assert "not proof nobody came" in page.text  # the boundary prints too
+    assert "bytes not included" in page.text.lower() or "media" not in page.text.lower()
+    assert "window.print" in page.text
+    # the brief is admin-side — it must not be reachable without auth
+    assert api.get(f"/visits/{visit.id}/brief", auth=None).status_code == 401
+    assert api.get("/visits/vis_missing/brief").status_code == 404
+
+
 def test_link_qr_encodes_worker_paths_only(api):
     """The QR helper exists for the door-step scan — scoped to worker-link
     paths, not an open encoder."""

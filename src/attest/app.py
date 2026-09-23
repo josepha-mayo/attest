@@ -516,15 +516,10 @@ def create_app(
             late_count=len(late),
         )
 
-    def _household_render(
-        request: Request,
-        v: Visit,
-        media_base: str,
-        via_link: bool = False,
-        **extra,
-    ):
-        """Shared context for the coordinator's /visits/{id}/household and the
-        scoped /family/{token} view — same record, same honesty constraints."""
+    def _record_context(v: Visit) -> dict:
+        """Everything a human-facing record view needs — the coordinator's
+        household page, the scoped family link, and the printable brief share
+        this gather so the three surfaces can never disagree."""
         receipt = store.receipt_for_visit(v.id)
         bundle = reviews.bundle(v.id) if receipt else None
         site = store.site(v.site_id)
@@ -554,22 +549,59 @@ def create_app(
             if schedule
             else ((receipt.payload.get("scheduled_worker") or {}).get("id") if receipt else None)
         )
+        return {
+            "visit": v,
+            "timeline": strip,
+            "site": site,
+            "worker": store.worker(scheduled_worker) if scheduled_worker else None,
+            "schedule": schedule,
+            "evidence": evidence,
+            "receipt": receipt,
+            "bundle": bundle,
+            "reviews": bundle.reviews if bundle else [],
+            "countersign": reviews.countersign(v.id) if bundle else None,
+            "coverage": cov,
+        }
+
+    def _household_render(
+        request: Request,
+        v: Visit,
+        media_base: str,
+        via_link: bool = False,
+        **extra,
+    ):
+        """Shared context for the coordinator's /visits/{id}/household and the
+        scoped /family/{token} view — same record, same honesty constraints."""
         return render(
             request,
             "household.html",
-            visit=v,
-            timeline=strip,
-            site=site,
-            worker=store.worker(scheduled_worker) if scheduled_worker else None,
-            schedule=schedule,
-            evidence=evidence,
-            receipt=receipt,
-            reviews=bundle.reviews if bundle else [],
-            countersign=reviews.countersign(v.id) if bundle else None,
-            coverage=cov,
+            **_record_context(v),
             media_base=media_base,
             via_link=via_link,
             **extra,
+        )
+
+    @app.get("/visits/{visit_id}/brief", response_class=HTMLResponse)
+    async def brief_page(request: Request, visit_id: str = PathParam(max_length=128)):
+        """The printable case brief — one page a customer can hand to a
+        mediator or attach to a filing. It carries the signed anchors (receipt
+        hash, issuer key, verification steps) but never media bytes: the sheet
+        is safe to hand over because it proves integrity without exposing
+        footage."""
+        v = store.visit(visit_id)
+        if v is None:
+            raise HTTPException(404)
+        ctx = _record_context(v)
+        bundle = ctx["bundle"]
+        site = ctx["site"]
+        return render(
+            request,
+            "brief.html",
+            **ctx,
+            corroboration=corroboration(v, site, ctx["schedule"], ctx["evidence"], ctx["receipt"]),
+            review_verification=verify_bundle(bundle, public_key=signer.public_key_b64) if bundle else None,
+            issuer_key=signer.public_key_b64,
+            generated_at=engine.clock.now(),
         )
 
     @app.get("/visits/{visit_id}/household", response_class=HTMLResponse)
