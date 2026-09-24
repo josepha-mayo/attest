@@ -126,6 +126,11 @@ a:focus-visible{outline:2px solid #2563a8;outline-offset:2px;border-radius:3px}
     {% if receipt %}
     <div class="fact"><div class="k">Integrity</div><div class="v">Signed record #{{ receipt.sequence }} — tampering after signing is detectable.{% if not via_link %} <a href="/visits/{{ visit.id }}">Full record</a>{% endif %}</div></div>
     {% endif %}
+    {% if coverage and coverage.live_sessions %}
+    <div class="fact"><div class="k">Live view</div><div class="v">
+      {% for s in coverage.live_sessions %}The service opened a live view of the camera at {{ s.opened_at[11:16] }} UTC.{% endfor %}
+      The record shows the stream was opened — it cannot show what a person saw through it.</div></div>
+    {% endif %}
   </div>
 </div>
 

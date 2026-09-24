@@ -282,6 +282,15 @@ document.getElementById('coordinator-resolve').onsubmit = async event => {
   {% endfor %}
 </div>
 {% endif %}
+{% if cov.live_sessions %}
+<div class="small muted" style="margin-top:8px">
+  A coordinator opened a live view during this window:
+  {% for s in cov.live_sessions %}
+    <div>{{ s.opened_at[11:19] }} UTC — stream established{% if s.closed_at %}, closed {{ s.closed_at[11:19] }}{% else %}, still open when signed{% endif %}
+      ({{ s.device_id }}) · <em>the session is attested — viewership is not</em></div>
+  {% endfor %}
+</div>
+{% endif %}
 </div>
 {% endif %}
 <h2>Original signed record #{{ receipt.sequence }}</h2>

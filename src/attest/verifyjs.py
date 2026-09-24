@@ -763,7 +763,7 @@ function weekSVG(payloads){
   const key=t=>new Date(t*1000).toISOString().slice(0,10);
   const slot=(t,k,v)=>{
     const dk=key(t);
-    (days[dk]||(days[dk]={sched:[],cov:[],gap:[],intr:[],ev:[]}))[k].push(v);};
+    (days[dk]||(days[dk]={sched:[],cov:[],gap:[],intr:[],ev:[],live:[]}))[k].push(v);};
   const eachDay=(a,b,fn)=>{ /* clip an interval to each UTC day it overlaps */
     if(!(a<b))return;
     for(let d=Math.floor(a/DAY)*DAY;d<b;d+=DAY){
@@ -779,6 +779,11 @@ function weekSVG(payloads){
     for(const g of cov.gaps||[])
       eachDay(iso(g.start),iso(g.end),(d,a,b)=>slot(a,"gap",[a,b,g.explained_by||null]));
     for(const it of cov.interruptions||[]){const t=iso(it.at);if(t)slot(t,"intr",it);}
+    for(const s of cov.live_sessions||[]){
+      const a=iso(s.opened_at),b=s.closed_at?iso(s.closed_at):null;
+      if(!a)continue;
+      if(b&&b>a)eachDay(a,b,(d,ca,cb)=>slot(ca,"live",[ca,cb,s.device_id,false]));
+      else slot(a,"live",[a,null,s.device_id,true]); /* open or zero-length: a point mark */}
     for(const e of p.evidence||[]){const t=iso(e.at);if(t)slot(t,"ev",e);}
     const ci=iso(p.checked_in_at);
     if(ci)slot(ci,"ev",{kind:"checkin",at:p.checked_in_at});
@@ -796,6 +801,8 @@ function weekSVG(payloads){
     +' <span class="sw" style="background:#b45309"></span>lifecycle mark'
     +' <span class="sw" style="background:#5aa2e8"></span>device observation'
     +' <span class="sw" style="background:#7c5cc4"></span>worker check-in (self-report)'
+    +' <span class="sw" style="background:#22b8cf"></span>live view opened (a stream was'
+    +' established — never proof anyone watched)'
     +'<br>A quiet stretch is not proof nobody came; an interruption explains why the channel'
     +' went silent, not what happened physically.</small></div>';
   for(const k of keys){
@@ -820,6 +827,14 @@ function weekSVG(payloads){
       s+=`<rect x="${X}" y="0.6" width="0.7" height="3.6" fill="#b45309">`
         +`<title>${esc(String(it.kind||"").replaceAll("_"," "))} — ${esc(it.at||"")}`
         +(it.device_id?` · ${esc(it.device_id)}`:" · account-wide")+`</title></rect>`;}
+    for(const[a,b,dev,open]of day.live){
+      const title="live view opened — "+esc(dev||"camera")
+        +(open?" · still open when signed":" · stream established")
+        +" — attests a session, never viewership";
+      if(b)s+=`<rect x="${x(d,a)}" y="21.4" width="${w(d,a,b)}" height="1.7" fill="#22b8cf">`
+        +`<title>${title}</title></rect>`;
+      else s+=`<rect x="${Math.min(99.3,Math.max(0,x(d,a)))}" y="20.9" width="0.7" `
+        +`height="2.6" fill="#22b8cf"><title>${title}</title></rect>`;}
     for(const e of day.ev){
       const X=Math.min(99.3,Math.max(0,x(d,iso(e.at))));
       const isCk=e.kind==="checkin";

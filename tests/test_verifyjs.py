@@ -436,7 +436,10 @@ const P={
     interruptions:[{kind:'device_offline',at:'2026-09-20T09:55:00+00:00',device_id:'dev_cam',
                     interrupts:true,detail:null},
                    {kind:'device_online',at:'2026-09-20T10:40:00+00:00',device_id:'dev_cam',
-                    interrupts:false,detail:null}]}};
+                    interrupts:false,detail:null}],
+    live_sessions:[{opened_at:'2026-09-20T09:20:00+00:00',closed_at:'2026-09-20T09:35:00+00:00',
+                    device_id:'dev_cam'},
+                   {opened_at:'2026-09-20T10:45:00+00:00',closed_at:null,device_id:'dev_cam'}]}};
 /* a coverage span that crosses midnight clips into two day rows */
 const Q={
   schedule:{window_start:'2026-09-21T23:00:00+00:00',window_end:'2026-09-22T02:00:00+00:00'},
@@ -450,6 +453,9 @@ console.log('explained:',html.includes('channel reported device offline'));
 console.log('unexplained:',html.includes('the pipeline was not polling'));
 console.log('intrmark:',html.includes('device offline — 2026-09-20T09:55:00+00:00 · dev_cam'));
 console.log('checkin:',html.includes('(self-reported)'));
+console.log('live:',html.includes('live view opened — dev_cam · stream established'));
+console.log('liveopen:',html.includes('still open when signed'));
+console.log('livebound:',html.includes('never proof anyone watched'));
 console.log('bound:',html.includes('not proof nobody came'));
 console.log('empty:',__w([{}])==='');
 console.log('order:',html.indexOf('09-20')<html.indexOf('09-21')&&html.indexOf('09-21')<html.indexOf('09-22'));
@@ -462,7 +468,18 @@ console.log('order:',html.indexOf('09-20')<html.indexOf('09-21')&&html.indexOf('
     assert proc.returncode == 0, proc.stderr
     out = proc.stdout
     assert "rows: 3" in out, out  # the midnight-crossing schedule splits into two day rows
-    for needle in ("explained", "unexplained", "intrmark", "checkin", "bound", "empty", "order"):
+    for needle in (
+        "explained",
+        "unexplained",
+        "intrmark",
+        "checkin",
+        "live",
+        "liveopen",
+        "livebound",
+        "bound",
+        "empty",
+        "order",
+    ):
         assert f"{needle}: true" in out, out
 
 

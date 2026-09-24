@@ -224,11 +224,26 @@ def test_receipt_coverage_carries_signed_interruptions(engine, store, household,
     engine.ingest(_cam_ev(cam.id, "device_online", t0 + timedelta(minutes=45)))
     engine.ingest(_cam_ev(cam.id, "motion_detected", t0 + timedelta(minutes=50), "human"))
 
+    # A coordinator opened a live view mid-window — the signed payload carries
+    # the session (stream established, viewership never claimed).
+    from attest.models import LiveViewSession
+
+    store.put_liveview_session(
+        LiveViewSession(
+            site_id=site.id,
+            device_id=cam.id,
+            session_url="/v1/devices/x/media/streaming/whep/sessions/s9",
+            opened_at=t0 + timedelta(minutes=10),
+            closed_at=t0 + timedelta(minutes=20),
+        )
+    )
     visit = store.active_visit(site.id)
     engine.close_for_review(visit.id)
     receipt = store.receipt_for_visit(visit.id)
     cov = receipt.payload["history_poll_coverage"]
     assert [i["kind"] for i in cov["interruptions"]] == ["device_offline", "device_online"]
+    assert len(cov["live_sessions"]) == 1
+    assert cov["live_sessions"][0]["device_id"] == cam.id
     # Departure was never observed, so the signed window extends to the
     # schedule's end — "could we have seen them leave?" not just "the last event".
     assert cov["window"]["end"] == (t0 + timedelta(hours=1)).isoformat()
