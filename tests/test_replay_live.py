@@ -273,6 +273,45 @@ def test_replay_blackout_day_signs_the_lifecycle_explanation(tmp_path):
                 assert "device offline" in page
 
 
+def test_verify_live_sweep_reports_every_surface():
+    """The evidence command exercises each official surface against the API —
+    account, integration, subscriptions, devices, history, media, and the
+    WHEP open/close — and reports pass/fail honestly per check."""
+    from ring_sandbox import RingClient
+
+    from attest import verifylive
+
+    with serve(sandbox_app()) as ring_url:
+        with RingClient("sandbox-token", base_url=ring_url) as ring:
+            report = verifylive.run(ring)
+    by_check = {c["check"]: c for c in report["checks"]}
+    assert by_check["users/me"]["status"] == "pass"
+    assert by_check["devices"]["status"] == "pass"
+    assert by_check["media download"]["status"] == "pass"
+    assert by_check["WHEP live view"]["status"] == "pass"
+    assert "closed" in by_check["WHEP live view"]["detail"]
+    assert report["summary"]["fail"] == 0
+    # the report never carries the raw token — only the masked hint
+    assert "sandbox-token" not in str(report)
+
+
+def test_verify_live_marks_failures_honestly():
+    """A dead endpoint is reported FAIL per check, not swallowed or crashed —
+    verification evidence must include what did not work."""
+    from ring_sandbox import RingClient
+
+    from attest import verifylive
+
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    dead_port = sock.getsockname()[1]
+    sock.close()  # nothing listening — every check fails fast
+    with RingClient("sandbox-token", base_url=f"http://127.0.0.1:{dead_port}") as ring:
+        report = verifylive.run(ring)
+    assert report["summary"]["fail"] >= 4
+    assert all(c["status"] in ("fail", "skip") for c in report["checks"])
+
+
 def test_replay_late_day_produces_source_divergence(tmp_path):
     """The 'late' story day defers the worker check-in ~65 min past the
     camera's first observation — the corroboration panel must surface the

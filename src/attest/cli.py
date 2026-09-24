@@ -1446,6 +1446,37 @@ def _retention(args: argparse.Namespace) -> None:
             inbox.close()
 
 
+def _verify_live(args: argparse.Namespace) -> None:
+    """Sweep the official API with a live token and print an evidence report."""
+    from pathlib import Path
+
+    from ring_sandbox import RingClient
+
+    from . import verifylive
+
+    token = args.token or settings.ring_access_token
+    base = args.ring_url or settings.ring_base_url
+    with RingClient(
+        token,
+        base_url=base,
+        media_origins=[o.strip() for o in settings.ring_media_origins.split(",") if o.strip()],
+    ) as ring:
+        report = verifylive.run(ring, do_whep=not args.no_whep)
+
+    if args.out:
+        Path(args.out).write_text(json.dumps(report, indent=2), encoding="utf-8")
+        print(f"wrote {args.out}")
+    icon = {"pass": "PASS", "fail": "FAIL", "warn": "WARN", "skip": "SKIP"}
+    print(f"official-API verification — {report['generated_at']} — {report['base_url']}")
+    for c in report["checks"]:
+        print(f"  {icon.get(c['status'], '????')} {c['check']}: {c['detail']}")
+    s = report["summary"]
+    print(f"  {s['pass']} pass · {s['fail']} fail · {s['warn']} warn · {s['skip']} skip")
+    print("Only checks marked PASS may be described as officially verified.")
+    if s["fail"]:
+        sys.exit(1)
+
+
 def main(argv: list[str] | None = None) -> None:
     # Windows consoles default to cp1252 — em-dashes and ellipses in output
     # would crash mid-print. UTF-8 bytes degrade to mojibake there instead of
@@ -1597,6 +1628,20 @@ def main(argv: list[str] | None = None) -> None:
         help="move all failed deliveries back to pending with a fresh attempt budget",
     )
     s.set_defaults(fn=_deliveries)
+
+    s = sub.add_parser(
+        "verify-live",
+        help="one fresh Ring token in, a timestamped official-API evidence report out",
+    )
+    s.add_argument("--token", default=None, help="access token (default ATTEST_RING_ACCESS_TOKEN)")
+    s.add_argument("--ring-url", default=None, help="API base (default ATTEST_RING_BASE_URL)")
+    s.add_argument("--out", default=None, help="also write the report JSON here")
+    s.add_argument(
+        "--no-whep",
+        action="store_true",
+        help="skip the WHEP open/close probe (it creates a real on-demand session)",
+    )
+    s.set_defaults(fn=_verify_live)
 
     _HELP = {
         "seed": "seed a demo site + schedule + worker against a Ring sandbox",
