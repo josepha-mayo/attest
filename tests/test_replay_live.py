@@ -211,6 +211,63 @@ def test_replay_story_cycles_patterns_and_survives_late_events(tmp_path):
                 assert cov["events"] == 0 and cov["gaps"] == []
 
 
+def test_replay_liveview_day_signs_the_session_into_coverage(tmp_path):
+    """The 'liveview' story day opens a coordinator stream mid-window: the
+    journaled session lands inside the visit's signed coverage payload —
+    'a stream was established' attested, viewership never claimed."""
+    token = secrets.token_urlsafe(32)
+    with serve(sandbox_app()) as ring_url:
+        settings = Settings(
+            _env_file=None,
+            admin_token=token,
+            replay_mode=True,
+            data_dir=tmp_path,
+            ring_base_url=ring_url,
+            timezone="UTC",
+            summarizer="template",
+        )
+        app = create_app(settings)
+        with serve(app) as app_url:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "attest.cli",
+                    "replay",
+                    "home_aide_visit",
+                    "--days",
+                    "1",
+                    "--story",
+                    "liveview",
+                    "--speed",
+                    "100000",
+                    "--ring-url",
+                    ring_url,
+                    "--public-url",
+                    app_url,
+                ],
+                env={
+                    **os.environ,
+                    "ATTEST_ADMIN_TOKEN": token,
+                    "ATTEST_REPLAY_MODE": "true",
+                    "ATTEST_RING_BASE_URL": ring_url,
+                    "ATTEST_SUMMARIZER": "template",
+                },
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            assert result.returncode == 0, result.stdout + result.stderr
+            with httpx.Client(base_url=app_url, auth=("admin", token)) as client:
+                receipts = [Receipt.model_validate(r) for r in client.get("/receipts.json").json()]
+                assert len(receipts) == 1
+                sessions = receipts[0].payload["history_poll_coverage"]["live_sessions"]
+                assert len(sessions) == 1
+                assert sessions[0]["opened_at"] and sessions[0]["closed_at"]
+                page = client.get(f"/visits/{receipts[0].visit_id}").text
+                assert "stream established" in page
+
+
 def test_replay_blackout_day_signs_the_lifecycle_explanation(tmp_path):
     """The 'blackout' story day drops the camera mid-visit: arrival is observed,
     departure never is — and the signed coverage must carry the device_offline/

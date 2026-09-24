@@ -241,7 +241,15 @@ def _replay(args: argparse.Namespace) -> None:
         devices = state_response.json()["devices"]
         if args.no_show_day is not None and not 0 <= args.no_show_day < args.days:
             sys.exit("--no-show-day must be a day index within --days")
-        story_patterns = {"observed", "late", "early_out", "no_show", "unmatched", "blackout"}
+        story_patterns = {
+            "observed",
+            "late",
+            "early_out",
+            "no_show",
+            "unmatched",
+            "blackout",
+            "liveview",
+        }
         patterns = [p.strip() for p in args.story.split(",") if p.strip()] if args.story else []
         if bad := set(patterns) - story_patterns:
             sys.exit(f"unknown --story pattern(s) {sorted(bad)}; choose from {sorted(story_patterns)}")
@@ -301,6 +309,12 @@ def _replay(args: argparse.Namespace) -> None:
                     "gap explained by lifecycle events",
                     flush=True,
                 )
+            elif pattern == "liveview":
+                print(
+                    f"Day {day}: coordinator opens a live view mid-visit — "
+                    "journaled human attention, signed into coverage",
+                    flush=True,
+                )
             # Poll history once at window start so coverage rows bracket the visit
             # (poll observations sit on the same logical clock as the events).
             api.post("/api/poll").raise_for_status()
@@ -328,11 +342,33 @@ def _replay(args: argparse.Namespace) -> None:
                 steps = [dataclasses.replace(s, offset_s=s.offset_s + shift) for s in steps]
             previous_offset = 0
             did_checkin = False
+            liveview_done = False
             # On a "late" day the check-in lands well after the shifted arrival
             # cluster — the worker's own self-report diverges from the camera's
             # observation, and the corroboration panel says so explicitly.
             checkin_at_s = 3300 if pattern == "late" else 0
             for step in steps:
+                if pattern == "liveview" and not liveview_done and step.offset_s - previous_offset >= 1800:
+                    # A long event silence is where a coordinator would open a
+                    # live view: broker a WHEP session 15 min into the gap and
+                    # close it 10 min later — bounded, inside the window, signed
+                    # into coverage before the visit closes.
+                    mid = day_start + timedelta(seconds=previous_offset + 900)
+                    advance(api, mid)
+                    lv = api.post(
+                        f"/api/sites/{seeded['site']}/liveview",
+                        content=(
+                            "v=0\r\no=- 0 0 IN IP4 0.0.0.0\r\ns=attest-demo\r\nt=0 0\r\n"
+                            "m=video 9 UDP/TLS/RTP/SAVPF 96\r\n"
+                        ),
+                        headers={"Content-Type": "application/sdp"},
+                    )
+                    if lv.status_code == 200:
+                        advance(api, mid + timedelta(minutes=10))
+                        api.post(
+                            f"/api/sites/{seeded['site']}/liveview/{lv.json()['session_id']}/close"
+                        ).raise_for_status()
+                    liveview_done = True
                 time.sleep((step.offset_s - previous_offset) / args.speed)
                 at = day_start + timedelta(seconds=step.offset_s)
                 advance(api, at)
@@ -617,6 +653,8 @@ def _demo(args: argparse.Namespace) -> None:
     print("     chain verification, journal replay, key custody, per-site watching.", flush=True)
     print("     Then the site page: 'Open live view' brokers a real WHEP stream —", flush=True)
     print("     journaled as 'a stream was opened', never evidence of what it saw.", flush=True)
+    print("     Day 6's visit already carries one: its signed coverage names the", flush=True)
+    print("     session, and the week strip draws the human-attention mark.", flush=True)
     print("  In another terminal, point at the demo's store first:", flush=True)
     print(f'    $env:ATTEST_DATA_DIR="{data_dir}"   (PowerShell)', flush=True)
     print(f"    ATTEST_DATA_DIR={data_dir} <cmd>      (POSIX)", flush=True)
@@ -1669,12 +1707,12 @@ def main(argv: list[str] | None = None) -> None:
                 default=None,
                 help="persist the demo runtime here (must be empty); default is a temp dir",
             )
-            s.add_argument("--days", type=int, default=6)
+            s.add_argument("--days", type=int, default=7)
             s.add_argument(
                 "--story",
-                default="observed,late,blackout,no_show,early_out,unmatched",
+                default="observed,late,blackout,no_show,early_out,unmatched,liveview",
                 metavar="PATTERNS",
-                help="day-pattern cycle: observed,late,blackout,early_out,no_show,unmatched",
+                help="day-pattern cycle: observed,late,blackout,early_out,no_show,unmatched,liveview",
             )
             s.add_argument("--speed", type=float, default=10000)
         if name == "replay":
@@ -1711,8 +1749,8 @@ def main(argv: list[str] | None = None) -> None:
                 "--story",
                 default=None,
                 metavar="PATTERNS",
-                help="comma list cycled across --days: observed,late,blackout,early_out,no_show,unmatched "
-                "(e.g. --days 5 --story observed,late,no_show,early_out,observed)",
+                help="comma list cycled across --days: observed,late,blackout,early_out,no_show,"
+                "unmatched,liveview (e.g. --days 5 --story observed,late,no_show,early_out,observed)",
             )
         s.set_defaults(fn=fn)
 
