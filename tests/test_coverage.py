@@ -370,6 +370,18 @@ def test_timeline_strip_positions_window_bands_and_marks(store, household, t0):
         "gaps": [
             {"start": (t0 + timedelta(minutes=40)).isoformat(), "end": (t0 + timedelta(hours=1)).isoformat()}
         ],
+        "live_sessions": [
+            {
+                "opened_at": (t0 + timedelta(minutes=15)).isoformat(),
+                "closed_at": (t0 + timedelta(minutes=25)).isoformat(),
+                "device_id": "cam1",
+            },
+            {
+                "opened_at": (t0 + timedelta(minutes=45)).isoformat(),
+                "closed_at": None,
+                "device_id": "cam1",
+            },
+        ],
     }
     strip = timeline_strip(
         schedule=sch,
@@ -378,8 +390,14 @@ def test_timeline_strip_positions_window_bands_and_marks(store, household, t0):
         coverage=cov,
     )
     assert strip["window"]["w"] > 50
-    assert [b["watched"] for b in strip["bands"]] == [True, False]
-    assert len(strip["marks"]) == 4  # 3 events + check-in
+    assert [b["watched"] for b in strip["bands"] if not b.get("live")] == [True, False]
+    live_bands = [b for b in strip["bands"] if b.get("live")]
+    assert len(live_bands) == 1  # the closed session only
+    assert "viewership not shown" in live_bands[0]["title"]
+    assert strip["has_live"] is True
+    kinds = [m["kind"] for m in strip["marks"]]
+    assert kinds.count("liveview") == 1  # the still-open session as a tick
+    assert len(strip["marks"]) == 5  # 3 events + check-in + open live tick
     assert all(0 <= m["x"] <= 100 for m in strip["marks"])
     assert timeline_strip(schedule=None, evidence=[], checked_in_at=None, coverage=None) is None
 
@@ -427,6 +445,13 @@ def test_day_strips_share_a_midnight_to_midnight_axis(store, household, t0):
         "v2": {
             "covered": [{"start": day2.isoformat(), "end": (day2 + timedelta(hours=1)).isoformat()}],
             "gaps": [],
+            "live_sessions": [
+                {
+                    "opened_at": (day2 + timedelta(hours=2)).isoformat(),
+                    "closed_at": (day2 + timedelta(hours=2, minutes=10)).isoformat(),
+                    "device_id": "cam1",
+                }
+            ],
         }
     }
     strips = day_strips(
@@ -449,8 +474,10 @@ def test_day_strips_share_a_midnight_to_midnight_axis(store, household, t0):
     assert 11 < mark["x"] < 14
     # day1 carries the check-in mark
     assert any(m["kind"] == "checkin" for m in oldest["strip"]["marks"])
-    # coverage band only on day2
+    # coverage band only on day2 — plus the closed live-view band on top of it
     assert newest["strip"]["bands"] and not oldest["strip"]["bands"]
+    assert any(b.get("live") for b in newest["strip"]["bands"])
+    assert not any(b.get("live") for b in oldest["strip"]["bands"])
     # every rendered element inside the axis
     for s in strips:
         assert all(0 <= m["x"] <= 100 for m in s["strip"]["marks"])

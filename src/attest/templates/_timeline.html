@@ -1,23 +1,23 @@
 {% if timeline %}
 <svg viewBox="0 0 100 34" preserveAspectRatio="none" style="width:100%;height:{{ timeline_h|default(96) }}px;display:block" role="img"
-     aria-label="Timeline of scheduled window, polling coverage, and observations">
+     aria-label="Timeline of scheduled window, polling coverage, observations, and live-view sessions">
   {% if timeline.window %}
   <rect x="{{ timeline.window.x }}" y="4" width="{{ timeline.window.w }}" height="20" rx="1.5"
         fill="#3b4a63" opacity="0.55"><title>scheduled window</title></rect>
   {% endif %}
   {% for b in timeline.bands %}
-  <rect x="{{ b.x }}" y="25" width="{{ b.w }}" height="3.2"
-        fill="{{ '#2f9e63' if b.watched else '#9aa3b2' }}" opacity="0.9">
-    <title>{{ 'watched by polling' if b.watched else 'coverage gap — not watched' }}</title>
+  <rect x="{{ b.x }}" y="{{ 21 if b.live else 25 }}" width="{{ b.w }}" height="3.2"
+        fill="{{ '#22b8cf' if b.live else ('#2f9e63' if b.watched else '#9aa3b2') }}" opacity="0.9">
+    <title>{{ b.title if b.live else ('watched by polling' if b.watched else 'coverage gap — not watched') }}</title>
   </rect>
   {% endfor %}
   {% for m in timeline.marks %}
   <g>
     <line x1="{{ m.x }}" y1="8" x2="{{ m.x }}" y2="24"
-          stroke="{{ '#e8b93e' if m.kind == 'checkin' else ('#c05a5a' if 'departure' in m.kind else '#5aa2e8') }}"
+          stroke="{{ '#e8b93e' if m.kind == 'checkin' else ('#22b8cf' if m.kind == 'liveview' else ('#c05a5a' if 'departure' in m.kind else '#5aa2e8')) }}"
           stroke-width="0.7"><title>{{ m.title }}</title></line>
     <circle cx="{{ m.x }}" cy="7" r="1.1"
-            fill="{{ '#e8b93e' if m.kind == 'checkin' else ('#c05a5a' if 'departure' in m.kind else '#5aa2e8') }}">
+            fill="{{ '#e8b93e' if m.kind == 'checkin' else ('#22b8cf' if m.kind == 'liveview' else ('#c05a5a' if 'departure' in m.kind else '#5aa2e8')) }}">
       <title>{{ m.title }}</title></circle>
   </g>
   {% endfor %}
@@ -30,6 +30,7 @@
   {% if timeline.window %}<span><span style="color:#8fa3c8">&#9632;</span> scheduled window</span>{% endif %}
   {% if timeline.has_coverage %}<span><span style="color:#2f9e63">&#9632;</span> watched &nbsp;<span style="color:#9aa3b2">&#9632;</span> gap</span>{% endif %}
   <span><span style="color:#5aa2e8">&#9679;</span> observation &nbsp;<span style="color:#e8b93e">&#9679;</span> self-reported check-in</span>
+  {% if timeline.has_live %}<span><span style="color:#22b8cf">&#9632;</span> live view — stream established, never viewership</span>{% endif %}
 </div>
 {% endif %}
 {% endif %}

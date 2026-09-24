@@ -1345,6 +1345,12 @@ def _explain(args: argparse.Namespace) -> None:
                 for i in interruptions:
                     dev = f" ({i['device_id']})" if i.get("device_id") else " (account)"
                     print(f"    {i['at']} — {i['kind'].replace('_', ' ')}{dev}")
+            live = (receipt.payload.get("history_poll_coverage") or {}).get("live_sessions") or []
+            if live:
+                print("  live-view sessions signed into coverage:")
+                for s in live:
+                    end = s["closed_at"] or "still open when signed"
+                    print(f"    {s['opened_at']} -> {end} — stream established, viewership not shown")
         else:
             print("No signed receipt — record still open.")
         bundle = reviews.bundle(visit.id) if receipt else None
@@ -1423,6 +1429,11 @@ def _explain_attestation(store, ident: str) -> None:
         interruptions = cov.get("interruptions") or []
         if interruptions:
             print(f"  lifecycle interruptions signed in: {', '.join(i['kind'] for i in interruptions)}")
+        live = cov.get("live_sessions") or []
+        if live:
+            print(
+                f"  live-view sessions signed in: {len(live)} — stream(s) established, viewership not shown"
+            )
         explained = sum(1 for g in cov.get("gaps", []) if g.get("explained"))
         if explained:
             print(f"  {explained} gap(s) carry a recorded cause — context, never absence")

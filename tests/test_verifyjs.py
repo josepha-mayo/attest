@@ -158,6 +158,14 @@ def test_js_timeline_renders_marks_and_escapes_titles(tmp_path):
         "history_poll_coverage": {
             "covered": [{"start": "2026-09-12T15:00:00+00:00", "end": "2026-09-12T16:00:00+00:00"}],
             "gaps": [{"start": "2026-09-12T16:00:00+00:00", "end": "2026-09-12T17:00:00+00:00"}],
+            "live_sessions": [
+                {
+                    "opened_at": "2026-09-12T15:20:00+00:00",
+                    "closed_at": "2026-09-12T15:30:00+00:00",
+                    "device_id": "cam1",
+                },
+                {"opened_at": "2026-09-12T15:40:00+00:00", "closed_at": None, "device_id": "cam1"},
+            ],
         },
     }
     (tmp_path / "p.json").write_text(__import__("json").dumps(payload), encoding="utf-8")
@@ -171,6 +179,8 @@ console.log('has_svg:', svg.startsWith('<svg'));
 console.log('marks:', (svg.match(/<circle/g)||[]).length);
 console.log('checkin_col:', svg.includes('#e8b93e'));
 console.log('gap_band:', svg.includes('#9aa3b2'));
+console.log('live_band:', (svg.match(/#22b8cf/g)||[]).length===2);
+console.log('live_honest:', svg.includes('viewership not shown'));
 console.log('escaped:', !svg.includes('<script') && svg.includes('&lt;'));
 console.log('empty:', timelineSVG({})==='');`);
 """
@@ -189,6 +199,8 @@ console.log('empty:', timelineSVG({})==='');`);
         "marks: 4",
         "checkin_col: true",
         "gap_band: true",
+        "live_band: true",
+        "live_honest: true",
         "escaped: true",
         "empty: true",
     ):

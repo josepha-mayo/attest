@@ -22,6 +22,7 @@ _KIND_LABEL = {
     "snapshot": "snapshot",
     "checkin": "worker check-in",
     "late": "late-arriving event",
+    "liveview": "live view",
 }
 
 
@@ -57,6 +58,14 @@ def timeline_strip(
         points.append(_iso(checked_in_at))
     for iv in (coverage or {}).get("covered", []):
         points.extend((_iso(iv["start"]), _iso(iv["end"])))
+    live = []
+    for s in (coverage or {}).get("live_sessions", []):
+        opened = _iso(_get(s, "opened_at"))
+        closed = _iso(_get(s, "closed_at")) if _get(s, "closed_at") else None
+        live.append((opened, closed))
+        points.append(opened)
+        if closed:
+            points.append(closed)
     for e in late_events or []:
         at = _get(e, "occurred_at") or _get(e, "at")
         if at:
@@ -95,6 +104,20 @@ def timeline_strip(
         bands = [{"watched": True, **b} for a, b_ in covered if (b := band(a, b_))] + [
             {"watched": False, **b} for a, b_ in gaps if (b := band(a, b_))
         ]
+        # A closed live-view session draws as a band over the coverage line —
+        # the record attests a stream was established for that span, never
+        # that anyone watched it or what was on screen.
+        for opened, closed in live:
+            if closed and (b := band(opened, closed)):
+                bands.append(
+                    {
+                        "live": True,
+                        "watched": False,
+                        "title": "live view — a stream was established "
+                        f"{opened.isoformat()} -> {closed.isoformat()}; viewership not shown",
+                        **b,
+                    }
+                )
 
     marks = []
     for e in evidence:
@@ -131,6 +154,17 @@ def timeline_strip(
                     "title": f"late-arriving event — {_iso(at).isoformat()}",
                 }
             )
+    for opened, closed in live:
+        if closed is None and (not bounds or lo <= opened <= hi):
+            marks.append(
+                {
+                    "x": x(opened),
+                    "kind": "liveview",
+                    "label": _KIND_LABEL["liveview"],
+                    "title": f"live view opened {opened.isoformat()} — still open; "
+                    "attests a session, never viewership",
+                }
+            )
 
     # 4–5 readable axis ticks
     ticks = []
@@ -147,6 +181,7 @@ def timeline_strip(
         "start": lo.isoformat(),
         "end": hi.isoformat(),
         "has_coverage": bool(coverage),
+        "has_live": bool(live),
     }
 
 
@@ -179,6 +214,10 @@ def day_strips(
         for key, watched in (("covered", True), ("gaps", False)):
             for iv in cov.get(key, []):
                 items.append((_iso(iv["start"]), _iso(iv["end"]), "coverage", (iv, watched)))
+        for s in cov.get("live_sessions", []):
+            opened = _iso(_get(s, "opened_at"))
+            closed = _iso(_get(s, "closed_at")) if _get(s, "closed_at") else opened
+            items.append((opened, closed, "livesession", s))
     if not items:
         return []
 
@@ -203,7 +242,7 @@ def day_strips(
             if kind == "schedule" and ws < hi and we > lo
         ]
         ev_today = [o for a, _b, kind, o in items if kind == "evidence" and lo <= a < hi]
-        cov_today: dict[str, list[dict]] = {"covered": [], "gaps": []}
+        cov_today: dict[str, list] = {"covered": [], "gaps": [], "live_sessions": []}
         for a, b, kind, o in items:
             if kind == "coverage":
                 iv, watched = o
@@ -211,12 +250,14 @@ def day_strips(
                     cov_today["covered" if watched else "gaps"].append(
                         {"start": max(a, lo).isoformat(), "end": min(b, hi).isoformat()}
                     )
+            elif kind == "livesession" and a < hi and (b > lo or lo <= a < hi):
+                cov_today["live_sessions"].append(o)
         checkins = [a for a, _b, kind, _o in items if kind == "checkin" and lo <= a < hi]
         strip = timeline_strip(
             schedule=sched_today[0] if sched_today else None,
             evidence=ev_today,
             checked_in_at=checkins[0] if checkins else None,
-            coverage=cov_today if cov_today["covered"] or cov_today["gaps"] else None,
+            coverage=cov_today if any(cov_today.values()) else None,
             bounds=(lo, hi),
         )
         # extra schedules/check-ins beyond the first fold into marks via evidence anyway;

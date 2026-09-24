@@ -221,6 +221,8 @@ function timelineSVG(p){
   const ci=iso(p.checked_in_at);if(ci)pts.push(ci);
   const cov=p.history_poll_coverage;
   for(const iv of(cov&&cov.covered)||[])pts.push(iso(iv.start),iso(iv.end));
+  for(const lv of(cov&&cov.live_sessions)||[]){
+    pts.push(iso(lv.opened_at));if(lv.closed_at)pts.push(iso(lv.closed_at));}
   if(!pts.length)return"";
   let lo=Math.min.apply(null,pts),hi=Math.max.apply(null,pts);
   if(hi-lo<600){const m=(lo+hi)/2;lo=m-300;hi=m+300;}
@@ -239,6 +241,16 @@ function timelineSVG(p){
         title=watched?"watched by polling":"coverage gap — not watched";
       s+=`<rect x="${x(a)}" y="25" width="${w(a,b)}" height="3.2" `
         +`fill="${fill}"><title>${title}</title></rect>`;
+    }
+    for(const lv of cov.live_sessions||[]){
+      const a=iso(lv.opened_at),b=lv.closed_at?iso(lv.closed_at):null;
+      if(!a)continue;
+      const title=esc("live view — a stream was established "+lv.opened_at
+        +(b?" -> "+lv.closed_at:" · still open")+"; viewership not shown");
+      if(b&&b>a)s+=`<rect x="${x(a)}" y="21.4" width="${w(a,b)}" height="3.2" `
+        +`fill="#22b8cf"><title>${title}</title></rect>`;
+      else s+=`<line x1="${x(a)}" y1="19" x2="${x(a)}" y2="24.5" stroke="#22b8cf" `
+        +`stroke-width="0.7"><title>${title}</title></line>`;
     }
   }
   const KIND={arrival_motion:"motion",doorbell:"doorbell",door_opened:"door opened",
