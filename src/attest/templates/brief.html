@@ -31,13 +31,17 @@ tr{border-bottom:1px solid #eef1f4}
 .state.quiet{background:#e9eef3;color:#45545f}
 .flag{background:#f9edd4;border:1px solid #ecd3a0;border-radius:6px;padding:6px 10px;font-size:12.5px;margin:4px 0;color:#5d3f06}
 .boundary{font-size:12px;color:var(--quiet);line-height:1.65;border-top:1px solid var(--line);margin-top:20px;padding-top:12px}
+.row{display:flex;align-items:center;flex-wrap:wrap}
 .printbar{max-width:760px;margin:0 auto 12px;display:flex;justify-content:flex-end}
 .printbar button{font:inherit;padding:8px 16px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer}
 @media print{
+  @page{margin:1.5cm}
   body{background:#fff;padding:0}
   .sheet{border:0;border-radius:0;max-width:none;padding:0}
   .printbar{display:none}
   a{color:var(--ink);text-decoration:none}
+  h2{break-after:avoid}
+  tr,.quote,.flag,.boundary{break-inside:avoid;page-break-inside:avoid}
 }
 </style>
 </head>
@@ -77,7 +81,7 @@ tr{border-bottom:1px solid #eef1f4}
   {% else %}{{ countersign.state }}{% endif %}</td></tr>
 {% endif %}
 {% if coverage %}
-<tr><td class="k">Pipeline coverage</td><td>{{ {"observed":"fully watched","observed_with_events":"watched — events seen","partial":"partially watched","blind":"polls failed","no_polls":"not polled"}[coverage.state] if coverage.state in ["observed","observed_with_events","partial","blind","no_polls"] else coverage.state }}{% if coverage.fraction is not none %} — {{ "%.0f"|format(coverage.fraction*100) }}% of the window watched{% endif %}{% if coverage.gaps %}; {{ coverage.gaps|length }} unwatched gap{{ "s" if coverage.gaps|length != 1 }}{% set ex = coverage.gaps|selectattr("explained")|list %}{% if ex %} ({{ ex|length }} with a signed channel interruption{% endif %}{% if ex %}){% endif %}{% endif %}</td></tr>
+<tr><td class="k">Pipeline coverage</td><td>{{ {"observed":"fully watched","observed_with_events":"watched — events seen","partial":"partially watched","blind":"polls failed","no_polls":"not polled"}[coverage.state] if coverage.state in ["observed","observed_with_events","partial","blind","no_polls"] else coverage.state }}{% if coverage.fraction is not none %} — {{ "%.0f"|format(coverage.fraction*100) }}% of the window watched{% endif %}{% if coverage.gaps %}; {{ coverage.gaps|length }} unwatched gap{{ "s" if coverage.gaps|length != 1 }}{% set ex = coverage.gaps|selectattr("explained")|list %}{% if ex %} ({{ ex|length }} explained by a signed Ring lifecycle event{% endif %}{% if ex %}){% endif %}{% endif %}</td></tr>
 {% endif %}
 </table>
 

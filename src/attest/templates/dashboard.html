@@ -12,7 +12,7 @@
     <br>Audit log: {% if journal.intact %}<span class="ok">&#10003; {{ journal.entries }} entries, intact</span>{% else %}<span class="bad">&#10007; {{ journal.mismatches[0] }}</span>{% endif %}
     {% if journal.untracked_rows %}<br><span class="muted">{{ journal.untracked_rows }} rows not covered by the journal — pre-journal data or written outside the pipeline</span>{% endif %}
     <br><span class="muted">Queue: {{ queue.get('pending', 0) }} pending · {{ queue.get('processing', 0) }} in flight · {{ queue.get('failed', 0) }} failed</span>
-    {% for sid, site in sites.items() %}
+    {% for sid, site in sites.items() if sid in signed_sites %}
     <br><a href="/sites/{{ sid }}/pack.zip" style="color:var(--accent)" title="Every signed record for this site, one manifest, offline verifier">Case pack: {{ site.name }}</a>
     <span class="muted">— unzip and open index.html: it verifies every record in the browser, no install</span>
     {% endfor %}
@@ -28,12 +28,12 @@
 <table>
   <tbody>
   {% for a in attention %}
-  <tr class="link" tabindex="0" role="link" aria-label="Open record for {{ t(a.visit.arrived_at) if a.visit.has_observations else t(a.visit.created_at) }}"
+  <tr class="link" tabindex="0" role="link" aria-label="Open record for {{ t(a.visit.arrived_at) if a.visit.has_observations else t(a.visit.created_at) }} — {{ a.level }} priority"
       onclick="location.href='/visits/{{ a.visit.id }}'"
       onkeydown="if(event.key==='Enter')location.href='/visits/{{ a.visit.id }}'">
-    <td style="width:1rem"><span class="flag {{ 'warn' if a.level == 'warn' else a.level }}">&nbsp;</span></td>
+    <td><span class="flag {{ {'warn': 'warn', 'bad': 'critical'}.get(a.level, 'info') }}">{{ a.level }}</span></td>
     <td><a href="/visits/{{ a.visit.id }}" style="color:var(--accent)">{{ t(a.visit.arrived_at) if a.visit.has_observations else t(a.visit.created_at) }}</a>
-      <a href="/sites/{{ a.visit.site_id }}" class="muted small"> — {{ sites[a.visit.site_id].name if a.visit.site_id in sites else a.visit.site_id }}</a>
+      <a href="/sites/{{ a.visit.site_id }}" class="muted small" onclick="event.stopPropagation()"> — {{ sites[a.visit.site_id].name if a.visit.site_id in sites else a.visit.site_id }}</a>
       {% if a.visit.worker_id and a.visit.worker_id in workers %}<span class="muted small"> · {{ workers[a.visit.worker_id].name }}</span>{% endif %}</td>
     <td>{{ a.why }}</td>
     <td class="muted small">Open record &rarr;</td>
@@ -201,7 +201,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
   });
   paint();
   setInterval(() => {
-    if (paused || window.triageRunning) return;  // don't kill an in-flight agent brief
+    if (paused || window.triageRunning || document.visibilityState !== "visible") return;
     sessionStorage.setItem('dash-scroll', String(window.scrollY));
     location.reload();
   }, 5000);

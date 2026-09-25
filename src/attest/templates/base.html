@@ -41,15 +41,16 @@
   .snap { display:flex; gap:14px; flex-wrap:wrap } .snap figure { margin:0; width:240px } .snap img { width:100%; border-radius:8px; border:1px solid var(--line); background:#000 }
   .snap figcaption { font-size:12px; color:var(--muted); word-break:break-all; margin-top:4px }
   pre { background:#0b0d11; border:1px solid var(--line); border-radius:8px; padding:12px; overflow:auto; font-size:12px }
+  code { word-break:break-all }
   .btn { display:inline-block; background:var(--accent); color:#0b0d11; font-weight:700; padding:10px 18px; border-radius:8px; border:0; cursor:pointer; text-decoration:none }
   .btn.secondary { background:transparent; color:var(--fg); border:1px solid var(--line) }
-  .ok { color:var(--ok) } .bad { color:var(--crit) }
+  .ok { color:var(--ok) } .bad { color:var(--crit) } .warn { color:var(--warn) }
   .kpi { font-size:28px; font-weight:700 } .kpi + .muted { margin-top:-4px }
   textarea, input[type=file] { width:100%; background:#0b0d11; color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:10px; font:13px ui-monospace,monospace }
   .summary { font-size:16px; line-height:1.6; border-left:3px solid var(--accent); padding-left:14px }
   .dispute-quote { font-size:16px; line-height:1.55; border-left:3px solid var(--warn); padding-left:14px; margin:12px 0 }
   label { display:block; margin:10px 0; font-size:13px; color:var(--muted) }
-  input:not([type=file]), select { display:block; width:100%; margin-top:5px; padding:10px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg) }
+  input:not([type=file]):not([type=radio]):not([type=checkbox]), select { display:block; width:100%; margin-top:5px; padding:10px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg) }
   fieldset { border:0; padding:0; margin:0; min-width:0 }
   button:disabled, fieldset:disabled { opacity:.5; cursor:not-allowed }
   .table-wrap { overflow-x:auto }
@@ -65,12 +66,14 @@
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
+{% block chrome %}
 <header>
   <div class="brand">Attest<span>.</span></div>
   <nav><a href="/">Records</a><a href="/setup">Setup &amp; schedules</a><a href="/verify">Verify</a><a href="/about">Claim boundary</a><a href="/receipts.json">Export originals</a></nav>
   <div class="meta">{% if settings.ring_base_url == "https://api.amazonvision.com" %}Ring API configured{% else %}Local / test data{% endif %} &middot; configured summary provider: {{ summarizer }}</div>
 </header>
 {% if clock.mode == "replay" %}<div class="replay-banner">LOCAL REPLAY — not a live visit. Event clock: {{ clock.now or "not started" }}. Security expiry and signature issuance use real time.</div>{% endif %}
+{% endblock %}
 <main id="main">{% block body %}{% endblock %}</main>
 </body>
 </html>

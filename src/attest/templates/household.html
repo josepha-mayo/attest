@@ -52,7 +52,8 @@ label.lab{display:block;font-size:14px;color:var(--muted);margin-bottom:6px}
 a{color:#2563a8}
 .row{display:flex;align-items:center}
 .small{font-size:13px}
-a:focus-visible{outline:2px solid #2563a8;outline-offset:2px;border-radius:3px}
+a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid #2563a8;outline-offset:2px;border-radius:3px}
+@media(max-width:480px){.fact .k{min-width:110px}}
 @media(prefers-contrast:more){:root{--muted:#3f4c58;--quiet:#55636f;--line:#b8c2cc}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 </style>
@@ -85,14 +86,14 @@ a:focus-visible{outline:2px solid #2563a8;outline-offset:2px;border-radius:3px}
   <p>{% if coverage and coverage.fraction and coverage.fraction >= 0.999 %}The camera was checked {{ coverage.polls }} times across the whole window and reported nothing.
   {% elif coverage and coverage.polls %}The camera was checked for {{ "%.0f"|format((coverage.fraction or 0)*100) }}% of the window and reported nothing{% if coverage.gaps %} — some of the window wasn't watched{% endif %}.
   {% else %}The camera reported no activity during this window.{% endif %}
-  {% if coverage and coverage.interruptions %}{% set stopped = coverage.interruptions | selectattr("interrupts") | list %}{% if stopped %}The camera itself reported it stopped reporting for part of that time ({{ stopped[0].kind.replace("_", " ") }}) — that gap has a recorded cause.{% endif %}{% endif %}
+  {% if coverage and coverage.interruptions %}{% set stopped = coverage.interruptions | selectattr("interrupts") | list %}{% if stopped %}{% set kind_words = {"device_offline": "it went offline", "device_removed": "it was removed", "subscription_deactivated": "its subscription ended", "subscription_expired": "its subscription ended", "app_integration_removed": "its link to this service was removed"} %}The camera itself reported it stopped reporting for part of that time ({{ kind_words.get(stopped[0].kind, stopped[0].kind.replace("_", " ")) }}) — that gap has a recorded cause.{% endif %}{% endif %}
   No activity is not proof nobody came — it only means the camera reported nothing.</p>
 </div>
 {% else %}
 <div class="card hero ok">
   <div class="mark" aria-hidden="true">&#10003;</div>
   <h2>Activity was observed</h2>
-  <p>The camera reported activity between {{ t(visit.arrived_at) }} and {{ t(visit.last_activity_at) }}{% if visit.observed_span_minutes is not none %} — about {{ "%.0f"|format(visit.observed_span_minutes) }} minutes of observed span{% endif %}.</p>
+  <p>The camera reported activity between {{ t(visit.arrived_at) }} and {{ t(visit.last_activity_at) }}{% if visit.observed_span_minutes is not none %} — about {{ "%.0f"|format(visit.observed_span_minutes) }} minutes between the first and last report{% endif %}.</p>
 </div>
 {% endif %}
 
@@ -120,15 +121,16 @@ a:focus-visible{outline:2px solid #2563a8;outline-offset:2px;border-radius:3px}
       {% else %}Not recorded yet{% endif %}
     </div></div>
     {% if countersign.resolution %}
-    <div class="fact"><div class="k">Conclusion</div><div class="v">{{ countersign.resolution.outcome.replace('_',' ') }} — signed by the coordinator. The worker's statement stays in the record unchanged.</div></div>
+    {% set outcome_words = {"record_upheld": "the signed record stands", "account_accepted": "the worker's account was accepted", "inconclusive": "it could not be settled either way"} %}
+    <div class="fact"><div class="k">Conclusion</div><div class="v">A coordinator concluded that {{ outcome_words.get(countersign.resolution.outcome, countersign.resolution.outcome.replace('_',' ')) }} — signed by the coordinator. The worker's statement stays in the record unchanged.</div></div>
     {% endif %}
     {% endif %}
     {% if receipt %}
     <div class="fact"><div class="k">Integrity</div><div class="v">Signed record #{{ receipt.sequence }} — tampering after signing is detectable.{% if not via_link %} <a href="/visits/{{ visit.id }}">Full record</a>{% endif %}</div></div>
     {% endif %}
-    {% if coverage and coverage.live_sessions %}
+    {% if live_sessions %}
     <div class="fact"><div class="k">Live view</div><div class="v">
-      {% for s in coverage.live_sessions %}The service opened a live view of the camera at {{ s.opened_at[11:16] }} UTC.{% endfor %}
+      {% for s in live_sessions %}The service opened a live view of the camera at {{ t(s.opened_at) }}.{% endfor %}
       The record shows the stream was opened — it cannot show what a person saw through it.</div></div>
     {% endif %}
   </div>
@@ -155,7 +157,7 @@ a:focus-visible{outline:2px solid #2563a8;outline-offset:2px;border-radius:3px}
 {% for hr in household_reviews %}
 {% set hp = hr.receipt.payload %}
 <div class="card">
-  <div class="small" style="color:var(--muted);margin-bottom:6px">In the household's words — {{ hp.review.perception.replace('_', ' ') }}</div>
+  <div class="small" style="color:var(--muted);margin-bottom:6px">In the household's words — {{ {"saw_someone": "someone was seen", "no_one_seen": "nobody was seen", "unsure": "not sure"}.get(hp.review.perception, hp.review.perception.replace('_', ' ')) }}</div>
   <div class="quote household">&ldquo;{{ hp.review.statement }}&rdquo;</div>
   <div class="small" style="color:var(--muted)">— household account via the family link, appended to the signed record. Self-reported; it doesn't change the camera's observations or the worker's account.</div>
 </div>
@@ -209,7 +211,7 @@ a:focus-visible{outline:2px solid #2563a8;outline-offset:2px;border-radius:3px}
   The camera's report, the schedule, the worker's account, and the household's account are kept separate — this page shows them side by side rather than picking one.
   A signature proves the record hasn't been altered since it was signed — not identity, attendance, or time worked.
   No reported activity is not proof nobody came.
-  {% if receipt %}<br><br>Anyone can check this record without trusting us: ask the coordinator for the export pack and open it in a browser — it verifies itself.{% endif %}
+  {% if receipt %}<br><br>Anyone can check this record without trusting us: ask the service for the export pack and open it in a browser — it verifies itself.{% endif %}
 </div>
 
 </main>

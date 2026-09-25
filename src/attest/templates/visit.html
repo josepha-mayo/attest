@@ -14,8 +14,8 @@
   </div>
 </div>
 <p class="muted">A valid signature proves record integrity, not identity, attendance, or time worked. Review observations alongside the worker's account.</p>
-{% if visit.summary %}<p class="summary" style="margin:22px 0">{{ visit.summary }}</p>{% endif %}
-<div class="small muted">Summary source: {{ visit.summary_source }}{% if visit.summary_model %} / {{ visit.summary_model }}{% endif %}{% if visit.summary_fallback_reason %} — fallback used: {{ visit.summary_fallback_reason }}{% endif %}</div>
+{% if visit.summary %}<p class="summary" style="margin:22px 0">{{ visit.summary }}</p>
+<div class="small muted">Summary source: {{ visit.summary_source }}{% if visit.summary_model %} / {{ visit.summary_model }}{% endif %}{% if visit.summary_fallback_reason %} — fallback used: {{ visit.summary_fallback_reason }}{% endif %}</div>{% endif %}
 <div class="grid" style="margin-top:14px">
   <div class="card"><div class="muted small">First observation</div><div class="kpi" style="font-size:20px">{{ t(visit.arrived_at) if visit.has_observations else "None received" }}</div></div>
   <div class="card"><div class="muted small">Self-reported check-in</div><div class="kpi" style="font-size:20px">{{ t(visit.checked_in_at) }}</div></div>

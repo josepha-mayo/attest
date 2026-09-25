@@ -12,8 +12,12 @@
     </div>
   </div>
   <div>
+    {% if signed_visits %}
     <a class="btn secondary" href="/sites/{{ site.id }}/pack.zip">Export case pack</a>
     <a class="btn secondary" href="/sites/{{ site.id }}/pack.zip?redact_media=1">Privacy export</a>
+    {% else %}
+    <span class="muted small" style="align-self:center">Case pack exports appear once a record is signed.</span>
+    {% endif %}
     <button class="btn secondary" onclick="signDigest()">Sign records digest</button>
     {% if not site.disconnected_at %}
     <button class="btn secondary" onclick="disconnectSource()">Disconnect Ring source</button>

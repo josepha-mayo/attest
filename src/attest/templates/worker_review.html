@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Worker's account — Attest{% endblock %}
+{% block chrome %}<header><div class="brand">Attest<span>.</span></div></header>{% endblock %}
 {% block body %}
 <div style="max-width:720px;margin:auto">
 <h1>Your account of the visit</h1>
@@ -8,7 +9,7 @@
 {% else %}
 <div class="card">
 <p>This link was issued to <b>{{ original.scheduled_worker.name }}</b> for the record at <b>{{ original.site.name }}</b>. It expires 24 hours after issue and works once.</p>
-<p>First observation: {{ original.first_observed_at or "None received" }}<br>Last observation: {{ original.last_observed_at or "None received" }}</p>
+<p>First observation: {{ original.first_observed_at[:16].replace('T', ' ') + ' UTC' if original.first_observed_at else "None received" }}<br>Last observation: {{ original.last_observed_at[:16].replace('T', ' ') + ' UTC' if original.last_observed_at else "None received" }}</p>
 {% if timeline %}<div style="margin:10px 0;padding:8px 4px;background:#11131a;border-radius:8px">
 {% include "_timeline.html" %}
 </div>{% endif %}

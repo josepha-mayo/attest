@@ -17,7 +17,7 @@ worker was honest.</div>
 
 <div class="grid" style="margin-top:16px">
   <div class="card">
-    <h3 style="margin-top:0">Receipt chain</h3>
+    <h2 style="margin-top:0;font-size:1.05rem">Receipt chain</h3>
     {% if chain[0] %}<span class="ok">&#10003; {{ chain[1] }}</span>
     {% else %}<span class="bad">&#10007; {{ chain[1] }}</span>{% endif %}
     <div class="muted small" style="margin-top:.5rem">
@@ -25,7 +25,7 @@ worker was honest.</div>
     </div>
   </div>
   <div class="card">
-    <h3 style="margin-top:0">Mutation journal</h3>
+    <h2 style="margin-top:0;font-size:1.05rem">Mutation journal</h3>
     {% if journal.intact %}<span class="ok">&#10003; {{ journal.entries }} entries, intact</span>
     {% else %}<span class="bad">&#10007; violated</span>{% endif %}
     <div class="muted small" style="margin-top:.5rem">
@@ -34,17 +34,17 @@ worker was honest.</div>
     </div>
   </div>
   <div class="card">
-    <h3 style="margin-top:0">Signing key</h3>
+    <h2 style="margin-top:0;font-size:1.05rem">Signing key</h3>
     {{ custody }}
     <div class="muted small" style="margin-top:.5rem">
       Issuer <code>{{ issuer[:16] }}…</code> · clock mode <code>{{ mode }}</code>
     </div>
   </div>
   <div class="card">
-    <h3 style="margin-top:0">Delivery inbox</h3>
+    <h2 style="margin-top:0;font-size:1.05rem">Delivery inbox</h3>
     {{ queue.get('pending', 0) }} pending · {{ queue.get('processing', 0) }} in flight ·
     {{ queue.get('failed', 0) }} failed
-    <div class="muted small" style="margin-top:.5rem">Failed deliveries requeue — kept until requeued or explicitly purged via retention.</div>
+    <div class="muted small" style="margin-top:.5rem">Failed deliveries are kept until requeued or explicitly purged via retention.</div>
   </div>
 </div>
 

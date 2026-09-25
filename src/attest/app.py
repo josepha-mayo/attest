@@ -312,7 +312,7 @@ def create_app(
                 "Worker check-in and review links are visit-scoped, expire, and are "
                 "single-use — a link that was already used or has expired cannot be reopened."
             )
-            gates = "adding a statement"
+            gates = "checking in" if what == "check-in" else "adding a statement"
         tail = "invalid or expired." if what == "family view" else "invalid, expired, or already used."
         resp = render(
             request,
@@ -398,6 +398,7 @@ def create_app(
             request,
             "dashboard.html",
             visits=visits,
+            signed_sites={v.site_id for v in store.visits(limit=10_000) if v.receipt_id},
             sites={x.id: x for x in store.sites()},
             workers={w.id: w for w in store.workers()},
             schedules={x.id: x for x in store.schedules()},
@@ -561,6 +562,15 @@ def create_app(
             "reviews": bundle.reviews if bundle else [],
             "countersign": reviews.countersign(v.id) if bundle else None,
             "coverage": cov,
+            # Signed payload times arrive as ISO strings; human surfaces need
+            # datetimes for the local-tz `t()` macro — convert once, here.
+            "live_sessions": [
+                {
+                    "opened_at": datetime.fromisoformat(srow["opened_at"]),
+                    "closed_at": datetime.fromisoformat(srow["closed_at"]) if srow.get("closed_at") else None,
+                }
+                for srow in (cov or {}).get("live_sessions", [])
+            ],
         }
 
     def _household_render(
@@ -913,6 +923,7 @@ def create_app(
             "site.html",
             site=site,
             visits=visits,
+            signed_visits=sum(1 for v in visits if v.receipt_id),
             workers=workers,
             schedules=schedules,
             countersign=stances,

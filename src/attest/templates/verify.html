@@ -1,16 +1,18 @@
 {% extends "base.html" %}
-{% block title %}Verify a receipt{% endblock %}
+{% block title %}Verify a receipt or pack{% endblock %}
 {% block body %}
-<h1>Verify a receipt</h1>
+<h1>Verify a receipt or pack</h1>
 <p class="muted">Paste a single receipt or the full ledger export — or upload an exported pack (.zip) to check every record, its review chain, media digests, and the signed manifest. Verification is offline: it recomputes the payload hash and checks the Ed25519 signature. Nothing is stored.</p>
 {% if result %}
 <div class="card" style="margin:14px 0;font-size:17px">{% if result[0] %}<span class="ok">&#10003; {{ result[1] }}</span>{% else %}<span class="bad">&#10007; {{ result[1] }}</span>{% endif %}</div>
 {% endif %}
 <form method="post" enctype="multipart/form-data" class="card">
-  <label class="muted small">Receipt JSON</label>
-  <textarea name="text" rows="12" placeholder='{"id": "rcpt_...", "payload": {...}, "signature": "..."}'></textarea>
+  <label class="muted small" for="verify-text">Receipt JSON</label>
+  <textarea id="verify-text" name="text" rows="12" placeholder='{"id": "rcpt_...", "payload": {...}, "signature": "..."}'></textarea>
   <div class="row" style="margin-top:10px;justify-content:space-between">
-    <input type="file" name="file" accept="application/json,.zip,application/zip" style="width:auto">
+    <label class="muted small" for="verify-file" style="margin:0">…or a bundle.json / pack.zip
+      <input type="file" id="verify-file" name="file" accept="application/json,.zip,application/zip" style="width:auto">
+    </label>
     <button class="btn">Verify</button>
   </div>
 </form>

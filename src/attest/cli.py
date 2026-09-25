@@ -645,7 +645,7 @@ def _demo(args: argparse.Namespace) -> None:
     print("     Open the pack's index.html — a week strip of the whole window", flush=True)
     print("     first, then each record toggles between the technical view and", flush=True)
     print("     a plain-language family view. Or skip the install entirely:", flush=True)
-    print("     josepha-mayo.github.io/attest/verify.html hosts the verifier.", flush=True)
+    print("     https://josepha-mayo.github.io/attest/verify.html hosts the verifier.", flush=True)
     print("  4. On the visit: 'Printable brief' — one page for a mediator or", flush=True)
     print("     filing: state, sources, all three voices, signed anchors, and", flush=True)
     print("     the verify steps. Media digests only — safe to hand over.", flush=True)
