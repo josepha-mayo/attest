@@ -1444,7 +1444,8 @@ def _explain_attestation(store, ident: str) -> None:
         print(
             f"  {c.get('visits_observed', 0)} observed · {c.get('visits_no_observation', 0)} "
             f"no-observation · {c.get('worker_disputes', 0)} dispute(s) · "
-            f"{c.get('coordinator_resolutions', 0)} resolution(s) — counts of signed records"
+            f"{c.get('coordinator_resolutions', 0)} resolution(s) · "
+            f"{c.get('liveview_sessions', 0)} live session(s) — counts of signed records"
         )
     elif rtype == "source_disconnected":
         print(f"  disconnected {p.get('disconnected_at')} — {p.get('reason') or 'no reason given'}")

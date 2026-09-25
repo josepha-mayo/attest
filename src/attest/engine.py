@@ -738,6 +738,11 @@ class VisitEngine:
             "median_resolution_minutes": (
                 round(statistics.median(resolution_lags), 1) if resolution_lags else None
             ),
+            # Streams brokered in the interval — a journaled-fact count, never
+            # a claim about who watched or what was on screen.
+            "liveview_sessions": sum(
+                1 for s in self.store.liveview_sessions(site.id, start, end) if s.state != "failed"
+            ),
         }
         device = site.door_camera_id or site.door_sensor_id
         prev = self.store.latest_receipt()

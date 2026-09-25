@@ -949,4 +949,5 @@ class Store:
             "late_events": self.late_events(),
             "schedules": [json.loads(s.model_dump_json()) for s in self.schedules()],
             "visits": [json.loads(v.model_dump_json()) for v in self.visits()],
+            "liveview_sessions": [json.loads(s.model_dump_json()) for s in self.liveview_session_rows()],
         }

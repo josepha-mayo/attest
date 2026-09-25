@@ -37,7 +37,8 @@
   {{ d.payload.counts.visits_unmatched }} unmatched,
   {{ d.payload.counts.worker_disputes }} worker dispute(s){% if d.payload.counts.records_resolved %},
   {{ d.payload.counts.records_resolved }} resolved{% if d.payload.counts.median_resolution_minutes is not none %}
-  (median {{ d.payload.counts.median_resolution_minutes }} min to conclusion){% endif %}{% endif %} over
+  (median {{ d.payload.counts.median_resolution_minutes }} min to conclusion){% endif %}{% endif %}{% if d.payload.counts.liveview_sessions %},
+  {{ d.payload.counts.liveview_sessions }} live session(s){% endif %} over
   {{ d.payload.summarized_receipts|length }} receipt(s) — verifies offline with the issuer key.
 </div>
 {% endfor %}

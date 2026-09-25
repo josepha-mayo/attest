@@ -55,6 +55,32 @@ def test_period_digest_counts_records_signs_and_chains(engine, store, household,
     assert counts["visits_no_observation"] == 1
     assert counts["visits_observed"] == counts["visits_unmatched"] == 0
     assert counts["worker_statements"] == 0
+    assert counts["liveview_sessions"] == 0
+    # a brokered session inside the interval is a journaled-fact count —
+    # a failed open is an audit entry, not an established stream.
+    from attest.models import LiveViewSession
+
+    store.put_liveview_session(
+        LiveViewSession(
+            site_id=site.id,
+            device_id="cam1",
+            session_url="/v1/devices/cam1/media/streaming/whep/sessions/s1",
+            opened_at=t0 + timedelta(minutes=30),
+            closed_at=t0 + timedelta(minutes=38),
+        )
+    )
+    store.put_liveview_session(
+        LiveViewSession(
+            site_id=site.id,
+            device_id="cam1",
+            session_url="",
+            opened_at=t0 + timedelta(minutes=50),
+            state="failed",
+            failure_reason="upstream error",
+        )
+    )
+    digest2 = engine.issue_period_digest(site, start - timedelta(days=1), end + timedelta(days=1))
+    assert digest2.payload["counts"]["liveview_sessions"] == 1
     # the digest pins exactly which receipts it summarizes
     visit = store.visit_for_schedule(schedule.id)
     assert payload["summarized_receipts"] == {visit.id: store.receipt_for_visit(visit.id).payload_hash}
