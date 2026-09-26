@@ -815,6 +815,47 @@ class VisitEngine:
         return receipt
 
     @atomic
+    def issue_verification_report(self, report: dict) -> Receipt:
+        """Sign a verify-live sweep into the chain: 'this deployment ran the
+        official-API checks at this time and these are the results.' An
+        unsigned report file could be edited to upgrade a fail to a pass
+        before a judge sees it; a chained receipt cannot. Idempotent per
+        identical report content via a ``verify:`` pseudo visit_id."""
+        import hashlib
+        import json as _json
+
+        canonical = _json.dumps(report, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        digest = hashlib.sha256(canonical.encode()).hexdigest()
+        pseudo_id = f"verify:{digest[:16]}"
+        existing = self.store.receipt_for_visit(pseudo_id)
+        if existing:
+            return existing
+        prev = self.store.latest_receipt()
+        receipt = self.signer.issue(
+            visit_id=pseudo_id,
+            sequence=prev.sequence + 1 if prev else 1,
+            prev_hash=prev.payload_hash if prev else None,
+            facts={
+                "record_type": "verification_report",
+                "generated_at": report["generated_at"],
+                "base_url": report["base_url"],
+                "checks": report["checks"],
+                "summary": report["summary"],
+                "boundary": (
+                    "A signed statement that these checks ran at this time and "
+                    "returned these results — a PASS attests the API call "
+                    "succeeded, never the semantics beyond it."
+                ),
+                "journal_head": self.store.journal_head(),
+            },
+        )
+        try:
+            self.store.put_receipt(receipt)
+        except sqlite3.IntegrityError:
+            return self.store.receipt_for_visit(pseudo_id)
+        return receipt
+
+    @atomic
     def disconnect_site(self, site: Site, reason: str = "") -> Receipt:
         """Revoke a site's Ring source binding: tombstone the site and sign a
         ``source_disconnected`` receipt naming exactly what was unbound. The

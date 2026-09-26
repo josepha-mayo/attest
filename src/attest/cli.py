@@ -1513,7 +1513,22 @@ def _verify_live(args: argparse.Namespace) -> None:
     ) as ring:
         report = verifylive.run(ring, do_whep=not args.no_whep)
 
-    if args.out:
+    if args.sign:
+        from .store import Store
+
+        db = settings.data_dir / "attest.sqlite3"
+        if not db.exists():
+            sys.exit("--sign needs a runtime store — run `attest serve` once first")
+        store = Store(db)
+        try:
+            receipt = _cli_engine(store).issue_verification_report(report)
+        finally:
+            store.close()
+        print(f"signed into the ledger as {receipt.id} (record_type=verification_report)")
+        if args.out:
+            Path(args.out).write_text(receipt.model_dump_json(indent=2), encoding="utf-8")
+            print(f"wrote {args.out} — verify with `attest verify {args.out}`")
+    elif args.out:
         Path(args.out).write_text(json.dumps(report, indent=2), encoding="utf-8")
         print(f"wrote {args.out}")
     icon = {"pass": "PASS", "fail": "FAIL", "warn": "WARN", "skip": "SKIP"}
@@ -1686,6 +1701,12 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--token", default=None, help="access token (default ATTEST_RING_ACCESS_TOKEN)")
     s.add_argument("--ring-url", default=None, help="API base (default ATTEST_RING_BASE_URL)")
     s.add_argument("--out", default=None, help="also write the report JSON here")
+    s.add_argument(
+        "--sign",
+        action="store_true",
+        help="chain the report into the runtime ledger as a verification_report "
+        "receipt; --out then writes the signed receipt (`attest verify` checks it)",
+    )
     s.add_argument(
         "--no-whep",
         action="store_true",

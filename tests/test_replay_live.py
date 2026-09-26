@@ -447,6 +447,32 @@ def test_verify_live_marks_failures_honestly():
     assert all(c["status"] in ("fail", "skip") for c in report["checks"])
 
 
+def test_signed_verification_report_verifies_and_is_idempotent(engine):
+    """--sign chains the sweep into the ledger as a verification_report
+    receipt: a judge's copy of the evidence can't be edited to upgrade a
+    fail to a pass without breaking the signature."""
+    from attest.ledger import verify_receipt
+
+    report = {
+        "generated_at": "2026-09-24T00:00:00+00:00",
+        "base_url": "http://127.0.0.1:9999",
+        "checks": [{"check": "users/me", "status": "pass", "detail": "account reachable"}],
+        "summary": {"pass": 1, "fail": 0, "warn": 0, "skip": 0},
+    }
+    receipt = engine.issue_verification_report(report)
+    ok, reason = verify_receipt(receipt)
+    assert ok, reason
+    assert receipt.payload["record_type"] == "verification_report"
+    assert receipt.payload["checks"] == report["checks"]
+    # identical report → same pseudo-id, no duplicate chain entry
+    again = engine.issue_verification_report(report)
+    assert again.id == receipt.id
+    # tampering with a check result invalidates the signature
+    forged = receipt.model_copy(update={"payload": {**receipt.payload, "summary": {"pass": 0, "fail": 1}}})
+    ok2, _ = verify_receipt(forged)
+    assert not ok2
+
+
 def test_replay_late_day_produces_source_divergence(tmp_path):
     """The 'late' story day defers the worker check-in ~65 min past the
     camera's first observation — the corroboration panel must surface the
