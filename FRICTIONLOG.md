@@ -134,3 +134,60 @@ the required shape: task → steps → expected vs. actual → severity → work
   Packs are written `ensure_ascii=False`.
 - **Suggestion:** If a signed-artifact spec is language-neutral, publish a
   reference canonicalizer — every team will otherwise re-find this the hard way.
+
+## 9. Event History type vocabulary is undocumented
+
+- **Task:** Classify Event History records into ding / motion / on-demand /
+  contact-sensor observations.
+- **Steps:** Read `attributes.type` values off the history endpoint and
+  compare with the webhook `type` vocabulary.
+- **Expected:** A documented enum covering both surfaces.
+- **Actual:** Webhook event names are documented (`motion`, `button_press`,
+  `device_offline`, `subscription_*`, `app_integration_*`); the Event History
+  `type` vocabulary is not — and the two surfaces don't obviously share names.
+  Playground only ever emits `on_demand`, so real `ding`/`motion`/`contact`
+  history names cannot be observed at all (see #4).
+- **Severity:** Medium — ingestion must accept a vocabulary it cannot fully
+  enumerate; unknown-but-plausible names have to be handled defensively.
+- **Workaround:** The ingestion layer maps the documented names, tolerates
+  unknown types as generic observations, and ring-sandbox encodes the assumed
+  vocabulary in one place (`scenarios.py`/`world.py`) so a correction is a
+  one-line change.
+- **Suggestion:** Publish the Event History `type` enum alongside the webhook
+  event list, and state explicitly whether the two vocabularies are identical.
+
+## 10. App-integration activation flow is not discoverable from the docs
+
+- **Task:** Complete an app integration so webhooks/subscriptions activate.
+- **Steps:** POST the app-integration resource, then activate it.
+- **Expected:** A documented state machine — create, activate, deactivate.
+- **Actual:** The create returns `awaiting` and activation is a PATCH
+  `{"status": "completed"}` — the transition shape was confirmed only via
+  community Q&A, not the reference docs.
+- **Severity:** Medium — the flow works, but a wrong guess leaves the
+  integration silently in `awaiting` and no events ever arrive.
+- **Workaround:** Confirmed the shape in community Q&A and encoded it in
+  ring-sandbox (`app_integrations` routes + `create`/`update` client methods)
+  so the emulator enforces the same state machine.
+- **Suggestion:** Document the integration lifecycle explicitly — states,
+  transitions, and what happens to subscriptions in each state.
+
+## 11. WHEP live view cannot be exercised without hardware on the account
+
+- **Task:** Open a real WHEP session and confirm the SDP offer/answer +
+  `Location` contract end-to-end.
+- **Steps:** POST an SDP offer to the documented WHEP sessions endpoint on a
+  Playground camera.
+- **Expected:** A 201 + `Location` + SDP answer, like a real camera.
+- **Actual:** There is no documented way to make a Playground virtual device
+  produce a stream — no synthetic media pipeline is described — so the WHEP
+  contract stays unverifiable without physical hardware paired to the
+  account.
+- **Severity:** Medium — live view is a flagship surface; teams without a
+  doorbell cannot test it at all.
+- **Workaround:** `attest verify-live` probes the WHEP endpoint as one check
+  in a full API sweep (PASS/FAIL/SKIP reported honestly), and ring-sandbox
+  implements the documented 201/`Location`/`application/sdp` contract so the
+  client path is exercised end-to-end.
+- **Suggestion:** Give Playground devices a synthetic WHEP responder — a
+  static test pattern stream would make live-view development hardware-free.
