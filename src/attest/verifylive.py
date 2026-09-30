@@ -140,9 +140,10 @@ def run(client: RingClient, *, do_whep: bool = True) -> dict[str, Any]:
         )
 
         def _media():
-            snap = client.snapshot_latest(
-                cam_id, datetime.now(tz=UTC) - timedelta(hours=24), datetime.now(tz=UTC)
-            )
+            # The API caps latest_in_range at 24 h — take one now() and stay a
+            # minute under so end-start can't straddle the cap by micro-time.
+            end = datetime.now(tz=UTC)
+            snap = client.snapshot_latest(cam_id, end - timedelta(hours=23, minutes=59), end)
             if not snap.content:
                 return {"check": "media download", "status": "fail", "detail": "empty body"}
             return {
