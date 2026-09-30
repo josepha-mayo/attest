@@ -46,7 +46,7 @@ tr{border-bottom:1px solid #eef1f4}
 </style>
 </head>
 <body>
-{% macro t(dt) %}{{ dt.astimezone(tz).strftime("%I:%M %p").lstrip("0") if dt else "—" }}{% endmacro %}
+{% macro t(dt) %}{{ (dt|iso).astimezone(tz).strftime("%I:%M %p").lstrip("0") if dt else "—" }}{% endmacro %}
 <div class="printbar"><button onclick="window.print()">Print / save as PDF</button></div>
 <main class="sheet">
 <div class="brand"><span class="logo">Attest &mdash; visit record brief</span><span class="gen">generated {{ generated_at.astimezone(tz).strftime("%Y-%m-%d %H:%M %Z") }}</span></div>
@@ -60,7 +60,8 @@ tr{border-bottom:1px solid #eef1f4}
   {% if visit.state in ["closed"] %}<span class="state ok">closed &amp; signed</span>
   {% elif visit.state in ["open","in_progress"] %}<span class="state warn">in progress — not yet signed</span>
   {% elif visit.state == "unmatched" %}<span class="state warn">unmatched — activity outside any schedule</span>
-  {% else %}<span class="state quiet">{{ visit.state.replace("_"," ") }}</span>{% endif %}</td></tr>
+  {% else %}<span class="state quiet">{{ state_label(visit.state) }}</span>{% endif %}
+  {% if visit.close_reason %}<br><span class="muted small">{{ close_reason_label(visit.close_reason) }}</span>{% endif %}</td></tr>
 {% if visit.has_observations %}
 <tr><td class="k">Observed activity</td><td>{{ t(visit.arrived_at) }} &ndash; {{ t(visit.last_activity_at) }}{% if visit.observed_span_minutes is not none %} ({{ "%.0f"|format(visit.observed_span_minutes) }} min observed span — not certified time worked){% endif %}</td></tr>
 {% else %}
@@ -107,7 +108,7 @@ tr{border-bottom:1px solid #eef1f4}
 {% if rv.decision or rv.outcome or rv.statement %}
 <div>
   <div class="quote {{ 'household' if p.actor.role == 'household' else ('coordinator' if rv.kind == 'resolution' else '') }}">&ldquo;{{ rv.statement }}&rdquo;</div>
-  <div class="byline">&mdash; {% if rv.kind == "resolution" %}coordinator conclusion: {{ rv.outcome.replace("_"," ") }}{% elif p.actor.role == "household" %}household account{% if rv.perception %} ({{ rv.perception.replace("_"," ") }}){% endif %}{% else %}worker {{ rv.decision or "statement" }}{% endif %}{% if p.actor.name %}, {{ p.actor.name }}{% endif %}{% if rv.reported_start %} · reports {{ rv.reported_start[11:16] }}&ndash;{{ rv.reported_end[11:16] }} UTC{% endif %} — signed {{ t(e.receipt.issued_at) }} · self-reported, appended verbatim, never edited</div>
+  <div class="byline">&mdash; {% if rv.kind == "resolution" %}coordinator conclusion: {{ rv.outcome.replace("_"," ") }}{% elif p.actor.role == "household" %}household account{% if rv.perception %} ({{ rv.perception.replace("_"," ") }}){% endif %}{% else %}worker {{ rv.decision or "statement" }}{% endif %}{% if p.actor.name %}, {{ p.actor.name }}{% endif %}{% if rv.reported_start %} · reports {{ t(rv.reported_start) }}&ndash;{{ t(rv.reported_end) }}{% endif %} — signed {{ t(e.receipt.issued_at) }} · self-reported, appended verbatim, never edited</div>
 </div>
 {% endif %}
 {% endfor %}
@@ -129,6 +130,9 @@ tr{border-bottom:1px solid #eef1f4}
 <tr><td class="k">Issuer key</td><td class="mono">{{ receipt.public_key }}</td></tr>
 <tr><td class="k">Chain</td><td>sequence #{{ receipt.sequence }}, hash-linked to the previous receipt{% if review_verification %} — {{ "verified: " + review_verification[1] if review_verification[0] else "verification FAILED: " + review_verification[1] }}{% endif %}</td></tr>
 <tr><td class="k">Signed at</td><td>{{ receipt.issued_at.astimezone(tz).strftime("%Y-%m-%d %H:%M:%S %Z") }}</td></tr>
+{% if receipt.payload.get("journal_head") %}<tr><td class="k">Journal head</td><td class="mono">{{ receipt.payload.journal_head }}</td></tr>{% endif %}
+{% if receipt.payload.get("signature_scope") %}<tr><td class="k">Signature scope</td><td>{{ receipt.payload.signature_scope.replace("_", " ") }}</td></tr>{% endif %}
+{% if receipt.payload.get("data_origin") %}<tr><td class="k">Data origin</td><td>{{ "Ring API" if receipt.payload.data_origin == "ring_api" else "local or test data" }}</td></tr>{% endif %}
 </table>
 {% endif %}
 

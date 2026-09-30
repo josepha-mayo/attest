@@ -1170,7 +1170,8 @@ def _status(args: argparse.Namespace) -> None:
         print(line)
         print(
             f"coverage: {stats['poll_observations']} poll observations, "
-            f"{stats['coverage_events']} lifecycle events on record"
+            f"{stats['coverage_events']} lifecycle events, "
+            f"{stats['liveview_sessions']} live-view sessions on record"
         )
         # Site-level chain events: coverage certs, digests, exports, disconnects —
         # the signed ledger's record of watching, summarizing, and consent.
@@ -1336,7 +1337,9 @@ def _explain(args: argparse.Namespace) -> None:
         print()
         if receipt:
             print(f"Signed receipt {receipt.id} · seq {receipt.sequence} · {receipt.payload_hash[:16]}…")
-            digests = receipt.payload.get("media_digests") or []
+            digests = [
+                e["media_sha256"] for e in receipt.payload.get("evidence", []) if e.get("media_sha256")
+            ]
             if digests:
                 print(f"  media digests signed: {len(digests)}")
             interruptions = (receipt.payload.get("history_poll_coverage") or {}).get("interruptions") or []

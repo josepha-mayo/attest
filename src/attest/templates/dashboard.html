@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Attest — visits{% endblock %}
 {% block body %}
-{% macro t(dt) %}{{ dt.astimezone(tz).strftime("%b %d, %I:%M %p").replace(" 0", " ") if dt else "—" }}{% endmacro %}
+{% macro t(dt) %}{{ (dt|iso).astimezone(tz).strftime("%b %d, %I:%M %p").replace(" 0", " ") if dt else "—" }}{% endmacro %}
 <div class="row" style="justify-content:space-between;align-items:flex-end">
   <div>
     <h1>Visit observations. Clear limits.</h1>
@@ -65,7 +65,7 @@
     {% for d in failed_deliveries %}
     <tr>
       <td><code class="small">{{ d.id[:36] }}</code></td>
-      <td class="muted small">{{ d.received_at }}</td>
+      <td class="muted small">{{ t(d.received_at) }}</td>
       <td class="muted small">{{ d.attempts }} attempt(s)</td>
       <td><span class="flag warn">{{ d.error_code or "failed" }}</span></td>
     </tr>
@@ -130,7 +130,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
     <td>{{ t(v.arrived_at) if v.has_observations else "None received" }}</td>
     <td>{{ t(v.last_activity_at) if v.has_observations else "None received" }}</td>
     <td>{% if v.observed_span_minutes is not none %}{{ "%.0f"|format(v.observed_span_minutes) }} min{% else %}Unknown{% endif %}</td>
-    <td><a href="/visits/{{ v.id }}" style="text-decoration:none"><span class="pill {{ v.state }}">{{ v.state.replace("_"," ") }}</span></a></td>
+    <td><a href="/visits/{{ v.id }}" style="text-decoration:none"><span class="pill {{ v.state }}">{{ state_label(v.state) }}</span></a></td>
     <td>{% set cs = countersign.get(v.id) %}
       {% if cs is none %}<span class="muted">—</span>
       {% elif cs.state == "acknowledged" %}<span class="ok">Acknowledged</span>
@@ -151,7 +151,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
 </div>
 
 {% if worker_stats %}
-<h2>Self-report reliability</h2>
+<h2>Worker check-in timing</h2>
 <div class="card table-wrap" style="padding:0">
 <table>
   <thead><tr><th>Worker</th><th>Visits with self-report</th><th>Median lag vs first observation</th><th>Worst lag</th></tr></thead>

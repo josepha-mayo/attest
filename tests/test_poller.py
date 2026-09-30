@@ -97,7 +97,7 @@ def test_camera_only_site_infers_departure_and_reconciles_history(engine, store,
     assert "observation_gap" in {f.code for f in closed.flags}
     assert "idle_close" not in {f.code for f in closed.flags}
     snaps = [e for e in store.evidence_for(closed.id) if e.kind == "snapshot"]
-    assert [s.note for s in snaps] == ["arrival", "departure"]
+    assert [s.note for s in snaps] == ["first-observation window", "last-observation window"]
 
     r = store.receipt_for_visit(closed.id)
     assert ledger.verify_receipt(r)[0]

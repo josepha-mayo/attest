@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ site.name }} — Attest{% endblock %}
 {% block body %}
-{% macro t(dt) %}{{ dt.astimezone(tz).strftime("%b %d, %I:%M %p").replace(" 0", " ") if dt else "—" }}{% endmacro %}
+{% macro t(dt) %}{{ (dt|iso).astimezone(tz).strftime("%b %d, %I:%M %p").replace(" 0", " ") if dt else "—" }}{% endmacro %}
 <a href="/" class="muted small">&larr; all records</a>
 <div class="row" style="justify-content:space-between;margin-top:8px">
   <div>
@@ -57,8 +57,8 @@
 {% set cov = c.payload.coverage %}
 <div class="muted small" style="margin-top:4px">
   Coverage <a href="/receipts/{{ c.id }}.json"><code>{{ c.id }}</code></a> — watched
-  {{ "%.0f"|format(cov.fraction * 100) }}% of {{ cov.window.start[:16].replace("T", " ") }} to
-  {{ cov.window.end[11:16] }} — {{ cov.polls }} poll(s), {{ cov.events }} event(s),
+  {{ "%.0f"|format(cov.fraction * 100) }}% of {{ t(cov.window.start) }} to
+  {{ t(cov.window.end) }} — {{ cov.polls }} poll(s), {{ cov.events }} event(s),
   {{ cov.gaps|length }} gap(s). What was watched — never a claim of absence.
 </div>
 {% endfor %}
@@ -231,7 +231,7 @@ async function disconnectSource() {
     <td class="small">{% set c = coverage.get(v.id) %}
       {% if c %}<span class="{{ 'ok' if c.fraction > 0.8 else ('warn' if c.fraction > 0.3 else 'bad') }}">{{ "%.0f"|format(c.fraction * 100) }}%</span>
       {% else %}<span class="muted">—</span>{% endif %}</td>
-    <td><span class="pill {{ v.state }}">{{ v.state.replace("_"," ") }}</span></td>
+    <td><span class="pill {{ v.state }}">{{ state_label(v.state) }}</span></td>
     <td>{% set cs = countersign.get(v.id) %}
       {% if cs is none %}<span class="muted">—</span>
       {% elif cs.state == "acknowledged" %}<span class="ok">Acknowledged</span>
@@ -239,7 +239,9 @@ async function disconnectSource() {
       {% elif cs.state == "contested" %}<span class="bad">Contested</span>
       {% elif cs.state == "corrected" %}<span class="warn">Corrected</span>
       {% elif cs.state == "awaiting" %}<span class="muted">Awaiting</span>
-      {% else %}<span class="muted">{{ cs.state }}</span>{% endif %}</td>
+      {% elif cs.state == "inconclusive" %}<span class="warn">Inconclusive</span>
+      {% elif cs.state == "unacknowledged" %}<span class="muted">Link expired</span>
+      {% else %}<span class="muted">{{ cs.state.replace("_", " ") }}</span>{% endif %}</td>
   </tr>
   {% else %}
   <tr><td colspan="7" class="muted">No visit records for this site yet.</td></tr>

@@ -88,7 +88,7 @@ python -m venv .venv
 
 (ring-sandbox resolves from PyPI — `pip install` pulls it automatically. To hack on the emulator alongside, clone it as a sibling directory and add `-e "../ring-sandbox[server]"` to the install line.)
 
-One command boots the in-process Ring emulator, the Attest server, and a 5-day `--story` replay — an on-time visit, a late arrival, a no-show, a departure-unconfirmed visit, an unmatched observation, and a signed worker dispute — then prints a ready Basic-auth dashboard URL. No Ring account, no credentials, no env vars; everything is clearly labeled simulated. `--data-dir DIR` keeps the runtime; `--days`/`--story` reshape it.
+One command boots the in-process Ring emulator, the Attest server, and a 7-day `--story` replay — an on-time visit, a late arrival, a mid-visit camera blackout, a no-observation day (the schedule lapses with no events — never claimed as a no-show), a departure-unconfirmed visit, an unmatched observation, and a mid-window coordinator live view — then prints a ready Basic-auth dashboard URL. No Ring account, no credentials, no env vars; everything is clearly labeled simulated. `--data-dir DIR` keeps the runtime; `--days`/`--story` reshape it.
 
 ## Local development on Windows
 
@@ -119,7 +119,7 @@ For coordinated demos, use `attest replay`, not the standalone `ring-sandbox pla
 
 Multi-day demos: `attest replay home_aide_visit --days 3 --no-show-day 1 --worker-review dispute` produces a week-style dashboard — two observed visits, one honest `no_observation`, and a signed worker dispute — in one command. The replay clock only ever simulates the past, so `--days N` starts N days back.
 
-Story mode: `--days 5 --story observed,late,no_show,early_out,unmatched` cycles named day-patterns — on-time, late arrival (+25 min), no-show, departure-unconfirmed, and out-of-window activity that produces an unmatched visit *and* a lapsed schedule — yielding a realistic mixed-outcome week in one command.
+Story mode: `--days 7 --story observed,late,blackout,no_show,early_out,unmatched,liveview` cycles named day-patterns — on-time, late arrival (+25 min), a camera blackout mid-visit, a no-observation day, departure-unconfirmed, out-of-window activity that produces an unmatched visit *and* a lapsed schedule, and a coordinator live-view session — yielding a realistic mixed-outcome week in one command.
 
 ## Reviewing and correcting a record
 
@@ -218,7 +218,7 @@ How this project sits against the hackathon's four criteria:
 
 - **Tech Implementation** — real `api.amazonvision.com` calls (server-to-server OAuth-shaped client, webhook HMAC-SHA256 verification, `meta.request_id` idempotency, Event History polling, media download behind validated redirects) plus five AWS touchpoints: KMS envelope-encrypts the signing key (live-verified), S3 holds published anchors (live-verified), a **Lambda function verifies uploaded packs with the pinned stdlib verifier — never the pack's own embedded script** (live-verified: clean pack `ok:true`, forged pack `ok:false`), Bedrock generates summaries with honest fallback provenance, and a Strands agent triages the week by reading the ledger through tools — with a deterministic fallback that labels which source wrote the brief. The integrity layer is Ed25519 + hash-chained receipts + a hash-chained mutation journal + OpenTimestamps Bitcoin notarization — each independently verifiable offline.
 - **Design** — a coherent coordinator workflow: dashboard triage → visual timeline (schedule vs. watched coverage vs. observations) → review/issue links → export a pack that verifies itself in a browser with zero install. Worker-facing pages show the same timeline the coordinator sees before they sign.
-- **Potential Impact** — proof-of-visit is a real field-service problem (cleaners, caregivers, contractors) with no product anchored to the household's own Ring events; the Ring Appstore is the named beyond-hackathon venue, and the Configure→Certify→Publish path is understood. `ring-sandbox` is independently useful to every developer integrating the Partner API (published on PyPI).
+- **Potential Impact** — disputed-visit claims are a real field-service problem (cleaners, caregivers, contractors) with no product anchored to the household's own Ring events; the Ring Appstore is the named beyond-hackathon venue, and the Configure→Certify→Publish path is understood. `ring-sandbox` is independently useful to every developer integrating the Partner API (published on PyPI).
 - **Quality of the Idea** — the rubric's "creative" ring, not the "obvious" one: caretaking monitoring + business-system integration + event-based triggers. The differentiated bet is *honest uncertainty as a product feature* — the record refuses to call motion "presence" or silence "absence," and signs exactly how much of the window was watched.
 
 MIT licensed.

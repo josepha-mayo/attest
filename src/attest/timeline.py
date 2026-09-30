@@ -26,6 +26,41 @@ _KIND_LABEL = {
 }
 
 
+def kind_label(kind: str) -> str:
+    """Neutral display name for an evidence kind — 'departure cue', never
+    'departure' (the record disclaims direction)."""
+    return _KIND_LABEL.get(kind, kind.replace("_", " "))
+
+
+_STATE_LABEL = {
+    # legacy stored state from before the no_show→no_observation rename —
+    # render it honestly rather than as a literal absence claim
+    "no_show": "no observation (legacy record)",
+    "open": "open",
+    "in_progress": "in progress",
+    "closed": "closed",
+    "unmatched": "unmatched",
+    "no_observation": "no observation",
+}
+
+
+def state_label(state: str) -> str:
+    return _STATE_LABEL.get(str(state), str(state).replace("_", " "))
+
+
+_CLOSE_REASON_LABEL = {
+    "departure": "closed on a departure cue",
+    "idle": "closed after an activity idle timeout",
+    "window_elapsed": "closed when the scheduled window elapsed",
+    "coordinator_review": "closed for coordinator review",
+}
+
+
+def close_reason_label(reason: str | None) -> str:
+    """Why the record closed — signed in the payload, rendered everywhere it matters."""
+    return _CLOSE_REASON_LABEL.get(str(reason), str(reason).replace("_", " ")) if reason else ""
+
+
 def _iso(s: Any) -> datetime:
     return s if isinstance(s, datetime) else datetime.fromisoformat(str(s))
 

@@ -1,13 +1,16 @@
 <label>Assessment
 <select name="decision" required>
-<option value="inconclusive">Inconclusive — more context needed</option>
-<option value="confirm">Confirm my account of the visit</option>
-<option value="dispute">Dispute the interpretation</option>
-<option value="correction">Add a correction or missing context</option>
+{% for val, label in [
+    ("inconclusive", "Inconclusive — more context needed"),
+    ("confirm", "Confirm my account of the visit"),
+    ("dispute", "Dispute the interpretation"),
+    ("correction", "Add a correction or missing context")] %}
+<option value="{{ val }}" {% if form and form.decision == val %}selected{% endif %}>{{ label }}</option>
+{% endfor %}
 </select></label>
-<label>Statement <textarea name="statement" rows="4" maxlength="2000" required placeholder="Explain what you know and what should be corrected."></textarea></label>
+<label>Statement <textarea name="statement" rows="4" maxlength="2000" required placeholder="Explain what you know and what should be corrected.">{{ form.statement if form }}</textarea></label>
 <div class="row">
-<label>Reported start (optional, include UTC offset)<input name="reported_start" placeholder="2026-09-15T09:00:00-07:00"></label>
-<label>Reported end (optional, include UTC offset)<input name="reported_end" placeholder="2026-09-15T10:30:00-07:00"></label>
+<label>Reported start (optional, include UTC offset)<input name="reported_start" value="{{ form.reported_start if form }}" placeholder="2026-09-15T09:00:00-07:00"></label>
+<label>Reported end (optional, include UTC offset)<input name="reported_end" value="{{ form.reported_end if form }}" placeholder="2026-09-15T10:30:00-07:00"></label>
 </div>
 <p class="muted small">Supply both times or neither. These are reported times, not independently measured work duration. Original observations will not change.</p>

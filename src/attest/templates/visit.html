@@ -1,12 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Observation record {{ visit.id }}{% endblock %}
 {% block body %}
-{% macro t(dt) %}{{ dt.astimezone(tz).strftime("%I:%M:%S %p").lstrip("0") if dt else "Unknown" }}{% endmacro %}
+{% macro t(dt) %}{{ (dt|iso).astimezone(tz).strftime("%I:%M:%S %p").lstrip("0") if dt else "Unknown" }}{% endmacro %}
 <a href="/" class="muted small">&larr; all records</a>
 <div class="row" style="justify-content:space-between;margin-top:8px">
   <div>
-    <h1>{{ site.name }} <span class="pill {{ visit.state }}">{{ visit.state.replace("_"," ") }}</span></h1>
-    <div class="muted">{% if worker and visit.checked_in_at %}Check-in self-reported using {{ worker.name }}'s link{% else %}No worker check-in received{% endif %}. Identity not verified.</div>
+    <h1>{{ site.name }} <span class="pill {{ visit.state }}">{{ state_label(visit.state) }}</span></h1>
+    <div class="muted">{% if worker and visit.checked_in_at %}Check-in self-reported using {{ worker.name }}'s link{% else %}No worker check-in received{% endif %}. Identity not verified.
+      {% if visit.close_reason %}· {{ close_reason_label(visit.close_reason) }}{% endif %}</div>
   </div>
   <div class="row" style="gap:8px">
     <a class="btn secondary" href="/visits/{{ visit.id }}/household" title="Plain-language view for the household">Household view</a>
@@ -114,7 +115,7 @@ where they fall inside the strip. They were not merged into the signed record.</
 {% endif %}
 <div class="card"><ul class="timeline">
 {% for e in evidence if e.kind != "snapshot" %}
-<li><time>{{ t(e.at) }}</time><div>{{ e.kind.replace("_"," ") }}{% if e.ring_sub_type %} ({{ e.ring_sub_type }}){% endif %}
+<li><time>{{ t(e.at) }}</time><div>{{ kind_label(e.kind) }}{% if e.ring_sub_type %} ({{ e.ring_sub_type }}){% endif %}
 {% if e.note %}<div class="muted">{{ e.note }}</div>{% endif %}
 {% if e.ring_event_type %}<div class="small muted">{{ e.ingestion_source }}: <code>{{ e.ring_event_type }}</code> &middot; {{ e.ring_history_event_id or e.ring_request_id or "unavailable" }}</div>{% endif %}
 </div></li>{% endfor %}
@@ -164,9 +165,9 @@ document.getElementById('close-record').onclick = async () => {
 <strong>Revision {{ review.revision }}: {{ facts.review.decision }} — {{ facts.actor.name }} ({{ facts.actor.role }})</strong>
 {% endif %}
 <p style="white-space:pre-wrap">{{ facts.review.statement }}</p>
-{% if facts.review.reported_start %}<p class="small">Reported interval: {{ facts.review.reported_start }} to {{ facts.review.reported_end }}</p>{% endif %}
+{% if facts.review.reported_start %}<p class="small">Reported interval: {{ t(facts.review.reported_start) }} to {{ t(facts.review.reported_end) }}</p>{% endif %}
 {% if facts.actor.role == "household" %}<p class="small muted">Household account via the family link — self-reported; identity not independently verified. It doesn't alter the worker or coordinator stances.</p>{% endif %}
-<div class="muted small">Received {{ facts.statement_received_at }} &middot; hash {{ review.receipt.payload_hash[:16] }}…</div>
+<div class="muted small">Received {{ t(facts.statement_received_at) }} &middot; hash {{ review.receipt.payload_hash[:16] }}…</div>
 </article>
 {% else %}<p class="muted">No human review yet. A coordinator can record an assessment below or request the worker's account.</p>{% endfor %}
 </div>
@@ -241,7 +242,7 @@ document.getElementById('coordinator-resolve').onsubmit = async event => {
   document.getElementById('resolve-status').textContent = typeof data.detail === 'string' ? data.detail : 'Check the required conclusion fields.';
 };
 </script>
-{% set cov = receipt.payload.history_poll_coverage %}
+{% set cov = coverage %}
 {% if cov %}
 <h2>Observation coverage</h2>
 <div class="card">
@@ -265,11 +266,11 @@ document.getElementById('coordinator-resolve').onsubmit = async event => {
   <span class="flag warn">coverage gap</span>
   {% for g in cov.gaps %}
     {% if g.explained %}
-      <div class="muted">{{ g.start[11:19] }} – {{ g.end[11:19] }} UTC not watched — <span class="ok">explained</span>:
+      <div class="muted">{{ t(g.start) }} – {{ t(g.end) }} not watched — <span class="ok">explained</span>:
         {% for w in g.explained_by %}Ring reported <b>{{ w.kind.replace("_", " ") }}</b>{% if w.device_id %} ({{ w.device_id }}){% endif %}{% if w.restored_by %}, restored by {{ w.restored_by.replace("_", " ") }}{% else %}, never restored in window{% endif %}{{ "; " if not loop.last }}{% endfor %}
       </div>
     {% else %}
-      <div class="muted">{{ g.start[11:19] }} – {{ g.end[11:19] }} UTC not watched by any successful poll</div>
+      <div class="muted">{{ t(g.start) }} – {{ t(g.end) }} not watched by any successful poll</div>
     {% endif %}
   {% endfor %}
 </div>
@@ -278,7 +279,7 @@ document.getElementById('coordinator-resolve').onsubmit = async event => {
 <div class="small muted" style="margin-top:8px">
   Ring lifecycle events in this window:
   {% for i in cov.interruptions %}
-    <div>{{ i.at[11:19] }} UTC — {{ i.kind.replace("_", " ") }}{% if i.device_id %} ({{ i.device_id }}){% endif %}{% if i.detail.plan_id %} · plan {{ i.detail.plan_id }}{% endif %}</div>
+    <div>{{ t(i.at) }} — {{ i.kind.replace("_", " ") }}{% if i.device_id %} ({{ i.device_id }}){% endif %}{% if i.detail.plan_id %} · plan {{ i.detail.plan_id }}{% endif %}</div>
   {% endfor %}
 </div>
 {% endif %}
@@ -286,7 +287,7 @@ document.getElementById('coordinator-resolve').onsubmit = async event => {
 <div class="small muted" style="margin-top:8px">
   A coordinator opened a live view during this window:
   {% for s in cov.live_sessions %}
-    <div>{{ s.opened_at[11:19] }} UTC — stream established{% if s.closed_at %}, closed {{ s.closed_at[11:19] }}{% else %}, still open when signed{% endif %}
+    <div>{{ t(s.opened_at) }} — stream established{% if s.closed_at %}, closed {{ t(s.closed_at) }}{% else %}, still open when signed{% endif %}
       ({{ s.device_id }}) · <em>the session is attested — viewership is not</em></div>
   {% endfor %}
 </div>
@@ -296,6 +297,8 @@ document.getElementById('coordinator-resolve').onsubmit = async event => {
 <h2>Original signed record #{{ receipt.sequence }}</h2>
 <div class="card">
 <div class="small">{% if verified[0] %}<span class="ok">Ed25519 signature valid — integrity only</span>{% else %}<span class="bad">{{ verified[1] }}</span>{% endif %}</div>
+{% set pclock = receipt.payload.get("clock") %}
+{% if pclock and pclock.mode == "replay" %}<div class="muted small">Replay-clocked record — replay {{ pclock.replay_id }} · check-in received at wall time {{ t(pclock.checkin_received_at) if pclock.checkin_received_at else "n/a" }}</div>{% endif %}
 <div class="muted small">sha256 {{ receipt.payload_hash }}<br>previous {{ receipt.prev_hash or "genesis" }}</div>
 <pre>{{ receipt.payload | tojson(indent=2) }}</pre>
 </div>

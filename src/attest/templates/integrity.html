@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Attest — integrity posture{% endblock %}
 {% block body %}
-{% macro t(dt) %}{{ dt.astimezone(tz).strftime("%b %d, %I:%M %p").replace(" 0", " ") if dt else "—" }}{% endmacro %}
+{% macro t(dt) %}{{ (dt|iso).astimezone(tz).strftime("%b %d, %I:%M %p").replace(" 0", " ") if dt else "—" }}{% endmacro %}
 <h1>Integrity posture</h1>
 <div class="muted">The runtime's own audit — the same checks <code>attest status</code> runs
 offline, rendered live. This page describes the evidence system's health, not whether any
@@ -63,7 +63,7 @@ worker was honest.</div>
   <thead><tr><th>Kind</th><th>Count</th><th>Latest issued</th></tr></thead>
   <tbody>
   {% for kind, a in attestations|dictsort %}
-  <tr><td>{{ kind }}</td><td>{{ a.count }}</td><td class="muted">{{ t(a.latest) }}</td></tr>
+  <tr><td>{{ kind.replace("_", " ") }}</td><td>{{ a.count }}</td><td class="muted">{{ t(a.latest) }}</td></tr>
   {% else %}
   <tr><td colspan="3" class="muted">None yet — coverage certificates, period digests, export manifests, and disconnect receipts appear here.</td></tr>
   {% endfor %}

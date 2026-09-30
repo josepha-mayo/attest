@@ -170,6 +170,68 @@ def test_redacted_case_pack_upload_verifies(api, household, t0):
     assert "withheld" in detail
 
 
+def test_empty_case_pack_negotiates_a_styled_page(api, household):
+    """A browser following the case-pack link on a site with no signed records
+    gets an explanatory page; a zip consumer gets the JSON 409."""
+    site, _, _, _ = household
+    browser = api.get(f"/sites/{site.id}/pack.zip", headers={"Accept": "text/html"})
+    assert browser.status_code == 409
+    assert "text/html" in browser.headers["content-type"]
+    assert "Nothing to export yet" in browser.text
+    assert f"/sites/{site.id}" in browser.text
+    zip_client = api.get(f"/sites/{site.id}/pack.zip")
+    assert zip_client.status_code == 409
+    assert zip_client.json()["detail"] == "no signed records for this site yet"
+
+
+def test_record_pages_render_styled_404(api):
+    """A mistyped or retention-purged record URL renders an explanatory page,
+    never raw JSON — the page a judge sees on a stale link."""
+    paths = ("/visits/vis_nope", "/visits/vis_nope/brief", "/visits/vis_nope/household", "/sites/site_nope")
+    for path in paths:
+        r = api.get(path, headers={"Accept": "text/html"})
+        assert r.status_code == 404, path
+        assert "text/html" in r.headers["content-type"]
+        assert "Record not found" in r.text
+
+
+def test_unsigned_visit_pack_renders_styled_empty_state(api, household, t0):
+    """An open (unsigned) record's pack link explains instead of erroring raw."""
+    site, _, cam, _ = household
+    r = _post_hook(api, cam.id, "motion_detected", t0, "human")
+    assert r.status_code == 202
+    vid = api.attest_state.store.active_visit(site.id).id
+    page = api.get(f"/visits/{vid}/pack.zip", headers={"Accept": "text/html"})
+    assert page.status_code == 409
+    assert "Nothing to export yet" in page.text
+
+
+def test_worker_review_form_error_rerenders_styled(api, household, t0):
+    """A malformed worker statement re-renders the form with the entered text
+    preserved — the phone user never sees raw JSON."""
+    site, _, cam, _ = household
+    r = _post_hook(api, cam.id, "motion_detected", t0, "human")
+    assert r.status_code == 202
+    vid = api.attest_state.store.active_visit(site.id).id
+    assert api.post(f"/api/visits/{vid}/close").status_code == 200
+    link = api.post(f"/api/visits/{vid}/review-link").json()["path"]
+    page = api.get(link)
+    assert page.status_code == 200
+    bad = api.post(
+        link,
+        data={
+            "decision": "dispute",
+            "statement": "my words",
+            "reported_start": "not-a-time",
+            "reported_end": "",
+        },
+    )
+    assert bad.status_code == 422
+    assert "text/html" in bad.headers["content-type"]
+    assert 'role="alert"' in bad.text  # inline error, not raw JSON
+    assert "my words" in bad.text  # entered statement is preserved
+
+
 def test_verify_pack_page_serves_the_standalone_verifier(api):
     """The dashboard serves the same zero-dependency verifier the packs embed —
     a judge can drop a .zip without extracting anything."""

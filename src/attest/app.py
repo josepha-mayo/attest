@@ -10,7 +10,7 @@ import secrets
 import sqlite3
 import statistics
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -57,6 +57,22 @@ from .triage import attention_items, deterministic_brief, run_triage
 
 log = logging.getLogger("attest")
 _TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+
+
+def _register_template_helpers() -> None:
+    from .timeline import close_reason_label, kind_label, state_label
+
+    _TEMPLATES.env.globals["kind_label"] = kind_label
+    _TEMPLATES.env.globals["state_label"] = state_label
+    _TEMPLATES.env.globals["close_reason_label"] = close_reason_label
+    # Signed payload fields carry ISO strings — the `t` macros apply `|iso` so
+    # datetimes and ISO strings render through one local-tz path.
+    _TEMPLATES.env.filters["iso"] = lambda x: (
+        x if isinstance(x, datetime) else (datetime.fromisoformat(str(x)) if x else None)
+    )
+
+
+_register_template_helpers()
 
 _MAX_WEBHOOK_BYTES = 256 * 1024
 _MAX_VERIFY_BYTES = 32 * 1024 * 1024
@@ -324,6 +340,26 @@ def create_app(
         resp.status_code = status_code
         return resp
 
+    def _not_found(request: Request, what: str, back_href: str = "/", back_label: str = "the dashboard"):
+        """A styled 404 for browser-facing record pages — a stale bookmark or
+        retention-deleted visit should never hit raw JSON."""
+        resp = render(
+            request,
+            "link_expired.html",
+            title="Record not found",
+            heading="Record not found",
+            detail=(
+                f"No {what} exists at this address — it may have been "
+                "mistyped, or the record was removed by a retention purge."
+            ),
+            mechanics="Signed records are append-only; nothing here was silently edited or hidden.",
+            cta="Open",
+            back_href=back_href,
+            back_label=back_label,
+        )
+        resp.status_code = 404
+        return resp
+
     @app.get("/qr.svg")
     async def link_qr(target: str = ""):
         """QR-code a worker link for the door-step scan: the coordinator shows
@@ -362,7 +398,24 @@ def create_app(
         try:
             visit = await asyncio.to_thread(engine.check_in, token)
         except ValueError as exc:
-            raise HTTPException(409, str(exc)) from exc
+            # A semantic conflict (check-in before the first observation) —
+            # re-render the page with the reason, never raw JSON.
+            target = engine.checkin_target(token)
+            if target is None:
+                return _dead_link(request, "check-in", status_code=410)
+            _, v, w = target
+            resp = render(
+                request,
+                "checkin.html",
+                visit=v,
+                worker=w,
+                site=store.site(v.site_id),
+                token=token,
+                done=False,
+                checkin_error=str(exc),
+            )
+            resp.status_code = 409
+            return resp
         if visit is None:
             return _dead_link(request, "check-in", status_code=410)
         return render(
@@ -407,7 +460,11 @@ def create_app(
             journal=journal,
             worker_stats=worker_stats,
             queue=inbox.counts(),
-            failed_deliveries=[e for e in inbox.entries(limit=50) if e["status"] == "failed"],
+            failed_deliveries=[
+                {**e, "received_at": datetime.fromtimestamp(e["received_at"], tz=UTC)}
+                for e in inbox.entries(limit=50)
+                if e["status"] == "failed"
+            ],
             countersign=stances,
             attention=attention,
             triage_brief=(getattr(app.state, "last_triage", None) or {}).get("brief")
@@ -474,7 +531,7 @@ def create_app(
     async def visit_page(request: Request, visit_id: str = PathParam(max_length=128)):
         v = store.visit(visit_id)
         if v is None:
-            raise HTTPException(404)
+            return _not_found(request, "visit record")
         receipt = store.receipt_for_visit(visit_id)
         bundle = reviews.bundle(visit_id) if receipt else None
         site = store.site(v.site_id)
@@ -490,6 +547,7 @@ def create_app(
             end = min(schedule.window_end, engine.clock.now())
             if end > start:
                 cov = coverage_report(store, device, start, end, now=engine.clock.now(), site_id=site.id)
+        cov = _coverage_local(cov)
         late = [r["body"] for r in store.late_event_rows() if r["site_id"] == v.site_id]
         strip = timeline_strip(
             schedule=schedule,
@@ -514,8 +572,30 @@ def create_app(
             review_verification=verify_bundle(bundle, public_key=signer.public_key_b64) if bundle else None,
             verified=ledger.verify_receipt(receipt, public_key=signer.public_key_b64) if receipt else None,
             countersign=reviews.countersign(visit_id) if bundle else None,
+            coverage=cov,
             late_count=len(late),
         )
+
+    def _coverage_local(cov: dict | None) -> dict | None:
+        """Signed coverage times arrive as ISO strings; return a copy with parsed
+        datetimes so every human surface renders them through the local-tz `t()`
+        instead of UTC-slicing — one clock across the page."""
+        if not cov:
+            return cov
+        import copy
+
+        out = copy.deepcopy(cov)
+        for g in out.get("gaps") or []:
+            g["start"] = datetime.fromisoformat(g["start"])
+            g["end"] = datetime.fromisoformat(g["end"])
+        for i in out.get("interruptions") or []:
+            if i.get("at"):
+                i["at"] = datetime.fromisoformat(i["at"])
+        for srow in out.get("live_sessions") or []:
+            srow["opened_at"] = datetime.fromisoformat(srow["opened_at"])
+            if srow.get("closed_at"):
+                srow["closed_at"] = datetime.fromisoformat(srow["closed_at"])
+        return out
 
     def _record_context(v: Visit) -> dict:
         """Everything a human-facing record view needs — the coordinator's
@@ -550,6 +630,7 @@ def create_app(
             if schedule
             else ((receipt.payload.get("scheduled_worker") or {}).get("id") if receipt else None)
         )
+        cov_local = _coverage_local(cov)
         return {
             "visit": v,
             "timeline": strip,
@@ -561,15 +642,12 @@ def create_app(
             "bundle": bundle,
             "reviews": bundle.reviews if bundle else [],
             "countersign": reviews.countersign(v.id) if bundle else None,
-            "coverage": cov,
+            "coverage": cov_local,
             # Signed payload times arrive as ISO strings; human surfaces need
             # datetimes for the local-tz `t()` macro — convert once, here.
             "live_sessions": [
-                {
-                    "opened_at": datetime.fromisoformat(srow["opened_at"]),
-                    "closed_at": datetime.fromisoformat(srow["closed_at"]) if srow.get("closed_at") else None,
-                }
-                for srow in (cov or {}).get("live_sessions", [])
+                {"opened_at": srow["opened_at"], "closed_at": srow.get("closed_at")}
+                for srow in (cov_local or {}).get("live_sessions", [])
             ],
         }
 
@@ -600,7 +678,7 @@ def create_app(
         footage."""
         v = store.visit(visit_id)
         if v is None:
-            raise HTTPException(404)
+            return _not_found(request, "visit record")
         ctx = _record_context(v)
         bundle = ctx["bundle"]
         site = ctx["site"]
@@ -625,7 +703,7 @@ def create_app(
         """
         v = store.visit(visit_id)
         if v is None:
-            raise HTTPException(404)
+            return _not_found(request, "visit record")
         return _household_render(request, v, f"/visits/{v.id}")
 
     @app.post("/api/visits/{visit_id}/family-link")
@@ -667,7 +745,7 @@ def create_app(
                 ),
             )
         try:
-            await action(reviews.household_statement, token, data)
+            await asyncio.to_thread(reviews.household_statement, token, data)
         except ValueError:
             return _dead_link(request, "family view")
         return _household_render(request, visit, f"/family/{token}", via_link=True, statement_posted=True)
@@ -726,7 +804,17 @@ def create_app(
         if file and file.filename:
             data = await file.read(_MAX_VERIFY_BYTES + 1)
             if len(data) > _MAX_VERIFY_BYTES:
-                raise HTTPException(413, "verification input too large")
+                resp = render(
+                    request,
+                    "verify.html",
+                    result=(
+                        False,
+                        "That file is too large to verify here — split it or use `attest verify` offline.",
+                    ),
+                    public_key=signer.public_key_b64,
+                )
+                resp.status_code = 413
+                return resp
             if data[:2] == b"PK":
                 return render(
                     request,
@@ -876,9 +964,29 @@ def create_app(
         return await action(reviews.bundle, visit_id)
 
     @app.get("/visits/{visit_id}/pack.zip")
-    async def dispute_pack(visit_id: str = PathParam(max_length=128), redact_media: bool = False):
+    async def dispute_pack(
+        request: Request, visit_id: str = PathParam(max_length=128), redact_media: bool = False
+    ):
         """Portable dispute pack: bundle + media + a stdlib-only offline verifier.
         ?redact_media=1 withholds media bytes — signed digests stay verifiable."""
+        if "text/html" in (request.headers.get("accept") or ""):
+            v = store.visit(visit_id)
+            if v is None:
+                return _not_found(request, "visit record")
+            if store.receipt_for_visit(visit_id) is None:
+                resp = render(
+                    request,
+                    "link_expired.html",
+                    title="Nothing to export",
+                    heading="Nothing to export yet",
+                    detail="This record isn't signed yet — the dispute pack assembles the signed bundle.",
+                    mechanics="Records sign when the visit closes; open records have nothing to verify.",
+                    cta="Open",
+                    back_href=f"/visits/{visit_id}",
+                    back_label="the record",
+                )
+                resp.status_code = 409
+                return resp
         bundle = await action(reviews.bundle, visit_id)
         data = await asyncio.to_thread(
             build_pack, store, s.data_dir / "media", bundle, redact_media=redact_media
@@ -895,7 +1003,7 @@ def create_app(
         and coverage, so a coordinator sees a pattern rather than incidents."""
         site = store.site(site_id)
         if site is None:
-            raise HTTPException(404)
+            return _not_found(request, "site", back_href="/")
         visits = store.visits(site_id=site.id, limit=100)
         stances = {v.id: reviews.countersign(v.id) for v in visits if v.receipt_id}
         coverage_summaries = {}
@@ -994,13 +1102,38 @@ def create_app(
         return {"session_id": row.id, "closed_at": row.closed_at}
 
     @app.get("/sites/{site_id}/pack.zip")
-    async def case_pack(site_id: str = PathParam(max_length=128), redact_media: bool = False):
+    async def case_pack(
+        request: Request, site_id: str = PathParam(max_length=128), redact_media: bool = False
+    ):
         """Site-level case pack: every visit's signed bundle, a manifest of receipt
         hashes + worker stances, and a stdlib verifier — for pattern disputes.
         ?redact_media=1 withholds media bytes; digests are preserved."""
         site = store.site(site_id)
         if site is None:
             raise HTTPException(404, "unknown site")
+        if "text/html" in (request.headers.get("accept") or "") and not any(
+            store.receipt_for_visit(v.id) for v in store.visits(site_id=site.id, limit=10_000)
+        ):
+            # A browser following the export link gets a styled page, not raw JSON.
+            resp = render(
+                request,
+                "link_expired.html",
+                title="Nothing to export",
+                heading="Nothing to export yet",
+                detail=(
+                    f"{site.name} has no signed records yet — the case pack "
+                    "assembles closed, signed visit records only."
+                ),
+                mechanics=(
+                    "Records sign as visits close; open or unobserved "
+                    "schedules contribute nothing to the pack."
+                ),
+                cta="Come back once a visit has closed, or open",
+                back_href=f"/sites/{site.id}",
+                back_label="the site view",
+            )
+            resp.status_code = 409
+            return resp
 
         def build() -> bytes:
             entries = []
@@ -1042,31 +1175,34 @@ def create_app(
         token = await action(reviews.issue_worker_link, visit_id)
         return {"path": f"/review/{token}", "expires_in_seconds": 86400}
 
-    @app.get("/review/{token}", response_class=HTMLResponse)
-    async def worker_review_page(request: Request, token: str = PathParam(max_length=128)):
+    async def _worker_ctx(token: str):
+        """The worker-facing render context — the timeline is built from the
+        signed payload itself, so the strip is exactly what they countersign."""
         target = await action(reviews.worker_target, token)
         if target is None:
-            return _dead_link(request, "review")
+            return None
         _, bundle = target
-        # The worker sees the same visual the coordinator does — built from the
-        # signed payload itself, so the strip is exactly what they countersign.
         from .timeline import timeline_strip
 
         p = bundle.original.payload
-        strip = timeline_strip(
-            schedule=p.get("schedule"),
-            evidence=p.get("evidence") or [],
-            checked_in_at=p.get("checked_in_at"),
-            coverage=p.get("history_poll_coverage"),
-        )
-        return render(
-            request,
-            "worker_review.html",
-            original=p,
-            token=token,
-            done=False,
-            timeline=strip,
-        )
+        return {
+            "original": p,
+            "token": token,
+            "done": False,
+            "timeline": timeline_strip(
+                schedule=p.get("schedule"),
+                evidence=p.get("evidence") or [],
+                checked_in_at=p.get("checked_in_at"),
+                coverage=p.get("history_poll_coverage"),
+            ),
+        }
+
+    @app.get("/review/{token}", response_class=HTMLResponse)
+    async def worker_review_page(request: Request, token: str = PathParam(max_length=128)):
+        ctx = await _worker_ctx(token)
+        if ctx is None:
+            return _dead_link(request, "review")
+        return render(request, "worker_review.html", **ctx)
 
     @app.post("/review/{token}", response_class=HTMLResponse)
     async def worker_review_submit(
@@ -1084,10 +1220,28 @@ def create_app(
                 reported_start=reported_start or None,
                 reported_end=reported_end or None,
             )
-        except ValueError as exc:
-            raise HTTPException(
-                422, "Use a valid decision, non-empty statement, and two ordered offset-aware times"
-            ) from exc
+        except ValueError:
+            ctx = await _worker_ctx(token)
+            if ctx is None:
+                return _dead_link(request, "review")
+            resp = render(
+                request,
+                "worker_review.html",
+                **ctx,
+                form_error=(
+                    "Your statement didn't submit — check that it's not empty and that "
+                    "either both reported times or neither are filled, each with a UTC "
+                    "offset like 2026-09-15T09:00:00-07:00."
+                ),
+                form={
+                    "decision": decision,
+                    "statement": statement,
+                    "reported_start": reported_start,
+                    "reported_end": reported_end,
+                },
+            )
+            resp.status_code = 422
+            return resp
         try:
             await action(reviews.worker_review, token, body)
         except HTTPException as exc:

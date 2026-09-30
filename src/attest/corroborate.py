@@ -8,6 +8,7 @@ side by side; silence is labelled, never treated as evidence of absence.
 from __future__ import annotations
 
 from .models import Evidence, Receipt, Schedule, Site, Visit
+from .timeline import kind_label
 
 
 def corroboration(
@@ -29,7 +30,7 @@ def corroboration(
     rows = [
         {
             "source": "Scheduled expectation",
-            "status": f"{schedule.window_start:%H:%M}–{schedule.window_end:%H:%M}"
+            "status": f"{schedule.window_start:%H:%M}–{schedule.window_end:%H:%M} UTC"
             if schedule
             else "unscheduled",
             "detail": (f"{schedule.expected_minutes} min · {schedule.service}" if schedule else ""),
@@ -40,7 +41,7 @@ def corroboration(
             "status": f"{len(camera)} event{'s' if len(camera) != 1 else ''} {times(camera)}"
             if camera
             else "silent",
-            "detail": " + ".join(sorted({e.kind.value.replace("_", " ") for e in camera})),
+            "detail": " + ".join(sorted({kind_label(e.kind.value) for e in camera})),
             "establishes": "Device-observed activity timestamps only",
         },
         {
@@ -52,12 +53,12 @@ def corroboration(
                 if sensor
                 else "silent"
             ),
-            "detail": " + ".join(sorted({e.kind.value.replace("_", " ") for e in sensor})),
+            "detail": " + ".join(sorted({kind_label(e.kind.value) for e in sensor})),
             "establishes": "Open/close transitions at the door",
         },
         {
             "source": "Worker self-report",
-            "status": f"check-in {visit.checked_in_at:%H:%M}" if visit.checked_in_at else "none received",
+            "status": f"check-in {visit.checked_in_at:%H:%M} UTC" if visit.checked_in_at else "none received",
             "detail": "via single-use link" if visit.checked_in_at else "",
             "establishes": "The worker's account — a claim, not verification",
         },

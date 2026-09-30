@@ -10,6 +10,7 @@
       <p class="ok" style="font-size:18px">&#10003; You're checked in{% if visit and visit.checked_in_at %} at {{ visit.checked_in_at.astimezone(tz).strftime("%I:%M %p").lstrip("0") }}{% endif %}.</p>
       <p class="muted">Your self-report has been recorded. This link is now used and cannot submit again. You can close this page.</p>
     {% elif visit %}
+      {% if checkin_error %}<div class="flash err" role="alert">{{ checkin_error }}</div>{% endif %}
       <p>Activity was observed at <b>{{ site.name }}</b> at
         <b>{{ visit.arrived_at.astimezone(tz).strftime("%I:%M %p").lstrip("0") }}</b>. Are you there now?</p>
       <p class="muted small">This records your self-report at the current time, not the time of the camera event. It does not independently verify identity or location. Submit only for yourself.</p>

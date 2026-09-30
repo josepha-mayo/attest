@@ -907,6 +907,8 @@ class Store:
                 "checkin_grants": row("SELECT COUNT(*) FROM checkin_grants")[0],
                 "review_grants": row("SELECT COUNT(*) FROM review_grants")[0],
                 "family_grants": row("SELECT COUNT(*) FROM family_grants")[0],
+                "ingestion_sources": row("SELECT COUNT(*) FROM ingestion_sources")[0],
+                "settings": row("SELECT COUNT(*) FROM settings")[0],
                 "visits": {"total": visits[0], "oldest_arrival": visits[1], "by_state": by_state},
                 "evidence": {"total": evidence[0], "oldest": evidence[1]},
                 "receipts": {"total": receipts[0], "latest_sequence": receipts[1]},

@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Setup & schedules — Attest{% endblock %}
 {% block body %}
+{% macro t(dt) %}{{ (dt|iso).astimezone(tz).strftime("%b %d, %I:%M %p").replace(" 0", " ") if dt else "—" }}{% endmacro %}
 <h1>Set up a reviewable visit</h1>
 <p class="muted">Connect a device you are authorized to use, add a worker, then define an arrival window. Identity and time worked are not inferred from scheduling.</p>
 {% if error %}<div class="card bad" role="alert">{{ error }}</div>{% endif %}
@@ -73,7 +74,7 @@ document.getElementById('advance-clock').onsubmit = async event => {
 <thead><tr><th>Site / worker</th><th>Arrival window</th><th>Planned minutes</th><th>Status</th><th>Action</th></tr></thead><tbody>
 {% for schedule in schedules %}<tr>
 <td>{% for site in sites if site.id == schedule.site_id %}{{ site.name }}{% endfor %}<br>{% for worker in workers if worker.id == schedule.worker_id %}{{ worker.name }}{% endfor %}</td>
-<td>{{ schedule.window_start.isoformat() }}<br>{{ schedule.window_end.isoformat() }}</td>
+<td>{{ t(schedule.window_start) }}<br>{{ t(schedule.window_end) }}</td>
 <td>{{ schedule.expected_minutes }}</td><td>{{ schedule.status }}</td>
 <td>{% if schedule.status == "scheduled" %}<form method="post" action="/setup/schedules/{{ schedule.id }}/cancel"><button class="btn secondary">Cancel unused schedule</button></form>{% else %}<span class="muted small">Preserved, not deleted</span>{% endif %}</td>
 </tr>{% else %}<tr><td colspan="5" class="muted">No schedules yet.</td></tr>{% endfor %}

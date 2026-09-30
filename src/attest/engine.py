@@ -225,7 +225,7 @@ class VisitEngine:
         # Departure: door closed recently, then a person walks away past the camera.
         if human and self._door_closed_recently(visit, at) and at - visit.arrived_at >= _MIN_VISIT:
             self._evidence(visit, EvidenceKind.DEPARTURE_MOTION, at, ev)
-            self._snapshot(visit, site, at, "departure")
+            self._snapshot(visit, site, at, "departure_cue", "near departure cue")
             return self._close(visit, site, at, reason="departure")
         self._evidence(visit, EvidenceKind.ACTIVITY, at, ev)
         self._touch(visit, at)
@@ -264,7 +264,10 @@ class VisitEngine:
                 Flag(
                     code="early",
                     severity="info",
-                    message=f"arrived {_mins(schedule.window_start - at)} min before window",
+                    message=(
+                        f"first device observation {_mins(schedule.window_start - at)} "
+                        "min before the scheduled window"
+                    ),
                 )
             )
         if schedule and at > schedule.window_end:
@@ -272,7 +275,10 @@ class VisitEngine:
                 Flag(
                     code="late",
                     severity="warn",
-                    message=f"arrived {_mins(at - schedule.window_end)} min after window closed",
+                    message=(
+                        f"first device observation {_mins(at - schedule.window_end)} "
+                        "min after the window closed"
+                    ),
                 )
             )
         if not schedule:
@@ -280,12 +286,12 @@ class VisitEngine:
                 Flag(
                     code="unscheduled",
                     severity="warn",
-                    message="arrival with no scheduled visit in window",
+                    message="device activity with no scheduled visit in window",
                 )
             )
         self.store.put_visit(visit)
         self._evidence(visit, kind, at, ev)
-        self._snapshot(visit, site, at, "arrival")
+        self._snapshot(visit, site, at, "first_observation", "first-observation window")
         log.info("visit %s opened at %s (%s)", visit.id, at.isoformat(), visit.state)
         return Outcome(visit, ["opened"])
 
@@ -368,7 +374,7 @@ class VisitEngine:
                     visit_id=visit.id,
                     kind=EvidenceKind.CHECKIN,
                     at=at,
-                    note=f"Presence self-reported using the link issued to {worker.name}; "
+                    note=f"Worker check-in self-reported using the link issued to {worker.name}; "
                     "not identity-verified",
                 )
             )
@@ -405,7 +411,9 @@ class VisitEngine:
                         message=f"closed after {self.settings.idle_close_minutes} min without activity",
                     )
                 visit.flags.append(flag)
-                self._snapshot(visit, site, visit.last_activity_at, "departure")
+                self._snapshot(
+                    visit, site, visit.last_activity_at, "last_observation", "last-observation window"
+                )
                 changed.append(self._close(visit, site, visit.last_activity_at, reason="idle").visit)  # type: ignore[arg-type]
             grace = timedelta(minutes=self.settings.arrival_grace_minutes)
             for sch in self.store.schedules_for_site(site.id):
@@ -482,7 +490,7 @@ class VisitEngine:
                 Flag(
                     code="no_checkin",
                     severity="warn",
-                    message="worker never confirmed presence via check-in link",
+                    message="no worker self-report was received through the check-in link",
                 )
             )
         evidence = self.store.evidence_for(visit.id)
@@ -1033,7 +1041,9 @@ class VisitEngine:
             )
         )
 
-    def _snapshot(self, visit: Visit, site: Site, at: datetime, label: str) -> None:
+    def _snapshot(self, visit: Visit, site: Site, at: datetime, media_label: str, note: str) -> None:
+        """media_label must stay filename-safe ([a-zA-Z0-9_-]); note is the
+        human caption — they differ so captions can say what the snapshot is."""
         w = timedelta(seconds=self.settings.snapshot_window_seconds)
         end = min(at + w, self.clock.now())
         try:
@@ -1044,17 +1054,20 @@ class VisitEngine:
             if not at - w <= actual_at <= end:
                 raise ValueError("snapshot timestamp outside requested window")
         except Exception as exc:  # noqa: BLE001 - Ring media is best-effort evidence
-            log.warning("snapshot for %s (%s) failed: %s", visit.id, label, type(exc).__name__)
+            log.warning("snapshot for %s (%s) failed: %s", visit.id, media_label, type(exc).__name__)
             visit.flags.append(
                 Flag(
                     code="media_unavailable",
                     severity="info",
-                    message=f"No usable {label} snapshot was retrieved; imagery does not support this record",
+                    message=(
+                        f"No usable snapshot for the {note} was retrieved; "
+                        "imagery does not support this record"
+                    ),
                 )
             )
             self.store.put_visit(visit)
             return
-        sha, path = self.media.save(visit.id, label, snap.content, snap.content_type)
+        sha, path = self.media.save(visit.id, media_label, snap.content, snap.content_type)
         self.store.put_evidence(
             Evidence(
                 visit_id=visit.id,
@@ -1066,7 +1079,7 @@ class VisitEngine:
                 else "local_or_test",
                 media_sha256=sha,
                 media_path=str(path),
-                note=label,
+                note=note,
             )
         )
 

@@ -1,7 +1,7 @@
 """Plain-language visit summaries.
 
 ``TemplateSummarizer`` is deterministic and dependency-free. ``BedrockSummarizer`` sends the
-visit facts plus the arrival/departure snapshots to an Amazon Bedrock model through the
+visit facts plus the observation-window snapshots to an Amazon Bedrock model through the
 Converse API and asks for a short, factual account. The prompt forbids identifying people;
 the product is about *whether a visit happened as scheduled*, not *who* someone is.
 """
@@ -97,7 +97,7 @@ class TemplateSummarizer:
                 f"presence at {f['checked_in_at']}; identity was not independently verified."
             )
         else:
-            parts.append("No worker check-in was received; the visitor's identity is unknown.")
+            parts.append("No worker check-in was received; no one checking in has been identified.")
         parts.append("These observations do not establish departure, continuous presence, or time worked.")
         if f["flags"]:
             parts.append("Review notes: " + "; ".join(f["flags"]) + ".")

@@ -60,7 +60,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible{
 </head>
 <body>
 <main class="wrap">
-{% macro t(dt) %}{{ dt.astimezone(tz).strftime("%I:%M %p").lstrip("0") if dt else "—" }}{% endmacro %}
+{% macro t(dt) %}{{ (dt|iso).astimezone(tz).strftime("%I:%M %p").lstrip("0") if dt else "—" }}{% endmacro %}
 <div class="brand">Attest · observation record</div>
 <h1>{{ site.name }}</h1>
 <div class="date">{% if schedule %}{{ schedule.window_start.astimezone(tz).strftime("%A, %B %d").replace(" 0", " ") }} · scheduled {{ t(schedule.window_start) }}–{{ t(schedule.window_end) }}{% else %}Unscheduled record{% endif %}{% if schedule and schedule.service %} · {{ schedule.service }}{% endif %}</div>
@@ -173,8 +173,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible{
   <form method="post" action="{{ media_base }}/statement">
     <fieldset>
       <legend>What did you see or hear around this visit?</legend>
-      <label class="choice"><input type="radio" name="perception" value="saw_someone" required> <span><strong>Someone was there</strong> — you saw or heard a person at the door</span></label>
-      <label class="choice"><input type="radio" name="perception" value="no_one_seen"> <span><strong>No one was seen</strong> — as far as you know, nobody came</span></label>
+      <label class="choice"><input type="radio" name="perception" value="saw_someone" required> <span><strong>I saw or heard someone there</strong> — a person at the door</span></label>
+      <label class="choice"><input type="radio" name="perception" value="no_one_seen"> <span><strong>I didn't see or hear anyone</strong> — as far as you know, nobody came</span></label>
       <label class="choice"><input type="radio" name="perception" value="unsure"> <span><strong>Not sure</strong> — you can't say either way</span></label>
     </fieldset>
     <label class="lab" for="hh-statement">In your own words</label>
@@ -200,7 +200,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible{
   <div class="snap">
   {% for e in snaps %}<figure>
     <img src="{{ media_base }}/media/{{ e.media_path.replace('\\','/').split('/')[-1] }}" alt="Snapshot {{ t(e.at) }}">
-    <figcaption>{{ t(e.at) }} · fingerprint-verified</figcaption>
+    <figcaption>{{ t(e.at) }} · file hash matches the signed record</figcaption>
   </figure>{% endfor %}
   </div>
 </div>
