@@ -795,7 +795,7 @@ function plainHTML(p,js){
     const hp=he.receipt.payload,hrv=hp.review||{};
     quote+=`<div class="plain-quote household">&ldquo;${esc(hrv.statement||"")}&rdquo;</div>`
       +`<div class="plain-byline">— household account`
-      +(hrv.perception?` (${String(hrv.perception).replaceAll("_"," ")})`:"")
+      +(hrv.perception?` (${esc(String(hrv.perception).replaceAll("_"," "))})`:"")
       +` via the family link — self-reported; it doesn't change the camera's`
       +` observations or the worker's account</div>`;
   }
@@ -995,10 +995,16 @@ async function renderIndex(){
       +(p.scheduled_worker?` · worker ${esc(p.scheduled_worker.name||"")}`:"")
       +(stance!=="no_statement"?` · statement: ${esc(stance)}`:"")
       +` — ${esc(c.why)}</div>`
-      +`<div class="tech"><small>${win} · ${ds.length} media digest(s)</small>`
-      +timelineSVG(p)+corroborationHTML(p)+statementsHTML(js)+`</div>`
-      +`<div class="plain" style="display:none">${plainHTML(p,js)}</div>`
-      +`<a href="#" class="view-toggle muted"><small>View as the family sees it</small></a></div>`);
+      /* a FAILED bundle's narrative is untrusted — render only the verdict
+         row; statements/plain view stay hidden so tampered content can't
+         present itself as a verified account. */
+      +(c.ok
+        ?`<div class="tech"><small>${win} · ${ds.length} media digest(s)</small>`
+         +timelineSVG(p)+corroborationHTML(p)+statementsHTML(js)+`</div>`
+         +`<div class="plain" style="display:none">${plainHTML(p,js)}</div>`
+         +`<a href="#" class="view-toggle muted"><small>View as the family sees it</small></a>`
+        :"")
+      +`</div>`);
   }
   const wk=weekSVG(payloads);
   if(wk)rows.unshift(
@@ -1101,10 +1107,16 @@ def case_index_html(
     import base64
     import json as _json
 
+    from html import escape as _hesc
+
     enc = lambda s: base64.b64encode(s.encode()).decode()  # noqa: E731
-    tags = "".join(f'<script class="bundle" data-vid="{vid}">{enc(text)}</script>\n' for vid, text in bundles)
+    tags = "".join(
+        f'<script class="bundle" data-vid="{_hesc(vid, quote=True)}">{enc(text)}</script>\n'
+        for vid, text in bundles
+    )
     tags += "".join(
-        f'<script class="attestation" data-rid="{rid}">{enc(text)}</script>\n' for rid, text in attestations
+        f'<script class="attestation" data-rid="{_hesc(rid, quote=True)}">{enc(text)}</script>\n'
+        for rid, text in attestations
     )
     meta_tag = f'<script id="packmeta">{enc(_json.dumps(meta))}</script>\n'
     if manifest_text:

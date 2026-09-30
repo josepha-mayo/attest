@@ -367,6 +367,80 @@ def test_case_pack_embeds_offline_record_browser(engine, store, household, sched
 
 
 @pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_case_pack_index_renders_failed_bundle_without_injection(
+    engine, store, household, schedule, t0, tmp_path
+):
+    """A tampered bundle must surface as FAILED — and its narrative must never
+    reach innerHTML as live markup. An attacker who splices a hostile
+    household 'perception' into the pack can't inject script into whoever
+    opens index.html (the failed card renders the verdict row only)."""
+    import base64
+
+    z = _case_pack(engine, store, household, schedule, t0, tmp_path)
+    html = z.read("index.html").decode()
+    vid, b64 = re.search(r'data-vid="(vis_[0-9a-f]+)">([A-Za-z0-9+/=]+)</script>', html).groups()
+    bundle = json.loads(base64.b64decode(b64))
+    bundle["reviews"] = [
+        {
+            "receipt": {
+                "id": "rcpt_forged",
+                "visit_id": vid,
+                "signature": "00",
+                "payload": {
+                    "actor": {"role": "household", "name": "x"},
+                    "review": {
+                        "kind": "household_account",
+                        "perception": 'unsure"><img src=x onerror=alert(1)>',
+                        "statement": '"><img src=y onerror=alert(2)>',
+                    },
+                },
+            }
+        }
+    ]
+    forged_b64 = base64.b64encode(json.dumps(bundle).encode()).decode()
+    html = html.replace(b64, forged_b64)
+    meta = re.search(r'id="packmeta">([A-Za-z0-9+/=]+)</script>', html).group(1)
+    script = re.search(r'<script>\n("use strict";.*?)</script>', html, re.S).group(1)
+    (tmp_path / "idx.js").write_text(script, encoding="utf-8")
+    (tmp_path / "meta.b64").write_text(meta, encoding="utf-8")
+    driver = """
+const fs=require('fs');
+const html=fs.readFileSync(process.argv[2],'utf8');
+const bundles=[...html.matchAll(/data-vid="([^"]+)">([A-Za-z0-9+/=]+)<\\/script>/g)]
+  .map(m=>({dataset:{vid:m[1]},textContent:m[2]}));
+const els={packmeta:{textContent:fs.readFileSync(process.argv[4],'utf8')}};
+const mm=html.match(/id="packmanifest">([A-Za-z0-9+/=]+)<\\/script>/);
+if(mm)els.packmanifest={textContent:mm[1]};
+const get=id=>els[id]||(els[id]={textContent:'',innerHTML:''});
+global.document={querySelectorAll:s=>s==='script.bundle'?bundles:[],getElementById:get};
+let src=fs.readFileSync(process.argv[3],'utf8');
+src=src.replace(/renderIndex\\(\\)\\.catch[\\s\\S]*$/,'');
+eval(src+';globalThis.__r=renderIndex;');
+__r().then(()=>{
+  console.log('verdict:',els.verdict.innerHTML.slice(0,140));
+  console.log('img:',/<img/.test(els.cards.innerHTML));
+  console.log('onerror:',/onerror/.test(els.cards.innerHTML));
+  console.log('stmt:',/class="stmt"/.test(els.cards.innerHTML));
+});
+"""
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+    (tmp_path / "index.html").write_text(html, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "index.html", "idx.js", "meta.b64"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout
+    assert "FAILED" in out, out
+    assert "img: false" in out, out
+    assert "onerror: false" in out, out
+    assert "stmt: false" in out, out  # the forged narrative never renders
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
 def test_case_pack_index_verifies_records_in_browser(engine, store, household, schedule, t0, tmp_path):
     """Run index.html's own script under node with a minimal DOM stub — the
     embedded driver must verify the real inlined bundle and report VERIFIED."""

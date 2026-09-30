@@ -629,12 +629,19 @@ def test_liveview_ring_failure_returns_502_safely(api, store, household, monkeyp
     assert store.liveview_session(row.id).state == "open"
 
 
-def test_link_qr_encodes_worker_paths_only(api):
+def test_link_qr_encodes_worker_paths_only(api, monkeypatch):
     """The QR helper exists for the door-step scan — scoped to worker-link
-    paths, not an open encoder."""
+    paths, not an open encoder. The payload is the absolute URL a phone
+    scanner can resolve, not a bare relative path."""
+    import segno
+
+    encoded = []
+    real_make = segno.make
+    monkeypatch.setattr(segno, "make", lambda data, **kw: encoded.append(data) or real_make(data, **kw))
     r = api.get("/qr.svg", params={"target": "/checkin/" + "a" * 40})
     assert r.status_code == 200 and r.headers["content-type"].startswith("image/svg")
     assert "<svg" in r.text
+    assert encoded[0].startswith("http") and encoded[0].endswith("/checkin/" + "a" * 40)
     assert api.get("/qr.svg", params={"target": "https://evil.example/"}).status_code == 400
     assert api.get("/qr.svg", params={"target": "/api/state"}).status_code == 400
 
@@ -1246,3 +1253,33 @@ def test_status_json_emits_machine_readable_audit(api, store, tmp_path, monkeypa
     assert data["chain"]["ok"] is True
     assert data["webhook"]["armed"] is True
     assert data["mode"] in ("wall", "replay")
+
+
+def test_verify_accepts_an_https_url(monkeypatch, capsys):
+    """`attest verify https://…` fetches the artifact and runs the same crypto
+    path — the hosted sample pack and sweep receipt verify without a download."""
+    import argparse
+    from pathlib import Path
+
+    import httpx
+
+    from attest import cli
+
+    artifact = (Path(__file__).resolve().parents[1] / "docs" / "live-sweep-receipt.json").read_bytes()
+
+    class _Stream:
+        status_code = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def iter_bytes(self, n):
+            yield artifact
+
+    monkeypatch.setattr(httpx, "stream", lambda *a, **kw: _Stream())
+    cli._verify(argparse.Namespace(bundle="https://example.test/receipt.json", key=None))
+    out = capsys.readouterr().out
+    assert "OK:" in out and "verification_report" in out

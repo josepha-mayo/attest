@@ -388,11 +388,13 @@ def create_app(
         return resp
 
     @app.get("/qr.svg")
-    async def link_qr(target: str = ""):
+    async def link_qr(request: Request, target: str = ""):
         """QR-code a worker link for the door-step scan: the coordinator shows
-        it, the aide's phone opens the check-in/review page directly. Scoped to
-        the worker-link path prefixes — QR encoding is not a capability, but
-        there is no reason to make this an open encoder."""
+        it, the aide's phone opens the check-in/review page directly. The code
+        encodes the absolute URL — the origin this server was reached at — so a
+        phone scanner actually resolves it (a bare path scans as plain text).
+        Scoped to the worker-link path prefixes — QR encoding is not a
+        capability, but there is no reason to make this an open encoder."""
         allowed = target.startswith(("/checkin/", "/review/", "/family/"))
         if not allowed or len(target) > 300:
             raise HTTPException(400, "target must be a /checkin/, /review/, or /family/ path")
@@ -400,8 +402,9 @@ def create_app(
 
         import segno
 
+        absolute = str(request.base_url).rstrip("/") + target
         buf = io.BytesIO()
-        segno.make(target, error="m").save(buf, kind="svg", xmldecl=False, dark="#1c2733", light=None)
+        segno.make(absolute, error="m").save(buf, kind="svg", xmldecl=False, dark="#1c2733", light=None)
         return Response(buf.getvalue(), media_type="image/svg+xml", headers={"Cache-Control": "no-store"})
 
     @app.get("/checkin/{token}", response_class=HTMLResponse)

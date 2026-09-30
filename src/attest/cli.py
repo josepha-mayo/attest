@@ -522,9 +522,11 @@ def _demo(args: argparse.Namespace) -> None:
     from .app import create_app
     from .config import Settings
 
-    def serve(app, port: int = 0) -> tuple[str, uvicorn.Server, threading.Thread, socket.socket]:
+    def serve(
+        app, port: int = 0, host: str = "127.0.0.1", display_host: str | None = None
+    ) -> tuple[str, uvicorn.Server, threading.Thread, socket.socket]:
         sock = socket.socket()
-        sock.bind(("127.0.0.1", port))
+        sock.bind((host, port))
         sock.listen(32)
         server = uvicorn.Server(uvicorn.Config(app, log_level="warning", access_log=False))
         thread = threading.Thread(target=lambda: server.run(sockets=[sock]), daemon=True)
@@ -534,7 +536,20 @@ def _demo(args: argparse.Namespace) -> None:
             if time.monotonic() > deadline:
                 sys.exit("demo server failed to start")
             time.sleep(0.01)
-        return f"http://127.0.0.1:{sock.getsockname()[1]}", server, thread, sock
+        return f"http://{display_host or host}:{sock.getsockname()[1]}", server, thread, sock
+
+    def lan_ip() -> str:
+        """Best-guess LAN address so printed URLs/QRs resolve from a phone on
+        the same network — a UDP connect picks the outbound interface without
+        sending a packet."""
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            probe.connect(("192.0.2.1", 80))  # TEST-NET-1: routed nowhere, just picks the iface
+            return probe.getsockname()[0]
+        except OSError:
+            return "127.0.0.1"
+        finally:
+            probe.close()
 
     # --chaos injects delivery faults that cannot change the story: duplicates
     # collapse on request_id dedupe and jitter is waited out — drops would
@@ -567,7 +582,14 @@ def _demo(args: argparse.Namespace) -> None:
         timezone="UTC",
         summarizer="template",
     )
-    app_url, app_server, _app_thread, app_sock = serve(create_app(demo), args.port)
+    # --lan binds the demo on all interfaces so the QR-door-step moment works
+    # from a real phone; printed links then carry the LAN address, not loopback.
+    if args.lan:
+        app_url, app_server, _app_thread, app_sock = serve(
+            create_app(demo), args.port, host="0.0.0.0", display_host=lan_ip()
+        )
+    else:
+        app_url, app_server, _app_thread, app_sock = serve(create_app(demo), args.port)
 
     replay = argparse.Namespace(
         scenario="home_aide_visit",
@@ -714,8 +736,12 @@ def _demo(args: argparse.Namespace) -> None:
             flush=True,
         )
         print("              the ledger must show one evidence row per real event", flush=True)
-    dash_url = f"http://admin:{token}@127.0.0.1:{app_sock.getsockname()[1]}/"
+    dash_host = app_url.split("://", 1)[1].rsplit(":", 1)[0] if args.lan else "127.0.0.1"
+    dash_url = f"http://admin:{token}@{dash_host}:{app_sock.getsockname()[1]}/"
     print(f"  dashboard   {dash_url}", flush=True)
+    if args.lan:
+        print("  lan         listening on all interfaces — the QR codes resolve", flush=True)
+        print("              from a phone on this network; admin still needs the token", flush=True)
     print(f"  admin user  admin / {token}", flush=True)
     print(f"  data dir    {data_dir}", flush=True)
     print("", flush=True)
@@ -803,7 +829,25 @@ def _verify(args: argparse.Namespace) -> None:
     from .models import Receipt, ReviewBundle
 
     path = Path(args.bundle)
-    raw = path.read_bytes()
+    if args.bundle.startswith(("http://", "https://")):
+        # Verification is cryptographic — transport trust is not required —
+        # but stream with a byte cap so a hostile endpoint can't buffer
+        # unbounded content into memory before we can reject it.
+        raw, n = bytearray(), 0
+        try:
+            with httpx.stream("GET", args.bundle, follow_redirects=True, timeout=30) as r:
+                if r.status_code != 200:
+                    sys.exit(f"fetch failed: HTTP {r.status_code} for {args.bundle}")
+                for chunk in r.iter_bytes(1 << 20):
+                    n += len(chunk)
+                    if n > 256 * 1024 * 1024:
+                        sys.exit("artifact exceeds the 256 MB verification bound")
+                    raw.extend(chunk)
+        except httpx.HTTPError as exc:
+            sys.exit(f"fetch failed: {exc}")
+        path = Path(args.bundle.rstrip("/").rsplit("/", 1)[-1] or "remote-artifact")
+    else:
+        raw = path.read_bytes()
     if raw[:2] == b"PK":
         _verify_zip(raw, args.key)
         return
@@ -866,9 +910,10 @@ def _verify_zip(raw: bytes, pinned_key: str | None) -> None:
 
     from .app import _verify_pack
     from .models import ReviewBundle
+    from .packdiff import BoundedZip
 
     try:
-        z = zipfile.ZipFile(io.BytesIO(raw))
+        z = BoundedZip(zipfile.ZipFile(io.BytesIO(raw)))
         names = set(z.namelist())
         if "manifest.json" in names:
             declared = json.loads(z.read("manifest.json")).get("issuer_key")
@@ -1767,7 +1812,10 @@ def main(argv: list[str] | None = None) -> None:
     s.set_defaults(fn=_status)
 
     s = sub.add_parser("verify", help="verify a downloaded bundle.json offline")
-    s.add_argument("bundle", help="bundle.json, receipt, anchor, receipts.json — or a pack .zip")
+    s.add_argument(
+        "bundle",
+        help="bundle.json, receipt, anchor, receipts.json, a pack .zip — or an http(s) URL to one",
+    )
     s.add_argument("--key", default=None, help="issuer public key (base64) to pin against")
     s.set_defaults(fn=_verify)
 
@@ -1938,6 +1986,12 @@ def main(argv: list[str] | None = None) -> None:
                 "--open",
                 action="store_true",
                 help="open the authenticated dashboard in the default browser once live",
+            )
+            s.add_argument(
+                "--lan",
+                action="store_true",
+                help="bind the demo on all interfaces and print the LAN URL — "
+                "a phone on the same network can scan the door-step QR for real",
             )
         if name == "replay":
             s.add_argument(
