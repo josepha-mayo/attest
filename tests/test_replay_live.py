@@ -724,3 +724,52 @@ def test_demo_command_spins_up_full_stack(tmp_path):
     finally:
         proc.terminate()
         proc.wait(timeout=15)
+
+
+def test_demo_lan_binds_all_interfaces_and_prints_lan_urls(tmp_path):
+    """`attest demo --lan` must keep the replay driver on loopback (the
+    local-services-only guard stays satisfied) while printing the LAN
+    dashboard/family URLs — the phone-scan moment depends on both."""
+    import re
+
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "attest.cli",
+            "demo",
+            "--days",
+            "1",
+            "--story",
+            "observed",
+            "--speed",
+            "100000",
+            "--lan",
+            "--data-dir",
+            str(tmp_path / "demo"),
+        ],
+        env={**os.environ, "ATTEST_SUMMARIZER": "template"},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    try:
+        out = ""
+        deadline = time.monotonic() + 60
+        while "Press Ctrl+C" not in out and time.monotonic() < deadline:
+            line = proc.stdout.readline()
+            if not line and proc.poll() is not None:
+                break
+            out += line
+        assert "Demo is live" in out, out
+        assert "listening on all interfaces" in out, out
+        # the printed dashboard URL must be a LAN address, not loopback/0.0.0.0
+        dash = re.search(r"dashboard\s+(http://admin:[^@]+@([0-9.]+):\d+/)", out)
+        assert dash, out
+        host = dash.group(2)
+        assert host not in ("127.0.0.1", "0.0.0.0"), out
+        # and the family link printed later carries the same LAN host
+        assert "/family/" in out and f"{host}:" in out.split("/family/")[0], out
+    finally:
+        proc.terminate()
+        proc.wait(timeout=15)
