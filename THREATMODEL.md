@@ -64,6 +64,7 @@ against a live store:
 | Rewrite a signed case manifest | `manifest_sha256` inside the signed receipt no longer matches |
 | Forge a `redaction.json` naming undelivered digests | Fails closed — withheld digests must match signed evidence |
 | Swap issuer keys in a pack | Public key is inside every signed payload and the manifest; compare out-of-band |
+| Splice markup/script into a tampered pack's narrative fields | Every interpolated field is entity-escaped, and a bundle that fails signature verification renders only its FAILED verdict row — statements, timeline, and the plain-language view never render untrusted content |
 
 Two paths need an **external anchor** to be provable: truncating the journal
 before the earliest pin, and wholesale replacement of store + receipts + key
