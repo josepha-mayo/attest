@@ -549,6 +549,11 @@ def create_app(
                 if s.kms_key_id
                 else "local key file — plaintext at rest"
             ),
+            webhook={
+                "armed": bool(s.ring_webhook_key) and s.poll_history_seconds <= 0,
+                "polling": s.poll_history_seconds > 0,
+                "max_age_s": s.webhook_max_age_s,
+            },
             issuer=signer.public_key_b64,
             healthy=(
                 data["journal"]["intact"]

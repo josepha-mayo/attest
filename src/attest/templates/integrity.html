@@ -47,6 +47,17 @@ worker was honest.</div>
     {{ queue.get('failed', 0) }} failed
     <div class="muted small" style="margin-top:.5rem">Failed deliveries are kept until requeued or explicitly purged via retention.</div>
   </div>
+  <div class="card">
+    <h2 style="margin-top:0;font-size:1.05rem">Webhook intake</h2>
+    {% if webhook.armed %}
+      <span class="ok">&#10003; HMAC-verified</span> — {{ webhook.max_age_s }}s freshness window
+      <div class="muted small" style="margin-top:.5rem">Stale signed bodies and replays beyond the window are refused (401) even when the dedupe tombstone is gone.</div>
+    {% elif webhook.polling %}
+      <span class="muted">Polling mode</span> — webhook intake disabled; Event History drives ingestion.
+    {% else %}
+      <span class="bad">&#10007; OFF</span> — no signing key configured; deliveries rejected 503.
+    {% endif %}
+  </div>
 </div>
 
 {% if journal.mismatches %}

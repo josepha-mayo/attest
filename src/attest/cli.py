@@ -517,6 +517,7 @@ def _demo(args: argparse.Namespace) -> None:
     import uvicorn
     from pydantic import SecretStr
     from ring_sandbox.emulator import create_app as sandbox_app
+    from ring_sandbox.world import Chaos
 
     from .app import create_app
     from .config import Settings
@@ -535,7 +536,11 @@ def _demo(args: argparse.Namespace) -> None:
             time.sleep(0.01)
         return f"http://127.0.0.1:{sock.getsockname()[1]}", server, thread, sock
 
-    ring_url, ring_server, _ring_thread, ring_sock = serve(sandbox_app())
+    # --chaos injects delivery faults that cannot change the story: duplicates
+    # collapse on request_id dedupe and jitter is waited out — drops would
+    # silently rewrite "observed" into "no_observation", so they stay out.
+    chaos = Chaos(seed=0, duplicate=0.35, delay_ms=200, jitter_ms=600) if args.chaos else None
+    ring_url, ring_server, _ring_thread, ring_sock = serve(sandbox_app(chaos=chaos))
 
     if args.data_dir:
         data_dir = Path(args.data_dir)
@@ -660,6 +665,12 @@ def _demo(args: argparse.Namespace) -> None:
 
     print()
     print("Demo is live — simulated data only, no real Ring account involved.", flush=True)
+    if chaos:
+        print(
+            "  chaos       emulator is duplicating + jittering webhook deliveries —",
+            flush=True,
+        )
+        print("              the ledger must show one evidence row per real event", flush=True)
     print(f"  dashboard   http://admin:{token}@127.0.0.1:{app_sock.getsockname()[1]}/", flush=True)
     print(f"  admin user  admin / {token}", flush=True)
     print(f"  data dir    {data_dir}", flush=True)
@@ -1823,6 +1834,12 @@ def main(argv: list[str] | None = None) -> None:
                 help="day-pattern cycle: observed,late,blackout,early_out,no_show,unmatched,liveview",
             )
             s.add_argument("--speed", type=float, default=10000)
+            s.add_argument(
+                "--chaos",
+                action="store_true",
+                help="inject webhook duplication + delivery jitter into the emulator "
+                "(dedupe must hold; drops stay off so the story can't change)",
+            )
         if name == "replay":
             s.add_argument(
                 "scenario",
