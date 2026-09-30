@@ -91,7 +91,9 @@ the required shape: task → steps → expected vs. actual → severity → work
 - **Severity:** Medium-high — this is why `ring-sandbox` exists at all; it is
   the gap our Open Source entry fills.
 - **Workaround:** Built ring-sandbox (typed client + offline emulator +
-  webhook signer + scenario replay + chaos mode), published to PyPI.
+  webhook signer + scenario replay + chaos mode), published to PyPI;
+  the 0.4.0 surface (WHEP, subscriptions, app integrations) is pinned
+  to its released GitHub revision until the wheel publishes.
 - **Suggestion:** An official emulator — even a static JSON replay of the
   documented shapes — would remove the largest onboarding cost for every
   developer after us.
