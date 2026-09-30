@@ -1106,7 +1106,6 @@ def case_index_html(
     """
     import base64
     import json as _json
-
     from html import escape as _hesc
 
     enc = lambda s: base64.b64encode(s.encode()).decode()  # noqa: E731
