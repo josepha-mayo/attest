@@ -1168,10 +1168,11 @@ def _status(args: argparse.Namespace) -> None:
         if journal["mismatches"]:
             line += f", {len(journal['mismatches'])} mismatches"
         print(line)
+        _pl = lambda n, w: f"{n} {w}{'s' if n != 1 else ''}"  # noqa: E731
         print(
-            f"coverage: {stats['poll_observations']} poll observations, "
-            f"{stats['coverage_events']} lifecycle events, "
-            f"{stats['liveview_sessions']} live-view sessions on record"
+            f"coverage: {_pl(stats['poll_observations'], 'poll observation')}, "
+            f"{_pl(stats['coverage_events'], 'lifecycle event')}, "
+            f"{_pl(stats['liveview_sessions'], 'live-view session')} on record"
         )
         # Site-level chain events: coverage certs, digests, exports, disconnects —
         # the signed ledger's record of watching, summarizing, and consent.
