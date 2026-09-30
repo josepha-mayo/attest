@@ -952,4 +952,5 @@ class Store:
             "schedules": [json.loads(s.model_dump_json()) for s in self.schedules()],
             "visits": [json.loads(v.model_dump_json()) for v in self.visits()],
             "liveview_sessions": [json.loads(s.model_dump_json()) for s in self.liveview_session_rows()],
+            "coverage_events": [json.loads(e.model_dump_json()) for e in self.coverage_event_rows()],
         }

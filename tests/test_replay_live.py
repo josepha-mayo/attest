@@ -278,7 +278,10 @@ def test_replay_default_story_produces_the_full_demo_dataset(tmp_path):
                 # no_show day — watched silence, never "proof of absence".
                 assert any(c["events"] == 0 and c["state"] == "observed" for c in coverages)
                 # The exported case pack's offline browser carries the live mark.
-                site = client.get("/api/state").json()["sites"][0]["id"]
+                # /api/state exposes the aux tables for inspection/debugging.
+                state = client.get("/api/state").json()
+                assert state["liveview_sessions"] and state["coverage_events"]
+                site = state["sites"][0]["id"]
                 pack = client.get(f"/sites/{site}/pack.zip")
                 assert pack.status_code == 200
                 import io
