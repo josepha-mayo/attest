@@ -602,6 +602,7 @@ def _demo(args: argparse.Namespace) -> None:
 
     store = Store(data_dir / "attest.sqlite3")
     family_url = None
+    signed_ids: dict[str, str] = {}
     try:
         engine = VisitEngine(
             store,
@@ -623,6 +624,7 @@ def _demo(args: argparse.Namespace) -> None:
                 f" ({cov['fraction'] * 100:.0f}%) over the story window.",
                 flush=True,
             )
+            signed_ids["coverage"] = receipt.id
         # Sign the emulator API sweep too — the ledger and every exported pack
         # then carry the verification_report shape a real `verify-live --sign`
         # produces, honestly labeled with the loopback base URL. A sweep
@@ -638,6 +640,7 @@ def _demo(args: argparse.Namespace) -> None:
                 f"({vs['pass']} pass/{vs['fail']} fail) — deployment provenance.",
                 flush=True,
             )
+            signed_ids["verify"] = vreceipt.id
         except Exception as exc:  # noqa: BLE001 — demo provenance is best-effort
             print(f"API sweep skipped ({type(exc).__name__}: {exc})", flush=True)
         # Pre-issue a scoped family link on the record the worker disputed —
@@ -672,6 +675,7 @@ def _demo(args: argparse.Namespace) -> None:
                 f"Signed {dreceipt.id}: period digest over the story window.",
                 flush=True,
             )
+            signed_ids["digest"] = dreceipt.id
     finally:
         store.close()
 
@@ -721,9 +725,10 @@ def _demo(args: argparse.Namespace) -> None:
     print("  7. attest status       — audits the whole runtime offline", flush=True)
     print("  8. attest triage       — the week's brief (agent when AWS is reachable)", flush=True)
     print("  9. attest verify <zip> — verifies a downloaded pack without unzipping", flush=True)
-    print(" 10. attest explain <visit_id> — one record's full provenance, in words", flush=True)
-    print("     (try the verify: receipt just signed — the API sweep against the", flush=True)
-    print("     emulator, as a chained attestation; verify-live --sign does it live)", flush=True)
+    print(" 10. attest explain <visit_or_receipt_id> — full provenance, in words", flush=True)
+    if "verify" in signed_ids:
+        print(f"     e.g. attest explain {signed_ids['verify']} — the API sweep just", flush=True)
+        print("     signed as a chained attestation (verify-live --sign does it live)", flush=True)
     print("  Also: '/household' on any visit is the family's view — plain", flush=True)
     print("  language, glanceable; 'Share the household view' issues a scoped", flush=True)
     print("  link (/family/…) with a QR code for the door-step scan, same as", flush=True)
