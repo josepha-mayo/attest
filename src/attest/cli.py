@@ -797,7 +797,8 @@ def _demo(args: argparse.Namespace) -> None:
     print("  '/household' on any visit is the family's view —", flush=True)
     print("  plain language, glanceable; 'Share the household view' issues a scoped", flush=True)
     print("  link (/family/…) with a QR code for the door-step scan, same as", flush=True)
-    print("  the worker links. --redact-media exports keep signed digests while", flush=True)
+    print("  the worker links (re-run with --lan to scan it from a real phone).", flush=True)
+    print("  --redact-media exports keep signed digests while", flush=True)
     print("  withholding footage; attest diff A.zip B.zip proves appends only", flush=True)
     print("  ever add — never rewrite.", flush=True)
     if family_url:
