@@ -572,6 +572,24 @@ dz.ondragleave=()=>dz.classList.remove("over");
 dz.ondrop=e=>{e.preventDefault();dz.classList.remove("over");go(e.dataTransfer.files);};
 document.getElementById("pick").onchange=e=>go(e.target.files);
 document.getElementById("pickdir").onchange=e=>go(e.target.files);
+/* Hosted copies (Pages, a deployment's /verify-pack) sit next to
+   sample-pack.zip — offer one-click verification. file:// embedded copies
+   can't fetch; the button stays hidden. */
+if(location.protocol.indexOf("http")===0){
+  fetch("sample-pack.zip",{method:"HEAD"}).then(r=>{
+    if(!r.ok)return;
+    document.getElementById("trysample-wrap").hidden=false;
+    document.getElementById("trysample").onclick=async()=>{
+      try{
+        const buf=await(await fetch("sample-pack.zip")).arrayBuffer();
+        go([new File([buf],"sample-pack.zip")]);
+      }catch(e){
+        document.getElementById("out").innerHTML=
+          "<div class='row bad'>sample fetch failed: "+esc(e.message)+"</div>";
+      }
+    };
+  }).catch(()=>{});
+}
 """
 
 _VERIFY_BODY = """<h1>Attest pack verifier</h1>
@@ -583,6 +601,8 @@ single-visit pack, or a signed receipt JSON (e.g. a <code>verify-live --sign</co
 pick files: <input type="file" id="pick" multiple accept=".zip,.json" aria-label="Choose pack files">
 or the extracted folder: <input type="file" id="pickdir" webkitdirectory
 aria-label="Choose the extracted pack folder"></div>
+<p id="trysample-wrap" hidden><button id="trysample" type="button">Verify the bundled
+sample pack — one click, fetched from this site</button></p>
 <div id="out" role="status" aria-live="polite"></div>
 <h2>What this does and does not establish</h2>
 <p><small>A green result proves the signed records are intact and were issued under the pinned
