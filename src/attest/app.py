@@ -120,6 +120,8 @@ def create_app(
         if job is None:
             return False
         try:
+            if not s.ring_webhook_key:
+                raise ValueError("webhook signing key not configured")
             ev = webhooks.parse(job["raw_body"], signing_key=s.ring_webhook_key, signature=job["signature"])
             outcome = engine.ingest(ev)
             reason = outcome.ignored_reason or ""
@@ -283,8 +285,11 @@ def create_app(
             return JSONResponse(
                 {"error": "history polling is enabled; webhook intake disabled"}, status_code=409
             )
-        if s.ring_base_url == "https://api.amazonvision.com" and s.ring_webhook_key == "attest-dev-hmac-key":
-            return JSONResponse({"error": "configure the issued Ring webhook signing key"}, status_code=503)
+        if not s.ring_webhook_key:
+            return JSONResponse(
+                {"error": "no Ring webhook signing key configured — set ATTEST_RING_WEBHOOK_KEY"},
+                status_code=503,
+            )
         chunks = bytearray()
         async for chunk in request.stream():
             if len(chunks) + len(chunk) > _MAX_WEBHOOK_BYTES:
@@ -523,7 +528,11 @@ def create_app(
                 else "local key file — plaintext at rest"
             ),
             issuer=signer.public_key_b64,
-            healthy=data["journal"]["intact"] and data["chain"][0],
+            healthy=(
+                data["journal"]["intact"]
+                and data["chain"][0]
+                and data["journal"].get("untracked_rows", 0) == 0
+            ),
             **data,
         )
 
@@ -574,6 +583,9 @@ def create_app(
             countersign=reviews.countersign(visit_id) if bundle else None,
             coverage=cov,
             late_count=len(late),
+            family_link_active=any(
+                g.id == visit_id and g.expires_at > utcnow() for g in store.family_grants()
+            ),
         )
 
     def _coverage_local(cov: dict | None) -> dict | None:
@@ -717,6 +729,14 @@ def create_app(
             raise HTTPException(404, str(exc)) from exc
         return {"path": f"/family/{token}", "expires_in_seconds": 604800}
 
+    @app.post("/api/visits/{visit_id}/family-link/revoke")
+    async def revoke_family_link(visit_id: str = PathParam(max_length=128)):
+        """Kill the visit's family link immediately — the journaled delete
+        records the revocation; existing links 404/dead-link from now on."""
+        if not await action(engine.revoke_family_link, visit_id):
+            raise HTTPException(404, "no family link on this record")
+        return {"revoked": True}
+
     @app.get("/family/{token}", response_class=HTMLResponse)
     async def family_page(request: Request, token: str = PathParam(max_length=128)):
         visit = await action(engine.family_target, token)
@@ -746,7 +766,19 @@ def create_app(
             )
         try:
             await asyncio.to_thread(reviews.household_statement, token, data)
-        except ValueError:
+        except ValueError as exc:
+            if "statement limit" in str(exc):
+                return _household_render(
+                    request,
+                    visit,
+                    f"/family/{token}",
+                    via_link=True,
+                    statement_error=(
+                        "This record has reached its statement limit — the view "
+                        "link still works, but no further accounts can be added. "
+                        "Contact the coordinator if something needs correcting."
+                    ),
+                )
             return _dead_link(request, "family view")
         return _household_render(request, visit, f"/family/{token}", via_link=True, statement_posted=True)
 
@@ -757,6 +789,12 @@ def create_app(
             raise HTTPException(404)
         for e in store.evidence_for(visit.id):
             if e.media_path and Path(e.media_path).name == name:
+                # The signed digest is the contract: never serve bytes that
+                # fail it — a swapped file must surface as missing evidence,
+                # not render inside a page that displays the original digest.
+                if e.media_sha256 and not media.verify(e.media_path, e.media_sha256):
+                    log.warning("media digest mismatch for %s on %s", name, visit.id)
+                    raise HTTPException(410, "media failed integrity check")
                 data = media.read(e.media_path)
                 if data is None:
                     raise HTTPException(404)
@@ -768,6 +806,9 @@ def create_app(
     async def visit_media(visit_id: str = PathParam(max_length=128), name: str = PathParam(max_length=255)):
         for e in store.evidence_for(visit_id):
             if e.media_path and Path(e.media_path).name == name:
+                if e.media_sha256 and not media.verify(e.media_path, e.media_sha256):
+                    log.warning("media digest mismatch for %s on %s", name, visit_id)
+                    raise HTTPException(410, "media failed integrity check")
                 data = media.read(e.media_path)
                 if data is None:
                     break
@@ -1248,6 +1289,27 @@ def create_app(
         except HTTPException as exc:
             if exc.status_code == 409 and "review link" in str(exc.detail):
                 return _dead_link(request, "review", status_code=410)
+            if exc.status_code == 409 and "review limit reached" in str(exc.detail):
+                ctx = await _worker_ctx(token)
+                if ctx is None:
+                    return _dead_link(request, "review")
+                resp = render(
+                    request,
+                    "worker_review.html",
+                    **ctx,
+                    form_error=(
+                        "This record's review chain is full — no further statements "
+                        "can be appended. Ask the coordinator to export the case pack."
+                    ),
+                    form={
+                        "decision": decision,
+                        "statement": statement,
+                        "reported_start": reported_start,
+                        "reported_end": reported_end,
+                    },
+                )
+                resp.status_code = 409
+                return resp
             raise
         return render(request, "worker_review.html", original=None, token=None, done=True)
 

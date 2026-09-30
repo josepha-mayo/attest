@@ -240,7 +240,7 @@ class Store:
             return json.loads(row[0]) if row else None
 
     def put_setting(self, name: str, value: dict) -> None:
-        with self._lock:
+        with self.transaction():
             body = json.dumps(value)
             self._conn.execute(
                 "INSERT INTO settings (name, body) VALUES (?, ?) "
@@ -426,6 +426,14 @@ class Store:
             for p in missing_pins:
                 mismatches.append(f"journal tail removed: pinned head {p[:12]}... absent")
 
+            # Coverage honesty: pins authenticate entries up to the newest
+            # pinned head. Entries after it are unanchored — dropping them
+            # leaves no trace unless an external anchor (`attest anchor
+            # --publish`) has captured a later head. Report the window.
+            seq_by_hash = {h: seq for seq, _at, _t, _r, _o, _b, _p, h in entries}
+            last_pinned_seq = max((seq_by_hash[p] for p in pins if p in seq_by_hash), default=0)
+            unpinned = sum(1 for seq, *_ in entries if seq > last_pinned_seq)
+
             return {
                 "entries": len(entries),
                 "intact": not mismatches,
@@ -433,6 +441,7 @@ class Store:
                 "untracked_rows": untracked,
                 "pinned_heads": len(pins),
                 "missing_pins": len(missing_pins),
+                "unpinned_entries": unpinned,
                 "head": entries[-1][7] if entries else "0" * 64,
             }
 
@@ -768,7 +777,7 @@ class Store:
     # ----------------------------------------------------------------- idempotency
 
     def bind_source(self, site_id: str, source: str) -> bool:
-        with self._lock:
+        with self.transaction():
             cur = self._conn.execute(
                 "INSERT OR IGNORE INTO ingestion_sources (site_id, source) VALUES (?, ?)", (site_id, source)
             )
@@ -787,7 +796,7 @@ class Store:
             )
 
     def record_late_event(self, event_id: str, site_id: str, body: str) -> None:
-        with self._lock:
+        with self.transaction():
             self._conn.execute(
                 "INSERT INTO late_events (id, site_id, body) VALUES (?, ?, ?)", (event_id, site_id, body)
             )
@@ -806,7 +815,7 @@ class Store:
 
     def mark_seen(self, request_id: str, at: datetime) -> bool:
         """Return True if new, False if this webhook request_id was already processed."""
-        with self._lock:
+        with self.transaction():
             try:
                 seen_at = _iso(at)
                 self._conn.execute(

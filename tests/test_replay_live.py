@@ -19,6 +19,10 @@ from attest.ledger import verify_chain
 from attest.models import Receipt, ReviewBundle
 from attest.reviews import verify_bundle
 
+# The server and the replay subprocess must share one webhook signing key —
+# the CLI refuses to sign simulated deliveries without it.
+WEBHOOK_KEY = "test-webhook-signing-key"
+
 
 @contextmanager
 def serve(app):
@@ -61,6 +65,7 @@ def test_replay_cli_shares_clock_with_auto_checkin_and_signs_receipt(
             replay_mode=True,
             data_dir=tmp_path,
             ring_base_url=ring_url,
+            ring_webhook_key=WEBHOOK_KEY,
             timezone="UTC",
             summarizer="template",
         )
@@ -86,6 +91,7 @@ def test_replay_cli_shares_clock_with_auto_checkin_and_signs_receipt(
                     "ATTEST_ADMIN_TOKEN": token,
                     "ATTEST_REPLAY_MODE": "true",
                     "ATTEST_RING_BASE_URL": ring_url,
+                    "ATTEST_RING_WEBHOOK_KEY": WEBHOOK_KEY,
                     "ATTEST_SUMMARIZER": "template",
                 },
                 capture_output=True,
@@ -151,6 +157,7 @@ def test_replay_story_cycles_patterns_and_survives_late_events(tmp_path):
             replay_mode=True,
             data_dir=tmp_path,
             ring_base_url=ring_url,
+            ring_webhook_key=WEBHOOK_KEY,
             timezone="UTC",
             summarizer="template",
         )
@@ -179,6 +186,7 @@ def test_replay_story_cycles_patterns_and_survives_late_events(tmp_path):
                     "ATTEST_ADMIN_TOKEN": token,
                     "ATTEST_REPLAY_MODE": "true",
                     "ATTEST_RING_BASE_URL": ring_url,
+                    "ATTEST_RING_WEBHOOK_KEY": WEBHOOK_KEY,
                     "ATTEST_SUMMARIZER": "template",
                 },
                 capture_output=True,
@@ -223,6 +231,7 @@ def test_replay_default_story_produces_the_full_demo_dataset(tmp_path):
             replay_mode=True,
             data_dir=tmp_path,
             ring_base_url=ring_url,
+            ring_webhook_key=WEBHOOK_KEY,
             timezone="UTC",
             summarizer="template",
         )
@@ -251,6 +260,7 @@ def test_replay_default_story_produces_the_full_demo_dataset(tmp_path):
                     "ATTEST_ADMIN_TOKEN": token,
                     "ATTEST_REPLAY_MODE": "true",
                     "ATTEST_RING_BASE_URL": ring_url,
+                    "ATTEST_RING_WEBHOOK_KEY": WEBHOOK_KEY,
                     "ATTEST_SUMMARIZER": "template",
                 },
                 capture_output=True,
@@ -304,6 +314,7 @@ def test_replay_liveview_day_signs_the_session_into_coverage(tmp_path):
             replay_mode=True,
             data_dir=tmp_path,
             ring_base_url=ring_url,
+            ring_webhook_key=WEBHOOK_KEY,
             timezone="UTC",
             summarizer="template",
         )
@@ -332,6 +343,7 @@ def test_replay_liveview_day_signs_the_session_into_coverage(tmp_path):
                     "ATTEST_ADMIN_TOKEN": token,
                     "ATTEST_REPLAY_MODE": "true",
                     "ATTEST_RING_BASE_URL": ring_url,
+                    "ATTEST_RING_WEBHOOK_KEY": WEBHOOK_KEY,
                     "ATTEST_SUMMARIZER": "template",
                 },
                 capture_output=True,
@@ -361,6 +373,7 @@ def test_replay_blackout_day_signs_the_lifecycle_explanation(tmp_path):
             replay_mode=True,
             data_dir=tmp_path,
             ring_base_url=ring_url,
+            ring_webhook_key=WEBHOOK_KEY,
             timezone="UTC",
             summarizer="template",
         )
@@ -389,6 +402,7 @@ def test_replay_blackout_day_signs_the_lifecycle_explanation(tmp_path):
                     "ATTEST_ADMIN_TOKEN": token,
                     "ATTEST_REPLAY_MODE": "true",
                     "ATTEST_RING_BASE_URL": ring_url,
+                    "ATTEST_RING_WEBHOOK_KEY": WEBHOOK_KEY,
                     "ATTEST_SUMMARIZER": "template",
                 },
                 capture_output=True,
@@ -488,6 +502,7 @@ def test_replay_late_day_produces_source_divergence(tmp_path):
             replay_mode=True,
             data_dir=tmp_path,
             ring_base_url=ring_url,
+            ring_webhook_key=WEBHOOK_KEY,
             timezone="UTC",
             summarizer="template",
         )
@@ -517,6 +532,7 @@ def test_replay_late_day_produces_source_divergence(tmp_path):
                     "ATTEST_ADMIN_TOKEN": token,
                     "ATTEST_REPLAY_MODE": "true",
                     "ATTEST_RING_BASE_URL": ring_url,
+                    "ATTEST_RING_WEBHOOK_KEY": WEBHOOK_KEY,
                     "ATTEST_SUMMARIZER": "template",
                 },
                 capture_output=True,
@@ -544,6 +560,7 @@ def test_replay_story_rejects_unknown_pattern(tmp_path):
             replay_mode=True,
             data_dir=tmp_path,
             ring_base_url=ring_url,
+            ring_webhook_key=WEBHOOK_KEY,
             timezone="UTC",
         )
         with serve(create_app(settings)) as app_url:
@@ -568,6 +585,7 @@ def test_replay_story_rejects_unknown_pattern(tmp_path):
                     "ATTEST_ADMIN_TOKEN": token,
                     "ATTEST_REPLAY_MODE": "true",
                     "ATTEST_RING_BASE_URL": ring_url,
+                    "ATTEST_RING_WEBHOOK_KEY": WEBHOOK_KEY,
                 },
                 capture_output=True,
                 text=True,
@@ -599,6 +617,7 @@ def test_replay_named_example_scenarios_stay_honest(
             replay_mode=True,
             data_dir=tmp_path,
             ring_base_url=ring_url,
+            ring_webhook_key=WEBHOOK_KEY,
             timezone="UTC",
             summarizer="template",
         )
@@ -624,6 +643,7 @@ def test_replay_named_example_scenarios_stay_honest(
                     "ATTEST_ADMIN_TOKEN": token,
                     "ATTEST_REPLAY_MODE": "true",
                     "ATTEST_RING_BASE_URL": ring_url,
+                    "ATTEST_RING_WEBHOOK_KEY": WEBHOOK_KEY,
                     "ATTEST_SUMMARIZER": "template",
                 },
                 capture_output=True,

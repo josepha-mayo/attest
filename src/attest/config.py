@@ -18,7 +18,12 @@ class Settings(BaseSettings):
     ring_client_id: str | None = None
     ring_token_url: str = "https://oauth.ring.com/oauth/token"
     ring_base_url: str = "http://127.0.0.1:8787"
-    ring_webhook_key: str = "attest-dev-hmac-key"
+    # No shipped default: a public constant here would be live in every
+    # deployment that forgets to configure a real key — forged HMAC-signed
+    # webhooks would ingest as genuine Ring traffic. The demo mints a fresh
+    # per-run key; `attest replay` needs ATTEST_RING_WEBHOOK_KEY set to the
+    # server's value.
+    ring_webhook_key: str | None = None
     # Comma-separated origins allowed to receive media downloads (Ring presigned URLs).
     # Entries are HTTPS origins like https://host or wildcard hosts like *.amazonaws.com.
     ring_media_origins: str = ""
@@ -39,7 +44,7 @@ class Settings(BaseSettings):
     retention_media_days: int = 180
     retention_deliveries_days: int = 30
     retention_grants_days: int = 7
-    retention_seen_days: int = 30
+    retention_seen_days: int = 0  # 0 = keep dedupe tombstones forever (replay protection)
     retention_late_days: int = 90
     retention_poll_days: int = 90
     retention_coverage_days: int = 90

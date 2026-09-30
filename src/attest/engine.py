@@ -336,6 +336,11 @@ class VisitEngine:
             return None
         return self.store.visit(grant.id)
 
+    def revoke_family_link(self, visit_id: str) -> bool:
+        """Delete the visit's family grant — the journaled delete makes the
+        revocation part of the mutation log, not a silent row removal."""
+        return bool(self.store.delete_family_grants([visit_id]))
+
     def checkin_target(self, token: str):
         grant = self.store.checkin_grant(hashlib.sha256(token.encode()).hexdigest())
         if grant is None or grant.used_at or grant.expires_at <= utcnow():

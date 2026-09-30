@@ -150,6 +150,7 @@ document.getElementById('close-record').onclick = async () => {
 <p id="review-link-status" role="status" class="small muted"></p>
 {% endif %}
 <button class="btn secondary" id="issue-family">Share the household view</button>
+{% if family_link_active %}<button class="btn secondary" id="revoke-family" title="Kills the existing family link — anyone holding it loses access immediately">Revoke family link</button>{% endif %}
 <a id="family-view-link" style="display:block;overflow-wrap:anywhere;color:var(--accent)"></a>
 <a id="family-mailto" class="muted small" style="display:none" href="#">Send by email</a>
 <img id="family-view-qr" alt="QR code for the household view link" style="display:none;width:120px;height:120px;margin-top:8px;border:1px solid var(--line);border-radius:8px">
@@ -219,8 +220,33 @@ if (issueFamily) issueFamily.onclick = async () => {
     const qr = document.getElementById('family-view-qr');
     qr.src = '/qr.svg?target=' + encodeURIComponent(data.path);
     qr.style.display = 'block';
+    const rv = document.getElementById('revoke-family');
+    if (!rv) {
+      const b = document.createElement('button');
+      b.className = 'btn secondary'; b.id = 'revoke-family';
+      b.textContent = 'Revoke family link';
+      b.title = 'Kills the existing family link — anyone holding it loses access immediately';
+      issueFamily.after(b);
+      b.onclick = revokeFamily;
+    }
   }
 };
+async function revokeFamily() {
+  const status = document.getElementById('family-link-status');
+  const response = await fetch('/api/visits/{{ visit.id }}/family-link/revoke', {method: 'POST'});
+  if (response.ok) {
+    status.textContent = 'Family link revoked — the URL stops working immediately.';
+    document.getElementById('family-view-link').removeAttribute('href');
+    document.getElementById('family-view-link').textContent = '';
+    document.getElementById('family-view-qr').style.display = 'none';
+    document.getElementById('family-mailto').style.display = 'none';
+    document.getElementById('revoke-family').remove();
+  } else {
+    status.textContent = (await response.json()).detail || 'Revoke failed';
+  }
+}
+const revokeFamilyBtn = document.getElementById('revoke-family');
+if (revokeFamilyBtn) revokeFamilyBtn.onclick = revokeFamily;
 document.getElementById('coordinator-review').onsubmit = async event => {
   event.preventDefault();
   const body = Object.fromEntries(new FormData(event.target));

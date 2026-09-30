@@ -34,7 +34,9 @@ class RetentionPolicy:
     media_days: int = 180
     deliveries_days: int = 30
     grants_days: int = 7
-    seen_days: int = 30
+    # Dedupe tombstones are tiny (~50 bytes) and deleting one re-enables replay
+    # of a captured delivery. Default 0 = never purge; opt in explicitly.
+    seen_days: int = 0
     late_events_days: int = 90
     poll_observations_days: int = 90
     coverage_events_days: int = 90
@@ -197,7 +199,12 @@ def _candidates(store: Store, inbox: Any | None, media_root: Path, now: datetime
         elif visit.state in _CLOSED and _aware(visit.closed_at or visit.last_activity_at) < media_cutoff:
             media_candidates.append({**f, "reason": "visit past media retention"})
 
-    seen_total, seen_ids = store.stale_seen(now - timedelta(days=policy.seen_days), limit=_CAP)
+    # seen_requests rows are replay-protection tombstones — a purged key lets a
+    # captured delivery re-ingest. Days=0 keeps them forever.
+    if policy.seen_days > 0:
+        seen_total, seen_ids = store.stale_seen(now - timedelta(days=policy.seen_days), limit=_CAP)
+    else:
+        seen_total, seen_ids = 0, []
 
     late = []
     for row in store.late_event_rows():

@@ -262,7 +262,10 @@ class ReviewService:
         grant = self.store.review_grant(hashlib.sha256(token.encode()).hexdigest())
         if grant is None or grant.used_at or grant.expires_at <= utcnow():
             return None
-        bundle = self._checked_bundle(grant.id)
+        bundle = self.bundle(grant.id)
+        ok, _reason = verify_bundle(bundle, public_key=self.signer.public_key_b64)
+        if not ok:
+            return None
         worker = bundle.original.payload.get("scheduled_worker") or {}
         if bundle.original.payload_hash != grant.original_hash or worker.get("id") != grant.worker_id:
             return None
@@ -290,6 +293,12 @@ class ReviewService:
         self.store.put_review_grant(grant)
         return entry
 
+    # A family link is multi-use by design — but uncapped appends let a link
+    # holder fill the shared per-visit review chain (max 500 entries) and
+    # permanently freeze the worker/coordinator channel. Cap household
+    # statements per visit well below the chain limit.
+    HOUSEHOLD_STATEMENT_LIMIT = 10
+
     @atomic
     def household_statement(self, token: str, data: HouseholdStatementInput) -> ReviewEntry:
         """Append the household's own account via the scoped family link. The
@@ -300,6 +309,13 @@ class ReviewService:
         grant = self.store.family_grant(hashlib.sha256(token.encode()).hexdigest())
         if grant is None or grant.expires_at <= utcnow():
             raise ValueError("invalid or expired family link")
+        household_count = sum(
+            1
+            for e in self.bundle(grant.id).reviews
+            if e.receipt.payload.get("actor", {}).get("role") == "household"
+        )
+        if household_count >= self.HOUSEHOLD_STATEMENT_LIMIT:
+            raise ValueError("statement limit reached for this family link")
         return self._append(
             grant.id,
             data,

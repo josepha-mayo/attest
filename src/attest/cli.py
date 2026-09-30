@@ -57,6 +57,14 @@ def _serve(args: argparse.Namespace) -> None:
     db = settings.data_dir / "attest.sqlite3"
     if not db.exists():
         print("note: empty runtime — `attest demo` boots emulator + server + a scripted week")
+    if args.host not in ("127.0.0.1", "localhost", "::1"):
+        # uvicorn serves plain HTTP — a non-loopback bind puts the admin Basic
+        # credentials and bearer-link tokens on the wire in cleartext.
+        print(
+            f"WARNING: serving HTTP on {args.host}:{args.port} — admin credentials "
+            "and link tokens transit in cleartext. Put a TLS terminator in front "
+            "or keep the listener on loopback."
+        )
     uvicorn.run(create_app(), host=args.host, port=args.port, log_level="info", access_log=False)
 
 
@@ -148,6 +156,12 @@ def _replay(args: argparse.Namespace) -> None:
 
     if not settings.admin_token or not math.isfinite(args.speed) or args.speed <= 0:
         sys.exit("Replay requires admin authentication and a finite positive speed.")
+    if not settings.ring_webhook_key:
+        sys.exit(
+            "Replay signs simulated webhooks — set ATTEST_RING_WEBHOOK_KEY to the "
+            "same value the target server verifies with. `attest demo` mints one "
+            "per run automatically."
+        )
     if args.days < 1:
         sys.exit("--days must be at least 1")
     if args.scenario.endswith((".yml", ".yaml")) and not Path(args.scenario).exists():
@@ -534,12 +548,17 @@ def _demo(args: argparse.Namespace) -> None:
     token = secrets.token_urlsafe(32)
     # The demo owns this CLI process; point the replay driver at the token it minted.
     settings.admin_token = SecretStr(token)
+    # Webhook HMAC keys are never shipped: mint a fresh one per run and hand it
+    # to both the app's verifier and the in-process replay driver's signer.
+    webhook_key = secrets.token_urlsafe(32)
+    settings.ring_webhook_key = webhook_key
     demo = Settings(
         _env_file=None,
         admin_token=token,
         replay_mode=True,
         data_dir=data_dir,
         ring_base_url=ring_url,
+        ring_webhook_key=webhook_key,
         timezone="UTC",
         summarizer="template",
     )
@@ -1158,7 +1177,9 @@ def _status(args: argparse.Namespace) -> None:
             finally:
                 inbox.close()
         by_state = ", ".join(f"{k}={n}" for k, n in stats["visits"]["by_state"].items())
-        healthy = journal["intact"] and chain_ok
+        # A row with no journal entry at all means an out-of-band write (or
+        # journal rows truncated after the last pin) — never "healthy".
+        healthy = journal["intact"] and chain_ok and journal["untracked_rows"] == 0
         mode = (store.setting("execution_mode") or {}).get("mode", "wall")
         print(f"store:    {db} ({mode} clock)")
         print(f"visits:   {stats['visits']['total']} ({by_state or 'none'})")
@@ -1166,6 +1187,8 @@ def _status(args: argparse.Namespace) -> None:
         line = f"journal:  {'intact' if journal['intact'] else 'VIOLATED'} — {journal['entries']} entries"
         if journal.get("pinned_heads"):
             line += f", {journal['pinned_heads']} signature-pinned heads"
+        if journal.get("unpinned_entries"):
+            line += f", {journal['unpinned_entries']} entries not yet pinned (`attest anchor` to pin)"
         if journal["untracked_rows"]:
             line += f", {journal['untracked_rows']} untracked rows (run `attest journal --baseline`)"
         if journal["mismatches"]:

@@ -73,7 +73,9 @@ def test_report_identifies_candidates_without_deleting(store, tmp_path):
     inbox.enqueue("acct:req-fresh", b"{}", "sig2")
 
     before = store.stats()
-    report = retention.build_report(store, inbox, media_root, now=now)
+    report = retention.build_report(
+        store, inbox, media_root, now=now, policy=retention.RetentionPolicy(seen_days=30)
+    )
     after = store.stats()
 
     # nothing was deleted or modified
@@ -122,19 +124,28 @@ def test_apply_deletes_only_the_reviewed_set(store, tmp_path):
     inbox._db.execute("UPDATE deliveries SET received_at=?", (now.timestamp() - 40 * 86400,))
     inbox.enqueue("acct:req-pending", b"{}", "sig2")  # stays pending, never deletable
 
-    report = retention.build_report(store, inbox, media_root, now=now)
+    policy = retention.RetentionPolicy(seen_days=30)
+    report = retention.build_report(store, inbox, media_root, now=now, policy=policy)
     token = report["apply_token"]
 
     with pytest.raises(ValueError):
-        retention.apply(store, inbox, media_root, now=now, confirm="bogus")
+        retention.apply(store, inbox, media_root, now=now, policy=policy, confirm="bogus")
 
     # data changes invalidate the token before apply
     store.mark_seen("acct:req-newer", now - timedelta(days=60))
     with pytest.raises(ValueError):
-        retention.apply(store, inbox, media_root, now=now, confirm=token)
+        retention.apply(
+            store,
+            inbox,
+            media_root,
+            now=now,
+            policy=retention.RetentionPolicy(seen_days=30),
+            confirm=token,
+        )
 
-    report = retention.build_report(store, inbox, media_root, now=now)
-    result = retention.apply(store, inbox, media_root, now=now, confirm=report["apply_token"])
+    policy = retention.RetentionPolicy(seen_days=30)
+    report = retention.build_report(store, inbox, media_root, now=now, policy=policy)
+    result = retention.apply(store, inbox, media_root, now=now, policy=policy, confirm=report["apply_token"])
     d = result["deleted"]
     assert d["deliveries"] == 1 and d["grants"] == 1
     assert d["seen_requests"] == 2 and d["media_files"] == 1 and d["late_events"] == 0
@@ -251,3 +262,18 @@ def test_retention_endpoint_reports_without_deleting(settings, store, ring_clien
         assert body["mode"] == "preview"
         assert "policy" in body and "totals" in body and "candidates" in body
         assert client.get("/api/state", auth=admin).json()["sites"]  # data still present
+
+
+def test_default_policy_never_purges_dedupe_tombstones(store, tmp_path):
+    """seen_requests rows are replay-protection tombstones: even ancient ones
+    stay out of the default policy — only an explicit opt-in lists them."""
+    now = utcnow()
+    store.mark_seen("acct:req-ancient", now - timedelta(days=365))
+    report = retention.build_report(store, None, tmp_path / "media", now=now)
+    c = report["candidates"]
+    assert c["seen_requests"]["total"] == 0 and c["seen_requests"]["items"] == []
+    # the opt-in path still exists for operators who want it
+    opted = retention.build_report(
+        store, None, tmp_path / "media", now=now, policy=retention.RetentionPolicy(seen_days=30)
+    )
+    assert opted["candidates"]["seen_requests"]["items"] == ["acct:req-ancient"]

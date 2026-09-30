@@ -688,6 +688,78 @@ def test_family_statement_rejects_bad_input_and_dead_tokens(api, store, househol
     assert r.status_code == 404 and "invalid or expired" in r.text
 
 
+def test_family_statement_cap_stops_chain_flooding(api, store, household, t0):
+    """A live family link can't fill the shared review chain — the per-visit
+    household cap rejects the spam while the link still serves the view."""
+    _post_hook(api, household[2].id, "button_press", t0)
+    visit = store.active_visit(household[0].id)
+    assert api.post(f"/api/visits/{visit.id}/close").status_code == 200
+    path = api.post(f"/api/visits/{visit.id}/family-link").json()["path"]
+
+    for i in range(10):
+        r = api.post(
+            f"{path}/statement",
+            auth=None,
+            data={"perception": "saw_someone", "statement": f"note {i}"},
+        )
+        assert r.status_code == 200
+
+    # the 11th is refused with the styled page — the link itself still works
+    r = api.post(
+        f"{path}/statement",
+        auth=None,
+        data={"perception": "saw_someone", "statement": "flood"},
+    )
+    assert r.status_code == 200 and "statement limit" in r.text
+    assert api.get(path, auth=None).status_code == 200
+
+    # ...and the worker/coordinator channel still has headroom
+    from attest.reviews import ReviewService
+
+    svc = ReviewService(store, api.attest_state.signer, api.attest_state.engine.clock)
+    bundle = svc.bundle(visit.id)
+    assert len(bundle.reviews) == 10
+
+
+def test_family_link_revoke_kills_access(api, store, household, t0):
+    """The coordinator can revoke a live family link; the journaled delete
+    records the revocation and the URL dead-links from then on."""
+    _post_hook(api, household[2].id, "button_press", t0)
+    visit = store.active_visit(household[0].id)
+    assert api.post(f"/api/visits/{visit.id}/close").status_code == 200
+    path = api.post(f"/api/visits/{visit.id}/family-link").json()["path"]
+    assert api.get(path, auth=None).status_code == 200
+
+    # revoking a non-existent link is a 404, revoking a real one works once
+    assert api.post(f"/api/visits/{visit.id}/family-link/revoke").status_code == 200
+    assert api.get(path, auth=None).status_code == 404
+    assert api.post(f"/api/visits/{visit.id}/family-link/revoke").status_code == 404
+
+    # the revocation lands in the mutation journal — not a silent row removal
+    journal = store.verify_journal()
+    assert journal["intact"]
+
+
+def test_webhook_route_fails_closed_without_signing_key(store, household, t0, tmp_path):
+    """No configured key → intake is off everywhere, not just on the prod URL."""
+    from fastapi.testclient import TestClient
+
+    from attest.app import create_app
+    from attest.config import Settings
+
+    s = Settings(
+        _env_file=None,
+        data_dir=tmp_path / "d",
+        admin_token="t" * 40,
+        ring_webhook_key=None,
+    )
+    app = create_app(s)
+    with TestClient(app) as api:
+        r = api.post("/webhooks/ring", content=b"{}")
+        assert r.status_code == 503
+        assert "signing key" in r.text
+
+
 def test_household_voice_coexists_with_worker_dispute(api, store, household, t0):
     """Three voices, one chain: worker dispute + household account + resolution
     all verify, and the derivation still reads worker/coordinator only."""
@@ -946,11 +1018,14 @@ def test_verify_pack_rejects_smuggled_attestation(api, household, t0):
 
 def test_status_survives_untracked_journal_rows(tmp_path, monkeypatch):
     """A store with rows written outside the journal used to crash `attest
-    status` with TypeError — it must print the untracked count instead."""
+    status` with TypeError — it must print the untracked count and flag
+    ATTENTION instead (out-of-band writes are an integrity signal)."""
     import argparse
     import contextlib
     import io as _io
     import sqlite3
+
+    import pytest
 
     from attest import cli
     from attest.models import Role, Worker
@@ -968,7 +1043,8 @@ def test_status_survives_untracked_journal_rows(tmp_path, monkeypatch):
     monkeypatch.setattr(cli.settings, "data_dir", tmp_path)
     monkeypatch.setattr(cli.settings, "kms_key_id", None)
     buf = _io.StringIO()
-    with contextlib.redirect_stdout(buf):
+    with contextlib.redirect_stdout(buf), pytest.raises(SystemExit) as exc:
         cli._status(argparse.Namespace())
     out = buf.getvalue()
-    assert "untracked" in out
+    assert exc.value.code == 1
+    assert "untracked" in out and "ATTENTION" in out

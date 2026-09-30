@@ -30,6 +30,7 @@ worker was honest.</div>
     {% else %}<span class="bad">&#10007; violated</span>{% endif %}
     <div class="muted small" style="margin-top:.5rem">
       {{ journal.pinned_heads }} signature-pinned heads · head <code>{{ journal.head[:12] }}…</code>
+      {% if journal.unpinned_entries %}<br>{{ journal.unpinned_entries }} newest entries not yet covered by a signed head — `attest anchor` pins them{% endif %}
       {% if journal.untracked_rows %}<br>{{ journal.untracked_rows }} rows not covered by the journal — pre-journal data or written outside the pipeline{% endif %}
     </div>
   </div>
