@@ -234,6 +234,18 @@ def test_review_link_renders_on_a_checked_in_visit(api, store, household, schedu
     assert page.status_code == 200
     assert "worker check-in" in page.text  # the tick that used to crash the render
 
+    # a malformed statement re-renders the same page — same timeline path
+    bad = api.post(
+        review_path,
+        data={
+            "decision": "dispute",
+            "statement": "x",
+            "reported_start": "2026-09-29T08:00:00+00:00",  # start without end
+        },
+        auth=None,
+    )
+    assert bad.status_code == 422 and "worker check-in" in bad.text
+
 
 def test_redacted_case_pack_upload_verifies(api, household, t0):
     site, _, cam, _ = household
