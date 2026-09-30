@@ -53,7 +53,9 @@ against a live store:
 | Edit a mid-chain journal entry | `verify_journal` chain break at that position |
 | Truncate the journal's tail | `journal_head` pins in later receipts name a head that no longer exists |
 | Re-sign a receipt under a foreign key | Signature fails under the pinned issuer key |
-| Replay a delivered webhook | `seen_requests` dedupe; delivery lands rejected in the durable inbox |
+| Replay a delivered webhook | `seen_requests` dedupe plus a signed-body freshness window: `meta.time` is HMAC-covered, so a verbatim replay past `webhook_max_age_s` (default 1h) is rejected even if its tombstone was purged; retention keeps tombstones by default (`retention_seen_days=0`) |
+| Deliver a webhook with a forged HMAC | Signature verification at intake and again in the worker; with no `ATTEST_RING_WEBHOOK_KEY` configured, intake fails closed (503 / rejected) rather than trusting nothing |
+| Swap media bytes on disk after signing | Serve-time digest check — bytes that fail the signed sha256 return 410 on both admin and family-link paths |
 | Insert a row out-of-band | Journal continuity and receipt-pin mismatches |
 | Update a denormalized index column directly (token_hash, visit_id, state, polled_at, coverage_events.at, liveview_sessions.opened_at) | `verify_journal` re-derives every index column from the signed body and flags divergence; `late_events.site_id` is bound into the journaled row hash itself — residual: for a late_events row journaled after the last receipt pin, rewriting the whole tail could hide a site_id change, since no second check covers it — the same tail-truncation boundary anchors exist to close |
 | Drop a file from an exported pack | Verifier reports missing media or missing bundle explicitly |
@@ -85,8 +87,12 @@ deployment controls.
 - Review-link tokens are stored hashed; the raw token exists only in the URL
   shown at issuance. CLI access logging is disabled so URLs are not logged.
 - Retention (`attest retention`) purges only non-chain data — deliveries,
-  grants, dedupe keys, late events, media files. Signed records are never
+  grants, late events, media files; dedupe tombstones are kept by default
+  (opt-in purge via `retention_seen_days`). Signed records are never
   deleted in place.
+- Family links are revocable (`family-link/revoke` journal-deletes the
+  grant) and household appends are capped at 10 per visit — a shared link
+  can't flood the 500-entry review chain and freeze the worker channel.
 
 ## Deliberate non-claims
 

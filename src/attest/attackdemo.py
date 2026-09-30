@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 
 from .ledger import Signer, verify_chain
+from .media import MediaStore
 from .store import Store
 
 
@@ -30,7 +32,7 @@ def _attempt(store: Store, name: str, fn) -> dict:
     return {"attack": name, "caught": caught, "detail": detail}
 
 
-def run(store: Store) -> dict:
+def run(store: Store, media_root: Path | None = None) -> dict:
     """Run the battery. Returns {"results": [...], "unchanged": bool}."""
     before = store.verify_journal()
     if before["entries"] == 0 and before["untracked_rows"]:
@@ -181,6 +183,37 @@ def run(store: Store) -> dict:
     results.append(
         _attempt(store, "retimestamp a live-view session (move human attention)", retimestamp_liveview)
     )
+
+    def swap_media() -> tuple[bool, str]:
+        """Overwrite a media file's bytes post-signing — the digest check at
+        serve time must refuse it. The file system isn't transactional, so the
+        original bytes are restored by hand after the check runs."""
+        if media_root is None:
+            return False, "no media root configured"
+        target = None
+        for (body,) in store._conn.execute("SELECT body FROM evidence").fetchall():
+            parsed = json.loads(body)
+            if parsed.get("media_path") and parsed.get("media_sha256"):
+                target = parsed
+                break
+        if target is None:
+            return False, "no signed media to swap"
+        media = MediaStore(media_root)
+        original = media.read(target["media_path"])
+        if original is None:
+            return False, "media file already absent"
+        path = Path(target["media_path"])
+        if not path.is_absolute():
+            path = media.root / path
+        try:
+            path.write_bytes(b"tampered-bytes")
+            ok = media.verify(target["media_path"], target["media_sha256"])
+            verdict = "refused the swapped bytes" if not ok else "MISSED the swap"
+            return not ok, f"{path.name}: serve-time digest check {verdict}"
+        finally:
+            path.write_bytes(original)
+
+    results.append(_attempt(store, "swap media bytes on disk after signing", swap_media))
 
     after = store.verify_journal()
     out = {

@@ -301,9 +301,20 @@ def create_app(
                 raw,
                 signing_key=s.ring_webhook_key,
                 signature=request.headers.get(webhooks.SIGNATURE_HEADER),
+                max_age_s=s.webhook_max_age_s,
             )
-        except webhooks.SignatureError:
-            return JSONResponse({"error": "invalid signature"}, status_code=401)
+        except webhooks.SignatureError as exc:
+            stale = "freshness" in str(exc)
+            return JSONResponse(
+                {
+                    "error": (
+                        "stale delivery — meta.time outside the freshness window"
+                        if stale
+                        else "invalid signature"
+                    )
+                },
+                status_code=401,
+            )
         except ValueError:
             return JSONResponse({"error": "invalid webhook payload"}, status_code=400)
         try:

@@ -89,6 +89,28 @@ def test_rejects_bad_signature(api, household, t0):
     assert r.status_code == 401
 
 
+def test_rejects_stale_meta_time_delivery(api, store, household, t0):
+    """A captured, validly-signed delivery replayed after the freshness window
+    is authentic but not acceptable — meta.time sits inside the signed body,
+    so the stale timestamp itself is attested."""
+    _, _, cam, _ = household
+    payload = webhooks.build_event(event_type="button_press", device_id=cam.id, occurred_at=t0)
+    payload["meta"]["time"] = "2001-01-01T00:00:00Z"  # captured long ago
+    body = webhooks.encode(payload)
+    r = api.post(
+        "/webhooks/ring",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            webhooks.SIGNATURE_HEADER: webhooks.sign(KEY, body),
+        },
+    )
+    assert r.status_code == 401 and "stale" in r.json()["error"]
+    # nothing was queued — intake refused it before the inbox
+    assert api.post("/api/process-webhooks").status_code == 200
+    assert store.stats()["evidence"]["total"] == 0
+
+
 def test_chaos_duplicated_deliveries_collapse_to_one_event(api, store, household, t0):
     """The emulator's chaos.duplicate sends the same signed delivery over and
     over — identical request_ids must collapse at intake, not into duplicate

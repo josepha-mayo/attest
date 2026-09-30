@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     # per-run key; `attest replay` needs ATTEST_RING_WEBHOOK_KEY set to the
     # server's value.
     ring_webhook_key: str | None = None
+    # Freshness bound on inbound webhooks: meta.time is inside the signed body,
+    # so a captured delivery replayed verbatim is authentic but stale. Generous
+    # default — must comfortably exceed Ring's retry window; it bounds replay
+    # damage if a dedupe tombstone is ever purged, it is not the primary dedupe.
+    webhook_max_age_s: int = 3600
     # Comma-separated origins allowed to receive media downloads (Ring presigned URLs).
     # Entries are HTTPS origins like https://host or wildcard hosts like *.amazonaws.com.
     ring_media_origins: str = ""

@@ -31,8 +31,8 @@ def seeded(engine, store, household, schedule, t0):
     return visit
 
 
-def test_battery_catches_everything_and_leaves_store_unchanged(store, seeded):
-    out = run(store)
+def test_battery_catches_everything_and_leaves_store_unchanged(store, seeded, tmp_path):
+    out = run(store, tmp_path / "media")
     assert out["unchanged"], out
     for r in out["results"]:
         assert r["caught"], f"{r['attack']} went undetected: {r['detail']}"

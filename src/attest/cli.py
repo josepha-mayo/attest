@@ -680,7 +680,7 @@ def _demo(args: argparse.Namespace) -> None:
     print("  In another terminal, point at the demo's store first:", flush=True)
     print(f'    $env:ATTEST_DATA_DIR="{data_dir}"   (PowerShell)', flush=True)
     print(f"    ATTEST_DATA_DIR={data_dir} <cmd>      (POSIX)", flush=True)
-    print("  6. attest attack-demo  — 9 tamper attempts, all caught and rolled back", flush=True)
+    print("  6. attest attack-demo  — 10 tamper attempts, all caught and rolled back", flush=True)
     print("  7. attest status       — audits the whole runtime offline", flush=True)
     print("  8. attest triage       — the week's brief (agent when AWS is reachable)", flush=True)
     print("  9. attest verify <zip> — verifies a downloaded pack without unzipping", flush=True)
@@ -1269,7 +1269,7 @@ def _attack_demo(args: argparse.Namespace) -> None:
         sys.exit(f"no store at {db} — run `attest replay home_aide_visit` first")
     store = Store(db)
     try:
-        out = run(store)
+        out = run(store, settings.data_dir / "media")
         if out.get("baseline_note"):
             print(out["baseline_note"])
         caught = 0
@@ -1636,7 +1636,8 @@ def main(argv: list[str] | None = None) -> None:
 
     s = sub.add_parser(
         "attack-demo",
-        help="run real tamper attempts (forge, delete, truncate, key swap, replay), all rolled back",
+        help="run real tamper attempts (forge, delete, truncate, key swap, replay, media swap), "
+        "all rolled back",
     )
     s.set_defaults(fn=_attack_demo)
 

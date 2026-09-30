@@ -59,7 +59,7 @@ The signing key itself can be wrapped under an AWS KMS CMK (`ATTEST_KMS_KEY_ID`)
 ## Implemented
 
 - Ring Partner API client via the companion [ring-sandbox](https://github.com/josepha-mayo/ring-sandbox) project.
-- HMAC-verified webhook intake persisted in a separate SQLite inbox before a `202` acknowledgement. A background worker verifies the signature again and processes events with account-to-site checks. Leases recover interrupted deliveries; failures back off and move to a failed state after five attempts. Intake is tested independently of slow visit transactions.
+- HMAC-verified webhook intake persisted in a separate SQLite inbox before a `202` acknowledgement. A background worker verifies the signature again and processes events with account-to-site checks. Leases recover interrupted deliveries; failures back off and move to a failed state after five attempts. Intake is tested independently of slow visit transactions. Two independent replay defenses: `request_id` dedupe tombstones (never purged by default) plus a freshness window on the HMAC-covered `meta.time` — a captured delivery replayed past `ATTEST_WEBHOOK_MAX_AGE_S` (default 1h) is refused even if its tombstone is gone.
 - Event History polling with human-motion and doorbell results merged in chronological order. History-derived observations are labelled as history, not authenticated webhook deliveries.
 - One ingestion source is bound per site. Switching between history and webhooks is rejected pending reconciliation; their identifiers are not interchangeable and cross-source deduplication is not yet implemented.
 - Atomic event processing, check-in consumption, and receipt issuance in SQLite. Failed processing rolls back the consumed marker and database changes. Out-of-order events are retained for review instead of rewriting an existing signed record.
@@ -102,6 +102,9 @@ $env:ATTEST_REPLAY_MODE = "true"
 $env:ATTEST_DATA_DIR = ".\data-replay-" + [guid]::NewGuid().ToString("N")
 $env:ATTEST_RING_BASE_URL = "http://127.0.0.1:8787"
 $env:ATTEST_RING_ACCESS_TOKEN = "sandbox-token"
+# The server verifies inbound webhook HMACs with this key and `attest replay`
+# signs simulated deliveries with it — both processes must see the same value.
+$env:ATTEST_RING_WEBHOOK_KEY = [guid]::NewGuid().ToString("N")
 $env:ATTEST_POLL_HISTORY_SECONDS = "0"
 $env:ATTEST_SUMMARIZER = "template"
 Start-Process .\.venv\Scripts\ring-sandbox.exe -ArgumentList "serve"

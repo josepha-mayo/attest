@@ -91,8 +91,12 @@ def handler(event, context):
     script_path = os.path.join(HERE, script)
     if not os.path.exists(script_path):
         return _respond(500, {"ok": False, "error": f"verifier {script} not deployed"})
-    with tempfile.TemporaryDirectory() as d:
+    # ignore_cleanup_errors: Windows hosts running the deployable copy can see
+    # transient AV/indexer locks on the extracted files — a leftover temp dir
+    # beats failing verification. Lambda (Linux) always cleans up anyway.
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
         zf.extractall(d)
+        zf.close()
         try:
             proc = subprocess.run(
                 [sys.executable, script_path, *argv],
