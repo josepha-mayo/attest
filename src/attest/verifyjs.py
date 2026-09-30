@@ -580,7 +580,7 @@ uploaded — all hashing and signature checks run locally, offline. Drop the
 <strong>.zip pack itself</strong>, select every extracted file, just bundle.json for a
 single-visit pack, or a signed receipt JSON (e.g. a <code>verify-live --sign</code> report).</p>
 <div class="drop" id="drop">Drop the pack .zip or a signed receipt .json here, or
-pick files: <input type="file" id="pick" multiple aria-label="Choose pack files">
+pick files: <input type="file" id="pick" multiple accept=".zip,.json" aria-label="Choose pack files">
 or the extracted folder: <input type="file" id="pickdir" webkitdirectory
 aria-label="Choose the extracted pack folder"></div>
 <div id="out" role="status" aria-live="polite"></div>
