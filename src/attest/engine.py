@@ -385,7 +385,7 @@ class VisitEngine:
 
     @atomic
     def sweep(self, now: datetime | None = None) -> list[Visit]:
-        """Close idle visits and mark elapsed schedules as no-shows. Call periodically.
+        """Close idle visits and lapse elapsed schedules to no_observation. Call periodically.
 
         Idleness is *webhook silence* (wall clock since the last cue we ingested), not the
         event timestamp: Ring retries can deliver late, and replayed scenarios are back-dated.

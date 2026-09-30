@@ -54,6 +54,9 @@ def _serve(args: argparse.Namespace) -> None:
 
     if settings.admin_token is None:
         sys.exit("Set ATTEST_ADMIN_TOKEN to at least 32 random characters before starting Attest.")
+    db = settings.data_dir / "attest.sqlite3"
+    if not db.exists():
+        print("note: empty runtime — `attest demo` boots emulator + server + a scripted week")
     uvicorn.run(create_app(), host=args.host, port=args.port, log_level="info", access_log=False)
 
 

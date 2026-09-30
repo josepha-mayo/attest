@@ -182,7 +182,7 @@ class VisitState(StrEnum):
     IN_PROGRESS = "in_progress"  # worker checked in
     CLOSED = "closed"  # departure evidence seen, receipt issued
     UNMATCHED = "unmatched"  # arrival with no schedule in window; kept for review
-    NO_SHOW = "no_show"  # schedule window elapsed with no arrival
+    NO_SHOW = "no_show"  # legacy state name; renders as "no observation"
     NO_OBSERVATION = "no_observation"
 
 

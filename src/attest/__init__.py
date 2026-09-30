@@ -1,3 +1,3 @@
-"""Attest: proof-of-visit ledger for home-service work, built on Ring."""
+"""Attest: reviewable Ring observation records for home-service visits — records, not verdicts."""
 
 __version__ = "0.1.0"

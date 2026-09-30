@@ -515,9 +515,6 @@ class Store:
     def worker(self, worker_id: str) -> Worker | None:
         return self._one(Worker, "SELECT body FROM workers WHERE id=?", (worker_id,))
 
-    def worker_by_token(self, token: str) -> Worker | None:
-        return self._one(Worker, "SELECT body FROM workers WHERE checkin_token=?", (token,))
-
     def workers(self) -> list[Worker]:
         return self._rows(Worker, "SELECT body FROM workers ORDER BY id")
 
