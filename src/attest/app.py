@@ -1025,6 +1025,7 @@ def create_app(
             schedules=list(schedules.values()),
             coverage_by_visit=coverage_summaries,
             tz=tz,
+            late_events=[r["body"] for r in store.late_event_rows() if r["site_id"] == site.id],
         )
         return render(
             request,

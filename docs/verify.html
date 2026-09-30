@@ -20,9 +20,9 @@
 <h1>Attest pack verifier</h1>
 <p>This page verifies an exported Attest pack <strong>in your browser</strong>. Nothing is
 uploaded — all hashing and signature checks run locally, offline. Drop the
-<strong>.zip pack itself</strong>, select every extracted file, or just bundle.json for a
-single-visit pack.</p>
-<div class="drop" id="drop">Drop the pack .zip here, or
+<strong>.zip pack itself</strong>, select every extracted file, just bundle.json for a
+single-visit pack, or a signed receipt JSON (e.g. a <code>verify-live --sign</code> report).</p>
+<div class="drop" id="drop">Drop the pack .zip or a signed receipt .json here, or
 pick files: <input type="file" id="pick" multiple aria-label="Choose pack files">
 or the extracted folder: <input type="file" id="pickdir" webkitdirectory
 aria-label="Choose the extracted pack folder"></div>
@@ -229,7 +229,27 @@ function timelineSVG(p){
   const pad=(hi-lo)*0.04;lo-=pad;hi+=pad;const span=hi-lo;
   const x=t=>(Math.min(Math.max((t-lo)/span,0),1)*100).toFixed(2);
   const w=(a,b)=>Math.max(0.4,x(b)-x(a)).toFixed(2);
-  let s='<svg viewBox="0 0 100 34" preserveAspectRatio="none" '
+  const KIND_LBL={arrival_motion:"motion",doorbell:"doorbell",door_opened:"door opened",
+    door_closed:"door closed",activity:"activity",departure_motion:"departure cue",
+    on_demand:"on-demand media",snapshot:"snapshot",late:"late-arriving event",
+    checkin:"worker check-in"};
+  /* role=img hides child <title>s from screen readers — build a prose
+     aria-label from the same data so the strip reads for everyone. */
+  const counts={};for(const e of p.evidence||[]){
+    const lbl=KIND_LBL[e.kind]||String(e.kind||"activity").replace(/_/g," ");
+    counts[lbl]=(counts[lbl]||0)+1;}
+  if(p.checked_in_at)counts["worker check-in (self-reported)"]=
+    (counts["worker check-in (self-reported)"]||0)+1;
+  const hm=t=>new Date(t*1000).toISOString().slice(11,16)+"Z";
+  const label=(
+    (ws?"scheduled "+hm(ws)+" to "+hm(we)+"; ":"")
+    +(cov?((cov.covered||[]).length+" watched interval(s), "
+      +(cov.gaps||[]).length+" coverage gap(s)"
+      +((cov.live_sessions||[]).length?", "+(cov.live_sessions||[]).length
+        +" live-view session(s) (provenance only)":"")+"; "):"")
+    +Object.keys(counts).map(k=>counts[k]+" "+k).join(", "));
+  let s='<svg viewBox="0 0 100 34" preserveAspectRatio="none" role="img" '
+    +'aria-label="Timeline — '+esc(label||"empty")+'" '
     +'style="width:100%;height:64px;display:block;margin:4px 0">';
   if(ws)s+=`<rect x="${x(ws)}" y="4" width="${w(ws,we)}" height="20" rx="1.5" `
     +'fill="#3b4a63" opacity="0.55"><title>scheduled window</title></rect>';
@@ -253,13 +273,10 @@ function timelineSVG(p){
         +`stroke-width="0.7"><title>${title}</title></line>`;
     }
   }
-  const KIND={arrival_motion:"motion",doorbell:"doorbell",door_opened:"door opened",
-    door_closed:"door closed",activity:"activity",departure_motion:"departure cue",
-    on_demand:"on-demand media",snapshot:"snapshot",late:"late-arriving event",
-    checkin:"worker check-in"};
   for(const e of p.evidence||[]){
-    const k=KIND[e.kind]||String(e.kind||"activity").replace(/_/g," ");
-    const col=String(e.kind).indexOf("departure")===0?"#c05a5a":"#5aa2e8";
+    const k=KIND_LBL[e.kind]||String(e.kind||"activity").replace(/_/g," ");
+    const col=String(e.kind).indexOf("departure")===0?"#c05a5a"
+      :e.kind==="late"?"#9aa3b2":"#5aa2e8";
     const X=x(iso(e.at)),title=esc(k+" — "+e.at);
     s+=`<line x1="${X}" y1="8" x2="${X}" y2="24" stroke="${col}" `
       +`stroke-width="0.7"><title>${title}</title></line>`
@@ -330,6 +347,33 @@ async function verifyFiles(files){
   const bundles=[];let mNode=null,manifest=null;
   let anyBad=false,key=null;const actual={};
   const mText=await text("manifest.json");
+  /* A lone signed receipt (verify-live report, anchor, any exported receipt
+     JSON) verifies too — detect the receipt shape before the pack paths so
+     `attest verify-live --sign --out report.json` drops straight onto this
+     page. */
+  if(!mText&&files.length===1&&/\.json$/i.test(files[0].name)){
+    const node=parseKeep(await files[0].text());
+    const r=toJS(node)||{};
+    if(r.signature&&r.payload_hash&&r.public_key&&r.payload){
+      const c=await checkReceipt(node);
+      const p=r.payload||{};
+      if(p.record_type==="verification_report"){
+        const s=p.summary||{};
+        const cls=x=>x==="pass"?"ok":x==="fail"?"bad":x==="warn"?"warn":"muted";
+        out.push(`<div class="row ${c.ok?"ok":"bad"}"><span class="pill">verification</span> `
+          +`<strong>signed verify-live report</strong> — ${esc(p.generated_at||"")}<br>`
+          +`<small>against <code>${esc(p.base_url||"")}</code> · `
+          +`${esc(s.pass||0)} pass · ${esc(s.fail||0)} fail · ${esc(s.warn||0)} warn `
+          +`· ${esc(s.skip||0)} skip</small></div>`);
+        for(const chk of p.checks||[])
+          say(cls(chk.status),`<span class="pill">${esc(chk.status||"?")}</span> ${esc(chk.check||"")}`
+            +(chk.detail?` <small class="muted">— ${esc(String(chk.detail)).slice(0,160)}</small>`:""));
+      }else
+        say(c.ok?"ok":"bad",`receipt ${esc(r.id||"")} (${esc(p.record_type||"record")}): ${esc(c.why)}`);
+      say(c.ok?"ok":"bad",`<strong>${c.ok?"VERIFIED":"FAILED"}</strong>`);
+      return out.join("");
+    }
+  }
   if(mText){
     mNode=parseKeep(mText);
     manifest=toJS(mNode);

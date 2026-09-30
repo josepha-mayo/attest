@@ -90,7 +90,7 @@ document.getElementById('issue-link').onclick = async () => {
 <h2>Source corroboration</h2>
 <div class="card table-wrap" style="padding:0;margin-bottom:18px">
 <table>
-  <thead><tr><th>Source</th><th>Status</th><th></th><th>Establishes</th></tr></thead>
+  <thead><tr><th scope="col">Source</th><th scope="col">Status</th><th scope="col"><span class="sr-only">Detail</span></th><th scope="col">Establishes</th></tr></thead>
   <tbody>
   {% for r in corroboration %}
   <tr>
@@ -115,7 +115,7 @@ where they fall inside the strip. They were not merged into the signed record.</
 {% endif %}
 <div class="card"><ul class="timeline">
 {% for e in evidence if e.kind != "snapshot" %}
-<li><time>{{ t(e.at) }}</time><div>{{ kind_label(e.kind) }}{% if e.ring_sub_type %} ({{ e.ring_sub_type }}){% endif %}
+<li><time datetime="{{ e.at }}">{{ t(e.at) }}</time><div>{{ kind_label(e.kind) }}{% if e.ring_sub_type %} ({{ e.ring_sub_type }}){% endif %}
 {% if e.note %}<div class="muted">{{ e.note }}</div>{% endif %}
 {% if e.ring_event_type %}<div class="small muted">{{ e.ingestion_source }}: <code>{{ e.ring_event_type }}</code> &middot; {{ e.ring_history_event_id or e.ring_request_id or "unavailable" }}</div>{% endif %}
 </div></li>{% endfor %}
@@ -299,7 +299,7 @@ document.getElementById('coordinator-resolve').onsubmit = async event => {
 <div class="small">{% if verified[0] %}<span class="ok">Ed25519 signature valid — integrity only</span>{% else %}<span class="bad">{{ verified[1] }}</span>{% endif %}</div>
 {% set pclock = receipt.payload.get("clock") %}
 {% if pclock and pclock.mode == "replay" %}<div class="muted small">Replay-clocked record — replay {{ pclock.replay_id }} · check-in received at wall time {{ t(pclock.checkin_received_at) if pclock.checkin_received_at else "n/a" }}</div>{% endif %}
-<div class="muted small">sha256 {{ receipt.payload_hash }}<br>previous {{ receipt.prev_hash or "genesis" }}</div>
+<div class="muted small" style="overflow-wrap:anywhere">sha256 <code>{{ receipt.payload_hash }}</code><br>previous <code>{{ receipt.prev_hash or "genesis" }}</code></div>
 <pre>{{ receipt.payload | tojson(indent=2) }}</pre>
 </div>
 {% endif %}

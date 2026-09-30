@@ -208,6 +208,28 @@ def timeline_strip(
         dt = lo + timedelta(seconds=step * i)
         ticks.append({"x": x(dt), "label": dt.strftime("%I:%M%p").lstrip("0").lower()})
 
+    # Prose equivalent for screen readers — the SVG is role="img", so the
+    # label must carry what sighted users read from the geometry.
+    def _hm(dt: datetime) -> str:
+        return dt.strftime("%I:%M%p").lstrip("0").lower()
+
+    label_parts = []
+    if win_start and win_end:
+        label_parts.append(f"scheduled {_hm(win_start)}–{_hm(win_end)}")
+    watched = sum(1 for b in bands if b.get("watched"))
+    gaps_n = sum(1 for b in bands if not b.get("watched") and not b.get("live"))
+    live_bands = sum(1 for b in bands if b.get("live"))
+    if watched or gaps_n:
+        label_parts.append(f"{watched} watched interval(s), {gaps_n} coverage gap(s)")
+    if live_bands:
+        label_parts.append(f"{live_bands} live-view session(s) (provenance only)")
+    seen: dict[str, int] = {}
+    for m in marks:
+        seen[m["label"]] = seen.get(m["label"], 0) + 1
+    if seen:
+        label_parts.append(", ".join(f"{n} {lbl}" for lbl, n in seen.items()))
+    aria_label = "; ".join(label_parts) or "empty timeline"
+
     return {
         "window": band(win_start, win_end) if win_start else None,
         "bands": bands,
@@ -217,6 +239,7 @@ def timeline_strip(
         "end": hi.isoformat(),
         "has_coverage": bool(coverage),
         "has_live": bool(live),
+        "aria_label": aria_label,
     }
 
 
@@ -227,6 +250,7 @@ def day_strips(
     schedules: list[Any],
     coverage_by_visit: dict[str, dict],
     tz: Any,
+    late_events: list[Any] | None = None,
     max_days: int = 10,
 ) -> list[dict]:
     """One strip per local day covering every record — shared 00:00–24:00 axis,
@@ -288,11 +312,17 @@ def day_strips(
             elif kind == "livesession" and a < hi and (b > lo or lo <= a < hi):
                 cov_today["live_sessions"].append(o)
         checkins = [a for a, _b, kind, _o in items if kind == "checkin" and lo <= a < hi]
+        late_today = [
+            e
+            for e in (late_events or [])
+            if (_at := _get(e, "occurred_at") or _get(e, "at")) and lo <= _iso(_at) < hi
+        ]
         strip = timeline_strip(
             schedule=sched_today[0] if sched_today else None,
             evidence=ev_today,
             checked_in_at=checkins[0] if checkins else None,
             coverage=cov_today if any(cov_today.values()) else None,
+            late_events=late_today,
             bounds=(lo, hi),
         )
         # extra schedules/check-ins beyond the first fold into marks via evidence anyway;

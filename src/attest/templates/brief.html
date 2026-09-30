@@ -34,6 +34,7 @@ tr{border-bottom:1px solid #eef1f4}
 .row{display:flex;align-items:center;flex-wrap:wrap}
 .printbar{max-width:760px;margin:0 auto 12px;display:flex;justify-content:flex-end}
 .printbar button{font:inherit;padding:8px 16px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer}
+svg { break-inside:avoid }
 @media print{
   @page{margin:1.5cm}
   body{background:#fff;padding:0}
@@ -56,24 +57,24 @@ tr{border-bottom:1px solid #eef1f4}
 
 <h2>Record state</h2>
 <table>
-<tr><td class="k">Record</td><td><code>{{ visit.id }}</code>
+<tr><th scope="row" class="k">Record</th><td><code>{{ visit.id }}</code>
   {% if visit.state in ["closed"] %}<span class="state ok">closed &amp; signed</span>
   {% elif visit.state in ["open","in_progress"] %}<span class="state warn">in progress — not yet signed</span>
   {% elif visit.state == "unmatched" %}<span class="state warn">unmatched — activity outside any schedule</span>
   {% else %}<span class="state quiet">{{ state_label(visit.state) }}</span>{% endif %}
   {% if visit.close_reason %}<br><span class="muted small">{{ close_reason_label(visit.close_reason) }}</span>{% endif %}</td></tr>
 {% if visit.has_observations %}
-<tr><td class="k">Observed activity</td><td>{{ t(visit.arrived_at) }} &ndash; {{ t(visit.last_activity_at) }}{% if visit.observed_span_minutes is not none %} ({{ "%.0f"|format(visit.observed_span_minutes) }} min observed span — not certified time worked){% endif %}</td></tr>
+<tr><th scope="row" class="k">Observed activity</th><td>{{ t(visit.arrived_at) }} &ndash; {{ t(visit.last_activity_at) }}{% if visit.observed_span_minutes is not none %} ({{ "%.0f"|format(visit.observed_span_minutes) }} min observed span — not certified time worked){% endif %}</td></tr>
 {% else %}
-<tr><td class="k">Observed activity</td><td>none reported{% if coverage and coverage.polls %} — camera checked {{ coverage.polls }} time{{ "s" if coverage.polls != 1 }} across {{ "%.0f"|format((coverage.fraction or 0)*100) }}% of the window{% endif %}. No activity is not proof nobody came.</td></tr>
+<tr><th scope="row" class="k">Observed activity</th><td>none reported{% if coverage and coverage.polls %} — camera checked {{ coverage.polls }} time{{ "s" if coverage.polls != 1 }} across {{ "%.0f"|format((coverage.fraction or 0)*100) }}% of the window{% endif %}. No activity is not proof nobody came.</td></tr>
 {% endif %}
 {% if visit.checked_in_at %}
-<tr><td class="k">Worker check-in</td><td>{{ t(visit.checked_in_at) }} — self-reported via a single-use link; the check-in does not verify identity</td></tr>
+<tr><th scope="row" class="k">Worker check-in</th><td>{{ t(visit.checked_in_at) }} — self-reported via a single-use link; the check-in does not verify identity</td></tr>
 {% elif worker %}
-<tr><td class="k">Worker check-in</td><td>not received</td></tr>
+<tr><th scope="row" class="k">Worker check-in</th><td>not received</td></tr>
 {% endif %}
 {% if countersign %}
-<tr><td class="k">Worker's account</td><td>
+<tr><th scope="row" class="k">Worker's account</th><td>
   {% if countersign.state == "acknowledged" %}agrees with this record
   {% elif countersign.state == "contested" %}disputes this record
   {% elif countersign.state == "corrected" %}submitted a correction
@@ -82,7 +83,7 @@ tr{border-bottom:1px solid #eef1f4}
   {% else %}{{ countersign.state }}{% endif %}</td></tr>
 {% endif %}
 {% if coverage %}
-<tr><td class="k">Pipeline coverage</td><td>{{ {"observed":"fully watched","observed_with_events":"watched — events seen","partial":"partially watched","blind":"polls failed","no_polls":"not polled"}[coverage.state] if coverage.state in ["observed","observed_with_events","partial","blind","no_polls"] else coverage.state }}{% if coverage.fraction is not none %} — {{ "%.0f"|format(coverage.fraction*100) }}% of the window watched{% endif %}{% if coverage.gaps %}; {{ coverage.gaps|length }} unwatched gap{{ "s" if coverage.gaps|length != 1 }}{% set ex = coverage.gaps|selectattr("explained")|list %}{% if ex %} ({{ ex|length }} explained by a signed Ring lifecycle event{% endif %}{% if ex %}){% endif %}{% endif %}</td></tr>
+<tr><th scope="row" class="k">Pipeline coverage</th><td>{{ {"observed":"fully watched","observed_with_events":"watched — events seen","partial":"partially watched","blind":"polls failed","no_polls":"not polled"}[coverage.state] if coverage.state in ["observed","observed_with_events","partial","blind","no_polls"] else coverage.state }}{% if coverage.fraction is not none %} — {{ "%.0f"|format(coverage.fraction*100) }}% of the window watched{% endif %}{% if coverage.gaps %}; {{ coverage.gaps|length }} unwatched gap{{ "s" if coverage.gaps|length != 1 }}{% set ex = coverage.gaps|selectattr("explained")|list %}{% if ex %} ({{ ex|length }} explained by a signed Ring lifecycle event{% endif %}{% if ex %}){% endif %}{% endif %}</td></tr>
 {% endif %}
 </table>
 
@@ -96,7 +97,7 @@ tr{border-bottom:1px solid #eef1f4}
 <h2>Source by source</h2>
 <table>
 {% for r in corroboration %}
-<tr><td class="k">{{ r.source }}</td><td>{{ r.status }}{% if r.detail %} <span style="color:var(--muted)">— {{ r.detail }}</span>{% endif %}</td><td style="color:var(--muted);font-size:12px">{{ r.establishes }}</td></tr>
+<tr><th scope="row" class="k">{{ r.source }}</th><td>{{ r.status }}{% if r.detail %} <span style="color:var(--muted)">— {{ r.detail }}</span>{% endif %}</td><td style="color:var(--muted);font-size:12px">{{ r.establishes }}</td></tr>
 {% endfor %}
 </table>
 
@@ -118,21 +119,21 @@ tr{border-bottom:1px solid #eef1f4}
 {% if snaps %}
 <h2>Media digests (bytes not included)</h2>
 <table>
-{% for e in snaps %}<tr><td class="k">{{ t(e.at) }}</td><td class="mono">sha256:{{ e.media_sha256 }}</td></tr>{% endfor %}
+{% for e in snaps %}<tr><th scope="row" class="k">{{ t(e.at) }}</th><td class="mono">sha256:{{ e.media_sha256 }}</td></tr>{% endfor %}
 </table>
 {% endif %}
 
 {% if receipt %}
 <h2>Signed anchors</h2>
 <table>
-<tr><td class="k">Receipt</td><td class="mono">{{ receipt.id }}</td></tr>
-<tr><td class="k">Payload hash</td><td class="mono">{{ receipt.payload_hash }}</td></tr>
-<tr><td class="k">Issuer key</td><td class="mono">{{ receipt.public_key }}</td></tr>
-<tr><td class="k">Chain</td><td>sequence #{{ receipt.sequence }}, hash-linked to the previous receipt{% if review_verification %} — {{ "verified: " + review_verification[1] if review_verification[0] else "verification FAILED: " + review_verification[1] }}{% endif %}</td></tr>
-<tr><td class="k">Signed at</td><td>{{ receipt.issued_at.astimezone(tz).strftime("%Y-%m-%d %H:%M:%S %Z") }}</td></tr>
-{% if receipt.payload.get("journal_head") %}<tr><td class="k">Journal head</td><td class="mono">{{ receipt.payload.journal_head }}</td></tr>{% endif %}
-{% if receipt.payload.get("signature_scope") %}<tr><td class="k">Signature scope</td><td>{{ receipt.payload.signature_scope.replace("_", " ") }}</td></tr>{% endif %}
-{% if receipt.payload.get("data_origin") %}<tr><td class="k">Data origin</td><td>{{ "Ring API" if receipt.payload.data_origin == "ring_api" else "local or test data" }}</td></tr>{% endif %}
+<tr><th scope="row" class="k">Receipt</th><td class="mono">{{ receipt.id }}</td></tr>
+<tr><th scope="row" class="k">Payload hash</th><td class="mono">{{ receipt.payload_hash }}</td></tr>
+<tr><th scope="row" class="k">Issuer key</th><td class="mono">{{ receipt.public_key }}</td></tr>
+<tr><th scope="row" class="k">Chain</th><td>sequence #{{ receipt.sequence }}, hash-linked to the previous receipt{% if review_verification %} — {{ "verified: " + review_verification[1] if review_verification[0] else "verification FAILED: " + review_verification[1] }}{% endif %}</td></tr>
+<tr><th scope="row" class="k">Signed at</th><td>{{ receipt.issued_at.astimezone(tz).strftime("%Y-%m-%d %H:%M:%S %Z") }}</td></tr>
+{% if receipt.payload.get("journal_head") %}<tr><th scope="row" class="k">Journal head</th><td class="mono">{{ receipt.payload.journal_head }}</td></tr>{% endif %}
+{% if receipt.payload.get("signature_scope") %}<tr><th scope="row" class="k">Signature scope</th><td>{{ receipt.payload.signature_scope.replace("_", " ") }}</td></tr>{% endif %}
+{% if receipt.payload.get("data_origin") %}<tr><th scope="row" class="k">Data origin</th><td>{{ "Ring API" if receipt.payload.data_origin == "ring_api" else "local or test data" }}</td></tr>{% endif %}
 </table>
 {% endif %}
 

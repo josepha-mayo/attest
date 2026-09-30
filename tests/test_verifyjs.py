@@ -207,6 +207,57 @@ console.log('empty:', timelineSVG({})==='');`);
         assert expected in out, out
 
 
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_js_verifier_accepts_lone_signed_receipt(tmp_path):
+    """A bare receipt JSON (e.g. `verify-live --sign --out report.json`) dropped
+    on the hosted verifier verifies — judges can check the evidence itself."""
+    s = Signer.ephemeral()
+    r = s.issue(
+        visit_id="verify:abc123",
+        sequence=1,
+        prev_hash=None,
+        facts={
+            "record_type": "verification_report",
+            "generated_at": "2026-09-30T03:00:00+00:00",
+            "base_url": "https://api.amazonvision.com",
+            "checks": [
+                {"check": "users/me", "status": "pass", "detail": "account reachable"},
+                {"check": "WHEP live view", "status": "fail", "detail": "HTTP 500"},
+            ],
+            "summary": {"pass": 1, "fail": 1, "warn": 0, "skip": 0},
+        },
+    )
+    (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
+    rt = r.model_dump_json(indent=2)
+    driver = f"""
+const fs=require('fs');
+let src=fs.readFileSync(process.argv[2],'utf8').replace(/const dz=[\\s\\S]*$/,'');
+const rt={json.dumps(rt)};
+eval(src + `
+const mk=t=>[{{name:'report.json',text:async()=>t,
+  arrayBuffer:async()=>new TextEncoder().encode(t).buffer}}];
+(async()=>{{
+  const html=await verifyFiles(mk(rt));
+  console.log('verified:',html.includes('<strong>VERIFIED</strong>'));
+  console.log('report_card:',html.includes('signed verify-live report'));
+  console.log('check_row:',html.includes('WHEP live view')&&html.includes('HTTP 500'));
+  const bad=JSON.parse(rt);bad.payload.summary.fail=0;
+  const html2=await verifyFiles(mk(JSON.stringify(bad)));
+  console.log('tampered:',html2.includes('<strong>FAILED</strong>'));
+}})();`);
+"""
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "verify.js"], cwd=tmp_path, capture_output=True, text=True, timeout=60
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout
+    assert "verified: true" in out, out
+    assert "report_card: true" in out, out
+    assert "check_row: true" in out, out
+    assert "tampered: true" in out, out
+
+
 def test_packs_embed_browser_verifier(engine, store, household, schedule, t0, tmp_path):
     from ring_sandbox import WebhookEvent, webhooks
 

@@ -18,7 +18,7 @@
     {% endfor %}
     <br><a href="/integrity" style="color:var(--accent)" title="Chain, journal, custody, coverage — the runtime's self-audit">Integrity posture &rarr;</a>
     <br><a href="/verify-pack" style="color:var(--accent)" title="The same verifier every pack embeds — drop a .zip; nothing uploads">Verify a pack in-browser</a>
-    <br><button id="refresh-toggle" class="muted" style="background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;font-size:13px">Pause auto-refresh</button>
+    <br><button id="refresh-toggle" class="muted" style="background:none;border:0;padding:6px 2px;cursor:pointer;text-decoration:underline;font-size:13px;min-height:24px">Pause auto-refresh</button>
   </div>
 </div>
 
@@ -26,13 +26,16 @@
 <h2>Needs review</h2>
 <div class="card table-wrap" style="padding:0">
 <table>
+  <thead>
+    <tr><th scope="col">Priority</th><th scope="col">Record</th><th scope="col">Why flagged</th><th scope="col"></th></tr>
+  </thead>
   <tbody>
   {% for a in attention %}
-  <tr class="link" tabindex="0" role="link" aria-label="Open record for {{ t(a.visit.arrived_at) if a.visit.has_observations else t(a.visit.created_at) }} — {{ a.level }} priority"
+  <tr class="link" tabindex="0" aria-label="Open record for {{ t(a.visit.arrived_at) if a.visit.has_observations else t(a.visit.created_at) }} — {{ a.level }} priority"
       onclick="location.href='/visits/{{ a.visit.id }}'"
-      onkeydown="if(event.key==='Enter')location.href='/visits/{{ a.visit.id }}'">
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();location.href='/visits/{{ a.visit.id }}'}">
     <td><span class="flag {{ {'warn': 'warn', 'bad': 'critical'}.get(a.level, 'info') }}">{{ a.level }}</span></td>
-    <td><a href="/visits/{{ a.visit.id }}" style="color:var(--accent)">{{ t(a.visit.arrived_at) if a.visit.has_observations else t(a.visit.created_at) }}</a>
+    <td><a href="/visits/{{ a.visit.id }}">{{ t(a.visit.arrived_at) if a.visit.has_observations else t(a.visit.created_at) }}</a>
       <a href="/sites/{{ a.visit.site_id }}" class="muted small" onclick="event.stopPropagation()"> — {{ sites[a.visit.site_id].name if a.visit.site_id in sites else a.visit.site_id }}</a>
       {% if a.visit.worker_id and a.visit.worker_id in workers %}<span class="muted small"> · {{ workers[a.visit.worker_id].name }}</span>{% endif %}</td>
     <td>{{ a.why }}</td>
@@ -61,6 +64,9 @@
   received but processing failed. Nothing is lost: requeueing replays them
   through the same pipeline with a fresh attempt budget.</p>
   <table>
+    <thead>
+      <tr><th scope="col">Delivery</th><th scope="col">Received</th><th scope="col">Attempts</th><th scope="col">Error</th></tr>
+    </thead>
     <tbody>
     {% for d in failed_deliveries %}
     <tr>
@@ -73,7 +79,7 @@
     </tbody>
   </table>
   <button class="btn secondary" id="requeue-btn" type="button">Requeue failed deliveries</button>
-  <span id="requeue-status" class="muted small" style="margin-left:.5rem"></span>
+  <span id="requeue-status" role="status" class="muted small" style="margin-left:.5rem"></span>
 </div>
 <script>
 document.getElementById("requeue-btn").addEventListener("click", async () => {
@@ -88,8 +94,8 @@ document.getElementById("requeue-btn").addEventListener("click", async () => {
 
 <h2>Weekly triage brief</h2>
 <div class="card">
-  <pre id="triage-brief" style="white-space:pre-wrap;font:inherit;margin:0">{{ triage_brief }}</pre>
-  <div class="muted small" id="triage-source" style="margin-top:.5rem">{{ triage_source or "source: deterministic triage" }}</div>
+  <pre id="triage-brief" role="status" style="white-space:pre-wrap;font:inherit;margin:0">{{ triage_brief }}</pre>
+  <div class="muted small" id="triage-source" role="status" style="margin-top:.5rem">{{ triage_source or "source: deterministic triage" }}</div>
   <button id="triage-run" class="btn" style="margin-top:.75rem" type="button">Run agent brief</button>
   <span class="muted small" style="margin-left:.5rem">Strands agent over Bedrock reads the ledger through tools; falls back honestly.</span>
 </div>
@@ -202,6 +208,9 @@ document.getElementById("triage-run").addEventListener("click", async () => {
   paint();
   setInterval(() => {
     if (paused || window.triageRunning || document.visibilityState !== "visible") return;
+    // Never yank the page out from under keyboard/screen-reader users —
+    // reloading rebuilds the DOM and drops focus back to <body>.
+    if (document.activeElement && document.activeElement !== document.body) return;
     sessionStorage.setItem('dash-scroll', String(window.scrollY));
     location.reload();
   }, 5000);

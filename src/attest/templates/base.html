@@ -20,10 +20,15 @@
   main { max-width:1100px; margin:0 auto; padding:26px 28px 60px }
   h1 { font-size:22px; margin:0 0 6px } h2 { font-size:16px; color:var(--muted); font-weight:600; margin:26px 0 10px; text-transform:uppercase; letter-spacing:.6px }
   .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:14px }
+  a { color:#9db4ff }
   .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px }
-  .card a { color:inherit; text-decoration:none }
+  .card a { color:var(--accent); text-decoration:underline }
+  .card a.btn { text-decoration:none }
+  .flash { padding:11px 14px; border-radius:9px; margin-bottom:14px }
+  .flash.err { background:#3f1620; color:#f0a5b3; border:1px solid #c05a5a }
   .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap }
   .muted { color:var(--muted) } .small { font-size:13px }
+  .sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap }
   .pill { display:inline-block; padding:2px 9px; border-radius:999px; font-size:12px; font-weight:600; border:1px solid var(--line) }
   .pill.open, .pill.in_progress { color:var(--info); border-color:var(--info) }
   .pill.closed { color:var(--ok); border-color:var(--ok) }
@@ -69,11 +74,11 @@
 {% block chrome %}
 <header>
   <div class="brand">Attest<span>.</span></div>
-  <nav><a href="/">Records</a><a href="/setup">Setup &amp; schedules</a><a href="/verify">Verify</a><a href="/about">Claim boundary</a><a href="/receipts.json">Export originals</a></nav>
+  <nav><a href="/"{% if request.url.path == "/" %} aria-current="page"{% endif %}>Records</a><a href="/setup"{% if request.url.path == "/setup" %} aria-current="page"{% endif %}>Setup &amp; schedules</a><a href="/verify"{% if request.url.path == "/verify" %} aria-current="page"{% endif %}>Verify</a><a href="/about"{% if request.url.path == "/about" %} aria-current="page"{% endif %}>Claim boundary</a><a href="/receipts.json">Export originals</a></nav>
   <div class="meta">{% if settings.ring_base_url == "https://api.amazonvision.com" %}Ring API configured{% else %}Local / test data{% endif %} &middot; configured summary provider: {{ summarizer }}</div>
 </header>
 {% if clock.mode == "replay" %}<div class="replay-banner">LOCAL REPLAY — not a live visit. Event clock: {{ clock.now or "not started" }}. Security expiry and signature issuance use real time.</div>{% endif %}
 {% endblock %}
-<main id="main">{% block body %}{% endblock %}</main>
+<main id="main" tabindex="-1">{% block body %}{% endblock %}</main>
 </body>
 </html>
