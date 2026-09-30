@@ -1,0 +1,3 @@
+# docs/verify.html is byte-compared against attest.verifyjs.VERIFY_HTML in CI —
+# a CRLF checkout on Windows would drift it. Generated artifact: never convert.
+docs/verify.html -text
