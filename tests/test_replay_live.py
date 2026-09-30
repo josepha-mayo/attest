@@ -714,6 +714,13 @@ def test_demo_command_spins_up_full_stack(tmp_path):
         clean = parsed.copy_with(username=None, password=None)
         with httpx.Client() as client:
             assert client.get(clean, auth=creds).status_code == 200
+            receipts = client.get(clean.join("receipts.json"), auth=creds).json()
+            # the demo signs deployment provenance: coverage cert + the
+            # emulator API sweep + a period digest all land as receipts
+            pseudo_ids = {r["visit_id"] for r in receipts if ":" in r["visit_id"]}
+            assert any(i.startswith("coverage:") for i in pseudo_ids)
+            assert any(i.startswith("verify:") for i in pseudo_ids)
+            assert any(i.startswith("digest:") for i in pseudo_ids)
     finally:
         proc.terminate()
         proc.wait(timeout=15)
