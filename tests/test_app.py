@@ -111,6 +111,46 @@ def test_rejects_stale_meta_time_delivery(api, store, household, t0):
     assert store.stats()["evidence"]["total"] == 0
 
 
+def test_rejects_future_dated_meta_time_delivery(api, store, household, t0):
+    """A body timestamped beyond the clock-skew allowance is rejected — a
+    forger can't mint 'future-proof' captures by editing meta.time anyway
+    (it's inside the signature), but a clock or a buggy relay must not
+    silently age a delivery out of the freshness check."""
+    _, _, cam, _ = household
+    payload = webhooks.build_event(event_type="button_press", device_id=cam.id, occurred_at=t0)
+    payload["meta"]["time"] = "2999-01-01T00:00:00Z"
+    body = webhooks.encode(payload)
+    r = api.post(
+        "/webhooks/ring",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            webhooks.SIGNATURE_HEADER: webhooks.sign(KEY, body),
+        },
+    )
+    assert r.status_code == 401
+    assert store.stats()["evidence"]["total"] == 0
+
+
+def test_rejects_missing_meta_time_delivery(api, store, household, t0):
+    """A signature over a body with no meta.time can't be freshness-checked —
+    refuse it as malformed rather than assume freshness."""
+    _, _, cam, _ = household
+    payload = webhooks.build_event(event_type="button_press", device_id=cam.id, occurred_at=t0)
+    del payload["meta"]["time"]
+    body = webhooks.encode(payload)
+    r = api.post(
+        "/webhooks/ring",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            webhooks.SIGNATURE_HEADER: webhooks.sign(KEY, body),
+        },
+    )
+    assert r.status_code == 400
+    assert store.stats()["evidence"]["total"] == 0
+
+
 def test_chaos_duplicated_deliveries_collapse_to_one_event(api, store, household, t0):
     """The emulator's chaos.duplicate sends the same signed delivery over and
     over — identical request_ids must collapse at intake, not into duplicate

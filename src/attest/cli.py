@@ -698,6 +698,8 @@ def _demo(args: argparse.Namespace) -> None:
     print("  8. attest triage       — the week's brief (agent when AWS is reachable)", flush=True)
     print("  9. attest verify <zip> — verifies a downloaded pack without unzipping", flush=True)
     print(" 10. attest explain <visit_id> — one record's full provenance, in words", flush=True)
+    print("     (try the verify: receipt just signed — the API sweep against the", flush=True)
+    print("     emulator, as a chained attestation; verify-live --sign does it live)", flush=True)
     print("  Also: '/household' on any visit is the family's view — plain", flush=True)
     print("  language, glanceable; 'Share the household view' issues a scoped", flush=True)
     print("  link (/family/…) with a QR code for the door-step scan, same as", flush=True)
