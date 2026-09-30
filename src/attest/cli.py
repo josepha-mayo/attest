@@ -603,6 +603,7 @@ def _demo(args: argparse.Namespace) -> None:
     store = Store(data_dir / "attest.sqlite3")
     family_url = None
     signed_ids: dict[str, str] = {}
+    resolved_visit = None
     try:
         engine = VisitEngine(
             store,
@@ -667,6 +668,33 @@ def _demo(args: argparse.Namespace) -> None:
                 )
                 family_url = f"{app_url}/family/{family_token}"
                 break
+        # Resolve the honest no-observation day — the terminal state of the
+        # dispute loop needs to exist for judges to see it. The contested
+        # visit is deliberately left unresolved so "Conclude the record"
+        # stays an interactive beat in the tour.
+        from .models import ResolutionInput
+
+        for v in store.visits():
+            if v.state.value == "no_observation" and store.receipt_for_visit(v.id):
+                ReviewService(store, engine.signer, engine.clock).resolve(
+                    v.id,
+                    ResolutionInput(
+                        outcome="inconclusive",
+                        statement=(
+                            "No observations arrived in the scheduled window and coverage "
+                            "shows the channel was watched — but silence is not proof of "
+                            "absence. Closing as inconclusive: the record states what was "
+                            "seen, not what happened."
+                        ),
+                    ),
+                )
+                resolved_visit = v.id
+                print(
+                    f"Resolved {v.id}: inconclusive — the record says what was watched, "
+                    "not what happened.",
+                    flush=True,
+                )
+                break
         # Period digest last — it counts review entries, so it must see the
         # worker dispute and household statement that just landed.
         if sites:
@@ -729,8 +757,15 @@ def _demo(args: argparse.Namespace) -> None:
     if "verify" in signed_ids:
         print(f"     e.g. attest explain {signed_ids['verify']} — the API sweep just", flush=True)
         print("     signed as a chained attestation (verify-live --sign does it live)", flush=True)
-    print("  Also: '/household' on any visit is the family's view — plain", flush=True)
-    print("  language, glanceable; 'Share the household view' issues a scoped", flush=True)
+    if resolved_visit:
+        print(
+            f"  Also: {resolved_visit} is already concluded 'inconclusive' — the",
+            flush=True,
+        )
+        print("  terminal state of the dispute loop (resolved visits leave Needs", flush=True)
+        print("  review; find it under Records). ", flush=True)
+    print("  '/household' on any visit is the family's view —", flush=True)
+    print("  plain language, glanceable; 'Share the household view' issues a scoped", flush=True)
     print("  link (/family/…) with a QR code for the door-step scan, same as", flush=True)
     print("  the worker links. --redact-media exports keep signed digests while", flush=True)
     print("  withholding footage; attest diff A.zip B.zip proves appends only", flush=True)
