@@ -660,6 +660,14 @@ def _demo(args: argparse.Namespace) -> None:
                 )
                 family_url = f"{app_url}/family/{family_token}"
                 break
+        # Period digest last — it counts review entries, so it must see the
+        # worker dispute and household statement that just landed.
+        if sites:
+            dreceipt = engine.issue_period_digest(sites[0], end - timedelta(days=args.days, hours=1), end)
+            print(
+                f"Signed {dreceipt.id}: period digest over the story window.",
+                flush=True,
+            )
     finally:
         store.close()
 

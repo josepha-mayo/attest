@@ -1057,6 +1057,7 @@ def test_integrity_page_renders_self_audit(api, household, t0):
     assert "Mutation journal" in page.text and "intact" in page.text
     assert "Signing key" in page.text and "local key file" in page.text
     assert "Watching evidence per site" in page.text
+    assert "Webhook intake" in page.text and "HMAC-verified" in page.text
     assert "doesn't prove" in page.text  # the claims boundary stays on the page
 
     # Tamper out-of-band — the page must flip to attention, not stay green.
