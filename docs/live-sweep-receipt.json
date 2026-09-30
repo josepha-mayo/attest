@@ -1,0 +1,71 @@
+{
+  "id": "rcpt_7c63ab96ca3940db89957bab47ba8d8a",
+  "visit_id": "verify:77d4a9e234d7eb29",
+  "sequence": 4,
+  "prev_hash": "58eb7aca311a96fde4d708439a420a36e8393728815a031f5b0221d817aee6dd",
+  "payload": {
+    "record_type": "verification_report",
+    "generated_at": "2026-09-30T02:12:15+00:00",
+    "base_url": "https://api.amazonvision.com",
+    "checks": [
+      {
+        "check": "users/me",
+        "status": "pass",
+        "detail": "account reachable"
+      },
+      {
+        "check": "app-integration state",
+        "status": "fail",
+        "detail": "HTTP 403: Ring API returned HTTP 403"
+      },
+      {
+        "check": "subscriptions",
+        "status": "fail",
+        "detail": "HTTP 422: Ring API returned HTTP 422"
+      },
+      {
+        "check": "devices",
+        "status": "pass",
+        "detail": "1 device(s) returned"
+      },
+      {
+        "check": "device status",
+        "status": "pass",
+        "detail": "device ava1.rin\u2026 status endpoint returned"
+      },
+      {
+        "check": "event history",
+        "status": "pass",
+        "detail": "5 event(s) in first page; types: on_demand; newest 2026-09-30T02:10:34+00:00"
+      },
+      {
+        "check": "media download",
+        "status": "pass",
+        "detail": "59405 bytes image/jpeg sha256:503e0e5944f30d8d"
+      },
+      {
+        "check": "WHEP live view",
+        "status": "fail",
+        "detail": "HTTP 500: INTERNAL_ERROR"
+      }
+    ],
+    "summary": {
+      "pass": 5,
+      "fail": 3,
+      "warn": 0,
+      "skip": 0
+    },
+    "boundary": "A signed statement that these checks ran at this time and returned these results \u2014 a PASS attests the API call succeeded, never the semantics beyond it.",
+    "journal_head": "597f0bc25c3c0a5c9bd2786acc6a8458b62f4a8fac0b9b96335047f138e46cb3",
+    "schema": "attest.receipt/2",
+    "sequence": 4,
+    "prev_hash": "58eb7aca311a96fde4d708439a420a36e8393728815a031f5b0221d817aee6dd",
+    "visit_id": "verify:77d4a9e234d7eb29",
+    "receipt_id": "rcpt_7c63ab96ca3940db89957bab47ba8d8a",
+    "issued_at": "2026-09-30T02:12:15.450266+00:00"
+  },
+  "payload_hash": "354e907bcb9ca4fa1b9d38c71c2612c05c1f5ec21599d9a7a79614fdff6852a8",
+  "signature": "uTkgMg88lppMu9NwjmFNeGzuwyEU/X44GCH4RTEL0mMJnlLelyoxJspqRwWfv4KIqrpbsZhF0pliQ1GWjY1hCQ==",
+  "public_key": "iue57YVISX22IOQ4ZRQFJlgjcllv6ka1OaMe8jBPw4A=",
+  "issued_at": "2026-09-30T02:12:15.450266Z"
+}

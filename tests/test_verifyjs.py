@@ -289,6 +289,22 @@ def test_hosted_verifier_copy_stays_in_sync():
     )
 
 
+def test_live_sweep_receipt_artifact_verifies():
+    """docs/live-sweep-receipt.json is the signed verify-live report from the
+    real api.amazonvision.com run — it must verify offline under its embedded
+    issuer key, and it must stay the real-API report (not emulator output)."""
+    from attest.ledger import verify_receipt
+    from attest.models import Receipt
+
+    path = Path(__file__).resolve().parents[1] / "docs" / "live-sweep-receipt.json"
+    receipt = Receipt.model_validate_json(path.read_bytes())
+    assert receipt.payload["record_type"] == "verification_report"
+    assert receipt.payload["base_url"] == "https://api.amazonvision.com"
+    ok, why = verify_receipt(receipt, public_key=receipt.public_key)
+    assert ok, why
+    assert receipt.payload["summary"]["pass"] > 0
+
+
 def _case_pack(engine, store, household, schedule, t0, tmp_path):
     from ring_sandbox import WebhookEvent, webhooks
 
