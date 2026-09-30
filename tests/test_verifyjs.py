@@ -305,6 +305,21 @@ def test_live_sweep_receipt_artifact_verifies():
     assert receipt.payload["summary"]["pass"] > 0
 
 
+def test_sample_pack_artifact_verifies():
+    """docs/sample-pack.zip is the zero-install sample on the hosted verifier —
+    it must always verify end-to-end or the landing page demo breaks."""
+    import io
+
+    from attest.app import _verify_pack
+
+    path = Path(__file__).resolve().parents[1] / "docs" / "sample-pack.zip"
+    data = path.read_bytes()
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        issuer = json.loads(z.read("manifest.json"))["issuer_key"]
+    ok, detail = _verify_pack(data, issuer)
+    assert ok, detail
+
+
 def _case_pack(engine, store, household, schedule, t0, tmp_path):
     from ring_sandbox import WebhookEvent, webhooks
 
