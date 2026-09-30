@@ -39,10 +39,13 @@ jobs:
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: ${{ matrix.python }}
-      - name: Install both source packages
+      - name: Install the pinned dependency set
+        working-directory: attest
+        run: python -m pip install -r requirements-dev.txt
+      - name: Install both source packages editable
         working-directory: attest
         run: >-
-          python -m pip install -r requirements-dev.txt
+          python -m pip install
           -e "../ring-sandbox[server]" -e ".[dev]"
       - name: Reject tracked runtime files
         working-directory: attest

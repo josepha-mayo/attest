@@ -86,13 +86,13 @@ python -m venv .venv
 .\.venv\Scripts\attest demo
 ```
 
-(ring-sandbox resolves from PyPI — `pip install` pulls it automatically. To hack on the emulator alongside, clone it as a sibling directory and add `-e "../ring-sandbox[server]"` to the install line.)
+(ring-sandbox 0.4.0 is pinned to its released GitHub revision until the wheel reaches PyPI — `pip install` pulls it automatically. To hack on the emulator alongside, clone it as a sibling directory and add `-e "../ring-sandbox[server]"` to the install line.)
 
 One command boots the in-process Ring emulator, the Attest server, and a 7-day `--story` replay — an on-time visit, a late arrival, a mid-visit camera blackout, a no-observation day (the schedule lapses with no events — never claimed as a no-show), a departure-unconfirmed visit, an unmatched observation, and a mid-window coordinator live view — then prints a ready Basic-auth dashboard URL. No Ring account, no credentials, no env vars; everything is clearly labeled simulated. `--data-dir DIR` keeps the runtime; `--days`/`--story` reshape it.
 
 ## Local development on Windows
 
-From the Attest directory (ring-sandbox resolves from PyPI; to develop the emulator alongside, clone it as a sibling and add `-e "../ring-sandbox[server]"` to the install line):
+From the Attest directory (ring-sandbox resolves from its pinned GitHub revision; to develop the emulator alongside, clone it as a sibling and add `-e "../ring-sandbox[server]"` to the install line):
 
 ```powershell
 python -m venv .venv
@@ -199,7 +199,7 @@ triage never blocks on model access.
 
 Tests include rejected authentication, expired/reused links, concurrent arrivals, rollback after failure, source-switch rejection, late events, observation-versus-attendance semantics, history ordering, receipt/review tampering, setup validation, and fallback provenance. Socket-level tests run the CLI through real local emulator/Attest servers for sensor, camera-only, and no-observation scenarios, then append and verify worker/coordinator reviews.
 
-A fresh published checkout of both repositories passed 210 Attest tests and 40 companion tests in a new Windows Python 3.14 environment. The GitHub Actions workflow runs both suites, lint, format checks, a tracked-runtime-file guard, and wheel builds across Windows/Linux with Python 3.11/3.14. Actions, the companion commit, and `requirements-dev.txt` dependency pins make the run reproducible. CI does not receive live Ring or AWS credentials.
+A fresh published checkout of both repositories passed 244 Attest tests and 41 companion tests in a new Windows Python 3.14 environment. The GitHub Actions workflow runs both suites, lint, format checks, a tracked-runtime-file guard, and wheel builds across Windows/Linux with Python 3.11/3.14. Actions, the companion commit, and `requirements-dev.txt` dependency pins make the run reproducible. CI does not receive live Ring or AWS credentials.
 
 ## Before deployment or submission
 
