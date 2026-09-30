@@ -511,10 +511,10 @@ def create_app(
             for r in receipts:
                 if ":" in r.visit_id:
                     rtype = r.payload.get("record_type") or "record"
-                    slot = att_types.setdefault(rtype, {"count": 0, "latest": None})
+                    slot = att_types.setdefault(rtype, {"count": 0, "latest": None, "rid": None})
                     slot["count"] += 1
                     if slot["latest"] is None or r.issued_at > slot["latest"]:
-                        slot["latest"] = r.issued_at
+                        slot["latest"], slot["rid"] = r.issued_at, r.id
             return {
                 "stats": store.stats(),
                 "journal": store.verify_journal(),

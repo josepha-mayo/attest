@@ -625,17 +625,21 @@ def _demo(args: argparse.Namespace) -> None:
             )
         # Sign the emulator API sweep too — the ledger and every exported pack
         # then carry the verification_report shape a real `verify-live --sign`
-        # produces, honestly labeled with the loopback base URL.
+        # produces, honestly labeled with the loopback base URL. A sweep
+        # failure must not kill the demo after the story already replayed.
         from . import verifylive
 
-        vreport = verifylive.run(RingClient("sandbox-token", base_url=ring_url))
-        vreceipt = engine.issue_verification_report(vreport)
-        vs = vreport["summary"]
-        print(
-            f"Signed {vreceipt.id}: API sweep vs emulator "
-            f"({vs['pass']} pass/{vs['fail']} fail) — deployment provenance.",
-            flush=True,
-        )
+        try:
+            vreport = verifylive.run(RingClient("sandbox-token", base_url=ring_url))
+            vreceipt = engine.issue_verification_report(vreport)
+            vs = vreport["summary"]
+            print(
+                f"Signed {vreceipt.id}: API sweep vs emulator "
+                f"({vs['pass']} pass/{vs['fail']} fail) — deployment provenance.",
+                flush=True,
+            )
+        except Exception as exc:  # noqa: BLE001 — demo provenance is best-effort
+            print(f"API sweep skipped ({type(exc).__name__}: {exc})", flush=True)
         # Pre-issue a scoped family link on the record the worker disputed —
         # the tour can hand the judge the family view in one click. The
         # household's own (contradicting) account is appended too, so the
@@ -1645,6 +1649,9 @@ def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(
         prog="attest", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
+    from . import __version__
+
+    p.add_argument("--version", action="version", version=f"attest {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("serve")
