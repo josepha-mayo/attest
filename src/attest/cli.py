@@ -690,8 +690,7 @@ def _demo(args: argparse.Namespace) -> None:
                 )
                 resolved_visit = v.id
                 print(
-                    f"Resolved {v.id}: inconclusive — the record says what was watched, "
-                    "not what happened.",
+                    f"Resolved {v.id}: inconclusive — the record says what was watched, not what happened.",
                     flush=True,
                 )
                 break
