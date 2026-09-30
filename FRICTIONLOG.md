@@ -91,9 +91,9 @@ the required shape: task → steps → expected vs. actual → severity → work
 - **Severity:** Medium-high — this is why `ring-sandbox` exists at all; it is
   the gap our Open Source entry fills.
 - **Workaround:** Built ring-sandbox (typed client + offline emulator +
-  webhook signer + scenario replay + chaos mode), published to PyPI;
-  the 0.4.0 surface (WHEP, subscriptions, app integrations) is pinned
-  to its released GitHub revision until the wheel publishes.
+  webhook signer + scenario replay + chaos mode), published to PyPI —
+  the full 0.4.0 surface (WHEP, subscriptions, app integrations)
+  installs with `pip install ring-sandbox`.
 - **Suggestion:** An official emulator — even a static JSON replay of the
   documented shapes — would remove the largest onboarding cost for every
   developer after us.
@@ -193,3 +193,23 @@ the required shape: task → steps → expected vs. actual → severity → work
   client path is exercised end-to-end.
 - **Suggestion:** Give Playground devices a synthetic WHEP responder — a
   static test pattern stream would make live-view development hardware-free.
+
+## 12. Media redirects go to region-specific phoenix hosts, not one fixed origin
+
+- **Task:** Download event media for a Playground account and handle the
+  303 redirect safely.
+- **Steps:** Fetch the media URL with the documented API; follow the 303
+  manually (credentials must never be forwarded to a redirect target).
+- **Expected:** A documented, fixed media host — or a small enumerated list.
+- **Actual:** The redirect target is region-specific
+  (`download-eu-south-2.prod.phoenix.devices.amazon.dev` observed 2026-09-30);
+  accounts in different regions redirect to different hosts, so a fixed-host
+  allowlist silently fails legitimate downloads while an overly broad one
+  weakens the credential-leak protection.
+- **Severity:** Medium — every partner building a safe media client must
+  independently discover the region set.
+- **Workaround:** The client supports `*.phoenix.devices.amazon.dev` suffix
+  matching — all regions, one rule, HTTPS-only, credentials still stripped.
+- **Suggestion:** Document the redirect contract (status codes, host pattern,
+  region set) in the media endpoint reference; a stable hostname or a
+  documented suffix removes the guesswork.
