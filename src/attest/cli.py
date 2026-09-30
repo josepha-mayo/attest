@@ -583,13 +583,17 @@ def _demo(args: argparse.Namespace) -> None:
         summarizer="template",
     )
     # --lan binds the demo on all interfaces so the QR-door-step moment works
-    # from a real phone; printed links then carry the LAN address, not loopback.
+    # from a real phone. app_url stays loopback — the replay driver only
+    # targets local services; display_url is the LAN address for printed links.
     if args.lan:
+        lan = lan_ip()
         app_url, app_server, _app_thread, app_sock = serve(
-            create_app(demo), args.port, host="0.0.0.0", display_host=lan_ip()
+            create_app(demo), args.port, host="0.0.0.0", display_host="127.0.0.1"
         )
+        display_url = f"http://{lan}:{app_sock.getsockname()[1]}"
     else:
         app_url, app_server, _app_thread, app_sock = serve(create_app(demo), args.port)
+        display_url = app_url
 
     replay = argparse.Namespace(
         scenario="home_aide_visit",
@@ -688,7 +692,7 @@ def _demo(args: argparse.Namespace) -> None:
                         ),
                     ),
                 )
-                family_url = f"{app_url}/family/{family_token}"
+                family_url = f"{display_url}/family/{family_token}"
                 break
         # Resolve the honest no-observation day — the terminal state of the
         # dispute loop needs to exist for judges to see it. The contested
@@ -736,7 +740,7 @@ def _demo(args: argparse.Namespace) -> None:
             flush=True,
         )
         print("              the ledger must show one evidence row per real event", flush=True)
-    dash_host = app_url.split("://", 1)[1].rsplit(":", 1)[0] if args.lan else "127.0.0.1"
+    dash_host = display_url.split("://", 1)[1].rsplit(":", 1)[0]
     dash_url = f"http://admin:{token}@{dash_host}:{app_sock.getsockname()[1]}/"
     print(f"  dashboard   {dash_url}", flush=True)
     if args.lan:
