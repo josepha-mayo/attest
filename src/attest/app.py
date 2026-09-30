@@ -563,6 +563,54 @@ def create_app(
             **data,
         )
 
+    @app.get("/integrity.json")
+    async def integrity_json():
+        """The same self-audit, machine-readable — for scripted evaluation
+        and CI gates that shouldn't scrape the HTML page."""
+
+        def gather() -> dict:
+            receipts = store.receipts()
+            att_types: dict[str, dict] = {}
+            for r in receipts:
+                if ":" in r.visit_id:
+                    rtype = r.payload.get("record_type") or "record"
+                    slot = att_types.setdefault(rtype, {"count": 0, "latest": None, "rid": None})
+                    slot["count"] += 1
+                    if slot["latest"] is None or r.issued_at > slot["latest"]:
+                        slot["latest"], slot["rid"] = r.issued_at, r.id
+            journal = store.verify_journal()
+            chain_ok, chain_why = ledger.verify_chain(receipts, public_key=signer.public_key_b64)
+            return {
+                "healthy": journal["intact"] and chain_ok and journal.get("untracked_rows", 0) == 0,
+                "issuer": signer.public_key_b64,
+                "mode": (store.setting("execution_mode") or {}).get("mode", "wall"),
+                "journal": journal,
+                "chain": {"ok": chain_ok, "detail": chain_why},
+                "custody": (
+                    f"AWS KMS envelope — unwrap audited (key {s.kms_key_id})"
+                    if s.kms_key_id
+                    else "local key file — plaintext at rest"
+                ),
+                "webhook": {
+                    "armed": bool(s.ring_webhook_key) and s.poll_history_seconds <= 0,
+                    "polling": s.poll_history_seconds > 0,
+                    "max_age_s": s.webhook_max_age_s,
+                },
+                "attestations": {
+                    k: {
+                        "count": v["count"],
+                        "latest": v["latest"].isoformat() if v["latest"] else None,
+                        "receipt": v["rid"],
+                    }
+                    for k, v in att_types.items()
+                },
+                "sites": {x.id: {"name": x.name} for x in store.sites()},
+                "queue": inbox.counts(),
+                "stats": store.stats(),
+            }
+
+        return await asyncio.to_thread(gather)
+
     @app.get("/visits/{visit_id}", response_class=HTMLResponse)
     async def visit_page(request: Request, visit_id: str = PathParam(max_length=128)):
         v = store.visit(visit_id)

@@ -4,8 +4,8 @@
 {% macro t(dt) %}{{ (dt|iso).astimezone(tz).strftime("%b %d, %I:%M %p").replace(" 0", " ") if dt else "—" }}{% endmacro %}
 <h1>Integrity posture</h1>
 <div class="muted">The runtime's own audit — the same checks <code>attest status</code> runs
-offline, rendered live. This page describes the evidence system's health, not whether any
-worker was honest.</div>
+offline, rendered live (<a href="/integrity.json">raw JSON</a> for scripted checks).
+This page describes the evidence system's health, not whether any worker was honest.</div>
 
 <div class="card" style="margin-top:14px">
   {% if healthy %}

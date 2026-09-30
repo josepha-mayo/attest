@@ -683,7 +683,8 @@ def _demo(args: argparse.Namespace) -> None:
             flush=True,
         )
         print("              the ledger must show one evidence row per real event", flush=True)
-    print(f"  dashboard   http://admin:{token}@127.0.0.1:{app_sock.getsockname()[1]}/", flush=True)
+    dash_url = f"http://admin:{token}@127.0.0.1:{app_sock.getsockname()[1]}/"
+    print(f"  dashboard   {dash_url}", flush=True)
     print(f"  admin user  admin / {token}", flush=True)
     print(f"  data dir    {data_dir}", flush=True)
     print("", flush=True)
@@ -737,6 +738,10 @@ def _demo(args: argparse.Namespace) -> None:
             for line in _terminal_qr(family_url) or []:
                 print(f"    {line}", flush=True)
     print("", flush=True)
+    if args.open:
+        import webbrowser
+
+        webbrowser.open(dash_url)
     print("Press Ctrl+C to stop.", flush=True)
     try:
         while True:
@@ -1868,6 +1873,11 @@ def main(argv: list[str] | None = None) -> None:
                 action="store_true",
                 help="inject webhook duplication + delivery jitter into the emulator "
                 "(dedupe must hold; drops stay off so the story can't change)",
+            )
+            s.add_argument(
+                "--open",
+                action="store_true",
+                help="open the authenticated dashboard in the default browser once live",
             )
         if name == "replay":
             s.add_argument(

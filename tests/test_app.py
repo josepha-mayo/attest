@@ -1080,6 +1080,33 @@ def test_integrity_page_renders_self_audit(api, household, t0):
     assert "content changed" in page.text
 
 
+def test_integrity_json_mirrors_the_page(api, household, t0):
+    """/integrity.json is the same self-audit, machine-readable — scripted
+    evaluation must never scrape the HTML."""
+    site, _, cam, _ = household
+    r = _post_hook(api, cam.id, "motion_detected", t0, "human")
+    assert r.status_code == 202
+    vid = api.attest_state.store.active_visit(site.id).id
+    assert api.post(f"/api/visits/{vid}/close").status_code == 200
+
+    data = api.get("/integrity.json").json()
+    assert data["healthy"] is True
+    assert data["journal"]["intact"] is True
+    assert data["chain"]["ok"] is True
+    assert data["issuer"] == api.attest_state.signer.public_key_b64
+    assert data["webhook"]["armed"] is True
+    assert "max_age_s" in data["webhook"]
+    assert site.id in data["sites"]
+    assert data["stats"]["visits"]["total"] >= 1
+
+    store = api.attest_state.store
+    store._conn.execute("UPDATE visits SET body=? WHERE id=?", ('{"forged":true}', vid))
+    data = api.get("/integrity.json").json()
+    assert data["healthy"] is False
+    assert data["journal"]["intact"] is False
+    assert any("content changed" in m for m in data["journal"]["mismatches"])
+
+
 def test_verify_pack_rejects_smuggled_attestation(api, household, t0):
     """An attestations/*.json file the signed manifest does not list must fail
     _verify_pack — parity with the embedded verifier's sweep."""
