@@ -722,7 +722,7 @@ def _demo(args: argparse.Namespace) -> None:
     print(f'    $env:ATTEST_DATA_DIR="{data_dir}"   (PowerShell)', flush=True)
     print(f"    ATTEST_DATA_DIR={data_dir} <cmd>      (POSIX)", flush=True)
     print("  6. attest attack-demo  — 10 tamper attempts, all caught and rolled back", flush=True)
-    print("  7. attest status       — audits the whole runtime offline", flush=True)
+    print("  7. attest status       — audits the whole runtime offline (--json for scripts)", flush=True)
     print("  8. attest triage       — the week's brief (agent when AWS is reachable)", flush=True)
     print("  9. attest verify <zip> — verifies a downloaded pack without unzipping", flush=True)
     print(" 10. attest explain <visit_or_receipt_id> — full provenance, in words", flush=True)
