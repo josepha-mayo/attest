@@ -216,6 +216,25 @@ def test_webhook_to_receipt(api, store, household, schedule, t0):
     assert "chain intact" in ok.text
 
 
+def test_review_link_renders_on_a_checked_in_visit(api, store, household, schedule, t0):
+    """Regression: the signed payload stores checked_in_at as an ISO string,
+    and the worker review page's timeline used to compare str <= datetime —
+    a bare 500 on the exact page the tour tells judges to open."""
+    site, worker, cam, sensor = household
+    r = _post_hook(api, cam.id, "motion_detected", t0 + timedelta(minutes=1), "human")
+    assert r.status_code == 202
+    vid = store.active_visit(site.id).id
+
+    claim_path = api.post(f"/api/visits/{vid}/checkin-link").json()["path"]
+    assert api.post(claim_path, auth=None).status_code == 200  # worker checks in
+    api.post(f"/api/visits/{vid}/close")
+
+    review_path = api.post(f"/api/visits/{vid}/review-link").json()["path"]
+    page = api.get(review_path, auth=None)
+    assert page.status_code == 200
+    assert "worker check-in" in page.text  # the tick that used to crash the render
+
+
 def test_redacted_case_pack_upload_verifies(api, household, t0):
     site, _, cam, _ = household
     r = _post_hook(api, cam.id, "motion_detected", t0, "human")

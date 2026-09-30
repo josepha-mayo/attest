@@ -92,7 +92,7 @@ the required shape: task → steps → expected vs. actual → severity → work
   the gap our Open Source entry fills.
 - **Workaround:** Built ring-sandbox (typed client + offline emulator +
   webhook signer + scenario replay + chaos mode), published to PyPI —
-  the full 0.4.0 surface (WHEP, subscriptions, app integrations)
+  the full 0.4.x surface (WHEP, subscriptions, app integrations)
   installs with `pip install ring-sandbox`.
 - **Suggestion:** An official emulator — even a static JSON replay of the
   documented shapes — would remove the largest onboarding cost for every

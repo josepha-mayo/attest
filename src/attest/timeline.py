@@ -84,13 +84,14 @@ def timeline_strip(
     there is nothing worth drawing (no window and no observations). ``bounds``
     pins the axis (e.g. midnight→midnight for a day row in a week strip);
     without it the axis auto-fits the data."""
+    checked_in_at = _iso(checked_in_at) if checked_in_at else None
     points: list[datetime] = []
     win_start = _iso(_get(schedule, "window_start")) if schedule else None
     win_end = _iso(_get(schedule, "window_end")) if schedule else None
     for e in evidence:
         points.append(_iso(_get(e, "at")))
     if checked_in_at:
-        points.append(_iso(checked_in_at))
+        points.append(checked_in_at)
     for iv in (coverage or {}).get("covered", []):
         points.extend((_iso(iv["start"]), _iso(iv["end"])))
     live = []
