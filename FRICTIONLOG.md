@@ -213,3 +213,30 @@ the required shape: task → steps → expected vs. actual → severity → work
 - **Suggestion:** Document the redirect contract (status codes, host pattern,
   region set) in the media endpoint reference; a stable hostname or a
   documented suffix removes the guesswork.
+
+## 13. Webhook signatures carry no timestamp — freshness is the integrator's problem
+
+- **Task:** Bound how long a captured, validly-signed webhook delivery stays
+  replayable.
+- **Steps:** Verify `X-Ring-Signature` over the raw body, dedupe on
+  `meta.request_id`, then consider what happens when the dedupe tombstone is
+  gone (retention purge, restored backup, migrated store).
+- **Expected:** A `t=...,v1=...` signed-timestamp scheme (Stripe-style) or a
+  documented recommended max-age — receivers could enforce freshness against
+  a signed field without trusting the body.
+- **Actual:** The HMAC covers only the body. `meta.time` is inside the signed
+  payload, so it *is* integrity-protected — but the docs never say it is
+  delivery time (vs. event time), and there is no guidance on a safe window
+  or clock-skew tolerance. Every integrator must independently discover that
+  meta.time can serve as the freshness anchor and decide their own bound.
+- **Severity:** Medium — a verbatim capture replays as authentic for as long
+  as the receiver keeps accepting it; the difference between "deduplicated"
+  and "fresh" is invisible unless you build it.
+- **Workaround:** Treat `meta.time` as signed delivery time and reject
+  `|now - meta.time| > max_age` at intake (Attest uses 3600 s). Because the
+  field is HMAC-covered, an attacker cannot refresh it without breaking the
+  signature — freshness comes free once you look for it.
+- **Suggestion:** Document `meta.time` semantics and recommend a freshness
+  window in the webhook verification guide; consider a Stripe-style signed
+  timestamp header so receivers don't depend on a field whose semantics
+  are inferred.
