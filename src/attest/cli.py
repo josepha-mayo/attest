@@ -1229,6 +1229,44 @@ def _status(args: argparse.Namespace) -> None:
         # journal rows truncated after the last pin) — never "healthy".
         healthy = journal["intact"] and chain_ok and journal["untracked_rows"] == 0
         mode = (store.setting("execution_mode") or {}).get("mode", "wall")
+        # Site-level chain events: coverage certs, digests, exports, disconnects —
+        # the signed ledger's record of watching, summarizing, and consent.
+        att_types: dict[str, int] = {}
+        for r in store.receipts():
+            if ":" in r.visit_id:
+                rtype = r.payload.get("record_type") or "record"
+                att_types[rtype] = att_types.get(rtype, 0) + 1
+        # The running server records its own posture at boot — a bare `attest
+        # status` reports the deployment's truth, not this process's env.
+        posture = store.setting("webhook_intake") or {}
+        if posture.get("polling"):
+            intake = "polling mode — webhook intake disabled"
+        elif posture.get("armed"):
+            intake = f"HMAC-verified, {posture.get('max_age_s', 3600)}s freshness window"
+        elif posture:
+            intake = "OFF — no signing key at last server boot; deliveries rejected 503"
+        else:
+            intake = "unknown — server has not booted since this field existed"
+        if getattr(args, "json", False):
+            print(
+                json.dumps(
+                    {
+                        "healthy": healthy,
+                        "store": str(db),
+                        "mode": mode,
+                        "journal": journal,
+                        "chain": {"ok": chain_ok, "detail": chain_detail},
+                        "stats": stats,
+                        "queue": queue,
+                        "webhook": posture or None,
+                        "attestations": att_types,
+                    },
+                    default=str,
+                )
+            )
+            if not healthy:
+                sys.exit(1)
+            return
         print(f"store:    {db} ({mode} clock)")
         print(f"visits:   {stats['visits']['total']} ({by_state or 'none'})")
         print(f"receipts: {stats['receipts']['total']} — {chain_detail}")
@@ -1252,29 +1290,11 @@ def _status(args: argparse.Namespace) -> None:
             f"{_pl(stats['coverage_events'], 'lifecycle event')}, "
             f"{_pl(stats['liveview_sessions'], 'live-view session')} on record"
         )
-        # Site-level chain events: coverage certs, digests, exports, disconnects —
-        # the signed ledger's record of watching, summarizing, and consent.
-        att_types: dict[str, int] = {}
-        for r in store.receipts():
-            if ":" in r.visit_id:
-                rtype = r.payload.get("record_type") or "record"
-                att_types[rtype] = att_types.get(rtype, 0) + 1
         if att_types:
             detail = ", ".join(f"{n} {t}" for t, n in sorted(att_types.items()))
             print(f"attestations: {detail}")
         print(f"reviews:  {stats['reviews']}, late events retained: {stats['late_events']}")
         print(f"inbox:    {queue if queue else 'empty'}")
-        # The running server records its own posture at boot — a bare `attest
-        # status` reports the deployment's truth, not this process's env.
-        posture = store.setting("webhook_intake") or {}
-        if posture.get("polling"):
-            intake = "polling mode — webhook intake disabled"
-        elif posture.get("armed"):
-            intake = f"HMAC-verified, {posture.get('max_age_s', 3600)}s freshness window"
-        elif posture:
-            intake = "OFF — no signing key at last server boot; deliveries rejected 503"
-        else:
-            intake = "unknown — server has not booted since this field existed"
         print(f"webhooks: {intake}")
         print(f"status:   {'healthy' if healthy else 'ATTENTION — integrity check failed'}")
         if not healthy:
@@ -1709,6 +1729,7 @@ def main(argv: list[str] | None = None) -> None:
     s.set_defaults(fn=_journal)
 
     s = sub.add_parser("status", help="self-audit the local store: journal, receipt chain, coverage, inbox")
+    s.add_argument("--json", action="store_true", help="emit the audit as a single JSON object")
     s.set_defaults(fn=_status)
 
     s = sub.add_parser("verify", help="verify a downloaded bundle.json offline")

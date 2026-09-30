@@ -1219,3 +1219,30 @@ def test_status_reports_unarmed_webhook_intake(tmp_path, monkeypatch):
     with contextlib.redirect_stdout(buf):
         cli._status(argparse.Namespace())
     assert "webhooks: OFF" in buf.getvalue()
+
+
+def test_status_json_emits_machine_readable_audit(api, store, tmp_path, monkeypatch):
+    """`attest status --json` is the same self-audit as /integrity.json — a
+    stopped runtime still answers scripted checks without scraping text."""
+    import argparse
+    import contextlib
+    import io as _io
+    import json as _json
+    import sqlite3 as _sql
+
+    from attest import cli
+
+    monkeypatch.setattr(cli.settings, "data_dir", tmp_path)
+    monkeypatch.setattr(cli.settings, "kms_key_id", None)
+    dest = _sql.connect(tmp_path / "attest.sqlite3")
+    store._conn.backup(dest)
+    dest.close()
+    buf = _io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cli._status(argparse.Namespace(json=True))
+    data = _json.loads(buf.getvalue())
+    assert data["healthy"] is True
+    assert data["journal"]["intact"] is True
+    assert data["chain"]["ok"] is True
+    assert data["webhook"]["armed"] is True
+    assert data["mode"] in ("wall", "replay")
