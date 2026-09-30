@@ -1309,6 +1309,20 @@ def _export(args: argparse.Namespace) -> None:
         out.write_bytes(data)
         note = " (media withheld — digests preserved)" if args.redact_media else ""
         print(f"wrote {out}{note} — {len(entries)} visit record(s); verify with `python verify_case.py .`")
+        # Self-check before shipping: an export that doesn't verify is worse
+        # than no export — catch a corrupted zip at write time, not at review.
+        import io
+        import zipfile
+
+        from .app import _verify_case_pack
+
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            ok, why = _verify_case_pack(z, engine.signer.public_key_b64)
+        if ok:
+            print("self-check: pack verifies under this deployment's issuer key")
+        else:
+            print(f"WARNING: self-check failed — {why}", file=sys.stderr)
+            sys.exit(2)
     finally:
         store.close()
 
