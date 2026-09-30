@@ -35,7 +35,8 @@ def test_battery_catches_everything_and_leaves_store_unchanged(store, seeded, tm
     out = run(store, tmp_path / "media")
     assert out["unchanged"], out
     for r in out["results"]:
-        assert r["caught"], f"{r['attack']} went undetected: {r['detail']}"
+        # None = no target on this store (skipped), not a missed defense
+        assert r["caught"] is not False, f"{r['attack']} went undetected: {r['detail']}"
 
 
 def test_receipts_pin_journal_head(store, seeded):

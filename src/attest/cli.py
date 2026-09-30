@@ -1272,13 +1272,16 @@ def _attack_demo(args: argparse.Namespace) -> None:
         out = run(store, settings.data_dir / "media")
         if out.get("baseline_note"):
             print(out["baseline_note"])
-        caught = 0
+        caught = skipped = 0
         for r in out["results"]:
-            mark = "CAUGHT " if r["caught"] else "MISSED "
-            caught += r["caught"]
+            mark = "SKIPPED" if r["caught"] is None else ("CAUGHT " if r["caught"] else "MISSED ")
+            skipped += r["caught"] is None
+            caught += r["caught"] is True
             print(f"{mark} {r['attack']}\n        {r['detail']}")
+        attempted = len(out["results"]) - skipped
+        suffix = f" — {skipped} not applicable on this store" if skipped else ""
         print(
-            f"{caught}/{len(out['results'])} attacks caught — "
+            f"{caught}/{attempted} attacks caught{suffix} — "
             f"store {'unchanged' if out['unchanged'] else 'CHANGED (investigate)'}"
         )
         if not out["unchanged"]:

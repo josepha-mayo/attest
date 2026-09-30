@@ -576,9 +576,11 @@ def build_case_pack(
 
     # Site-level chain events — coverage attestations ("was anyone watching?"),
     # period digests, prior exports, source disconnect — travel in the pack so
-    # the evidence segment is complete, not just the visit receipts. Collected
-    # before signing: this export's own manifest receipt cannot reference its
-    # own hash, so it is the one attestation the pack cannot carry.
+    # the evidence segment is complete, not just the visit receipts. `verify:*`
+    # receipts are deployment-scoped provenance (a signed official-API sweep)
+    # and travel with every pack: they evidence the issuer, not the site.
+    # Collected before signing: this export's own manifest receipt cannot
+    # reference its own hash, so it is the one attestation the pack cannot carry.
     attestations = [
         r
         for r in store.receipts()
@@ -586,6 +588,7 @@ def build_case_pack(
         or r.visit_id.startswith(f"coverage:{site.id}:")
         or r.visit_id.startswith(f"digest:{site.id}:")
         or r.visit_id.startswith(f"export:{site.id}:")
+        or r.visit_id.startswith("verify:")
     ]
     manifest = {
         "schema": "attest.case-pack/1",

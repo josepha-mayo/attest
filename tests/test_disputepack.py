@@ -245,6 +245,16 @@ def case_pack_attested(engine, store, household, schedule, t0, tmp_path):
     site = store.sites()[0]
     engine.issue_coverage_attestation(site, t0 - timedelta(hours=1), t0 + timedelta(hours=2))
     engine.issue_period_digest(site, t0 - timedelta(hours=1), t0 + timedelta(hours=2))
+    # A deployment-scoped verification sweep — provenance about the issuer,
+    # travels with every pack regardless of site.
+    engine.issue_verification_report(
+        {
+            "generated_at": "2026-09-29T00:00:00+00:00",
+            "base_url": "https://api.amazonvision.com",
+            "checks": [{"check": "devices", "status": "pass", "detail": "2 devices"}],
+            "summary": {"pass": 1, "fail": 0, "warn": 0, "skip": 0},
+        }
+    )
     data = build_case_pack(
         store,
         tmp_path / "media",
@@ -260,7 +270,11 @@ def case_pack_attested(engine, store, household, schedule, t0, tmp_path):
 def test_site_attestations_travel_in_case_pack(case_pack_attested):
     manifest = json.loads((case_pack_attested / "manifest.json").read_text(encoding="utf-8"))
     listed = manifest["attestations"]
-    assert {a["record_type"] for a in listed} == {"coverage_attestation", "period_digest"}
+    assert {a["record_type"] for a in listed} == {
+        "coverage_attestation",
+        "period_digest",
+        "verification_report",
+    }
     # The export's own receipt cannot reference itself — not listed, not present.
     assert not any(a["visit_id"].startswith("export:") for a in listed)
     for a in listed:
@@ -273,6 +287,7 @@ def test_site_attestations_travel_in_case_pack(case_pack_attested):
     assert result.returncode == 0, result.stderr + result.stdout
     assert "OK   attestation coverage_attestation" in result.stdout
     assert "OK   attestation period_digest" in result.stdout
+    assert "OK   attestation verification_report" in result.stdout
 
 
 def test_case_pack_verifier_rejects_missing_attestation(case_pack_attested):

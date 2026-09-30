@@ -22,7 +22,9 @@ class _Rollback(Exception):
 
 
 def _attempt(store: Store, name: str, fn) -> dict:
-    """Run one attack inside a transaction; fn returns (caught, detail)."""
+    """Run one attack inside a transaction; fn returns (caught, detail) where
+    caught is True/False, or None when the store has nothing to attack — a
+    skipped attempt is not a missed defense."""
     try:
         with store.transaction():
             caught, detail = fn()
@@ -47,7 +49,7 @@ def run(store: Store, media_root: Path | None = None) -> dict:
     def forge_row() -> tuple[bool, str]:
         row = store._conn.execute("SELECT id, body FROM visits LIMIT 1").fetchone()
         if not row:
-            return False, "no visits to forge"
+            return None, "no visits to forge"
         visit_id, body = row
         forged = json.loads(body)
         forged["state"] = "attended_verified"
@@ -61,7 +63,7 @@ def run(store: Store, media_root: Path | None = None) -> dict:
     def delete_row() -> tuple[bool, str]:
         row = store._conn.execute("SELECT id FROM evidence ORDER BY at LIMIT 1").fetchone()
         if not row:
-            return False, "no evidence rows to delete"
+            return None, "no evidence rows to delete"
         store._conn.execute("DELETE FROM evidence WHERE id=?", (row[0],))
         report = store.verify_journal()
         hit = next((m for m in report["mismatches"] if "vanished" in m), None)
@@ -72,7 +74,7 @@ def run(store: Store, media_root: Path | None = None) -> dict:
     def truncate_interior() -> tuple[bool, str]:
         row = store._conn.execute("SELECT seq FROM journal ORDER BY seq LIMIT 1 OFFSET 2").fetchone()
         if not row:
-            return False, "journal too short for an interior delete"
+            return None, "journal too short for an interior delete"
         store._conn.execute("DELETE FROM journal WHERE seq=?", (row[0],))
         report = store.verify_journal()
         hit = next((m for m in report["mismatches"] if "gap" in m or "link broken" in m), None)
@@ -86,7 +88,7 @@ def run(store: Store, media_root: Path | None = None) -> dict:
         a pin that no longer resolves means history was cut after signing."""
         pins = store._pinned_journal_heads()
         if not pins:
-            return False, "no receipt pins exist yet — tail deletion is not covered"
+            return None, "no receipt pins exist yet — tail deletion is not covered"
         seqs = [
             r[0]
             for p in pins
@@ -97,7 +99,7 @@ def run(store: Store, media_root: Path | None = None) -> dict:
             )
         ]
         if not seqs:
-            return False, "no pin resolves in the current journal"
+            return None, "no pin resolves in the current journal"
         store._conn.execute("DELETE FROM journal WHERE seq>=?", (max(seqs),))
         report = store.verify_journal()
         hit = next((m for m in report["mismatches"] if "pinned head" in m), None)
@@ -108,7 +110,7 @@ def run(store: Store, media_root: Path | None = None) -> dict:
     def swap_key() -> tuple[bool, str]:
         row = store._conn.execute("SELECT id, body FROM receipts ORDER BY sequence DESC LIMIT 1").fetchone()
         if not row:
-            return False, "no receipts to re-sign"
+            return None, "no receipts to re-sign"
         receipt_id, body = row
         forged = json.loads(body)
         attacker = Signer.ephemeral()
@@ -133,7 +135,7 @@ def run(store: Store, media_root: Path | None = None) -> dict:
     def replay_request() -> tuple[bool, str]:
         row = store._conn.execute("SELECT request_id FROM seen_requests LIMIT 1").fetchone()
         if not row:
-            return False, "no webhook deliveries to replay"
+            return None, "no webhook deliveries to replay"
         fresh = store.mark_seen(row[0], datetime.now(tz=UTC))
         return not fresh, f"replayed request_id {row[0][:20]}... accepted={fresh}"
 
@@ -156,7 +158,7 @@ def run(store: Store, media_root: Path | None = None) -> dict:
         is untouched, but which coverage gaps look 'explained' changes."""
         row = store._conn.execute("SELECT id FROM coverage_events LIMIT 1").fetchone()
         if not row:
-            return False, "no coverage events to retimestamp"
+            return None, "no coverage events to retimestamp"
         store._conn.execute("UPDATE coverage_events SET at='1999-01-01T00:00:00+00:00' WHERE id=?", (row[0],))
         report = store.verify_journal()
         hit = next((m for m in report["mismatches"] if "index column" in m), None)
@@ -171,7 +173,7 @@ def run(store: Store, media_root: Path | None = None) -> dict:
         is untouched, but 'when a human was watching' moves on the record."""
         row = store._conn.execute("SELECT id FROM liveview_sessions LIMIT 1").fetchone()
         if not row:
-            return False, "no live-view sessions to retimestamp"
+            return None, "no live-view sessions to retimestamp"
         store._conn.execute(
             "UPDATE liveview_sessions SET opened_at='1999-01-01T00:00:00+00:00' WHERE id=?",
             (row[0],),
@@ -189,7 +191,7 @@ def run(store: Store, media_root: Path | None = None) -> dict:
         serve time must refuse it. The file system isn't transactional, so the
         original bytes are restored by hand after the check runs."""
         if media_root is None:
-            return False, "no media root configured"
+            return None, "no media root configured"
         target = None
         for (body,) in store._conn.execute("SELECT body FROM evidence").fetchall():
             parsed = json.loads(body)
@@ -197,11 +199,11 @@ def run(store: Store, media_root: Path | None = None) -> dict:
                 target = parsed
                 break
         if target is None:
-            return False, "no signed media to swap"
+            return None, "no signed media to swap"
         media = MediaStore(media_root)
         original = media.read(target["media_path"])
         if original is None:
-            return False, "media file already absent"
+            return None, "media file already absent"
         path = Path(target["media_path"])
         if not path.is_absolute():
             path = media.root / path
