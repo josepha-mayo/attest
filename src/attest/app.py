@@ -112,6 +112,17 @@ def create_app(
     )
     engine = VisitEngine(store, ring, signer, media, summarizer, s)
     inbox = WebhookInbox(s.data_dir / "webhooks.sqlite3")
+    # Record the deployment's actual webhook posture — `attest status` runs in
+    # a separate process without the server's env; this journaled setting is
+    # how it learns whether intake was armed at last boot.
+    store.put_setting(
+        "webhook_intake",
+        {
+            "armed": bool(s.ring_webhook_key) and s.poll_history_seconds <= 0,
+            "polling": s.poll_history_seconds > 0,
+            "max_age_s": s.webhook_max_age_s,
+        },
+    )
     reviews = ReviewService(store, signer, engine.clock)
     setup = SetupService(store, ring, engine.clock, s.arrival_grace_minutes)
 

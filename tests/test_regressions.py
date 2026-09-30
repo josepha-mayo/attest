@@ -329,6 +329,25 @@ def test_cli_explain_narrates_a_record(tmp_path, monkeypatch, ring_world, ring_c
     assert "coverage_attestation" in att
     assert "signature: OK" in att and "silence is not absence" in att
 
+    # a signed verification_report explains its per-check results too
+    vreceipt = engine.issue_verification_report(
+        {
+            "generated_at": t0.isoformat(),
+            "base_url": "https://api.prod.ring.dev.example",
+            "checks": [
+                {"check": "users/me", "status": "pass", "detail": "account reachable"},
+                {"check": "WHEP live view", "status": "fail", "detail": "500"},
+            ],
+            "summary": {"pass": 1, "fail": 1, "warn": 0, "skip": 0},
+        }
+    )
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cli._explain(argparse.Namespace(visit=vreceipt.id))
+    vout = buf.getvalue()
+    assert "verification_report" in vout and "official-API sweep" in vout
+    assert "users/me: account reachable" in vout and "only PASS is verified" in vout
+
     with pytest.raises(SystemExit):
         with contextlib.redirect_stdout(buf):
             cli._explain(argparse.Namespace(visit="vis_nope"))

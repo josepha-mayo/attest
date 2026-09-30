@@ -1070,3 +1070,53 @@ def test_status_survives_untracked_journal_rows(tmp_path, monkeypatch):
     out = buf.getvalue()
     assert exc.value.code == 1
     assert "untracked" in out and "ATTENTION" in out
+
+
+def test_status_reports_the_servers_recorded_webhook_posture(api, store, tmp_path, monkeypatch):
+    """`attest status` runs without the server's env — it must report the
+    posture the deployment recorded at boot, not this process's config."""
+    import argparse
+    import contextlib
+    import io as _io
+
+    from attest import cli
+
+    # api fixture already booted an app with ring_webhook_key="k" — the
+    # journaled posture should now read armed with the default freshness.
+    posture = store.setting("webhook_intake")
+    assert posture == {"armed": True, "polling": False, "max_age_s": 3600}
+
+    monkeypatch.setattr(cli.settings, "data_dir", tmp_path)
+    monkeypatch.setattr(cli.settings, "kms_key_id", None)
+    # status opens its own store file — backup the live store into place.
+    import sqlite3 as _sql
+
+    dest = _sql.connect(tmp_path / "attest.sqlite3")
+    store._conn.backup(dest)
+    dest.close()
+    buf = _io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cli._status(argparse.Namespace())
+    assert "webhooks: HMAC-verified, 3600s freshness window" in buf.getvalue()
+
+
+def test_status_reports_unarmed_webhook_intake(tmp_path, monkeypatch):
+    """A server booted without a key must read OFF in status — the CLI env
+    having no key is unrelated to what the deployment actually ran."""
+    import argparse
+    import contextlib
+    import io as _io
+
+    from attest import cli
+    from attest.store import Store
+
+    store = Store(tmp_path / "attest.sqlite3")
+    store.put_setting("webhook_intake", {"armed": False, "polling": False, "max_age_s": 3600})
+    store.close()
+
+    monkeypatch.setattr(cli.settings, "data_dir", tmp_path)
+    monkeypatch.setattr(cli.settings, "kms_key_id", None)
+    buf = _io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cli._status(argparse.Namespace())
+    assert "webhooks: OFF" in buf.getvalue()

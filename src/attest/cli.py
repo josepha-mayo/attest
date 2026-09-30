@@ -618,6 +618,19 @@ def _demo(args: argparse.Namespace) -> None:
                 f" ({cov['fraction'] * 100:.0f}%) over the story window.",
                 flush=True,
             )
+        # Sign the emulator API sweep too — the ledger and every exported pack
+        # then carry the verification_report shape a real `verify-live --sign`
+        # produces, honestly labeled with the loopback base URL.
+        from . import verifylive
+
+        vreport = verifylive.run(RingClient("sandbox-token", base_url=ring_url))
+        vreceipt = engine.issue_verification_report(vreport)
+        vs = vreport["summary"]
+        print(
+            f"Signed {vreceipt.id}: API sweep vs emulator "
+            f"({vs['pass']} pass/{vs['fail']} fail) — deployment provenance.",
+            flush=True,
+        )
         # Pre-issue a scoped family link on the record the worker disputed —
         # the tour can hand the judge the family view in one click. The
         # household's own (contradicting) account is appended too, so the
@@ -1184,17 +1197,21 @@ def _status(args: argparse.Namespace) -> None:
         print(f"store:    {db} ({mode} clock)")
         print(f"visits:   {stats['visits']['total']} ({by_state or 'none'})")
         print(f"receipts: {stats['receipts']['total']} — {chain_detail}")
-        line = f"journal:  {'intact' if journal['intact'] else 'VIOLATED'} — {journal['entries']} entries"
+        _pl = lambda n, w, p=None: f"{n} {(w if n == 1 else (p or w + 's'))}"  # noqa: E731
+        intact = "intact" if journal["intact"] else "VIOLATED"
+        line = f"journal:  {intact} — {_pl(journal['entries'], 'entry', 'entries')}"
         if journal.get("pinned_heads"):
             line += f", {journal['pinned_heads']} signature-pinned heads"
         if journal.get("unpinned_entries"):
-            line += f", {journal['unpinned_entries']} entries not yet pinned (`attest anchor` to pin)"
+            line += (
+                f", {_pl(journal['unpinned_entries'], 'entry', 'entries')} "
+                "not yet pinned (`attest anchor` to pin)"
+            )
         if journal["untracked_rows"]:
             line += f", {journal['untracked_rows']} untracked rows (run `attest journal --baseline`)"
         if journal["mismatches"]:
             line += f", {len(journal['mismatches'])} mismatches"
         print(line)
-        _pl = lambda n, w: f"{n} {w}{'s' if n != 1 else ''}"  # noqa: E731
         print(
             f"coverage: {_pl(stats['poll_observations'], 'poll observation')}, "
             f"{_pl(stats['coverage_events'], 'lifecycle event')}, "
@@ -1212,6 +1229,18 @@ def _status(args: argparse.Namespace) -> None:
             print(f"attestations: {detail}")
         print(f"reviews:  {stats['reviews']}, late events retained: {stats['late_events']}")
         print(f"inbox:    {queue if queue else 'empty'}")
+        # The running server records its own posture at boot — a bare `attest
+        # status` reports the deployment's truth, not this process's env.
+        posture = store.setting("webhook_intake") or {}
+        if posture.get("polling"):
+            intake = "polling mode — webhook intake disabled"
+        elif posture.get("armed"):
+            intake = f"HMAC-verified, {posture.get('max_age_s', 3600)}s freshness window"
+        elif posture:
+            intake = "OFF — no signing key at last server boot; deliveries rejected 503"
+        else:
+            intake = "unknown — server has not booted since this field existed"
+        print(f"webhooks: {intake}")
         print(f"status:   {'healthy' if healthy else 'ATTENTION — integrity check failed'}")
         if not healthy:
             sys.exit(1)
@@ -1488,6 +1517,16 @@ def _explain_attestation(store, ident: str) -> None:
     elif rtype == "case_export":
         n = len(p.get("receipt_hashes", {}))
         print(f"  export manifest pins {n} record(s), sha256 {str(p.get('manifest_sha256'))[:16]}…")
+    elif rtype == "verification_report":
+        print(f"  official-API sweep — {p.get('base_url')} · {p.get('generated_at')}")
+        for c in p.get("checks", []):
+            print(f"    {c.get('status', '?').upper():<5} {c.get('check')}: {c.get('detail')}")
+        s = p.get("summary", {})
+        print(
+            f"  {s.get('pass', 0)} pass · {s.get('fail', 0)} fail · "
+            f"{s.get('warn', 0)} warn · {s.get('skip', 0)} skip — "
+            "only PASS is verified evidence"
+        )
     print()
     print("Boundary: a signature attests what the record claims and that it is")
     print("intact under the issuer key — never identity, attendance, or truth.")
