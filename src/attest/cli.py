@@ -1530,6 +1530,16 @@ def _explain(args: argparse.Namespace) -> None:
         engine = _cli_engine(store)
         reviews = ReviewService(store, engine.signer, engine.clock)
 
+        if getattr(args, "json", False):
+            print(
+                json.dumps(
+                    _explain_report(store, visit, site, schedule, evidence, receipt, reviews),
+                    indent=2,
+                    default=str,
+                )
+            )
+            return
+
         print(f"{visit.id} — {visit.state.value} at {site.name if site else visit.site_id}")
         if visit.has_observations:
             print(f"  observed {visit.arrived_at.isoformat()} -> {visit.last_activity_at.isoformat()}")
@@ -1615,6 +1625,84 @@ def _explain(args: argparse.Namespace) -> None:
         print("the record is intact — never identity, attendance, or physical truth.")
     finally:
         store.close()
+
+
+def _explain_report(store, visit, site, schedule, evidence, receipt, reviews) -> dict:
+    """The explain narrative as structured data — same sources, same derived
+    stance, same boundary. `attest explain --json` feeds scripted evaluation."""
+    from .corroborate import corroboration
+    from .reviews import verify_bundle
+
+    bundle = reviews.bundle(visit.id) if receipt else None
+    out: dict = {
+        "visit_id": visit.id,
+        "state": visit.state.value,
+        "site": site.name if site else visit.site_id,
+        "site_id": visit.site_id,
+        "scheduled_window": (
+            {"start": schedule.window_start, "end": schedule.window_end} if schedule else None
+        ),
+        "observed": (
+            {"first": visit.arrived_at, "last": visit.last_activity_at} if visit.has_observations else None
+        ),
+        "worker_check_in": visit.checked_in_at,
+        "flags": [{"code": f.code, "severity": f.severity, "message": f.message} for f in visit.flags],
+        "sources": corroboration(visit, site, schedule, evidence, receipt),
+        "receipt": None,
+        "review_chain": None,
+        "stance": None,
+        "attestations": [],
+        "boundary": (
+            "sources establish what they reported; the signature proves the record "
+            "is intact — never identity, attendance, or physical truth"
+        ),
+    }
+    if receipt:
+        cov = receipt.payload.get("history_poll_coverage") or {}
+        out["receipt"] = {
+            "id": receipt.id,
+            "sequence": receipt.sequence,
+            "payload_hash": receipt.payload_hash,
+            "media_digests": [
+                e["media_sha256"] for e in receipt.payload.get("evidence", []) if e.get("media_sha256")
+            ],
+            "coverage_interruptions": cov.get("interruptions") or [],
+            "live_sessions": cov.get("live_sessions") or [],
+        }
+    if bundle:
+        ok, why = verify_bundle(bundle, public_key=bundle.original.public_key)
+        out["review_chain"] = {
+            "verified": ok,
+            "detail": why,
+            "entries": [
+                {
+                    "revision": r.revision,
+                    "kind": r.receipt.payload["review"].get("kind"),
+                    "role": r.receipt.payload["actor"].get("role"),
+                    "actor": r.receipt.payload["actor"].get("name"),
+                    "outcome": r.receipt.payload["review"].get("outcome"),
+                    "decision": r.receipt.payload["review"].get("decision"),
+                    "perception": r.receipt.payload["review"].get("perception"),
+                    "payload_hash": r.receipt.payload_hash,
+                }
+                for r in bundle.reviews
+            ],
+        }
+        out["stance"] = reviews.countersign(visit.id)
+    out["attestations"] = [
+        {
+            "receipt_id": r.id,
+            "visit_id": r.visit_id,
+            "record_type": r.payload.get("record_type"),
+            "payload_hash": r.payload_hash,
+        }
+        for r in store.receipts()
+        if r.visit_id == f"source:{visit.site_id}"
+        or r.visit_id.startswith(f"coverage:{visit.site_id}:")
+        or r.visit_id.startswith(f"digest:{visit.site_id}:")
+        or r.visit_id.startswith(f"export:{visit.site_id}:")
+    ]
+    return out
 
 
 def _explain_attestation(store, ident: str) -> None:
@@ -1918,6 +2006,7 @@ def main(argv: list[str] | None = None) -> None:
         "visit",
         help="visit id, or an attestation (coverage:/digest:/export:/source: pseudo id, or receipt id)",
     )
+    s.add_argument("--json", action="store_true", help="emit the same account machine-readable")
     s.set_defaults(fn=_explain)
 
     s = sub.add_parser("deliveries", help="show durable webhook inbox state, or requeue failed deliveries")

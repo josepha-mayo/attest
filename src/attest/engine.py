@@ -785,6 +785,33 @@ class VisitEngine:
             return self.store.receipt_for_visit(pseudo_id)
         return receipt
 
+    def maybe_period_digest(self, site: Site, interval_s: int) -> Receipt | None:
+        """Cadence-driven self-summarization: when the newest period digest's
+        window ended more than ``interval_s`` ago, sign a new digest continuing
+        from where it stopped; with no prior digest, cover the trailing
+        interval. The ledger keeps summarizing itself without an operator."""
+        if interval_s <= 0:
+            return None
+        now = self.clock.now()
+        digests = [
+            r
+            for r in self.store.receipts()
+            if r.visit_id.startswith(f"digest:{site.id}:") and r.payload.get("record_type") == "period_digest"
+        ]
+        ends = [
+            datetime.fromisoformat(r.payload["interval"]["end"])
+            for r in digests
+            if r.payload.get("interval", {}).get("end")
+        ]
+        if ends:
+            end = max(ends)
+            if now - end < timedelta(seconds=interval_s):
+                return None
+            start = end
+        else:
+            start = now - timedelta(seconds=interval_s)
+        return self.issue_period_digest(site, start, now)
+
     @atomic
     def issue_export_manifest(self, site: Site, manifest: dict) -> Receipt:
         """Sign a case-pack manifest: the export itself becomes a chain event

@@ -150,3 +150,32 @@ def test_period_digest_endpoint_covers_shown_records(api):
     assert receipt["payload"]["site"]["id"] == site.id
     # re-issue is idempotent — same records, same digest
     assert api.post(f"/api/sites/{site.id}/digest").json()["id"] == receipt["id"]
+
+
+def test_maybe_period_digest_runs_on_cadence(engine, store, household):
+    """The sweep hook self-summarizes: no prior digest → cover the trailing
+    interval; a stale digest → continue exactly from where it stopped;
+    inside the window → nothing. Digest intervals are ledger-time claims."""
+    from datetime import UTC, datetime
+
+    from attest.models import Site
+
+    site = household[0]
+    other = store.put_site(Site(name="Second residence", ring_account_id="acct-x", door_camera_id="cam-x"))
+    now = engine.clock.now()
+
+    # a stale digest exists — the cadence continues from its window end
+    stale = engine.issue_period_digest(site, now - timedelta(days=14), now - timedelta(days=9))
+    nxt = engine.maybe_period_digest(site, 7 * 86400)
+    assert nxt is not None
+    assert nxt.payload["interval"]["start"] == stale.payload["interval"]["end"]
+    assert datetime.fromisoformat(nxt.payload["interval"]["end"]) <= datetime.now(tz=UTC)
+
+    # inside the window → nothing new; disabled → nothing
+    assert engine.maybe_period_digest(site, 7 * 86400) is None
+    assert engine.maybe_period_digest(site, 0) is None
+
+    # a site with no digest history seeds a trailing-interval digest
+    seeded = engine.maybe_period_digest(other, 7 * 86400)
+    assert seeded is not None
+    assert seeded.payload["interval"]["end"] >= seeded.payload["interval"]["start"]

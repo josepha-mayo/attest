@@ -157,6 +157,12 @@ def create_app(
                     changed = await asyncio.to_thread(engine.sweep)
                     for v in changed:
                         log.info("sweep: visit %s -> %s", v.id, v.state)
+                    for site in store.sites():
+                        d = await asyncio.to_thread(
+                            engine.maybe_period_digest, site, s.digest_interval_seconds
+                        )
+                        if d:
+                            log.info("sweep: period digest %s issued for site %s", d.id, site.id)
                 except Exception:  # noqa: BLE001
                     log.exception("sweep failed")
 

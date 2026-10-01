@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     snapshot_window_seconds: int = 45
     # Poll GET /v1/history when webhooks can't reach us (Playground tokens). 0 disables.
     poll_history_seconds: int = 0
+    # Cadence for self-issued period digests: the ledger summarizes itself on a
+    # rolling window (the weekly report a coordinator can hand upstream). 0 disables.
+    digest_interval_seconds: int = 604800
 
     # Retention preview policy. Reporting only — deletion is a separate explicit action.
     retention_visits_days: int = 180
