@@ -290,3 +290,89 @@ def test_disconnected_site_is_not_polled(engine, store, household, ring_control)
         datetime(2100, 1, 1, tzinfo=UTC),
     )
     assert rows == []
+
+
+def test_ring_calls_never_inside_write_txn(engine, store, household, schedule, t0, monkeypatch):
+    """Audit invariant: Ring calls must never run inside the write txn — a hung
+    upstream would serialize the whole app behind the store lock. Fetches
+    happen in a pre-txn prefetch; the apply path re-validates under the lock."""
+    import contextlib
+
+    depth = 0
+    real_txn = store.transaction
+
+    @contextlib.contextmanager
+    def spy():
+        nonlocal depth
+        depth += 1
+        try:
+            with real_txn():
+                yield
+        finally:
+            depth -= 1
+
+    monkeypatch.setattr(store, "transaction", spy)
+    calls: list[tuple[str, int]] = []
+
+    def snap(*a, **k):
+        calls.append(("snapshot", depth))
+        raise RuntimeError("no media in test")
+
+    def events(*a, **k):
+        calls.append(("events", depth))
+        return []
+
+    monkeypatch.setattr(engine.ring, "snapshot_latest", snap)
+    monkeypatch.setattr(engine.ring, "events", events)
+    site, _worker, cam, _sensor = household
+    engine.ingest(ev(cam.id, "motion_detected", t0 + timedelta(minutes=2), "human"))
+    vid = store.active_visit(site.id).id
+    engine.close_for_review(vid)
+    assert ("snapshot", 0) in calls and ("events", 0) in calls
+    assert all(d == 0 for _, d in calls), f"Ring call ran under the store lock: {calls}"
+    assert store.visit(vid).receipt_id  # degrade path still closes + signs
+
+
+def test_close_consumes_prefetched_summary(engine, store, household, schedule, t0, monkeypatch):
+    """The prefetch path must actually hit — a token mismatch on every close
+    would silently degrade every record to the template summary and skip the
+    Ring history cross-check."""
+    seen: list[VisitState] = []
+    orig = engine.summarizer.summarize
+
+    def spy(visit, *a, **k):
+        seen.append(visit.state)
+        return orig(visit, *a, **k)
+
+    monkeypatch.setattr(engine.summarizer, "summarize", spy)
+    site, _w, cam, _s = household
+    engine.ingest(ev(cam.id, "motion_detected", t0 + timedelta(minutes=2), "human"))
+    vid = store.active_visit(site.id).id
+    engine.close_for_review(vid)
+    visit = store.visit(vid)
+    # summarize ran exactly once, on the prefetch copy — already marked CLOSED
+    assert seen == [VisitState.CLOSED]
+    assert visit.summary and visit.receipt_id
+    receipt = store.receipt(visit.receipt_id)
+    assert receipt.payload["ring_history"] is not None  # prefetched list, not dropped
+
+
+def test_close_degrades_when_prefetch_token_stale(engine, store, household, schedule, t0, monkeypatch):
+    """If the record moved between prefetch and apply, the write txn falls back
+    to the no-network template summary and signs without a history cross-check
+    — it must never call the network under the store lock."""
+    site, _w, cam, _s = household
+    engine.ingest(ev(cam.id, "motion_detected", t0 + timedelta(minutes=2), "human"))
+    vid = store.active_visit(site.id).id
+    real = engine._prefetch_close
+
+    def stale(visit, s, at, reason, pending):
+        net = real(visit, s, at, reason, pending)
+        net.evidence_count = -1  # pretend the world moved
+        return net
+
+    monkeypatch.setattr(engine, "_prefetch_close", stale)
+    engine.close_for_review(vid)
+    visit = store.visit(vid)
+    assert visit.receipt_id and visit.summary_source == "template"
+    assert store.receipt(visit.receipt_id).payload["ring_history"] is None

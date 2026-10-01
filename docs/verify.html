@@ -438,9 +438,19 @@ async function verifyFiles(files){
        keys must not be able to inject "verified" media rows. */
     const mprefix=mNode?`visits/${vid}/media/`:"media/";
     const found=new Set();
+    const dset=new Set(digests((js.original||{}).payload||{}));
     for(const name of Object.keys(byName)){
-      if(name.startsWith(mprefix)&&!name.endsWith("/"))
-        found.add(await sha256hex(new Uint8Array(await byName[name].arrayBuffer())));
+      if(name.startsWith(mprefix)&&!name.endsWith("/")){
+        const h=await sha256hex(new Uint8Array(await byName[name].arrayBuffer()));
+        /* A media member whose bytes don't hash to a signed digest is smuggled
+           content riding inside the pack — fail it, don't silently skip it. */
+        if(!dset.has(h)){
+          anyBad=true;
+          say("bad",`${esc(name)}: media not named by the signed evidence`);
+          continue;
+        }
+        found.add(h);
+      }
     }
     for(const d of digests((js.original||{}).payload||{})){
       if(withheld.has(d)){say("warn",`  media ${esc(d.slice(0,12))}… withheld by redaction`);continue;}
@@ -479,18 +489,27 @@ async function verifyFiles(files){
         anyBad=true;say("bad",`attestation ${esc(a.receipt_id)}: disagrees with signed manifest`);continue;}
       say("ok",`attestation ${esc(a.record_type||"record")}: signed and intact`);
     }
-    /* Fail closed on pack files the signed manifest does not name — a smuggled
-       attestation or visit bundle would otherwise pass unverified. */
-    const listedAtts=new Set((manifest.attestations||[]).map(a=>`attestations/${a.receipt_id}.json`));
-    const listedVids=new Set((manifest.visits||[]).map(v=>`visits/${v.visit_id}/`));
+    /* Fail closed on ANY file the signed manifest does not name — a smuggled
+       top-level file or an extra member inside a listed visit dir would ride
+       inside a VERIFIED pack. Media members are digest-checked per visit. */
+    const vids=new Set((manifest.visits||[]).map(v=>v.visit_id));
+    const allowed=new Set(["manifest.json","README.txt","verify_case.py","verify.html","index.html"]);
+    for(const a of manifest.attestations||[])allowed.add(`attestations/${a.receipt_id}.json`);
+    for(const v of vids){allowed.add(`visits/${v}/bundle.json`);allowed.add(`visits/${v}/redaction.json`);}
     for(const name of Object.keys(byName)){
-      if(name.endsWith("/"))continue;
-      if(name.startsWith("attestations/")&&!listedAtts.has(name)){
-        anyBad=true;say("bad",`${esc(name)}: present but not in the signed manifest`);
-      }
-      if(name.startsWith("visits/")&&![...listedVids].some(p=>name.startsWith(p))){
-        anyBad=true;say("bad",`${esc(name)}: present but not in the signed manifest`);
-      }
+      if(name.endsWith("/")||allowed.has(name))continue;
+      const parts=name.split("/");
+      if(parts.length>=4&&parts[0]==="visits"&&parts[2]==="media"&&vids.has(parts[1]))continue;
+      anyBad=true;say("bad",`${esc(name)}: present but not in the signed manifest`);
+    }
+  }else{
+    /* Single-visit dispute pack — the format names a fixed top-level set plus
+       media/* (digest-checked above). */
+    const allowed=new Set([
+      "bundle.json","README.txt","verify_bundle.py","verify.html","index.html","redaction.json"]);
+    for(const name of Object.keys(byName)){
+      if(name.endsWith("/")||allowed.has(name)||name.startsWith("media/"))continue;
+      anyBad=true;say("bad",`${esc(name)}: present but not in the signed manifest`);
     }
   }
   say(anyBad?"bad":"ok",anyBad

@@ -79,6 +79,48 @@ class Outcome:
     ignored_reason: str | None = None
 
 
+@dataclass
+class _SnapshotFetch:
+    """Bytes fetched from Ring OUTSIDE the write txn. ``ok=False`` (and no
+    prefetch at all) degrades to the same media_unavailable flag a failed
+    fetch produces — the ledger never waits on the network."""
+
+    ok: bool
+    content: bytes = b""
+    content_type: str = "image/jpeg"
+    actual_at: datetime | None = None
+
+
+@dataclass
+class _ClosePrefetch:
+    """Everything `_close`/`_issue_receipt` needs from the network, fetched
+    against committed state BEFORE the write txn. The apply path re-checks
+    the token fields and degrades to the inline template summary / no
+    history if the record moved since — identical outcomes to a failed
+    fetch, so a hung Ring or Bedrock can never stall the write lock."""
+
+    summary: tuple[str, str | None, str | None, str | None] | None = None
+    history: list[dict] | None = None
+    last_activity_at: datetime | None = None
+    evidence_count: int = 0
+    pending_evidence: int = 0
+    receipt_absent: bool = True
+
+    def matches(self, visit: Visit, n_evidence: int) -> bool:
+        return (
+            self.summary is not None
+            and self.last_activity_at == visit.last_activity_at
+            and self.evidence_count + self.pending_evidence == n_evidence
+            and self.receipt_absent == (visit.receipt_id is None)
+        )
+
+
+@dataclass
+class _NetBundle:
+    snapshots: dict[str, _SnapshotFetch] = field(default_factory=dict)
+    close: _ClosePrefetch | None = None
+
+
 class VisitEngine:
     def __init__(
         self,
@@ -95,11 +137,59 @@ class VisitEngine:
 
     # ------------------------------------------------------------------ webhooks
 
-    @atomic
     def ingest(self, ev: WebhookEvent, *, source: str = "webhook") -> Outcome:
+        # Fetch any media/history/summary this event will need BEFORE the
+        # write txn — a hung Ring or Bedrock must never hold the store lock.
+        # The prefetch reads are advisory: `_ingest` re-derives the decision
+        # under the lock and simply ignores prefetched data that no longer
+        # applies (same outcome as a failed fetch).
         if source not in ("webhook", "history"):
             raise ValueError("invalid ingestion source")
         ev = ev.model_copy(update={"meta": ev.meta.model_copy(update={"ingest_source": source})})
+        net = self._prefetch_event(ev, source)
+        return self._ingest(ev, source, net)
+
+    def _prefetch_event(self, ev: WebhookEvent, source: str) -> _NetBundle:
+        bundle = _NetBundle()
+        if source not in ("webhook", "history"):
+            return bundle
+        if ev.data.attributes.source_type == "accounts":
+            return bundle
+        site = self.store.site_for_device(ev.device_id)
+        if site is None or ev.meta.account_id != site.ring_account_id or site.disconnected_at is not None:
+            return bundle
+        at = ev.occurred_at
+        if (self.clock.replay and at > self.clock.now()) or at > utcnow() + timedelta(seconds=30):
+            return bundle
+        visit = self.store.active_visit(site.id)
+        et, sub = ev.event_type, ev.sub_type
+        is_camera = ev.device_id == site.door_camera_id
+        human_motion = et == "motion_detected" and is_camera and sub in _ARRIVAL_MOTION
+        opens = visit is None and (
+            human_motion
+            or (et == "button_press" and is_camera)
+            or (et == "contact_sensor_faulted" and ev.device_id == site.door_sensor_id)
+        )
+        departs = (
+            visit is not None
+            and human_motion
+            and at >= visit.last_activity_at
+            and at - visit.arrived_at >= _MIN_VISIT
+            and self._door_closed_recently(visit, at)
+        )
+        if opens:
+            bundle.snapshots["first_observation"] = self._fetch_snapshot(site, at)
+        if departs:
+            snap = self._fetch_snapshot(site, at)
+            bundle.snapshots["departure_cue"] = snap
+            pending = [self._pending_evidence(visit, EvidenceKind.DEPARTURE_MOTION, at, ev)]
+            if snap.ok:
+                pending.append(self._pending_snapshot_evidence(visit, site, snap, "near departure cue"))
+            bundle.close = self._prefetch_close(visit, site, at, "departure", pending)
+        return bundle
+
+    @atomic
+    def _ingest(self, ev: WebhookEvent, source: str, net: _NetBundle) -> Outcome:
         # Account-scoped lifecycle events name the account, not a device, as
         # their source — they route to every site bound to that Ring account.
         if ev.data.attributes.source_type == "accounts":
@@ -157,13 +247,13 @@ class VisitEngine:
             return Outcome(ignored_reason="late event retained for review")
 
         if et == "motion_detected" and is_camera:
-            return self._on_motion(site, at, ev, human=sub in _ARRIVAL_MOTION)
+            return self._on_motion(site, at, ev, human=sub in _ARRIVAL_MOTION, net=net)
         if et == "button_press" and is_camera:
-            return self._on_arrival_cue(site, at, ev, EvidenceKind.DOORBELL)
+            return self._on_arrival_cue(site, at, ev, EvidenceKind.DOORBELL, net)
         if et == "contact_sensor_faulted" and ev.device_id == site.door_sensor_id:
-            return self._on_door(site, at, ev, opened=True)
+            return self._on_door(site, at, ev, opened=True, net=net)
         if et == "contact_sensor_cleared" and ev.device_id == site.door_sensor_id:
-            return self._on_door(site, at, ev, opened=False)
+            return self._on_door(site, at, ev, opened=False, net=net)
         if et == "on_demand" and is_camera:
             # Media was requested from the camera (Ring history event_type=on_demand).
             # Attest's own close-time snapshot requests surface here too — if this
@@ -216,33 +306,46 @@ class VisitEngine:
 
     # ------------------------------------------------------------------ cues
 
-    def _on_motion(self, site: Site, at: datetime, ev: WebhookEvent, *, human: bool) -> Outcome:
+    def _on_motion(
+        self, site: Site, at: datetime, ev: WebhookEvent, *, human: bool, net: _NetBundle
+    ) -> Outcome:
         visit = self.store.active_visit(site.id)
         if visit is None:
             if not human:
                 return Outcome(ignored_reason="non-human motion with no active visit")
-            return self._on_arrival_cue(site, at, ev, EvidenceKind.ARRIVAL_MOTION)
+            return self._on_arrival_cue(site, at, ev, EvidenceKind.ARRIVAL_MOTION, net)
         # Departure: door closed recently, then a person walks away past the camera.
         if human and self._door_closed_recently(visit, at) and at - visit.arrived_at >= _MIN_VISIT:
             self._evidence(visit, EvidenceKind.DEPARTURE_MOTION, at, ev)
-            self._snapshot(visit, site, at, "departure_cue", "near departure cue")
-            return self._close(visit, site, at, reason="departure")
+            self._snapshot(
+                visit,
+                site,
+                at,
+                "departure_cue",
+                "near departure cue",
+                net.snapshots.get("departure_cue"),
+            )
+            return self._close(visit, site, at, reason="departure", net=net.close)
         self._evidence(visit, EvidenceKind.ACTIVITY, at, ev)
         self._touch(visit, at)
         return Outcome(visit, ["activity"])
 
-    def _on_door(self, site: Site, at: datetime, ev: WebhookEvent, *, opened: bool) -> Outcome:
+    def _on_door(
+        self, site: Site, at: datetime, ev: WebhookEvent, *, opened: bool, net: _NetBundle
+    ) -> Outcome:
         visit = self.store.active_visit(site.id)
         kind = EvidenceKind.DOOR_OPENED if opened else EvidenceKind.DOOR_CLOSED
         if visit is None:
             if opened:
-                return self._on_arrival_cue(site, at, ev, kind)
+                return self._on_arrival_cue(site, at, ev, kind, net)
             return Outcome(ignored_reason="door closed with no active visit")
         self._evidence(visit, kind, at, ev)
         self._touch(visit, at)
         return Outcome(visit, [kind.value])
 
-    def _on_arrival_cue(self, site: Site, at: datetime, ev: WebhookEvent, kind: EvidenceKind) -> Outcome:
+    def _on_arrival_cue(
+        self, site: Site, at: datetime, ev: WebhookEvent, kind: EvidenceKind, net: _NetBundle
+    ) -> Outcome:
         visit = self.store.active_visit(site.id)
         if visit is not None:
             self._evidence(visit, kind, at, ev)
@@ -291,7 +394,14 @@ class VisitEngine:
             )
         self.store.put_visit(visit)
         self._evidence(visit, kind, at, ev)
-        self._snapshot(visit, site, at, "first_observation", "first-observation window")
+        self._snapshot(
+            visit,
+            site,
+            at,
+            "first_observation",
+            "first-observation window",
+            net.snapshots.get("first_observation"),
+        )
         log.info("visit %s opened at %s (%s)", visit.id, at.isoformat(), visit.state)
         return Outcome(visit, ["opened"])
 
@@ -388,7 +498,6 @@ class VisitEngine:
 
     # ------------------------------------------------------------------ sweeper
 
-    @atomic
     def sweep(self, now: datetime | None = None) -> list[Visit]:
         """Close idle visits and lapse elapsed schedules to no_observation. Call periodically.
 
@@ -396,11 +505,40 @@ class VisitEngine:
         event timestamp: Ring retries can deliver late, and replayed scenarios are back-dated.
         """
         now = now or self.clock.now()
+        nets = self._prefetch_sweep(now)
+        return self._sweep(now, nets)
+
+    def _prefetch_sweep(self, now: datetime) -> dict[str, _NetBundle]:
+        """Fetch snapshots/summaries/history for visits that look idle-closeable
+        BEFORE the write txn (advisory reads; the apply path re-validates)."""
+        if self.clock.replay:
+            return {}
+        idle = timedelta(minutes=self.settings.idle_close_minutes)
+        nets: dict[str, _NetBundle] = {}
+        for site in self.store.sites():
+            visit = self.store.active_visit(site.id)
+            if not visit or now - visit.last_seen_at < idle:
+                continue
+            bundle = _NetBundle()
+            snap = self._fetch_snapshot(site, visit.last_activity_at)
+            bundle.snapshots["last_observation"] = snap
+            pending = (
+                [self._pending_snapshot_evidence(visit, site, snap, "last-observation window")]
+                if snap.ok
+                else []
+            )
+            bundle.close = self._prefetch_close(visit, site, visit.last_activity_at, "idle", pending)
+            nets[visit.id] = bundle
+        return nets
+
+    @atomic
+    def _sweep(self, now: datetime, nets: dict[str, _NetBundle]) -> list[Visit]:
         changed: list[Visit] = []
         idle = timedelta(minutes=self.settings.idle_close_minutes)
         for site in self.store.sites():
             visit = self.store.active_visit(site.id)
             if visit and not self.clock.replay and now - visit.last_seen_at >= idle:
+                net = nets.get(visit.id) or _NetBundle()
                 if site.door_sensor_id is None:
                     # Camera-only site: the last person seen at the door is the best departure evidence.
                     flag = Flag(
@@ -417,9 +555,16 @@ class VisitEngine:
                     )
                 visit.flags.append(flag)
                 self._snapshot(
-                    visit, site, visit.last_activity_at, "last_observation", "last-observation window"
+                    visit,
+                    site,
+                    visit.last_activity_at,
+                    "last_observation",
+                    "last-observation window",
+                    net.snapshots.get("last_observation"),
                 )
-                changed.append(self._close(visit, site, visit.last_activity_at, reason="idle").visit)  # type: ignore[arg-type]
+                changed.append(
+                    self._close(visit, site, visit.last_activity_at, reason="idle", net=net.close).visit
+                )
             grace = timedelta(minutes=self.settings.arrival_grace_minutes)
             for sch in self.store.schedules_for_site(site.id):
                 if (
@@ -456,16 +601,100 @@ class VisitEngine:
 
     # ------------------------------------------------------------------ closing
 
-    @atomic
     def close_for_review(self, visit_id: str) -> Visit:
+        net = self._prefetch_close_for(visit_id)
+        return self._close_for_review_apply(visit_id, net)
+
+    def _prefetch_close_for(self, visit_id: str) -> _ClosePrefetch | None:
+        """Fetch summary + history for a coordinator close BEFORE the write
+        txn, against committed state. Returns None when nothing is closeable —
+        the apply path raises the same validation errors as before."""
+        visit = self.store.visit(visit_id)
+        if visit is None or visit.receipt_id:
+            return None
+        site = self.store.site(visit.site_id)
+        if site is None:
+            return None
+        return self._prefetch_close(visit, site, visit.last_activity_at, "coordinator_review", [])
+
+    @atomic
+    def _close_for_review_apply(self, visit_id: str, net: _ClosePrefetch | None) -> Visit:
         visit = self.store.visit(visit_id)
         if visit is None or visit.receipt_id:
             raise ValueError("record is missing or already signed")
         site = self.store.site(visit.site_id)
-        self._close(visit, site, visit.last_activity_at, reason="coordinator_review")
+        self._close(visit, site, visit.last_activity_at, reason="coordinator_review", net=net)
         return visit
 
-    def _close(self, visit: Visit, site: Site, at: datetime, *, reason: str) -> Outcome:
+    def _prefetch_close(
+        self,
+        visit: Visit,
+        site: Site,
+        at: datetime,
+        reason: str,
+        pending: list[Evidence],
+    ) -> _ClosePrefetch:
+        """Replicate `_close`'s mutations on a copy so the summary sees exactly
+        the inputs it would inside the txn — but the Bedrock/Ring calls happen
+        here, before the lock is taken."""
+        vcopy = visit.model_copy(deep=True)
+        self._close_mutations(vcopy, at, reason)
+        evidence = self.store.evidence_for(visit.id)
+        sch = self._schedule(visit)
+        text = self.summarizer.summarize(
+            vcopy, site, sch, self._worker_name(visit), [*evidence, *pending], self.media
+        )
+        return _ClosePrefetch(
+            summary=(text, vcopy.summary_source, vcopy.summary_model, vcopy.summary_fallback_reason),
+            history=self._fetch_history(visit, site),
+            last_activity_at=max(visit.last_activity_at, at),
+            evidence_count=len(evidence),
+            pending_evidence=len(pending),
+            receipt_absent=visit.receipt_id is None,
+        )
+
+    def _close(
+        self, visit: Visit, site: Site, at: datetime, *, reason: str, net: _ClosePrefetch | None = None
+    ) -> Outcome:
+        self._close_mutations(visit, at, reason)
+        evidence = self.store.evidence_for(visit.id)
+        if net is not None and net.matches(visit, len(evidence)):
+            (
+                visit.summary,
+                visit.summary_source,
+                visit.summary_model,
+                visit.summary_fallback_reason,
+            ) = net.summary  # type: ignore[misc]
+            history = net.history
+        else:
+            # State moved since prefetch (or nothing prefetched) — the write
+            # txn never waits on the network; fall back to the deterministic
+            # summary path and sign without a history cross-check.
+            visit.summary = self._degraded_summarizer().summarize(
+                visit, site, self._schedule(visit), self._worker_name(visit), evidence, self.media
+            )
+            history = None
+        self.store.put_visit(visit)
+        self._issue_receipt(visit, site, history=history)
+        log.info(
+            "record %s closed (%s); observed interval %.1f min",
+            visit.id,
+            reason,
+            visit.observed_span_minutes or 0,
+        )
+        return Outcome(visit, ["closed"])
+
+    def _degraded_summarizer(self) -> Summarizer:
+        """A no-network summarizer for the degrade path — Bedrock's own
+        template fallback, or the summarizer itself when it's already
+        deterministic."""
+        fb = getattr(self.summarizer, "fallback", None)
+        return fb if fb is not None else self.summarizer
+
+    def _close_mutations(self, visit: Visit, at: datetime, reason: str) -> None:
+        """The state changes `_close` applies — shared verbatim with
+        `_prefetch_close`, which runs them on a copy to build the summary's
+        inputs before the write txn starts."""
         visit.departed_at = None
         visit.departure_candidate_at = at if reason == "departure" else None
         visit.last_activity_at = max(visit.last_activity_at, at)
@@ -498,19 +727,6 @@ class VisitEngine:
                     message="no worker self-report was received through the check-in link",
                 )
             )
-        evidence = self.store.evidence_for(visit.id)
-        visit.summary = self.summarizer.summarize(
-            visit, site, self._schedule(visit), self._worker_name(visit), evidence, self.media
-        )
-        self.store.put_visit(visit)
-        self._issue_receipt(visit, site)
-        log.info(
-            "record %s closed (%s); observed interval %.1f min",
-            visit.id,
-            reason,
-            visit.observed_span_minutes or 0,
-        )
-        return Outcome(visit, ["closed"])
 
     def _apply_duration_flags(self, visit: Visit) -> None:
         sch = self._schedule(visit)
@@ -536,7 +752,7 @@ class VisitEngine:
                 )
             )
 
-    def _issue_receipt(self, visit: Visit, site: Site) -> None:
+    def _issue_receipt(self, visit: Visit, site: Site, *, history: list[dict] | None = None) -> None:
         prev = self.store.latest_receipt()
         sch = self._schedule(visit)
         evidence = self.store.evidence_for(visit.id)
@@ -620,7 +836,7 @@ class VisitEngine:
                 for e in evidence
             ],
             "history_poll_coverage": self._coverage(visit, site),
-            "ring_history": self._reconcile_history(visit, site),
+            "ring_history": history,
             "journal_head": self.store.journal_head(),
         }
         receipt = self.signer.issue(
@@ -984,21 +1200,35 @@ class VisitEngine:
             )
         )
 
-    @atomic
     def close_liveview(self, site_id: str, session_id: str) -> LiveViewSession:
         """End a brokered session — DELETE it at Ring, then mark the journaled
         row closed. Closing Ring-side first keeps 'still streaming' from ever
-        being recorded when it isn't; a failed close leaves the row open."""
-        row = self.store.liveview_session(session_id)
-        if row is None or row.site_id != site_id:
-            raise ValueError("unknown live-view session")
+        being recorded when it isn't; a failed close leaves the row open. The
+        network call runs between two short txns so a hung Ring API never
+        holds the store lock."""
+        row = self._liveview_to_close(site_id, session_id)
         if row.closed_at is not None:
             return row
         self.ring.whep_close(row.session_url)
-        row.closed_at = self.clock.now()
-        row.state = "closed"
-        self.store.put_liveview_session(row)
+        return self._liveview_closed(row)
+
+    @atomic
+    def _liveview_to_close(self, site_id: str, session_id: str) -> LiveViewSession:
+        row = self.store.liveview_session(session_id)
+        if row is None or row.site_id != site_id:
+            raise ValueError("unknown live-view session")
         return row
+
+    @atomic
+    def _liveview_closed(self, row: LiveViewSession) -> LiveViewSession:
+        current = self.store.liveview_session(row.id)
+        if current is None or current.closed_at is not None:
+            # A concurrent close already journaled it — keep the recorded row.
+            return current or row
+        current.closed_at = self.clock.now()
+        current.state = "closed"
+        self.store.put_liveview_session(current)
+        return current
 
     def _coverage(self, visit: Visit, site: Site) -> dict | None:
         """How much of this visit's window Event History polling actually watched.
@@ -1024,11 +1254,13 @@ class VisitEngine:
             return None
         return coverage_report(self.store, site.door_camera_id, start, end, now=utcnow(), site_id=site.id)
 
-    def _reconcile_history(self, visit: Visit, site: Site) -> list[dict] | None:
+    def _fetch_history(self, visit: Visit, site: Site) -> list[dict] | None:
         """Corroborate webhook evidence with Ring's own Event History for the visit window.
 
         Independent of webhook delivery: a receipt that cites history event ids can be
         re-checked against Ring later. Best-effort; ``None`` means history was unavailable.
+        Network-only — callers fetch this BEFORE the write txn and pass the result
+        into `_issue_receipt`.
         """
         if not visit.has_observations:
             return None
@@ -1073,9 +1305,10 @@ class VisitEngine:
             )
         )
 
-    def _snapshot(self, visit: Visit, site: Site, at: datetime, media_label: str, note: str) -> None:
-        """media_label must stay filename-safe ([a-zA-Z0-9_-]); note is the
-        human caption — they differ so captions can say what the snapshot is."""
+    def _fetch_snapshot(self, site: Site, at: datetime) -> _SnapshotFetch:
+        """The network half of `_snapshot` — call BEFORE the write txn.
+        Failures return ``ok=False``; the apply path records the same
+        media_unavailable flag either way."""
         w = timedelta(seconds=self.settings.snapshot_window_seconds)
         end = min(at + w, self.clock.now())
         try:
@@ -1086,7 +1319,62 @@ class VisitEngine:
             if not at - w <= actual_at <= end:
                 raise ValueError("snapshot timestamp outside requested window")
         except Exception as exc:  # noqa: BLE001 - Ring media is best-effort evidence
-            log.warning("snapshot for %s (%s) failed: %s", visit.id, media_label, type(exc).__name__)
+            log.warning("snapshot fetch for %s failed: %s", site.door_camera_id, type(exc).__name__)
+            return _SnapshotFetch(ok=False)
+        return _SnapshotFetch(
+            ok=True, content=snap.content, content_type=snap.content_type, actual_at=actual_at
+        )
+
+    def _pending_snapshot_evidence(
+        self, visit: Visit, site: Site, fetched: _SnapshotFetch, note: str
+    ) -> Evidence:
+        """A synthesized SNAPSHOT evidence row for the prefetch-time summary
+        input — the real row is written by `_snapshot` inside the txn. The
+        media isn't saved yet, so media_path stays None (the Bedrock prompt
+        skips it; the fallback summary only reads the row's shape)."""
+        return Evidence(
+            visit_id=visit.id,
+            kind=EvidenceKind.SNAPSHOT,
+            at=fetched.actual_at or self.clock.now(),
+            source_device_id=site.door_camera_id,
+            ingestion_source="ring_media_api"
+            if self.ring.base_url == "https://api.amazonvision.com"
+            else "local_or_test",
+            note=note,
+        )
+
+    def _pending_evidence(self, visit: Visit, kind: EvidenceKind, at: datetime, ev: WebhookEvent) -> Evidence:
+        """The row `_evidence` will write, synthesized for prefetch-time
+        summary inputs (never persisted directly)."""
+        return Evidence(
+            visit_id=visit.id,
+            kind=kind,
+            at=at,
+            source_device_id=ev.device_id,
+            ring_event_type=ev.event_type,
+            ring_sub_type=ev.sub_type,
+            ring_request_id=ev.request_id if ev.meta.ingest_source == "webhook" else None,
+            ring_history_event_id=(
+                ev.request_id.removeprefix("history:") if ev.meta.ingest_source == "history" else None
+            ),
+            ingestion_source=ev.meta.ingest_source,
+        )
+
+    def _snapshot(
+        self,
+        visit: Visit,
+        site: Site,
+        at: datetime,
+        media_label: str,
+        note: str,
+        fetched: _SnapshotFetch | None,
+    ) -> None:
+        """media_label must stay filename-safe ([a-zA-Z0-9_-]); note is the
+        human caption — they differ so captions can say what the snapshot is.
+        Consumes bytes fetched BEFORE the write txn; ``None``/failed fetches
+        degrade to the same media_unavailable flag — this method never does
+        network I/O under the store lock."""
+        if fetched is None or not fetched.ok or fetched.actual_at is None:
             visit.flags.append(
                 Flag(
                     code="media_unavailable",
@@ -1099,12 +1387,12 @@ class VisitEngine:
             )
             self.store.put_visit(visit)
             return
-        sha, path = self.media.save(visit.id, media_label, snap.content, snap.content_type)
+        sha, path = self.media.save(visit.id, media_label, fetched.content, fetched.content_type)
         self.store.put_evidence(
             Evidence(
                 visit_id=visit.id,
                 kind=EvidenceKind.SNAPSHOT,
-                at=actual_at,
+                at=fetched.actual_at,
                 source_device_id=site.door_camera_id,
                 ingestion_source="ring_media_api"
                 if self.ring.base_url == "https://api.amazonvision.com"

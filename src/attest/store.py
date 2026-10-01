@@ -623,6 +623,10 @@ class Store:
     def put_receipt(self, r: Receipt) -> Receipt:
         with self._lock:
             body = r.model_dump_json()
+            # visit_id is UNIQUE: a second receipt for one visit raises
+            # IntegrityError mid-transaction and rolls the whole thing back —
+            # deliberately loud. Callers gate on visit.receipt_id; a breach
+            # means the signed record set would fork, so crashing is correct.
             self._conn.execute(
                 "INSERT INTO receipts (id, visit_id, sequence, body) VALUES (?, ?, ?, ?)",
                 (r.id, r.visit_id, r.sequence, body),

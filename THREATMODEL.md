@@ -61,6 +61,7 @@ against a live store:
 | Drop a file from an exported pack | Verifier reports missing media or missing bundle explicitly |
 | Drop or swap a record inside a case pack | Signed `case_export` manifest names the exact visit→hash map; mismatch fails closed |
 | Drop, swap, or smuggle a site attestation in a case pack | The manifest's signed `attestations` list pins receipt_id + visit_id + payload_hash; every verifier checks signature + manifest equality, and a file the list does not name fails closed |
+| Smuggle a file the manifest never names (top-level, inside a listed visit dir, or a media member whose bytes hash to no signed digest) | Every verifier (server, embedded `verify_case.py`, `verify.html`/`index.html`, `packdiff`) whitelists pack members and digest-checks media — any unlisted file fails the pack |
 | Rewrite a signed case manifest | `manifest_sha256` inside the signed receipt no longer matches |
 | Forge a `redaction.json` naming undelivered digests | Fails closed — withheld digests must match signed evidence |
 | Swap issuer keys in a pack | Public key is inside every signed payload and the manifest; compare out-of-band |

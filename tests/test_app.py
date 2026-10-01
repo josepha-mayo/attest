@@ -1180,6 +1180,49 @@ def test_verify_pack_rejects_smuggled_attestation(api, household, t0):
     assert "not in the signed manifest" in detail
 
 
+def test_verify_pack_rejects_smuggled_top_level_and_media(api, household, t0):
+    """Files outside the pack format's named set — top-level extras, members in
+    a listed visit dir, and media that doesn't hash to signed evidence — must
+    all fail closed rather than ride inside a VERIFIED pack."""
+    import io
+    import zipfile
+    from datetime import timedelta
+
+    site, _, cam, _ = household
+    r = _post_hook(api, cam.id, "motion_detected", t0, "human")
+    assert r.status_code == 202
+    vid = api.attest_state.store.active_visit(site.id).id
+    assert api.post(f"/api/visits/{vid}/close").status_code == 200
+    api.attest_state.engine.issue_coverage_attestation(site, t0 - timedelta(hours=1), t0 + timedelta(hours=2))
+    pack = api.get(f"/sites/{site.id}/pack.zip")
+    zin = zipfile.ZipFile(io.BytesIO(pack.content))
+
+    from attest.app import _verify_pack
+
+    key = api.attest_state.signer.public_key_b64
+
+    def repacked(extra_name, content=b"x"):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zout:
+            for n in zin.namelist():
+                zout.writestr(n, zin.read(n))
+            zout.writestr(extra_name, content)
+        return buf.getvalue()
+
+    # top-level extra
+    ok, detail = _verify_pack(repacked("notes.txt"), key)
+    assert not ok and "not in the signed manifest" in detail
+    # extra file inside a listed visit dir
+    ok, detail = _verify_pack(repacked(f"visits/{vid}/misleading.txt"), key)
+    assert not ok and "not in the signed manifest" in detail
+    # media member whose bytes hash to no signed digest
+    ok, detail = _verify_pack(repacked(f"visits/{vid}/media/{vid}/forged.png"), key)
+    assert not ok
+    # a media dir under an UNLISTED visit id is not the manifest's either
+    ok, detail = _verify_pack(repacked("visits/vis_other/media/x/y.png"), key)
+    assert not ok and "not in the signed manifest" in detail
+
+
 def test_status_survives_untracked_journal_rows(tmp_path, monkeypatch):
     """A store with rows written outside the journal used to crash `attest
     status` with TypeError — it must print the untracked count and flag

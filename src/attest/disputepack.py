@@ -216,6 +216,11 @@ def check_media(bundle, media_dir, withheld=None):
     """
     withheld = set(withheld or [])
     checked = held = 0
+    signed = {
+        e.get("media_sha256")
+        for e in bundle["original"]["payload"].get("evidence", [])
+        if e.get("media_sha256")
+    }
     for e in bundle["original"]["payload"].get("evidence", []):
         digest = e.get("media_sha256")
         if not digest:
@@ -229,6 +234,12 @@ def check_media(bundle, media_dir, withheld=None):
                 held += 1
                 continue
             return checked, held, digest
+    if media_dir.exists():
+        # A media file whose bytes don't hash to a signed digest is smuggled
+        # content riding inside a "VERIFIED" pack — fail it, don't skip it.
+        for p in sorted(media_dir.rglob("*")):
+            if p.is_file() and hashlib.sha256(p.read_bytes()).hexdigest() not in signed:
+                return checked, held, f"smuggled:{p.name}"
     return checked, held, None
 
 
@@ -295,6 +306,8 @@ def main():
         sys.exit(f"FAIL {exc}")
     checked, held, bad = check_media(bundle, Path("media"), withheld)
     if bad:
+        if str(bad).startswith("smuggled:"):
+            sys.exit(f"FAIL media file not named by the signed evidence: {bad[9:]}")
         sys.exit(f"FAIL media digest not found in pack: {bad[:16]}...")
     redact_note = f", {held} withheld by redaction" if held else ""
     print(f"OK: {n} receipt(s) verified; {checked} media digests matched{redact_note}.")
@@ -372,7 +385,10 @@ def main():
             continue
         checked, held, bad = check_media(bundle, vdir / "media", withheld)
         if bad:
-            print(f"FAIL {vid}: media digest not found: {bad[:16]}...")
+            if str(bad).startswith("smuggled:"):
+                print(f"FAIL {vid}: media file not named by the signed evidence: {bad[9:]}")
+            else:
+                print(f"FAIL {vid}: media digest not found: {bad[:16]}...")
             failed += 1
             continue
         redact_note = f", {held} withheld" if held else ""
@@ -414,6 +430,27 @@ def main():
         if extra_v:
             print(f"FAIL {len(extra_v)} visit dir(s) present but not in the signed manifest")
             failed += 1
+    # Fail closed on any file the pack format doesn't name — a smuggled
+    # top-level file or extra member inside a visit dir would otherwise ride
+    # inside a "VERIFIED" pack. Media members are digest-checked by
+    # check_media against the signed evidence.
+    allowed_top = {"manifest.json", "README.txt", "verify_case.py", "verify.html", "index.html"}
+    for p in sorted(root.iterdir()):
+        if p.is_file() and p.name not in allowed_top:
+            print(f"FAIL {p.name}: present but not in the signed manifest")
+            failed += 1
+        elif p.is_dir() and p.name not in ("visits", "attestations"):
+            print(f"FAIL {p.name}/: directory not in the signed manifest")
+            failed += 1
+    if vdir.exists():
+        for vd in sorted(p for p in vdir.iterdir() if p.is_dir()):
+            for p in sorted(vd.iterdir()):
+                if p.is_file() and p.name not in ("bundle.json", "redaction.json"):
+                    print(f"FAIL {vd.name}/{p.name}: present but not in the signed manifest")
+                    failed += 1
+                elif p.is_dir() and p.name != "media":
+                    print(f"FAIL {vd.name}/{p.name}/: directory not in the signed manifest")
+                    failed += 1
     mok, mwhy = check_manifest(manifest, key)
     print(f"{'OK  ' if mok else 'FAIL'} manifest: {mwhy}")
     if not mok:

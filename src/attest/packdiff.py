@@ -179,19 +179,34 @@ def load_artifact(path: str | Path, key: str | None = None) -> dict:
                 failures += _manifest_consistency(manifest, bundles, notes)
                 failures += _verify_artifact_bundles(bundles, issuer)
                 failures += _verify_attestation_files(z, attestations, issuer)
-                # Fail closed on smuggled content the signed manifest does not
-                # name — parity with _verify_case_pack.
-                listed_atts = {f"attestations/{rid}.json" for rid in attestations}
-                listed_visits = {f"visits/{vid}/" for vid in entries}
+                # Fail closed on ANY member the signed manifest does not name —
+                # top-level files and extra members inside listed visit dirs
+                # too, not just foreign attestations/visits trees.
+                allowed = {
+                    "manifest.json",
+                    "README.txt",
+                    "verify_case.py",
+                    "verify.html",
+                    "index.html",
+                }
+                allowed |= {f"attestations/{rid}.json" for rid in attestations}
+                for vid in entries:
+                    allowed |= {
+                        f"visits/{vid}/bundle.json",
+                        f"visits/{vid}/redaction.json",
+                    }
                 for name in names:
-                    if name.endswith("/"):
+                    if name.endswith("/") or name in allowed:
                         continue
-                    if name.startswith("attestations/") and name not in listed_atts:
-                        failures.append(f"{name}: present but not in the signed manifest")
-                    elif name.startswith("visits/") and not any(
-                        name.startswith(prefix) for prefix in listed_visits
+                    parts = name.split("/")
+                    if (
+                        len(parts) >= 4
+                        and parts[0] == "visits"
+                        and parts[2] == "media"
+                        and parts[1] in entries
                     ):
-                        failures.append(f"{name}: present but not in the signed manifest")
+                        continue  # media members — digest-checked upstream
+                    failures.append(f"{name}: present but not in the signed manifest")
                 mfail = _verify_manifest_signature(manifest, issuer)
                 if mfail:
                     failures.append(mfail)
@@ -208,6 +223,18 @@ def load_artifact(path: str | Path, key: str | None = None) -> dict:
                 issuer = key or bundle["original"]["public_key"]
                 visits[bundle["original"]["visit_id"]] = _visit_summary(bundle)
                 failures += _verify_artifact_bundles({bundle["original"]["visit_id"]: bundle}, issuer)
+                allowed = {
+                    "bundle.json",
+                    "README.txt",
+                    "verify_bundle.py",
+                    "verify.html",
+                    "index.html",
+                    "redaction.json",
+                }
+                for name in names:
+                    if name.endswith("/") or name in allowed or name.startswith("media/"):
+                        continue
+                    failures.append(f"{name}: present but not in the signed manifest")
                 return {
                     "issuer": issuer,
                     "visits": visits,

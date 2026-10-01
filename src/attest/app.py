@@ -9,6 +9,7 @@ import logging
 import secrets
 import sqlite3
 import statistics
+import time
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -336,6 +337,13 @@ def create_app(
             )
         except ValueError:
             return JSONResponse({"error": "invalid webhook payload"}, status_code=400)
+        if ev.occurred_at.tzinfo is None:
+            # A naive timestamp can't be ordered against aware clocks — reject at
+            # intake rather than let it burn inbox retries into a TypeError.
+            return JSONResponse(
+                {"error": "event timestamps must be timezone-aware (ISO 8601 with offset)"},
+                status_code=400,
+            )
         try:
             added = await asyncio.to_thread(
                 inbox.enqueue,
@@ -492,9 +500,23 @@ def create_app(
             st["max_lag"] = max(st["lags"]) if st["lags"] else None
         stances = {v.id: reviews.countersign(v.id) for v in visits if v.receipt_id}
         attention = attention_items(store, reviews)
+
         # The journal replay is O(rows) and holds the store lock — run it off
-        # the event loop so the 5s auto-reload can't stall ingest/poll writes.
-        journal = await asyncio.to_thread(store.verify_journal)
+        # the event loop AND cache the verdict briefly so the 5s auto-reload
+        # of N coordinator tabs doesn't serialize continuous replays against
+        # the single writer. Keyed on the journal head: any journaled write
+        # re-runs it, and the cache expires on its own after 15s. `/integrity`
+        # and `attest status` always run the full uncached audit.
+        async def verify_journal_cached() -> dict:
+            now = time.monotonic()
+            cached = getattr(app.state, "_journal_cache", None)
+            if cached and cached[0] == store.journal_head() and now - cached[1] < 15.0:
+                return cached[2]
+            result = await asyncio.to_thread(store.verify_journal)
+            app.state._journal_cache = (store.journal_head(), now, result)
+            return result
+
+        journal = await verify_journal_cached()
         return render(
             request,
             "dashboard.html",
@@ -1567,7 +1589,24 @@ def _verify_pack(data: bytes, public_key: str) -> tuple[bool, str]:
         if "manifest.json" in names:
             return _verify_case_pack(z, public_key)
         bundle = ReviewBundle.model_validate(json.loads(z.read("bundle.json")))
-        return _check_pack_bundle(z, bundle, public_key, media_prefix="media/")
+        ok, detail = _check_pack_bundle(z, bundle, public_key, media_prefix="media/")
+        if not ok:
+            return False, detail
+        # Fail closed on files the pack format doesn't name (media members are
+        # digest-checked in _check_pack_bundle).
+        allowed = {
+            "bundle.json",
+            "README.txt",
+            "verify_bundle.py",
+            "verify.html",
+            "index.html",
+            "redaction.json",
+        }
+        for name in names:
+            if name.endswith("/") or name in allowed or name.startswith("media/"):
+                continue
+            return False, f"{name}: present but not in the signed manifest"
+        return True, detail
     except Exception as exc:  # noqa: BLE001
         return False, f"not a valid exported pack: {exc}"
 
@@ -1586,11 +1625,17 @@ def _check_pack_bundle(z, bundle: ReviewBundle, public_key: str, *, media_prefix
         withheld = set(marker.get("withheld_digests", []))
         if not withheld <= digests:
             return False, "bundle: redaction.json lists digests not in the signed evidence"
-    present = {
-        hashlib.sha256(z.read(name)).hexdigest()
+    media_members = [
+        (name, hashlib.sha256(z.read(name)).hexdigest())
         for name in z.namelist()
         if name.startswith(media_prefix) and not name.endswith("/")
-    }
+    ]
+    # A media member that doesn't hash to a digest the signed evidence names
+    # is smuggled content riding inside a "VERIFIED" pack — fail closed.
+    for name, sha in media_members:
+        if sha not in digests:
+            return False, f"{name}: media member not named by the signed evidence"
+    present = {sha for _, sha in media_members}
     matched = len(digests & present)
     covered = matched + len(withheld & digests)
     detail = f"{why}; {matched}/{len(digests)} signed media digests found in pack" + (
@@ -1653,17 +1698,22 @@ def _verify_case_pack(z, public_key: str) -> tuple[bool, str]:
             return False, f"attestation {rid}: {why}"
         if att.visit_id != a.get("visit_id") or att.payload_hash != a.get("payload_hash"):
             return False, f"attestation {rid}: does not match the manifest's signed entry"
-    # Fail closed on files the signed manifest does not name — a smuggled
-    # attestation or visit bundle would otherwise pass unverified.
-    listed_atts = {f"attestations/{a.get('receipt_id')}.json" for a in manifest.get("attestations", [])}
-    listed_visits = {f"visits/{v.get('visit_id')}/" for v in manifest.get("visits", [])}
+    # Fail closed on ANY file the signed manifest doesn't name — a smuggled
+    # top-level file or an extra member inside a listed visit directory would
+    # otherwise ride inside a "VERIFIED" pack. Media members are digest-checked
+    # per visit in _check_pack_bundle.
+    visit_ids = {v.get("visit_id") for v in manifest.get("visits", [])}
+    allowed = {"manifest.json", "README.txt", "verify_case.py", "verify.html", "index.html"}
+    allowed |= {f"attestations/{a.get('receipt_id')}.json" for a in manifest.get("attestations", [])}
+    for vid in visit_ids:
+        allowed |= {f"visits/{vid}/bundle.json", f"visits/{vid}/redaction.json"}
     for name in z.namelist():
-        if name.endswith("/"):
+        if name.endswith("/") or name in allowed:
             continue
-        if name.startswith("attestations/") and name not in listed_atts:
-            return False, f"{name}: file is present but not in the signed manifest"
-        if name.startswith("visits/") and not any(name.startswith(prefix) for prefix in listed_visits):
-            return False, f"{name}: file is present but not in the signed manifest"
+        parts = name.split("/")
+        if len(parts) >= 4 and parts[0] == "visits" and parts[2] == "media" and parts[1] in visit_ids:
+            continue  # digest-checked against the signed evidence above
+        return False, f"{name}: present but not in the signed manifest"
     return True, f"case pack verified — {total} visit record(s) intact ({manifest_note}): " + "; ".join(lines)
 
 
