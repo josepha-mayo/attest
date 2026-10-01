@@ -240,3 +240,54 @@ the required shape: task → steps → expected vs. actual → severity → work
   window in the webhook verification guide; consider a Stripe-style signed
   timestamp header so receivers don't depend on a field whose semantics
   are inferred.
+
+## 14. Scope denials are inconsistent across surfaces (403 vs 422)
+
+- **Task:** Exercise the API with a restricted `ava.v1:read` token to map
+  what a least-privilege partner token can and cannot do.
+- **Steps:** Mint a read-scoped Playground token, call `GET /v1/devices`,
+  `POST /v1/accounts/me/app-integrations`, and the subscriptions surface.
+- **Expected:** A consistent `403` with a documented error code like
+  `insufficient_scope` wherever the token's scope falls short.
+- **Actual:** Mutations on app-integrations answered `403`, while the
+  subscriptions surface answered `422` — a validation-shaped status for an
+  authorization failure. Nothing documents which surfaces read-scoped
+  tokens may touch or which status to expect.
+- **Severity:** Medium — a client that treats 422 as "bad request body"
+  misdiagnoses an authorization denial, and error-handling code must
+  special-case surfaces that should behave identically.
+- **Workaround:** Emulated both statuses exactly as observed
+  (`ring-sandbox serve --read-token` / `POST /_sandbox/tokens`), and Attest
+  treats any 4xx scope denial as an intake-coverage gap, never as a
+  factual signal about the site.
+- **Suggestion:** Standardize scope denials on `403` +
+  `insufficient_scope` and publish the scope × surface matrix in the
+  Partner API reference.
+
+## 15. Subscription entitlement semantics are undocumented
+
+- **Task:** Model what happens to event delivery, history, and media when
+  a device's plan lapses mid-stream — the case a dispute-record system
+  must handle honestly.
+- **Steps:** Read the subscriptions reference and webhook docs for the
+  lapsed-plan contract; probe the behavior on the Playground account.
+- **Expected:** A documented answer — do observation webhooks stop? Is
+  Event History emptied, frozen, or shortened? Do media endpoints 403 or
+  return stale data?
+- **Actual:** No documented contract. `subscription_deactivated` fires,
+  and everything else must be inferred: whether the silence afterwards
+  means "nothing happened" or "nothing was entitled" is left to the
+  integrator's guesswork — and those readings have opposite meanings in a
+  dispute.
+- **Severity:** High for evidence-adjacent consumers — an integrator that
+  reads post-lapse silence as a no-show is making an unsupported claim
+  about the physical world.
+- **Workaround:** Made the semantics explicit and testable in the
+  emulator (`--enforce-subscriptions`): no entitlement means empty
+  history, `403 subscription_required` on media/WHEP, observation
+  webhooks suppressed, and lifecycle events still delivered so the lapse
+  itself is never silent. Attest journals the lifecycle event into signed
+  coverage, so post-lapse quiet reads as *explained* rather than absent.
+- **Suggestion:** Publish the lapsed-plan contract per surface (event
+  fan-out, history retention, media access) in the Partner API reference
+  — it's the difference between "silence" and "unwatched".

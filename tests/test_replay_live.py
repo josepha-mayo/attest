@@ -220,9 +220,10 @@ def test_replay_story_cycles_patterns_and_survives_late_events(tmp_path):
 
 
 def test_replay_default_story_produces_the_full_demo_dataset(tmp_path):
-    """The shipped default — all seven day-patterns in one run — must yield the
-    complete judge-visible dataset: watched silence, a signed camera-outage
-    explanation, an unmatched observation, and a live session in coverage."""
+    """The shipped default — all eight day-patterns in one run — must yield the
+    complete judge-visible dataset: watched silence, signed outage AND
+    entitlement-lapse explanations, an unmatched observation, and a live
+    session in coverage."""
     token = secrets.token_urlsafe(32)
     with serve(sandbox_app()) as ring_url:
         settings = Settings(
@@ -245,9 +246,9 @@ def test_replay_default_story_produces_the_full_demo_dataset(tmp_path):
                     "replay",
                     "home_aide_visit",
                     "--days",
-                    "7",
+                    "8",
                     "--story",
-                    "observed,late,blackout,no_show,early_out,unmatched,liveview",
+                    "observed,late,blackout,sub_lapse,no_show,early_out,unmatched,liveview",
                     "--speed",
                     "100000",
                     "--ring-url",
@@ -272,14 +273,20 @@ def test_replay_default_story_produces_the_full_demo_dataset(tmp_path):
                 visits = client.get("/api/state").json()["visits"]
                 # unmatched day yields an unmatched observation *and* its
                 # displaced schedule lapsing to no_observation.
-                assert sorted(v["state"] for v in visits) == ["closed"] * 6 + ["no_observation"] * 2
+                assert sorted(v["state"] for v in visits) == ["closed"] * 7 + ["no_observation"] * 2
                 receipts = [Receipt.model_validate(r) for r in client.get("/receipts.json").json()]
-                assert len(receipts) == 8
+                assert len(receipts) == 9
                 assert verify_chain(receipts, public_key=app.state.signer.public_key_b64)[0]
                 coverages = [r.payload["history_poll_coverage"] for r in receipts]
                 # blackout day — the outage is a signed interruption.
                 assert any(
                     [i["kind"] for i in c["interruptions"]] == ["device_offline", "device_online"]
+                    for c in coverages
+                )
+                # sub_lapse day — the entitlement lapse is a signed interruption,
+                # a billing fact distinct from a device fault.
+                assert any(
+                    [i["kind"] for i in c["interruptions"]] == ["subscription_deactivated"]
                     for c in coverages
                 )
                 # liveview day — a bounded session signed into coverage.

@@ -776,9 +776,10 @@ def _demo(args: argparse.Namespace) -> None:
     print("  3. Download a pack, then 'Verify a pack in-browser' on the dashboard —", flush=True)
     print("     drop the .zip; it self-verifies, no install, no unzip. Site packs", flush=True)
     print("     carry the signed coverage cert: 'was anyone watching?' In the", flush=True)
-    print("     default story one camera dies mid-visit — the record signs the", flush=True)
-    print("     device_offline/device_online lifecycle, so the quiet span reads", flush=True)
-    print("     explained, not absent.", flush=True)
+    print("     default story one camera dies mid-visit and the Ring plan", flush=True)
+    print("     lapses on another day — the records sign the device_offline and", flush=True)
+    print("     subscription_deactivated lifecycle, so quiet spans read", flush=True)
+    print("     explained (a fault, a billing event), never absent.", flush=True)
     print("     Open the pack's index.html — a week strip of the whole window", flush=True)
     print("     first, then each record toggles between the technical view and", flush=True)
     print("     a plain-language family view. Or skip the install entirely:", flush=True)
@@ -2080,12 +2081,13 @@ def main(argv: list[str] | None = None) -> None:
                 default=None,
                 help="persist the demo runtime here (must be empty); default is a temp dir",
             )
-            s.add_argument("--days", type=int, default=7)
+            s.add_argument("--days", type=int, default=8)
             s.add_argument(
                 "--story",
-                default="observed,late,blackout,no_show,early_out,unmatched,liveview",
+                default="observed,late,blackout,sub_lapse,no_show,early_out,unmatched,liveview",
                 metavar="PATTERNS",
-                help="day-pattern cycle: observed,late,blackout,early_out,no_show,unmatched,liveview",
+                help="day-pattern cycle: observed,late,blackout,sub_lapse,early_out,no_show,"
+                "unmatched,liveview",
             )
             s.add_argument("--speed", type=float, default=10000)
             s.add_argument(
