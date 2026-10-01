@@ -136,7 +136,7 @@ async function disconnectSource() {
 <div class="card">
   <p class="small muted" style="margin-top:0">Signed-channel facts that explain observation coverage — a camera offline or a subscription ending says *why* events stopped; it never says nobody came.</p>
   <table>
-    <thead>
+    <th scope="col"ead>
       <tr><th scope="col">When</th><th scope="col">Event</th><th scope="col">Scope</th></tr>
     </thead>
     <tbody>
@@ -166,7 +166,7 @@ async function disconnectSource() {
   <p id="lv-status" class="small muted" role="status"></p>
   {% if liveview_sessions %}
   <table style="margin-top:10px">
-    <thead>
+    <th scope="col"ead>
       <tr><th scope="col">Opened</th><th scope="col">Outcome</th><th scope="col">Device</th><th scope="col"></th></tr>
     </thead>
     <tbody>
@@ -230,7 +230,7 @@ async function disconnectSource() {
 <h2>Visit records</h2>
 <div class="card table-wrap" style="padding:0">
 <table>
-  <thead><tr><th>Visit</th><th>Worker</th><th>First observed</th><th>Observed interval</th><th>Coverage</th><th>State</th><th>Worker stance</th></tr></thead>
+  <th scope="col"ead><tr><th scope="col">Visit</th><th scope="col">Worker</th><th scope="col">First observed</th><th scope="col">Observed interval</th><th scope="col">Coverage</th><th scope="col">State</th><th scope="col">Worker stance</th></tr></thead>
   <tbody>
   {% for v in visits %}
   <tr>
@@ -263,7 +263,7 @@ async function disconnectSource() {
 <h2>Schedules</h2>
 <div class="card table-wrap" style="padding:0">
 <table>
-  <thead><tr><th>Worker</th><th>Window</th><th>Expected</th><th>Service</th><th>Status</th></tr></thead>
+  <th scope="col"ead><tr><th scope="col">Worker</th><th scope="col">Window</th><th scope="col">Expected</th><th scope="col">Service</th><th scope="col">Status</th></tr></thead>
   <tbody>
   {% for s in schedules.values() %}
   <tr>

@@ -2,7 +2,7 @@
 <select name="decision" required>
 {% for val, label in [
     ("inconclusive", "Inconclusive — more context needed"),
-    ("confirm", "Confirm my account of the visit"),
+    ("confirm", "Confirm the recorded account" if review_voice == "coordinator" else "Confirm my account of the visit"),
     ("dispute", "Dispute the interpretation"),
     ("correction", "Add a correction or missing context")] %}
 <option value="{{ val }}" {% if form and form.decision == val %}selected{% endif %}>{{ label }}</option>

@@ -29,6 +29,8 @@ from .config import settings as default_settings
 from .corroborate import corroboration
 from .disputepack import build_case_pack, build_pack
 from .engine import VisitEngine
+from .i18n import pick as pick_lang
+from .i18n import strings as lang_strings
 from .inbox import WebhookInbox
 from .ledger import Signer
 from .media import MediaStore
@@ -387,6 +389,16 @@ def create_app(
         resp.status_code = 404
         return resp
 
+    @app.exception_handler(404)
+    async def _catch_all_404(request: Request, exc: HTTPException):
+        """A mistyped URL in a browser gets the styled page; API clients and
+        non-GET requests keep the JSON detail. Never leak raw JSON to someone
+        exploring the console."""
+        accept = request.headers.get("accept", "")
+        if request.method == "GET" and "text/html" in accept:
+            return _not_found(request, "page")
+        return JSONResponse({"detail": exc.detail}, status_code=404)
+
     @app.get("/qr.svg")
     async def link_qr(request: Request, target: str = ""):
         """QR-code a worker link for the door-step scan: the coordinator shows
@@ -664,6 +676,7 @@ def create_app(
             family_link_active=any(
                 g.id == visit_id and g.expires_at > utcnow() for g in store.family_grants()
             ),
+            s=lang_strings("en"),  # _timeline.html legend strings default to English
         )
 
     def _coverage_local(cov: dict | None) -> dict | None:
@@ -746,16 +759,19 @@ def create_app(
         v: Visit,
         media_base: str,
         via_link: bool = False,
+        lang: str = "en",
         **extra,
     ):
         """Shared context for the coordinator's /visits/{id}/household and the
-        scoped /family/{token} view — same record, same honesty constraints."""
+        scoped /family/{token} view — same record, same honesty constraints.
+        ?lang=es localizes the chrome; signed content stays verbatim."""
         return render(
             request,
             "household.html",
             **_record_context(v),
             media_base=media_base,
             via_link=via_link,
+            s=lang_strings(lang),
             **extra,
         )
 
@@ -794,7 +810,9 @@ def create_app(
         v = store.visit(visit_id)
         if v is None:
             return _not_found(request, "visit record")
-        return _household_render(request, v, f"/visits/{v.id}")
+        return _household_render(
+            request, v, f"/visits/{v.id}", lang=pick_lang(request.query_params.get("lang"))
+        )
 
     @app.post("/api/visits/{visit_id}/family-link")
     async def issue_family_link(visit_id: str = PathParam(max_length=128)):
@@ -820,7 +838,13 @@ def create_app(
         visit = await action(engine.family_target, token)
         if visit is None:
             return _dead_link(request, "family view")
-        return _household_render(request, visit, f"/family/{token}", via_link=True)
+        return _household_render(
+            request,
+            visit,
+            f"/family/{token}",
+            via_link=True,
+            lang=pick_lang(request.query_params.get("lang")),
+        )
 
     @app.post("/family/{token}/statement", response_class=HTMLResponse)
     async def family_statement(request: Request, token: str = PathParam(max_length=128)):
@@ -829,6 +853,8 @@ def create_app(
         visit = await action(engine.family_target, token)
         if visit is None:
             return _dead_link(request, "family view")
+        lang = pick_lang(request.query_params.get("lang"))
+        s = lang_strings(lang)
         try:
             data = HouseholdStatementInput.model_validate(dict(await request.form()))
         except ValidationError:
@@ -837,10 +863,8 @@ def create_app(
                 visit,
                 f"/family/{token}",
                 via_link=True,
-                statement_error=(
-                    "Your account needs both parts — pick what happened and "
-                    "write it in your own words (2000 characters max)."
-                ),
+                lang=lang,
+                statement_error=s["err_incomplete"],
             )
         try:
             await asyncio.to_thread(reviews.household_statement, token, data)
@@ -851,14 +875,13 @@ def create_app(
                     visit,
                     f"/family/{token}",
                     via_link=True,
-                    statement_error=(
-                        "This record has reached its statement limit — the view "
-                        "link still works, but no further accounts can be added. "
-                        "Contact the coordinator if something needs correcting."
-                    ),
+                    lang=lang,
+                    statement_error=s["err_limit"],
                 )
             return _dead_link(request, "family view")
-        return _household_render(request, visit, f"/family/{token}", via_link=True, statement_posted=True)
+        return _household_render(
+            request, visit, f"/family/{token}", via_link=True, lang=lang, statement_posted=True
+        )
 
     @app.get("/family/{token}/media/{name}")
     async def family_media(token: str = PathParam(max_length=128), name: str = PathParam(max_length=255)):

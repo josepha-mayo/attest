@@ -71,7 +71,7 @@ document.getElementById('advance-clock').onsubmit = async event => {
 </div>
 <h2>Schedules</h2>
 <div class="card table-wrap"><table>
-<thead><tr><th>Site / worker</th><th>Arrival window</th><th>Planned minutes</th><th>Status</th><th>Action</th></tr></thead><tbody>
+<th scope="col"ead><tr><th scope="col">Site / worker</th><th scope="col">Arrival window</th><th scope="col">Planned minutes</th><th scope="col">Status</th><th scope="col">Action</th></tr></thead><tbody>
 {% for schedule in schedules %}<tr>
 <td>{% for site in sites if site.id == schedule.site_id %}{{ site.name }}{% endfor %}<br>{% for worker in workers if worker.id == schedule.worker_id %}{{ worker.name }}{% endfor %}</td>
 <td>{{ t(schedule.window_start) }}<br>{{ t(schedule.window_end) }}</td>

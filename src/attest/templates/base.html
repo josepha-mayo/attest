@@ -74,7 +74,7 @@
 {% block chrome %}
 <header>
   <div class="brand">Attest<span>.</span></div>
-  <nav><a href="/"{% if request.url.path == "/" %} aria-current="page"{% endif %}>Records</a><a href="/setup"{% if request.url.path == "/setup" %} aria-current="page"{% endif %}>Setup &amp; schedules</a><a href="/integrity"{% if request.url.path == "/integrity" %} aria-current="page"{% endif %}>Integrity</a><a href="/verify"{% if request.url.path == "/verify" %} aria-current="page"{% endif %}>Verify</a><a href="/about"{% if request.url.path == "/about" %} aria-current="page"{% endif %}>Claim boundary</a><a href="/receipts.json">Export originals</a></nav>
+  <nav><a href="/"{% if request.url.path == "/" %} aria-current="page"{% endif %}>Records</a><a href="/setup"{% if request.url.path == "/setup" %} aria-current="page"{% endif %}>Setup &amp; schedules</a><a href="/integrity"{% if request.url.path == "/integrity" %} aria-current="page"{% endif %}>Integrity</a><a href="/verify"{% if request.url.path == "/verify" %} aria-current="page"{% endif %}>Verify</a><a href="/verify-pack"{% if request.url.path == "/verify-pack" %} aria-current="page"{% endif %}>Pack verifier</a><a href="/about"{% if request.url.path == "/about" %} aria-current="page"{% endif %}>Claim boundary</a><a href="/receipts.json" download>Receipts (JSON)</a></nav>
   <div class="meta">{% if settings.ring_base_url == "https://api.amazonvision.com" %}Ring API configured{% else %}Local / test data{% endif %} &middot; configured summary provider: {{ summarizer }}</div>
 </header>
 {% if clock.mode == "replay" %}<div class="replay-banner">LOCAL REPLAY — not a live visit. Event clock: {{ clock.now or "not started" }}. Security expiry and signature issuance use real time.</div>{% endif %}

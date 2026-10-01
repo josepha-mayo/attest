@@ -1,14 +1,14 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ s.lang }}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23f4f7fa'/%3E%3Cpath d='M4 8.5l2.5 2.5L12 5.5' stroke='%231a7f4b' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<meta property="og:title" content="Visit record — {{ site.name }}">
-<meta property="og:description" content="A tamper-evident record of a scheduled visit. Open to review what the camera observed, what the worker reported, and what remains uncertain.">
+<meta property="og:title" content="{{ s.page_title }} — {{ site.name }}">
+<meta property="og:description" content="{{ s.og_desc }}">
 <meta property="og:type" content="article">
-<title>{{ site.name }} — visit record</title>
+<title>{{ site.name }} — {{ s.page_title }}</title>
 <style>
 :root{--ink:#1c2733;--muted:#5c6b7a;--line:#e3e9ef;--card:#fff;--bg:#f4f7fa;--ok:#1a7f4b;--warn:#b4740c;--quiet:#5f6e7c}
 *{box-sizing:border-box;margin:0}
@@ -60,78 +60,75 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible{
 </head>
 <body>
 <main class="wrap">
-{% macro t(dt) %}{{ (dt|iso).astimezone(tz).strftime("%I:%M %p").lstrip("0") if dt else "—" }}{% endmacro %}
-<div class="brand">Attest · observation record</div>
+{% if not via_link %}<div class="small" style="margin-bottom:14px"><a href="/visits/{{ visit.id }}">&lsaquo; {% if s.lang == "es" %}volver al registro{% else %}back to the record{% endif %}</a></div>{% endif %}
+{% macro t(dt) %}{{ (dt|iso).astimezone(tz).strftime(s.time_fmt if s.time_fmt else "%I:%M %p").lstrip("0") if dt else "—" }}{% endmacro %}
+{% macro dayline(dt) %}{% if s.weekdays %}{{ s.weekdays[dt.astimezone(tz).weekday()] }}, {{ dt.astimezone(tz).day }} de {{ s.months[dt.astimezone(tz).month - 1] }}{% else %}{{ dt.astimezone(tz).strftime("%A, %B %d").replace(" 0", " ") }}{% endif %}{% endmacro %}
+<div class="brand">{{ s.brand }} · <a href="?lang={{ "es" if s.lang == "en" else "en" }}" style="letter-spacing:normal;text-transform:none">{{ s.lang_toggle }}</a></div>
 <h1>{{ site.name }}</h1>
-<div class="date">{% if schedule %}{{ schedule.window_start.astimezone(tz).strftime("%A, %B %d").replace(" 0", " ") }} · scheduled {{ t(schedule.window_start) }}–{{ t(schedule.window_end) }}{% else %}Unscheduled record{% endif %}{% if schedule and schedule.service %} · {{ schedule.service }}{% endif %}</div>
+<div class="date">{% if schedule %}{{ dayline(schedule.window_start) }} · {{ s.scheduled }} {{ t(schedule.window_start) }}–{{ t(schedule.window_end) }}{% else %}{{ s.unscheduled }}{% endif %}{% if schedule and schedule.service %} · {{ schedule.service }}{% endif %}</div>
 
 <div style="height:18px"></div>
 
 {% if visit.state in ["open", "in_progress"] %}
 <div class="card hero quiet">
   <div class="mark" aria-hidden="true">&#9202;</div>
-  <h2>This visit is still in progress</h2>
-  <p>This record hasn't been closed and signed yet — what you see below is what has been received so far.</p>
+  <h2>{{ s.hero_open_h }}</h2>
+  <p>{{ s.hero_open_p }}</p>
 </div>
 {% elif visit.state == "unmatched" %}
 <div class="card hero warn">
   <div class="mark" aria-hidden="true">&#9888;</div>
-  <h2>Activity was recorded outside any scheduled visit</h2>
-  <p>The camera reported activity that doesn't match a scheduled window — flagged for a person to review.</p>
+  <h2>{{ s.hero_unmatched_h }}</h2>
+  <p>{{ s.hero_unmatched_p }}</p>
 </div>
 {% elif not visit.has_observations %}
 <div class="card hero quiet">
   <div class="mark" aria-hidden="true">&#9675;</div>
-  <h2>No activity was reported</h2>
-  <p>{% if coverage and coverage.fraction and coverage.fraction >= 0.999 %}The camera was checked {{ coverage.polls }} times across the whole window and reported nothing.
-  {% elif coverage and coverage.polls %}The camera was checked for {{ "%.0f"|format((coverage.fraction or 0)*100) }}% of the window and reported nothing{% if coverage.gaps %} — some of the window wasn't watched{% endif %}.
-  {% else %}The camera reported no activity during this window.{% endif %}
-  {% if coverage and coverage.interruptions %}{% set stopped = coverage.interruptions | selectattr("interrupts") | list %}{% if stopped %}{% set kind_words = {"device_offline": "it went offline", "device_removed": "it was removed", "subscription_deactivated": "its subscription ended", "subscription_expired": "its subscription ended", "app_integration_removed": "its link to this service was removed"} %}The camera itself reported it stopped reporting for part of that time ({{ kind_words.get(stopped[0].kind, stopped[0].kind.replace("_", " ")) }}) — that gap has a recorded cause.{% endif %}{% endif %}
-  No activity is not proof nobody came — it only means the camera reported nothing.</p>
+  <h2>{{ s.hero_none_h }}</h2>
+  <p>{% if coverage and coverage.fraction and coverage.fraction >= 0.999 %}{{ s.cov_full.format(polls=coverage.polls) }}
+  {% elif coverage and coverage.polls %}{{ s.cov_part.format(pct="%.0f"|format((coverage.fraction or 0)*100)) }}{% if coverage.gaps %}{{ s.cov_part_gap }}{% endif %}.
+  {% else %}{{ s.cov_none }}{% endif %}
+  {% if coverage and coverage.interruptions %}{% set stopped = coverage.interruptions | selectattr("interrupts") | list %}{% if stopped %}{{ s.cov_interrupt.format(reason=s.interrupt_kind.get(stopped[0].kind, stopped[0].kind.replace("_", " "))) }}{% endif %}{% endif %}
+  {{ s.none_not_proof }}</p>
 </div>
 {% else %}
 <div class="card hero ok">
   <div class="mark" aria-hidden="true">&#10003;</div>
-  <h2>Activity was observed</h2>
-  <p>The camera reported activity between {{ t(visit.arrived_at) }} and {{ t(visit.last_activity_at) }}{% if visit.observed_span_minutes is not none %} — about {{ "%.0f"|format(visit.observed_span_minutes) }} minutes between the first and last report{% endif %}.</p>
+  <h2>{{ s.hero_ok_h }}</h2>
+  <p>{{ s.hero_ok_p.format(a=t(visit.arrived_at), b=t(visit.last_activity_at)) }}{% if visit.observed_span_minutes is not none %}{{ s.hero_ok_span.format(m="%.0f"|format(visit.observed_span_minutes)) }}{% endif %}.</p>
 </div>
 {% endif %}
 
 <div class="card">
   <div class="facts">
     {% if visit.has_observations %}
-    <div class="fact"><div class="k">First observation</div><div class="v">{{ t(visit.arrived_at) }}</div></div>
-    <div class="fact"><div class="k">Last observation</div><div class="v">{{ t(visit.last_activity_at) }}</div></div>
+    <div class="fact"><div class="k">{{ s.k_first }}</div><div class="v">{{ t(visit.arrived_at) }}</div></div>
+    <div class="fact"><div class="k">{{ s.k_last }}</div><div class="v">{{ t(visit.last_activity_at) }}</div></div>
     {% endif %}
     {% if worker %}
-    <div class="fact"><div class="k">Scheduled worker</div><div class="v">{{ worker.name }}</div></div>
+    <div class="fact"><div class="k">{{ s.k_worker }}</div><div class="v">{{ worker.name }}</div></div>
     {% endif %}
     {% if visit.checked_in_at %}
-    <div class="fact"><div class="k">Worker check-in</div><div class="v">{{ t(visit.checked_in_at) }} — self-reported from their link; identity isn't verified by the check-in itself.</div></div>
+    <div class="fact"><div class="k">{{ s.k_checkin }}</div><div class="v">{{ t(visit.checked_in_at) }}{{ s.checkin_self }}</div></div>
     {% elif worker %}
-    <div class="fact"><div class="k">Worker check-in</div><div class="v">Not received</div></div>
+    <div class="fact"><div class="k">{{ s.k_checkin }}</div><div class="v">{{ s.checkin_none }}</div></div>
     {% endif %}
     {% if countersign %}
-    <div class="fact"><div class="k">Worker's account</div><div class="v">
-      {% if countersign.state == "acknowledged" %}Agrees with this record
-      {% elif countersign.state == "contested" %}<strong>Disputes this record</strong> — see their words below
-      {% elif countersign.state == "corrected" %}Submitted a correction — see their words below
-      {% elif countersign.state == "resolved" %}Concluded by a coordinator
-      {% elif countersign.state == "inconclusive" %}Responded inconclusively
-      {% else %}Not recorded yet{% endif %}
+    <div class="fact"><div class="k">{{ s.k_account }}</div><div class="v">
+      {% if countersign.state in ["contested", "corrected"] %}<strong>{{ s.counter.get(countersign.state) }}</strong>{{ s.counter_see }}
+      {% else %}{{ s.counter.get(countersign.state, s.counter.pending) }}{% endif %}
     </div></div>
     {% if countersign.resolution %}
-    {% set outcome_words = {"record_upheld": "the signed record stands", "account_accepted": "the worker's account was accepted", "inconclusive": "it could not be settled either way"} %}
-    <div class="fact"><div class="k">Conclusion</div><div class="v">A coordinator concluded that {{ outcome_words.get(countersign.resolution.outcome, countersign.resolution.outcome.replace('_',' ')) }} — signed by the coordinator. The worker's statement stays in the record unchanged.</div></div>
+    <div class="fact"><div class="k">{{ s.k_conclusion }}</div><div class="v">{{ s.conclusion.format(outcome=s.outcome.get(countersign.resolution.outcome, countersign.resolution.outcome.replace('_',' '))) }}</div></div>
     {% endif %}
     {% endif %}
     {% if receipt %}
-    <div class="fact"><div class="k">Integrity</div><div class="v">Signed record #{{ receipt.sequence }} — tampering after signing is detectable.{% if not via_link %} <a href="/visits/{{ visit.id }}">Full record</a>{% endif %}</div></div>
+    <div class="fact"><div class="k">{{ s.k_integrity }}</div><div class="v">{{ s.integrity.format(n=receipt.sequence) }}{% if not via_link %} <a href="/visits/{{ visit.id }}">{{ s.full_record }}</a>{% endif %}</div></div>
     {% endif %}
     {% if live_sessions %}
-    <div class="fact"><div class="k">Live view</div><div class="v">
-      {% for s in live_sessions %}The service opened a live view of the camera at {{ t(s.opened_at) }}.{% endfor %}
-      The record shows the stream was opened — it cannot show what a person saw through it.</div></div>
+    <div class="fact"><div class="k">{{ s.k_liveview }}</div><div class="v">
+      {% for ls in live_sessions %}{{ s.liveview_open.format(t=t(ls.opened_at)) }}{% endfor %}
+      {{ s.liveview_limit }}</div></div>
     {% endif %}
   </div>
 </div>
@@ -140,16 +137,16 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible{
 {% if worker_reviews and countersign and countersign.state in ["contested", "corrected", "inconclusive"] %}
 {% set lw = worker_reviews[-1].receipt.payload %}
 <div class="card">
-  <div class="small" style="color:var(--muted);margin-bottom:6px">In the worker's words</div>
+  <div class="small" style="color:var(--muted);margin-bottom:6px">{{ s.worker_words }}</div>
   <div class="quote">&ldquo;{{ lw.review.statement }}&rdquo;</div>
-  <div class="small" style="color:var(--muted)">— {{ lw.actor.name }}, appended to the signed record (never edited after)</div>
+  <div class="small" style="color:var(--muted)">{{ s.worker_attr.format(name=lw.actor.name) }}</div>
 </div>
 {% elif worker_reviews and countersign and countersign.state == "resolved" %}
 {% set lw = worker_reviews[-1].receipt.payload %}
 <div class="card">
-  <div class="small" style="color:var(--muted);margin-bottom:6px">In the worker's words — concluded, kept on record</div>
+  <div class="small" style="color:var(--muted);margin-bottom:6px">{{ s.worker_words_resolved }}</div>
   <div class="quote">&ldquo;{{ lw.review.statement }}&rdquo;</div>
-  <div class="small" style="color:var(--muted)">— {{ lw.actor.name }}{% if countersign.resolution %}; concluded by the coordinator: {{ countersign.resolution.statement }}{% endif %}</div>
+  <div class="small" style="color:var(--muted)">— {{ lw.actor.name }}{% if countersign.resolution %}{{ s.worker_attr_resolved.format(stmt=countersign.resolution.statement) }}{% endif %}</div>
 </div>
 {% endif %}
 
@@ -157,32 +154,32 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible{
 {% for hr in household_reviews %}
 {% set hp = hr.receipt.payload %}
 <div class="card">
-  <div class="small" style="color:var(--muted);margin-bottom:6px">In the household's words — {{ {"saw_someone": "someone was seen", "no_one_seen": "nobody was seen", "unsure": "not sure"}.get(hp.review.perception, hp.review.perception.replace('_', ' ')) }}</div>
+  <div class="small" style="color:var(--muted);margin-bottom:6px">{{ s.hh_words.format(perception=s.perception.get(hp.review.perception, hp.review.perception.replace('_', ' '))) }}</div>
   <div class="quote household">&ldquo;{{ hp.review.statement }}&rdquo;</div>
-  <div class="small" style="color:var(--muted)">— household account via the family link, appended to the signed record. Self-reported; it doesn't change the camera's observations or the worker's account.</div>
+  <div class="small" style="color:var(--muted)">{{ s.hh_attr }}</div>
 </div>
 {% endfor %}
 
 {% if via_link %}
 {% if statement_posted %}
-<div class="flash ok" role="status">Your account was added to the signed record — it now sits alongside the camera's observations and the worker's report. It can't be edited or removed.</div>
+<div class="flash ok" role="status">{{ s.flash_posted }}</div>
 {% elif statement_error %}
 <div class="flash err" role="alert">{{ statement_error }}</div>
 {% endif %}
 <div class="card">
-  <form method="post" action="{{ media_base }}/statement">
+  <form method="post" action="{{ media_base }}/statement?lang={{ s.lang }}">
     <fieldset>
-      <legend>What did you see or hear around this visit?</legend>
-      <label class="choice"><input type="radio" name="perception" value="saw_someone" required> <span><strong>I saw or heard someone there</strong> — a person at the door</span></label>
-      <label class="choice"><input type="radio" name="perception" value="no_one_seen"> <span><strong>I didn't see or hear anyone</strong> — as far as you know, nobody came</span></label>
-      <label class="choice"><input type="radio" name="perception" value="unsure"> <span><strong>Not sure</strong> — you can't say either way</span></label>
+      <legend>{{ s.form_legend }}</legend>
+      <label class="choice"><input type="radio" name="perception" value="saw_someone" required> <span><strong>{{ s.choice_saw }}</strong>{{ s.choice_saw_d }}</span></label>
+      <label class="choice"><input type="radio" name="perception" value="no_one_seen"> <span><strong>{{ s.choice_none }}</strong>{{ s.choice_none_d }}</span></label>
+      <label class="choice"><input type="radio" name="perception" value="unsure"> <span><strong>{{ s.choice_unsure }}</strong>{{ s.choice_unsure_d }}</span></label>
     </fieldset>
-    <label class="lab" for="hh-statement">In your own words</label>
+    <label class="lab" for="hh-statement">{{ s.own_words }}</label>
     <textarea id="hh-statement" name="statement" rows="4" maxlength="2000" required
-      placeholder="What you saw, heard, or know — e.g. &ldquo;I was home and the doorbell never rang&rdquo; or &ldquo;My neighbor saw someone at 10:15&rdquo;."></textarea>
+      placeholder="{{ s.own_words_ph }}"></textarea>
     <div style="height:12px"></div>
-    <button class="btn" type="submit">Add your account to the record</button>
-    <p class="note">This is appended to the signed record as <strong>the household's own account</strong> — like the worker's statement, it's self-reported. It isn't proof on its own and never changes what the camera reported; a coordinator weighs all three separately. You can come back to this page until the link expires.</p>
+    <button class="btn" type="submit">{{ s.submit }}</button>
+    <p class="note">{{ s.form_note }}</p>
   </form>
 </div>
 {% endif %}
@@ -196,22 +193,20 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible{
 {% set snaps = evidence|selectattr("kind","equalto","snapshot")|list %}
 {% if snaps %}
 <div class="card">
-  <div class="small" style="color:var(--muted);margin-bottom:10px">Camera snapshots</div>
+  <div class="small" style="color:var(--muted);margin-bottom:10px">{{ s.snap_title }}</div>
   <div class="snap">
   {% for e in snaps %}<figure>
-    <img src="{{ media_base }}/media/{{ e.media_path.replace('\\','/').split('/')[-1] }}" alt="Snapshot {{ t(e.at) }}">
-    <figcaption>{{ t(e.at) }} · file hash matches the signed record</figcaption>
+    <img src="{{ media_base }}/media/{{ e.media_path.replace('\\','/').split('/')[-1] }}" alt="{{ s.snap_alt.format(t=t(e.at)) }}">
+    <figcaption>{{ t(e.at) }} · {{ s.snap_cap }}</figcaption>
   </figure>{% endfor %}
   </div>
 </div>
 {% endif %}
 
 <div class="foot">
-  <strong>What this record can and can't tell you.</strong>
-  The camera's report, the schedule, the worker's account, and the household's account are kept separate — this page shows them side by side rather than picking one.
-  A signature proves the record hasn't been altered since it was signed — not identity, attendance, or time worked.
-  No reported activity is not proof nobody came.
-  {% if receipt %}<br><br>Anyone can check this record without trusting us: ask the service for the export pack and open it in a browser — it verifies itself.{% endif %}
+  <strong>{{ s.foot_h }}</strong>
+  {{ s.foot_p }}
+  {% if receipt %}<br><br>{{ s.foot_verify }}{% endif %}
 </div>
 
 </main>

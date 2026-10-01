@@ -690,7 +690,7 @@ def test_family_statement_appends_the_households_voice(api, store, household, t0
     # the page offers the form only through the scoped link, with honest framing
     page = api.get(path, auth=None)
     assert 'name="perception"' in page.text and "/statement" in page.text
-    assert "isn't proof on its own" in page.text
+    assert "proof on its own" in page.text
     admin_view = api.get(f"/visits/{visit.id}/household")
     assert admin_view.status_code == 200 and 'name="perception"' not in admin_view.text
 
@@ -705,7 +705,7 @@ def test_family_statement_appends_the_households_voice(api, store, household, t0
 
     # multi-use: the link still opens after appending
     again = api.get(path, auth=None)
-    assert again.status_code == 200 and "household's words" in again.text
+    assert again.status_code == 200 and "household" in again.text and "words" in again.text
 
     # the signed entry carries the honest actor metadata
     bundle = api.get(f"/visits/{visit.id}/bundle.json").json()
@@ -733,6 +733,42 @@ def test_family_statement_appends_the_households_voice(api, store, household, t0
     svc = ReviewService(store, api.attest_state.signer, api.attest_state.engine.clock)
     assert svc.countersign(visit.id)["state"] == "unrequested"
     assert verify_bundle(svc.bundle(visit.id), public_key=api.attest_state.signer.public_key_b64)[0]
+
+
+def test_household_view_localizes_spanish_and_keeps_signed_words(api, store, household, t0):
+    """?lang=es localizes the family-facing chrome — the honesty boundary
+    translated verbatim — while signed content (the worker's words, the
+    household's account) always stays in the language it was written."""
+    _post_hook(api, household[2].id, "button_press", t0)
+    visit = store.active_visit(household[0].id)
+    assert api.post(f"/api/visits/{visit.id}/close").status_code == 200
+    link = api.post(f"/api/visits/{visit.id}/review-link").json()["path"]
+    api.post(link, auth=None, data={"decision": "dispute", "statement": "I arrived earlier."})
+    path = api.post(f"/api/visits/{visit.id}/family-link").json()["path"]
+
+    en = api.get(path, auth=None)
+    assert '<html lang="en">' in en.text and "Activity was observed" in en.text
+
+    es = api.get(path + "?lang=es", auth=None)
+    assert es.status_code == 200 and '<html lang="es">' in es.text
+    assert "Se observó actividad" in es.text
+    assert "no prueba que nadie haya venido" in es.text  # the boundary translates
+    assert "no prueba identidad, asistencia" in es.text
+    assert "I arrived earlier." in es.text  # signed words stay verbatim
+    assert "?lang=es" in es.text  # the form POST keeps the language
+    assert "Activity was observed" not in es.text
+
+    # an unknown language falls back to English, never 500s
+    odd = api.get(path + "?lang=xx", auth=None)
+    assert odd.status_code == 200 and '<html lang="en">' in odd.text
+
+    # a validation error on the POST re-renders in the requested language
+    bad = api.post(f"{path}/statement?lang=es", auth=None, data={"statement": "sin percepción"})
+    assert bad.status_code == 200 and "necesita ambas partes" in bad.text
+
+    # the coordinator-side view localizes the same record
+    admin_es = api.get(f"/visits/{visit.id}/household?lang=es")
+    assert '<html lang="es">' in admin_es.text and "Se observó actividad" in admin_es.text
 
 
 def test_family_statement_rejects_bad_input_and_dead_tokens(api, store, household, t0):

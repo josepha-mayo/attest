@@ -27,10 +27,11 @@
   {% for tk in timeline.ticks %}<span>{{ tk.label }}</span>{% endfor %}
 </div>
 <div class="row" style="gap:16px;font-size:11px;color:var(--muted);margin:6px 2px 4px">
-  {% if timeline.window %}<span><span style="color:#8fa3c8">&#9632;</span> scheduled window</span>{% endif %}
-  {% if timeline.has_coverage %}<span><span style="color:#2f9e63">&#9632;</span> watched &nbsp;<span style="color:#9aa3b2">&#9632;</span> gap</span>{% endif %}
-  <span><span style="color:#5aa2e8">&#9679;</span> observation &nbsp;<span style="color:#e8b93e">&#9679;</span> self-reported check-in</span>
-  {% if timeline.has_live %}<span><span style="color:#22b8cf">&#9632;</span> live view — stream established, never viewership</span>{% endif %}
+  {% set _s = s|default({}, true) %}
+  {% if timeline.window %}<span><span style="color:#8fa3c8">&#9632;</span> {{ _s.tl_window|default("scheduled window") }}</span>{% endif %}
+  {% if timeline.has_coverage %}<span><span style="color:#2f9e63">&#9632;</span> {{ _s.tl_watched|default("watched") }} &nbsp;<span style="color:#9aa3b2">&#9632;</span> {{ _s.tl_gap|default("gap") }}</span>{% endif %}
+  <span><span style="color:#5aa2e8">&#9679;</span> {{ _s.tl_obs|default("observation") }} &nbsp;<span style="color:#e8b93e">&#9679;</span> {{ _s.tl_checkin|default("self-reported check-in") }}</span>
+  {% if timeline.has_live %}<span><span style="color:#22b8cf">&#9632;</span> {{ _s.tl_live|default("live view — stream established, never viewership") }}</span>{% endif %}
 </div>
 {% endif %}
 {% endif %}

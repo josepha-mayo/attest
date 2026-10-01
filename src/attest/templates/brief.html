@@ -48,7 +48,7 @@ svg { break-inside:avoid }
 </head>
 <body>
 {% macro t(dt) %}{{ (dt|iso).astimezone(tz).strftime("%I:%M %p").lstrip("0") if dt else "—" }}{% endmacro %}
-<div class="printbar"><button onclick="window.print()">Print / save as PDF</button></div>
+<div class="printbar" style="justify-content:space-between"><a href="/visits/{{ visit.id }}" style="font-size:13px">&lsaquo; back to the record</a><button onclick="window.print()">Print / save as PDF</button></div>
 <main class="sheet">
 <div class="brand"><span class="logo">Attest &mdash; visit record brief</span><span class="gen">generated {{ generated_at.astimezone(tz).strftime("%Y-%m-%d %H:%M %Z") }}</span></div>
 
