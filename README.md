@@ -126,7 +126,7 @@ For coordinated demos, use `attest replay`, not the standalone `ring-sandbox pla
 
 Multi-day demos: `attest replay home_aide_visit --days 3 --no-show-day 1 --worker-review dispute` produces a week-style dashboard — two observed visits, one honest `no_observation`, and a signed worker dispute — in one command. The replay clock only ever simulates the past, so `--days N` starts N days back.
 
-Story mode: `--days 7 --story observed,late,blackout,no_show,early_out,unmatched,liveview` cycles named day-patterns — on-time, late arrival (+25 min), a camera blackout mid-visit, a no-observation day, departure-unconfirmed, out-of-window activity that produces an unmatched visit *and* a lapsed schedule, and a coordinator live-view session — yielding a realistic mixed-outcome week in one command.
+Story mode: `--days 7 --story observed,late,blackout,no_show,early_out,unmatched,sub_lapse,liveview` cycles named day-patterns — on-time, late arrival (+25 min), a camera blackout mid-visit, a no-observation day, departure-unconfirmed, out-of-window activity that produces an unmatched visit *and* a lapsed schedule, a mid-visit Ring plan lapse whose silence the signed coverage attributes to `subscription_deactivated` (a billing fact, not a device fault), and a coordinator live-view session — yielding a realistic mixed-outcome week in one command.
 
 ## Reviewing and correcting a record
 

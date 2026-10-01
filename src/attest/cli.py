@@ -265,6 +265,7 @@ def _replay(args: argparse.Namespace) -> None:
             "no_show",
             "unmatched",
             "blackout",
+            "sub_lapse",
             "liveview",
         }
         patterns = [p.strip() for p in args.story.split(",") if p.strip()] if args.story else []
@@ -326,6 +327,12 @@ def _replay(args: argparse.Namespace) -> None:
                     "gap explained by lifecycle events",
                     flush=True,
                 )
+            elif pattern == "sub_lapse":
+                print(
+                    f"Day {day}: the Ring plan lapses mid-visit — observation stops "
+                    "being delivered; the lifecycle webhook is the signed explanation",
+                    flush=True,
+                )
             elif pattern == "liveview":
                 print(
                     f"Day {day}: coordinator opens a live view mid-visit — "
@@ -354,6 +361,16 @@ def _replay(args: argparse.Namespace) -> None:
                 off = dataclasses.replace(steps[0], type="device_offline", sub_type=None, offset_s=1500)
                 on = dataclasses.replace(steps[0], type="device_online", sub_type=None, offset_s=6000)
                 steps = sorted([*steps, off, on], key=lambda s: s.offset_s)
+            elif pattern == "sub_lapse":
+                # The plan lapses mid-visit: Ring stops delivering observation
+                # events for the device, so the story drops them — exactly what
+                # entitlement suppression produces upstream. The lifecycle
+                # webhook still arrives and journals as the coverage cause.
+                steps = [s for s in steps if s.offset_s < 1800]
+                lapse = dataclasses.replace(
+                    steps[0], type="subscription_deactivated", sub_type=None, offset_s=2100
+                )
+                steps = sorted([*steps, lapse], key=lambda s: s.offset_s)
             elif pattern == "unmatched":
                 shift = (args.window_minutes + settings.arrival_grace_minutes + 10) * 60
                 steps = [dataclasses.replace(s, offset_s=s.offset_s + shift) for s in steps]
@@ -2123,7 +2140,8 @@ def main(argv: list[str] | None = None) -> None:
                 default=None,
                 metavar="PATTERNS",
                 help="comma list cycled across --days: observed,late,blackout,early_out,no_show,"
-                "unmatched,liveview (e.g. --days 5 --story observed,late,no_show,early_out,observed)",
+                "unmatched,sub_lapse,liveview "
+                "(e.g. --days 5 --story observed,late,no_show,early_out,observed)",
             )
         s.set_defaults(fn=fn)
 

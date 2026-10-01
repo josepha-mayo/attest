@@ -425,6 +425,66 @@ def test_replay_blackout_day_signs_the_lifecycle_explanation(tmp_path):
                 assert "device offline" in page
 
 
+def test_replay_sub_lapse_day_signs_the_entitlement_explanation(tmp_path):
+    """The 'sub_lapse' story day drops the plan mid-visit: arrival is observed,
+    departure never is — and the signed coverage must carry the
+    subscription_deactivated row so the quiet span reads as an entitlement
+    lapse (a billing fact), not a device fault or worker sneak-out."""
+    token = secrets.token_urlsafe(32)
+    with serve(sandbox_app()) as ring_url:
+        settings = Settings(
+            _env_file=None,
+            admin_token=token,
+            replay_mode=True,
+            data_dir=tmp_path,
+            ring_base_url=ring_url,
+            ring_webhook_key=WEBHOOK_KEY,
+            timezone="UTC",
+            summarizer="template",
+        )
+        app = create_app(settings)
+        with serve(app) as app_url:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "attest.cli",
+                    "replay",
+                    "home_aide_visit",
+                    "--days",
+                    "1",
+                    "--story",
+                    "sub_lapse",
+                    "--speed",
+                    "100000",
+                    "--ring-url",
+                    ring_url,
+                    "--public-url",
+                    app_url,
+                ],
+                env={
+                    **os.environ,
+                    "ATTEST_ADMIN_TOKEN": token,
+                    "ATTEST_REPLAY_MODE": "true",
+                    "ATTEST_RING_BASE_URL": ring_url,
+                    "ATTEST_RING_WEBHOOK_KEY": WEBHOOK_KEY,
+                    "ATTEST_SUMMARIZER": "template",
+                },
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            assert result.returncode == 0, result.stdout + result.stderr
+            assert "plan lapses mid-visit" in result.stdout
+            with httpx.Client(base_url=app_url, auth=("admin", token)) as client:
+                receipts = [Receipt.model_validate(r) for r in client.get("/receipts.json").json()]
+                assert len(receipts) == 1
+                assert verify_chain(receipts, public_key=app.state.signer.public_key_b64)[0]
+                cov = receipts[0].payload["history_poll_coverage"]
+                kinds = [i["kind"] for i in cov["interruptions"]]
+                assert kinds == ["subscription_deactivated"], cov
+
+
 def test_verify_live_sweep_reports_every_surface():
     """The evidence command exercises each official surface against the API —
     account, integration, subscriptions, devices, history, media, and the
