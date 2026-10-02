@@ -1614,7 +1614,8 @@ def _explain(args: argparse.Namespace) -> None:
                     if rv.get("kind") == "household_account"
                     else rv.get("decision", "statement")
                 )
-                print(f"  rev {r.revision}: {label} — {actor.get('name', '?')} ({actor.get('role')})")
+                reason = f" — reason {rv['reason_code']} (stated)" if rv.get("reason_code") else ""
+                print(f"  rev {r.revision}: {label} — {actor.get('name', '?')} ({actor.get('role')}){reason}")
             status = reviews.countersign(visit.id)
             print(f"Derived stance: {status['state']} — {status['detail']}")
         attestations = [
@@ -1704,6 +1705,8 @@ def _explain_report(store, visit, site, schedule, evidence, receipt, reviews) ->
                     "outcome": r.receipt.payload["review"].get("outcome"),
                     "decision": r.receipt.payload["review"].get("decision"),
                     "perception": r.receipt.payload["review"].get("perception"),
+                    "reason_code": r.receipt.payload["review"].get("reason_code"),
+                    "reason_basis": r.receipt.payload["review"].get("reason_basis"),
                     "payload_hash": r.receipt.payload_hash,
                 }
                 for r in bundle.reviews

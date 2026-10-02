@@ -204,7 +204,9 @@ def run(store: Store, media_root: Path | None = None) -> dict:
         review_id, visit_id, body = row
         forged = json.loads(body)
         rv = forged["payload"].get("review", {})
-        rv["reason_code"] = "participant_refused" if rv.get("reason_code") != "participant_refused" else "other"
+        rv["reason_code"] = (
+            "participant_refused" if rv.get("reason_code") != "participant_refused" else "other"
+        )
         store._conn.execute("UPDATE reviews SET body=? WHERE id=?", (json.dumps(forged), review_id))
         journal = store.verify_journal()
         j_hit = any("content changed" in m for m in journal["mismatches"])
