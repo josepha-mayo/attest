@@ -186,6 +186,49 @@ def run(store: Store, media_root: Path | None = None) -> dict:
         _attempt(store, "retimestamp a live-view session (move human attention)", retimestamp_liveview)
     )
 
+    def forge_reason() -> tuple[bool, str]:
+        """Rewrite a signed resolution's coded reason post-signature — the
+        journal flags the row edit AND the chain signature fails, because the
+        code rides inside the signed payload."""
+        row = None
+        for r in store._conn.execute(
+            "SELECT id, visit_id, body FROM reviews ORDER BY revision DESC"
+        ).fetchall():
+            parsed = json.loads(r[2])
+            rv = parsed.get("payload", {}).get("review")
+            if isinstance(rv, dict) and rv.get("kind") == "resolution":
+                row = (r[0], r[1], r[2])
+                break
+        if not row:
+            return None, "no signed resolution to forge"
+        review_id, visit_id, body = row
+        forged = json.loads(body)
+        rv = forged["payload"].get("review", {})
+        rv["reason_code"] = "participant_refused" if rv.get("reason_code") != "participant_refused" else "other"
+        store._conn.execute("UPDATE reviews SET body=? WHERE id=?", (json.dumps(forged), review_id))
+        journal = store.verify_journal()
+        j_hit = any("content changed" in m for m in journal["mismatches"])
+        from .models import ReviewEntry
+        from .reviews import ReviewBundle, verify_bundle
+
+        original = store.receipt_for_visit(visit_id)
+        entries = [
+            ReviewEntry.model_validate_json(r[0])
+            for r in store._conn.execute(
+                "SELECT body FROM reviews WHERE visit_id=? ORDER BY revision", (visit_id,)
+            )
+        ]
+        chain_ok, _ = verify_bundle(
+            ReviewBundle(original=original, reviews=entries),
+            public_key=original.public_key,
+        )
+        return (j_hit or not chain_ok), (
+            f"journal: {'flagged' if j_hit else 'missed'}; "
+            f"bundle verify: {'refused' if not chain_ok else 'MISSED the forged code'}"
+        )
+
+    results.append(_attempt(store, "forge a resolution's reason code post-signature", forge_reason))
+
     def swap_media() -> tuple[bool, str]:
         """Overwrite a media file's bytes post-signing — the digest check at
         serve time must refuse it. The file system isn't transactional, so the

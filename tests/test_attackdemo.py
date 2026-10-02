@@ -28,6 +28,14 @@ def seeded(engine, store, household, schedule, t0):
     row, _answer = engine.open_liveview(household[0].id, "v=0\r\no=- 0 0 IN IP4 0.0.0.0\r\ns=x\r\nt=0 0\r\n")
     engine.close_liveview(household[0].id, row.id)
     engine.close_for_review(visit.id)
+    # A signed resolution too — the reason-code forge attack needs one.
+    from attest.models import ResolutionInput
+    from attest.reviews import ReviewService
+
+    ReviewService(store, engine.signer, engine.clock).resolve(
+        visit.id,
+        ResolutionInput(outcome="inconclusive", statement="Unclear.", reason_code="device_fault"),
+    )
     return visit
 
 

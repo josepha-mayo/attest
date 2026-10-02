@@ -750,8 +750,10 @@ function statementsHTML(js){
       :rv.kind==="household_account"
       ?`household account: ${String(rv.perception||"").replaceAll("_"," ")}`
       :(rv.decision||"statement");
+    const reason=rv.reason_code
+      ?` <small class="muted">reason <code>${esc(rv.reason_code)}</code>${rv.reason_label?` — ${esc(rv.reason_label)}`:""} (stated, not verified)</small>`:"";
     out.push(`<div class="stmt"><strong>${esc(label)}</strong> by ${who}${note}:`
-      +` ${esc(rv.statement||"")}`+window+`</div>`);
+      +` ${esc(rv.statement||"")}`+window+reason+`</div>`);
   }
   return out.join("");
 }
