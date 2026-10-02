@@ -43,11 +43,13 @@ def household_conflict(reviews, visit) -> bool:
     entries = [
         r
         for r in reviews.bundle(visit.id).reviews
-        if r.receipt.payload.get("actor", {}).get("role") == "household"
+        if isinstance(r.receipt.payload.get("actor"), dict)
+        and r.receipt.payload["actor"].get("role") == "household"
     ]
     if not entries:
         return False
-    perception = entries[-1].receipt.payload.get("review", {}).get("perception")
+    rv = entries[-1].receipt.payload.get("review")
+    perception = rv.get("perception") if isinstance(rv, dict) else None
     return (perception == "no_one_seen" and visit.has_observations) or (
         perception == "saw_someone" and not visit.has_observations
     )

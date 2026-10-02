@@ -188,3 +188,37 @@ def test_maybe_period_digest_runs_on_cadence(engine, store, household):
     seeded = engine.maybe_period_digest(other, 7 * 86400)
     assert seeded is not None
     assert seeded.payload["interval"]["end"] >= seeded.payload["interval"]["start"]
+
+
+def test_digest_reopened_record_is_not_counted_resolved(engine, store, household, schedule, t0):
+    """A worker statement appended after the resolution re-opens the record —
+    the digest must derive 'resolved' by chain revision (like every other
+    surface), so the post-resolution statement drops the count back to zero."""
+    from ring_sandbox import WebhookEvent, webhooks
+
+    from attest.models import ResolutionInput, ReviewInput
+    from attest.reviews import ReviewService
+
+    site = household[0]
+    event = WebhookEvent.model_validate(
+        webhooks.build_event(event_type="button_press", device_id=household[2].id, occurred_at=t0)
+    )
+    visit = engine.ingest(event).visit
+    engine.close_for_review(visit.id)
+    service = ReviewService(store, engine.signer, engine.clock)
+    service.worker_review(
+        service.issue_worker_link(visit.id), ReviewInput(decision="dispute", statement="Wrong times.")
+    )
+    service.resolve(
+        visit.id, ResolutionInput(outcome="inconclusive", statement="Unclear.", reason_code="device_fault")
+    )
+    # re-open: a newer statement post-dates the resolution in chain order
+    service.worker_review(
+        service.issue_worker_link(visit.id), ReviewInput(decision="correction", statement="Addendum.")
+    )
+
+    receipt = engine.issue_period_digest(site, t0 - timedelta(hours=1), t0 + timedelta(hours=4))
+    counts = receipt.payload["counts"]
+    assert counts["coordinator_resolutions"] == 1  # the signed fact remains
+    assert counts["records_resolved"] == 0  # but the record is open again
+    assert counts["resolution_reasons"] == {}  # re-opened reasons don't aggregate

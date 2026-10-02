@@ -937,12 +937,18 @@ class VisitEngine:
             if v.arrived_at is not None and start <= v.arrived_at <= end
         ]
         entries = [e for v in visits for e in self.store.reviews_for(v.id)]
-        worker_entries = [e for e in entries if e.receipt.payload.get("actor", {}).get("role") == "worker"]
-        household_entries = [
-            e for e in entries if e.receipt.payload.get("actor", {}).get("role") == "household"
-        ]
+
+        def _role(e) -> str:
+            a = e.receipt.payload.get("actor")
+            return a.get("role", "") if isinstance(a, dict) else ""
+
+        worker_entries = [e for e in entries if _role(e) == "worker"]
+        household_entries = [e for e in entries if _role(e) == "household"]
         resolution_entries = [
-            e for e in entries if e.receipt.payload.get("review", {}).get("kind") == "resolution"
+            e
+            for e in entries
+            if isinstance(e.receipt.payload.get("review"), dict)
+            and e.receipt.payload["review"].get("kind") == "resolution"
         ]
         # The dispute loop closing is itself a ledger metric: how many records
         # carry a signed conclusion, and how long first-worker-statement ->
@@ -954,25 +960,26 @@ class VisitEngine:
         for v in visits:
             v_entries = self.store.reviews_for(v.id)
             worker_ats = [
-                e.receipt.payload.get("statement_received_at")
-                for e in v_entries
-                if e.receipt.payload.get("actor", {}).get("role") == "worker"
+                e.receipt.payload.get("statement_received_at") for e in v_entries if _role(e) == "worker"
             ]
             res_entries = [
-                e for e in v_entries if e.receipt.payload.get("review", {}).get("kind") == "resolution"
+                e
+                for e in v_entries
+                if isinstance(e.receipt.payload.get("review"), dict)
+                and e.receipt.payload["review"].get("kind") == "resolution"
             ]
             res_ats = [e.receipt.payload.get("statement_received_at") for e in res_entries]
             if not res_ats or res_ats[-1] is None:
                 continue
             try:
                 latest_res = datetime.fromisoformat(res_ats[-1])
-                latest_worker = (
-                    datetime.fromisoformat(worker_ats[-1]) if worker_ats and worker_ats[-1] else None
-                )
                 first_worker = datetime.fromisoformat(worker_ats[0]) if worker_ats and worker_ats[0] else None
             except (TypeError, ValueError):
                 continue  # corrupt journal-adjacent data — omit rather than sign garbage
-            if latest_worker and latest_worker > latest_res:
+            # Re-opened uses the same derivation as countersign_status — chain
+            # revision order, not wall-clock stamps that can tie or step back.
+            worker_entries_v = [e for e in v_entries if _role(e) == "worker"]
+            if worker_entries_v and worker_entries_v[-1].revision > res_entries[-1].revision:
                 continue  # a later worker statement re-opened the record
             resolved_records += 1
             reason = res_entries[-1].receipt.payload["review"].get("reason_code")
@@ -991,7 +998,10 @@ class VisitEngine:
             "visits_unmatched": sum(1 for v in visits if not v.schedule_id),
             "worker_statements": len(worker_entries),
             "worker_disputes": sum(
-                1 for e in worker_entries if e.receipt.payload.get("review", {}).get("decision") == "dispute"
+                1
+                for e in worker_entries
+                if isinstance(e.receipt.payload.get("review"), dict)
+                and e.receipt.payload["review"].get("decision") == "dispute"
             ),
             "household_statements": len(household_entries),
             "coordinator_statements": len(entries)

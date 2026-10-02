@@ -294,10 +294,12 @@ def _reason_known(v: str | None) -> str | None:
 
 
 # A coded exception reason — constrained to the fixed taxonomy on every
-# surface that accepts one. Blank form posts normalize to None.
+# surface that accepts one. Blank/whitespace form posts normalize to None
+# (runs before str_strip_whitespace, so strip here too); non-string values
+# still type-error normally.
 ReasonCode = Annotated[
     str | None,
-    BeforeValidator(lambda v: v or None),
+    BeforeValidator(lambda v: (v.strip() or None) if isinstance(v, str) else v),
     AfterValidator(_reason_known),
 ]
 

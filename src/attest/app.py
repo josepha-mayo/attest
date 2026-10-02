@@ -1278,8 +1278,9 @@ def create_app(
             bundle = reviews.bundle(v.id)
             if bundle:
                 for entry in reversed(bundle.reviews):
-                    if entry.receipt.payload.get("review", {}).get("kind") == "resolution":
-                        resolutions[v.id] = entry.receipt.payload["review"]
+                    rv = entry.receipt.payload.get("review")
+                    if isinstance(rv, dict) and rv.get("kind") == "resolution":
+                        resolutions[v.id] = rv
                         break
         return Response(
             content=visits_csv(site, visits, schedules, workers, review_states, receipt_hashes, resolutions),

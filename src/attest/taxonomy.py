@@ -65,7 +65,7 @@ def suggest(flag_codes: list[str]) -> list[str]:
     seen: list[str] = []
     for code in flag_codes:
         for c in _FLAG_SUGGESTIONS.get(code, []):
-            if c not in seen:
+            if c in REASON_CODES and c not in seen:
                 seen.append(c)
     return seen + [c for c in REASON_CODES if c not in seen]
 

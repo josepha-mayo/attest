@@ -201,11 +201,13 @@ class ReviewService:
         """Append the coordinator's terminal conclusion. Signed and append-only:
         the worker's stance stays in the chain; ``countersign_status`` derives
         ``resolved`` while this post-dates the latest worker statement."""
-        bundle = self._checked_bundle(visit_id)
         # Idempotent re-submit: if the chain tip is already this exact
         # resolution (double-click, retry, refreshed form), return it rather
         # than chaining a byte-identical duplicate. A *different* outcome or
         # statement appends normally — a changed mind is legitimate history.
+        # Runs on the unverified bundle so a retry on a full chain returns the
+        # existing entry instead of hitting the 500-review cap.
+        bundle = self.bundle(visit_id)
         if bundle.reviews:
             tip = bundle.reviews[-1].receipt.payload
             review = tip.get("review", {})
@@ -218,6 +220,7 @@ class ReviewService:
                 and review.get("reason_code") == data.reason_code
             ):
                 return bundle.reviews[-1]
+        bundle = self._checked_bundle(visit_id)
         previous = bundle.reviews[-1].receipt.payload_hash if bundle.reviews else bundle.original.payload_hash
         signed = self.signer.issue(
             visit_id=visit_id,
