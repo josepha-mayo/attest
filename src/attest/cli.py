@@ -775,7 +775,9 @@ def _demo(args: argparse.Namespace) -> None:
     print("  2. Open the contested visit from 'Needs review' — the worker's signed", flush=True)
     print("     dispute sits atop the evidence, and Source divergence shows their", flush=True)
     print("     check-in landing ~65 min after the camera saw them. 'Conclude the", flush=True)
-    print("     record' signs the coordinator's call.", flush=True)
+    print("     record' signs the coordinator's call — pick a coded reason too:", flush=True)
+    print("     EVV-style exception codes classify the stated explanation, never", flush=True)
+    print("     a verified cause, and they aggregate on the signed period digest.", flush=True)
     print("  3. Download a pack, then 'Verify a pack in-browser' on the dashboard —", flush=True)
     print("     drop the .zip; it self-verifies, no install, no unzip. Site packs", flush=True)
     print("     carry the signed coverage cert: 'was anyone watching?' In the", flush=True)
@@ -813,8 +815,8 @@ def _demo(args: argparse.Namespace) -> None:
             f"  Also: {resolved_visit} is already concluded 'inconclusive' — the",
             flush=True,
         )
-        print("  terminal state of the dispute loop (resolved visits leave Needs", flush=True)
-        print("  review; find it under Records). ", flush=True)
+        print("  terminal state of the dispute loop, coded no_electronic_confirmation", flush=True)
+        print("  (resolved visits leave Needs review; find it under Records). ", flush=True)
     print("  '/household' on any visit is the family's view —", flush=True)
     print("  plain language, glanceable; 'Share the household view' issues a scoped", flush=True)
     print("  link (/family/…) with a QR code for the door-step scan, same as", flush=True)
