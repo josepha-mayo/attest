@@ -67,6 +67,14 @@ against a live store:
 | Forge a `redaction.json` naming undelivered digests | Fails closed — withheld digests must match signed evidence |
 | Swap issuer keys in a pack | Public key is inside every signed payload and the manifest; compare out-of-band |
 | Splice markup/script into a tampered pack's narrative fields | Every interpolated field is entity-escaped, and a bundle that fails signature verification renders only its FAILED verdict row — statements, timeline, and the plain-language view never render untrusted content |
+| Corrupt a stored row's body in place (crash the read surfaces into silence) | `StoreCorrupt` fails every read closed — the CLI exits with one error line and browser surfaces render a styled 500 pointing at `/integrity`; `verify_journal`'s body-hash + index re-derivation names the divergent row. No surface silently skips the row (that would hide evidence) |
+| Corrupt a `settings` body to break boot/status | Same `StoreCorrupt` path — a non-dict or unparseable settings row is corruption, not a default |
+| Enable KMS on a deployed plaintext key to rotate the issuer silently | The existing PEM is wrapped in place (same identity); the wrapped record lands before the plaintext is removed, and unreachable KMS fails before anything is touched — key identity can never change without a signed-chain break that `verify_chain` reports |
+| Flood the inbox with far-future event timestamps to exhaust its retry budget | `NotYetAdmissible` reschedules to the admissibility instant — early arrivals never dead-letter, and terminal `failed` still requires five real processing failures |
+| Point `attest journal`/`status` at a missing or empty runtime to print a false "intact" verdict | Both refuse before opening — SQLite must not mint an empty store on a verify path |
+| Submit a coverage/digest request with an inverted window to mint a vacuous signed claim | Refused (`end <= start` raises before signing) — the deployment's key never signs an empty claim |
+| Truncate signed coverage payloads via the store's 500-row listing cap | Signed reads pass `limit=None` — a cap that dropped later "restored" events would over-explain gaps |
+| Feed a malformed bundle member to `attest diff` to mask other anomalies | Malformed members are flagged per-record; the diff still reports every other anomaly |
 
 Two paths need an **external anchor** to be provable: truncating the journal
 before the earliest pin, and wholesale replacement of store + receipts + key
@@ -117,6 +125,10 @@ These are architectural boundaries, not missing features:
 
 - `ATTEST_KMS_KEY_ID` envelope-encrypts the Ed25519 key: the on-disk PEM is
   AES-256-GCM wrapped under a KMS data key with a fixed encryption context.
+  Enabling KMS on a deployment whose plaintext `attest-ed25519.key` already
+  exists wraps that same key — issuer identity is preserved, the plaintext
+  PEM is removed only after the wrapped record is written, and a KMS outage
+  fails before either file is touched.
   Unwrapping requires a live `Decrypt` — every unwrap is a CloudTrail event.
   A KMS path that cannot reach KMS fails loudly rather than downgrading to a
   plaintext key.

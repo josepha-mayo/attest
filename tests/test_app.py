@@ -1498,3 +1498,23 @@ def test_resolve_rejects_unknown_reason_code(api):
         json={"outcome": "record_upheld", "statement": "x", "reason_code": "vibes"},
     )
     assert r.status_code == 422
+
+
+def test_security_headers_on_every_response(api):
+    """Every response — HTML or API — carries the privacy/security header set.
+    CSP is self-only with unsafe-inline script/style (the shipped templates
+    rely on inline handlers); its job is blocking exfiltration and framing."""
+    r = api.get("/integrity")  # admin-authed JSON/HTML surface
+    for h in (
+        "cache-control",
+        "referrer-policy",
+        "x-content-type-options",
+        "x-frame-options",
+        "content-security-policy",
+    ):
+        assert r.headers.get(h), f"missing {h}"
+    csp = r.headers["content-security-policy"]
+    assert "default-src 'none'" in csp
+    assert "frame-ancestors 'none'" in csp
+    assert "form-action 'self'" in csp
+    assert "connect-src 'self'" in csp  # an injected string can't phone home

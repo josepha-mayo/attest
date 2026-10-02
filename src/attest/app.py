@@ -254,6 +254,16 @@ def create_app(
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
+        # CSP: everything self-only — no external fonts/CDNs exist. Script and
+        # style are 'unsafe-inline' because the shipped templates use inline
+        # blocks and onclick handlers; the directive's job here is to keep an
+        # injected string from phoning home (connect-src 'self'), framing the
+        # console (frame-ancestors), or exfiltrating a form (form-action).
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+            "img-src 'self' data:; connect-src 'self'; font-src 'self'; "
+            "form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+        )
         return response
 
     @app.middleware("http")
