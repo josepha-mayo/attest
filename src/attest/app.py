@@ -1429,6 +1429,10 @@ def create_app(
             "original": p,
             "token": token,
             "done": False,
+            "reason_options": [
+                (code, taxonomy.REASON_CODES[code])
+                for code in taxonomy.suggest(f["code"] for f in p.get("flags", []))
+            ],
             "timeline": timeline_strip(
                 schedule=p.get("schedule"),
                 evidence=p.get("evidence") or [],
@@ -1452,6 +1456,7 @@ def create_app(
         statement: str = Form(...),
         reported_start: str = Form(""),
         reported_end: str = Form(""),
+        reason_code: str = Form(""),
     ):
         try:
             body = ReviewInput(
@@ -1459,6 +1464,7 @@ def create_app(
                 statement=statement,
                 reported_start=reported_start or None,
                 reported_end=reported_end or None,
+                reason_code=reason_code or None,
             )
         except ValueError:
             ctx = await _worker_ctx(token)
@@ -1478,6 +1484,7 @@ def create_app(
                     "statement": statement,
                     "reported_start": reported_start,
                     "reported_end": reported_end,
+                    "reason_code": reason_code,
                 },
             )
             resp.status_code = 422
@@ -1504,6 +1511,7 @@ def create_app(
                         "statement": statement,
                         "reported_start": reported_start,
                         "reported_end": reported_end,
+                        "reason_code": reason_code,
                     },
                 )
                 resp.status_code = 409

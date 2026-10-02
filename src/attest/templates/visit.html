@@ -165,6 +165,7 @@ document.getElementById('close-record').onclick = async () => {
 <strong>Revision {{ review.revision }}: household account — {{ facts.review.perception.replace('_', ' ') }} — {{ facts.actor.name }} ({{ facts.actor.role }})</strong>
 {% else %}
 <strong>Revision {{ review.revision }}: {{ facts.review.decision }} — {{ facts.actor.name }} ({{ facts.actor.role }})</strong>
+{% if facts.review.reason_code %}<div class="small muted">Self-reported reason <code>{{ facts.review.reason_code }}</code>{% if facts.review.reason_label %} — {{ facts.review.reason_label }}{% endif %}. Stated by the {{ facts.actor.role }}, not verified.</div>{% endif %}
 {% endif %}
 <p style="white-space:pre-wrap">{{ facts.review.statement }}</p>
 {% if facts.review.reported_start %}<p class="small">Reported interval: {{ t(facts.review.reported_start) }} to {{ t(facts.review.reported_end) }}</p>{% endif %}

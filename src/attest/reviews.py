@@ -157,6 +157,12 @@ class ReviewService:
     def _append(self, visit_id: str, data: ReviewInput, actor: dict) -> ReviewEntry:
         bundle = self._checked_bundle(visit_id)
         previous = bundle.reviews[-1].receipt.payload_hash if bundle.reviews else bundle.original.payload_hash
+        review = data.model_dump(mode="json")
+        if review.get("reason_code"):
+            review["reason_label"] = taxonomy.label(review["reason_code"])
+            # a worker/coordinator statement's code is self-reported — distinct
+            # basis from the terminal resolution's coordinator classification
+            review["reason_basis"] = f"{actor['role']}_stated_explanation_not_verified_cause"
         signed = self.signer.issue(
             visit_id=visit_id,
             sequence=len(bundle.reviews) + 1,
@@ -165,7 +171,7 @@ class ReviewService:
                 "record_type": "review",
                 "original_receipt": {"id": bundle.original.id, "hash": bundle.original.payload_hash},
                 "actor": actor,
-                "review": data.model_dump(mode="json"),
+                "review": review,
                 "statement_received_at": utcnow().isoformat(),
                 "effective_at": self.clock.now().isoformat(),
                 "clock": self.clock.snapshot(),

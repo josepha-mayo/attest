@@ -309,3 +309,22 @@ def test_taxonomy_suggestions_cover_every_visit_flag():
         assert len(codes) == len(REASON_CODES)  # suggestions then the rest
     # deduped — overlapping suggestions collapse
     assert len(suggest(["no_observation", "observation_gap"])) == len(REASON_CODES)
+
+
+def test_worker_statement_reason_code_is_self_reported(review_case):
+    """A worker's coded reason signs in with a self-reported basis — the same
+    taxonomy, a different claim class than a coordinator's resolution code."""
+    service, visit_id = review_case
+    token = service.issue_worker_link(visit_id)
+    entry = service.worker_review(
+        token,
+        ReviewInput(
+            decision="dispute",
+            statement="The app wouldn't open the check-in screen.",
+            reason_code="mobile_or_network_issue",
+        ),
+    )
+    review = entry.receipt.payload["review"]
+    assert review["reason_code"] == "mobile_or_network_issue"
+    assert review["reason_basis"] == "worker_stated_explanation_not_verified_cause"
+    assert verify_bundle(service.bundle(visit_id), public_key=service.signer.public_key_b64)[0]

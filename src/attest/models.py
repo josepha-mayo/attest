@@ -6,9 +6,17 @@ import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AfterValidator,
+    AwareDatetime,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    model_validator,
+)
 
 
 def _id(prefix: str) -> str:
@@ -277,12 +285,32 @@ class Receipt(BaseModel):
     issued_at: datetime = Field(default_factory=utcnow)
 
 
+def _reason_known(v: str | None) -> str | None:
+    from .taxonomy import REASON_CODES
+
+    if v is not None and v not in REASON_CODES:
+        raise ValueError(f"unknown reason code {v!r}")
+    return v
+
+
+# A coded exception reason — constrained to the fixed taxonomy on every
+# surface that accepts one. Blank form posts normalize to None.
+ReasonCode = Annotated[
+    str | None,
+    BeforeValidator(lambda v: v or None),
+    AfterValidator(_reason_known),
+]
+
+
 class ReviewInput(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     decision: Literal["confirm", "dispute", "correction", "inconclusive"]
     statement: str = Field(min_length=1, max_length=2000)
     reported_start: AwareDatetime | None = None
     reported_end: AwareDatetime | None = None
+    # The submitter's own coded explanation of the exception — self-reported,
+    # so the payload marks the basis distinctly from a coordinator's reason.
+    reason_code: ReasonCode = None
 
     @model_validator(mode="after")
     def reported_window(self):
@@ -319,21 +347,7 @@ class ResolutionInput(BaseModel):
     # The coded reason behind the conclusion (taxonomy.REASON_CODES) — the
     # EVV-style exception-code discipline: a disposition is classifiable, so
     # patterns aggregate. Optional: the conclusion is still complete without one.
-    reason_code: str | None = None
-
-    @field_validator("reason_code", mode="before")
-    @classmethod
-    def blank_is_none(cls, v):
-        return v or None
-
-    @model_validator(mode="after")
-    def reason_known(self):
-        if self.reason_code is not None:
-            from .taxonomy import REASON_CODES
-
-            if self.reason_code not in REASON_CODES:
-                raise ValueError(f"unknown reason code {self.reason_code!r}")
-        return self
+    reason_code: ReasonCode = None
 
 
 class ReviewGrant(CheckinGrant):
