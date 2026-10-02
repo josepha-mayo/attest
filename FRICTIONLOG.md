@@ -291,3 +291,44 @@ the required shape: task → steps → expected vs. actual → severity → work
 - **Suggestion:** Publish the lapsed-plan contract per surface (event
   fan-out, history retention, media access) in the Partner API reference
   — it's the difference between "silence" and "unwatched".
+
+## 16. Event History pagination links silently drop the filter
+
+- **Task:** Page Event History with an `event_types` filter — the shape a
+  dispute consumer needs, since door presses and motion mix in one list.
+- **Steps:** Request history filtered by `event_types`, follow
+  `links.next`, compare the pages' contents.
+- **Expected:** The next-page URL preserves the filter — or the docs say it
+  doesn't.
+- **Actual:** `links.next` drops `event_types` entirely. A client that
+  follows the bare URL gets unfiltered pages after page one, quietly mixing
+  event classes the caller explicitly excluded.
+- **Severity:** Medium — undetectable at the HTTP layer; the first hint is
+  downstream data that violates the caller's filter contract.
+- **Workaround:** ring-sandbox reproduces the drop verbatim (a fidelity
+  test pins it), and the Attest client re-applies its filters to every
+  followed link rather than trusting the returned URL.
+- **Suggestion:** Encode the full query (or an opaque cursor) in
+  `links.next`; a pagination link that loses parameters is a bug-shaped
+  contract.
+
+## 17. `latest_in_range` answers 416 `TIME_RANGE_NOT_AUTHORIZED` for "no coverage"
+
+- **Task:** Fetch the latest recording in a window the device never
+  recorded — the common case when a camera wasn't streaming.
+- **Steps:** Call the media surface for a range with no coverage; observe
+  the status and error code.
+- **Expected:** A "no media" signal — 404 or an empty result — with an
+  error name describing what actually failed.
+- **Actual:** `416` with code `TIME_RANGE_NOT_AUTHORIZED` — an
+  authorization-flavored name for what is really *absence of coverage*. An
+  integrator reading the code literally misdiagnoses a coverage gap as a
+  permissions problem — the same failure-shape confusion as #14.
+- **Severity:** Medium — error codes are the only contract a client sees;
+  a misleading name sends debugging down the wrong path and makes "no
+  recording" indistinguishable from "not allowed" in logs.
+- **Workaround:** ring-sandbox returns the observed 416 + code verbatim;
+  Attest treats the failure as unverifiable media (a coverage fact), never
+  as a permissions error.
+- **Suggestion:** Split the codes — `NO_RECORDED_MEDIA` for absence,
+  `TIME_RANGE_NOT_AUTHORIZED` for genuine entitlement failures.

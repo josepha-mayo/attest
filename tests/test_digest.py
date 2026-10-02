@@ -108,7 +108,14 @@ def test_period_digest_measures_the_dispute_loop_closing(engine, store, househol
     service = ReviewService(store, engine.signer, engine.clock)
     token = service.issue_worker_link(visit.id)
     service.worker_review(token, ReviewInput(decision="dispute", statement="I was early."))
-    service.resolve(visit.id, ResolutionInput(outcome="account_accepted", statement="Camera confirms."))
+    service.resolve(
+        visit.id,
+        ResolutionInput(
+            outcome="account_accepted",
+            statement="Camera confirms.",
+            reason_code="service_outside_home",
+        ),
+    )
 
     # the household's voice counts as its own kind — never inflating the
     # worker's or the coordinator's signed numbers
@@ -128,6 +135,8 @@ def test_period_digest_measures_the_dispute_loop_closing(engine, store, househol
     assert counts["records_resolved"] == 1
     assert counts["median_resolution_minutes"] is not None
     assert counts["median_resolution_minutes"] >= 0
+    # the coded reason aggregates — the exception pattern is itself signed
+    assert counts["resolution_reasons"] == {"service_outside_home": 1}
 
 
 def test_period_digest_is_idempotent_per_range(engine, store, household, schedule, t0):

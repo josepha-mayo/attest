@@ -81,14 +81,19 @@ def test_full_visit_matches_schedule_and_issues_receipt(engine, store, household
     assert "never_time_worked" in cw["time_begins_ends"]["basis"]
 
 
-def test_short_visit_is_flagged(engine, store, household, schedule, t0):
+def test_short_visit_is_flagged(engine, store, household, schedule, t0, ring_world):
     site, worker, cam, sensor = household
     t = t0 + timedelta(minutes=10)
+    # snapshot pulls need a covering recording in sandbox history
+    ring_world.record_event(cam.id, "motion_detected", at_ms=int(t.timestamp() * 1000))
     engine.ingest(ev(cam.id, "motion_detected", t, "human"))
     engine.check_in(engine.issue_checkin(store.active_visit(site.id).id), at=t + timedelta(minutes=1))
     leave = t + timedelta(minutes=12)
     engine.ingest(ev(sensor.id, "contact_sensor_faulted", leave))
     engine.ingest(ev(sensor.id, "contact_sensor_cleared", leave + timedelta(seconds=8)))
+    ring_world.record_event(
+        cam.id, "motion_detected", at_ms=int((leave + timedelta(seconds=20)).timestamp() * 1000)
+    )
     v = engine.ingest(ev(cam.id, "motion_detected", leave + timedelta(seconds=20), "human")).visit
     assert v.state == VisitState.CLOSED
     assert {f.code for f in v.flags} == {"observed_interval_short", "departure_unconfirmed"}

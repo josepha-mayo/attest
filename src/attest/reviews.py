@@ -4,6 +4,7 @@ import hashlib
 import secrets
 from datetime import timedelta
 
+from . import taxonomy
 from .clock import ExecutionClock
 from .ledger import Signer, verify_receipt
 from .models import (
@@ -208,6 +209,7 @@ class ReviewService:
                 and tip.get("actor", {}).get("role") == "coordinator"
                 and review.get("outcome") == data.outcome
                 and review.get("statement") == data.statement
+                and review.get("reason_code") == data.reason_code
             ):
                 return bundle.reviews[-1]
         previous = bundle.reviews[-1].receipt.payload_hash if bundle.reviews else bundle.original.payload_hash
@@ -227,6 +229,15 @@ class ReviewService:
                     "kind": "resolution",
                     "outcome": data.outcome,
                     "statement": data.statement,
+                    **(
+                        {
+                            "reason_code": data.reason_code,
+                            "reason_label": taxonomy.label(data.reason_code),
+                            "reason_basis": "coordinator_stated_explanation_not_verified_cause",
+                        }
+                        if data.reason_code
+                        else {}
+                    ),
                 },
                 "statement_received_at": utcnow().isoformat(),
                 "effective_at": self.clock.now().isoformat(),

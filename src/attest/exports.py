@@ -112,6 +112,9 @@ _CSV_HEADER = [
     "receipt_id",
     "receipt_sha256",
     "review_state",
+    "resolution_outcome",
+    "resolution_reason_code",
+    "resolution_reason_label",
 ]
 
 _FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
@@ -137,10 +140,13 @@ def visits_csv(
     workers: dict[str, Worker],
     review_states: dict[str, str],
     receipt_hashes: dict[str, str],
+    resolutions: dict[str, dict | None],
 ) -> str:
     """One row per visit — a register for billing reconciliation or a mediator's
     spreadsheet. Column names stay honest: 'observed', never 'arrived/departed';
-    'worker_self_reported', never 'worker' as fact."""
+    'worker_self_reported', never 'worker' as fact. Resolution columns carry the
+    coordinator's stated disposition + coded reason — an explanation, not a
+    verified cause."""
     buf = io.StringIO()
     w = csv.writer(buf, lineterminator="\r\n")
     w.writerow(_CSV_HEADER)
@@ -166,6 +172,9 @@ def visits_csv(
                 _csv_safe(v.receipt_id or ""),
                 _csv_safe(receipt_hashes.get(v.id, "")),
                 review_states.get(v.id, ""),
+                (res := resolutions.get(v.id) or {}).get("outcome", ""),
+                res.get("reason_code", ""),
+                _csv_safe(res.get("reason_label", "")),
             ]
         )
     return buf.getvalue()

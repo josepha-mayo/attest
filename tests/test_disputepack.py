@@ -355,10 +355,11 @@ def test_case_verifier_parity_rejects_forged_entry(case_pack):
     assert "identity does not match" in result.stdout
 
 
-def test_case_pack_redacted_media_verifies(engine, store, household, schedule, t0, tmp_path):
+def test_case_pack_redacted_media_verifies(engine, store, household, schedule, t0, tmp_path, ring_world):
     """A redacted pack keeps signed digests but withholds bytes — the verifier
     reports them withheld instead of failing on missing files."""
     service = ReviewService(store, engine.signer, engine.clock)
+    ring_world.record_event(household[2].id, "button_press", at_ms=int(t0.timestamp() * 1000))
     event = WebhookEvent.model_validate(
         webhooks.build_event(event_type="button_press", device_id=household[2].id, occurred_at=t0)
     )

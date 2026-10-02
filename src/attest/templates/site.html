@@ -46,6 +46,9 @@
   (median {{ d.payload.counts.median_resolution_minutes }} min to conclusion){% endif %}{% endif %}{% if d.payload.counts.liveview_sessions %},
   {{ d.payload.counts.liveview_sessions }} live session(s){% endif %} over
   {{ d.payload.summarized_receipts|length }} receipt(s) — verifies offline with the issuer key.
+  {% if d.payload.counts.resolution_reasons %}<div class="muted small">Coded reasons on resolved records:
+    {% for code, n in d.payload.counts.resolution_reasons.items() %}<code>{{ code }}</code>×{{ n }}{{ ", " if not loop.last }}{% endfor %}
+    — the coordinator's stated explanations, never verified causes.</div>{% endif %}
 </div>
 {% endfor %}
 {% if exports %}

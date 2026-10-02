@@ -109,7 +109,7 @@ svg { break-inside:avoid }
 {% if rv.decision or rv.outcome or rv.statement %}
 <div>
   <div class="quote {{ 'household' if p.actor.role == 'household' else ('coordinator' if rv.kind == 'resolution' else '') }}">&ldquo;{{ rv.statement }}&rdquo;</div>
-  <div class="byline">&mdash; {% if rv.kind == "resolution" %}coordinator conclusion: {{ rv.outcome.replace("_"," ") }}{% elif p.actor.role == "household" %}household account{% if rv.perception %} ({{ rv.perception.replace("_"," ") }}){% endif %}{% else %}worker {{ rv.decision or "statement" }}{% endif %}{% if p.actor.name %}, {{ p.actor.name }}{% endif %}{% if rv.reported_start %} · reports {{ t(rv.reported_start) }}&ndash;{{ t(rv.reported_end) }}{% endif %} — signed {{ t(e.receipt.issued_at) }} · self-reported, appended verbatim, never edited</div>
+  <div class="byline">&mdash; {% if rv.kind == "resolution" %}coordinator conclusion: {{ rv.outcome.replace("_"," ") }}{% if rv.reason_code %} · reason <code>{{ rv.reason_code }}</code>{% endif %}{% elif p.actor.role == "household" %}household account{% if rv.perception %} ({{ rv.perception.replace("_"," ") }}){% endif %}{% else %}worker {{ rv.decision or "statement" }}{% endif %}{% if p.actor.name %}, {{ p.actor.name }}{% endif %}{% if rv.reported_start %} · reports {{ t(rv.reported_start) }}&ndash;{{ t(rv.reported_end) }}{% endif %} — signed {{ t(e.receipt.issued_at) }} · self-reported, appended verbatim, never edited</div>
 </div>
 {% endif %}
 {% endfor %}

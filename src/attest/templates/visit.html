@@ -160,6 +160,7 @@ document.getElementById('close-record').onclick = async () => {
 <article style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
 {% if facts.review.kind == "resolution" %}
 <strong>Revision {{ review.revision }}: resolution — {{ facts.review.outcome.replace('_', ' ') }} — {{ facts.actor.name }} ({{ facts.actor.role }})</strong>
+{% if facts.review.reason_code %}<div class="small muted">Reason <code>{{ facts.review.reason_code }}</code> — {{ facts.review.reason_label }}. Coded from the coordinator's stated explanation — not a verified cause.</div>{% endif %}
 {% elif facts.review.kind == "household_account" %}
 <strong>Revision {{ review.revision }}: household account — {{ facts.review.perception.replace('_', ' ') }} — {{ facts.actor.name }} ({{ facts.actor.role }})</strong>
 {% else %}
@@ -186,6 +187,11 @@ document.getElementById('close-record').onclick = async () => {
 <option value="record_upheld">Record upheld — the signed record stands as the conclusion</option>
 <option value="account_accepted">Worker's account accepted — their statement is the operative conclusion</option>
 <option value="inconclusive">Inconclusive — the ambiguity itself is the conclusion</option>
+</select></label>
+<label>Reason <span class="muted">(coded — classifies your explanation, never asserts what happened)</span>
+<select name="reason_code">
+<option value="">No coded reason — statement carries it</option>
+{% for code, label in reason_options %}<option value="{{ code }}">{{ code }} — {{ label }}</option>{% endfor %}
 </select></label>
 <label>Statement <textarea name="statement" rows="4" maxlength="2000" required placeholder="Why this conclusion, and what evidence weighed on it."></textarea></label>
 <button class="btn">Sign conclusion</button>

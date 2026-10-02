@@ -215,3 +215,97 @@ def test_review_failure_does_not_consume_grant(review_case, store, monkeypatch):
             service.worker_review(token, ReviewInput(decision="dispute", statement="Try again."))
     assert service.worker_target(token) is not None
     assert service.worker_review(token, ReviewInput(decision="dispute", statement="Saved."))
+
+
+def test_resolution_reason_code_is_signed_and_classifies_not_asserts(review_case):
+    """The coded reason rides inside the signed review payload — an EVV-style
+    exception code that classifies the coordinator's explanation. The basis
+    qualifier keeps it honest: the code is a stated cause, never a verified one."""
+    from attest.models import ResolutionInput
+
+    service, visit_id = review_case
+    token = service.issue_worker_link(visit_id)
+    service.worker_review(token, ReviewInput(decision="dispute", statement="Door was jammed, I waited."))
+
+    entry = service.resolve(
+        visit_id,
+        ResolutionInput(
+            outcome="inconclusive",
+            statement="Plausible account, no confirming observation.",
+            reason_code="no_electronic_confirmation",
+        ),
+    )
+    review = entry.receipt.payload["review"]
+    assert review["reason_code"] == "no_electronic_confirmation"
+    assert review["reason_label"] == "No device confirmation exists — unexplained gap"
+    assert review["reason_basis"] == "coordinator_stated_explanation_not_verified_cause"
+    # the honesty invariants are untouched by the code
+    assert entry.receipt.payload["independently_verified_attendance"] is False
+    assert entry.receipt.payload["original_assessment_unchanged"] is True
+
+    exported = service.bundle(visit_id)
+    ok, _ = __import__("attest.reviews", fromlist=["verify_bundle"]).verify_bundle(
+        exported, public_key=service.signer.public_key_b64
+    )
+    assert ok
+
+
+def test_resolution_reason_code_validates_against_taxonomy(review_case):
+    """Free-text codes would defeat the point — only taxonomy members pass."""
+    import pytest
+
+    from attest.models import ResolutionInput
+
+    with pytest.raises(Exception, match="unknown reason code"):
+        ResolutionInput(outcome="record_upheld", statement="x", reason_code="worker_seemed_nice")
+    # blank posts (empty <select>) normalize to None, not a validation error
+    assert ResolutionInput(outcome="record_upheld", statement="x", reason_code="").reason_code is None
+
+
+def test_reason_code_participates_in_resolution_idempotency(review_case):
+    """Same outcome+statement but a different coded reason is a changed mind —
+    it must append, not dedupe against the earlier resolution."""
+    from attest.models import ResolutionInput
+
+    service, visit_id = review_case
+    first = service.resolve(
+        visit_id,
+        ResolutionInput(outcome="inconclusive", statement="Unclear.", reason_code="device_fault"),
+    )
+    same = service.resolve(
+        visit_id,
+        ResolutionInput(outcome="inconclusive", statement="Unclear.", reason_code="device_fault"),
+    )
+    assert same.id == first.id
+    recoded = service.resolve(
+        visit_id,
+        ResolutionInput(outcome="inconclusive", statement="Unclear.", reason_code="subscription_lapse"),
+    )
+    assert recoded.id != first.id
+    assert len(service.bundle(visit_id).reviews) == 2
+
+
+def test_taxonomy_suggestions_cover_every_visit_flag():
+    """Every flag the engine can emit maps to at least one suggested reason —
+    a coordinator should never face an unclassified flag."""
+    from attest.taxonomy import REASON_CODES, suggest
+
+    for flag in [
+        "clock_conflict",
+        "departure_unconfirmed",
+        "early",
+        "idle_close",
+        "late",
+        "media_unavailable",
+        "no_checkin",
+        "no_observation",
+        "observation_gap",
+        "observed_interval_short",
+        "unscheduled",
+    ]:
+        codes = suggest([flag])
+        assert codes, flag
+        assert all(c in REASON_CODES for c in codes)
+        assert len(codes) == len(REASON_CODES)  # suggestions then the rest
+    # deduped — overlapping suggestions collapse
+    assert len(suggest(["no_observation", "observation_gap"])) == len(REASON_CODES)

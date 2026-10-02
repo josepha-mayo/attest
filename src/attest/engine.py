@@ -950,6 +950,7 @@ class VisitEngine:
         # surface does — latest resolution post-dates latest worker statement —
         # so a re-opened record does not count as resolved. Ledger time only.
         resolved_records, resolution_lags = 0, []
+        reason_histogram: dict[str, int] = {}
         for v in visits:
             v_entries = self.store.reviews_for(v.id)
             worker_ats = [
@@ -957,11 +958,10 @@ class VisitEngine:
                 for e in v_entries
                 if e.receipt.payload.get("actor", {}).get("role") == "worker"
             ]
-            res_ats = [
-                e.receipt.payload.get("statement_received_at")
-                for e in v_entries
-                if e.receipt.payload.get("review", {}).get("kind") == "resolution"
+            res_entries = [
+                e for e in v_entries if e.receipt.payload.get("review", {}).get("kind") == "resolution"
             ]
+            res_ats = [e.receipt.payload.get("statement_received_at") for e in res_entries]
             if not res_ats or res_ats[-1] is None:
                 continue
             try:
@@ -975,6 +975,9 @@ class VisitEngine:
             if latest_worker and latest_worker > latest_res:
                 continue  # a later worker statement re-opened the record
             resolved_records += 1
+            reason = res_entries[-1].receipt.payload["review"].get("reason_code")
+            if reason:
+                reason_histogram[reason] = reason_histogram.get(reason, 0) + 1
             if first_worker:
                 lag = (latest_res - first_worker).total_seconds() / 60
                 if lag >= 0:
@@ -997,6 +1000,9 @@ class VisitEngine:
             - len(resolution_entries),
             "coordinator_resolutions": len(resolution_entries),
             "records_resolved": resolved_records,
+            # Which coded reasons stand behind currently-resolved records —
+            # signed so the exception pattern itself is auditable.
+            "resolution_reasons": dict(sorted(reason_histogram.items())),
             "median_resolution_minutes": (
                 round(statistics.median(resolution_lags), 1) if resolution_lags else None
             ),
@@ -1242,7 +1248,14 @@ class VisitEngine:
         row = self._liveview_to_close(site_id, session_id)
         if row.closed_at is not None:
             return row
-        self.ring.whep_close(row.session_url)
+        try:
+            self.ring.whep_close(row.session_url)
+        except RingAPIError as exc:
+            if exc.status_code != 404:
+                raise
+            # 404 = upstream already ended it (Ring sessions expire after ~60 s).
+            # The stream is verifiably gone — journal the close rather than
+            # leaving a stale "open" row forever.
         return self._liveview_closed(row)
 
     @atomic

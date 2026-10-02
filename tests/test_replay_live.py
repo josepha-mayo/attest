@@ -499,7 +499,14 @@ def test_verify_live_sweep_reports_every_surface():
 
     from attest import verifylive
 
-    with serve(sandbox_app()) as ring_url:
+    app = sandbox_app()
+    # the API only serves media over windows it recorded — give the sweep a
+    # recording inside its 24 h lookback
+    from ring_sandbox.world import now_ms
+
+    cam = app.state.world.cameras()[0]
+    app.state.world.record_event(cam.id, "motion_detected", at_ms=now_ms() - 60_000)
+    with serve(app) as ring_url:
         with RingClient("sandbox-token", base_url=ring_url) as ring:
             report = verifylive.run(ring)
     by_check = {c["check"]: c for c in report["checks"]}

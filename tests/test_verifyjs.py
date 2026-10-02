@@ -320,12 +320,15 @@ def test_sample_pack_artifact_verifies():
     assert ok, detail
 
 
-def _case_pack(engine, store, household, schedule, t0, tmp_path):
+def _case_pack(engine, store, household, schedule, t0, tmp_path, ring_world=None):
     from ring_sandbox import WebhookEvent, webhooks
 
     from attest.disputepack import build_case_pack
     from attest.reviews import ReviewService, countersign_status
 
+    if ring_world is not None:
+        # the sandbox only serves media for windows it actually recorded
+        ring_world.record_event(household[2].id, "button_press", at_ms=int(t0.timestamp() * 1000))
     event = WebhookEvent.model_validate(
         webhooks.build_event(
             event_type="button_press",
@@ -1004,15 +1007,15 @@ def test_verify_html_rejects_forged_countersign_status(engine, store, household,
 
 @pytest.mark.skipif(NODE is None, reason="node runtime not available")
 def test_verify_html_rejects_forged_redaction_masking_deleted_media(
-    engine, store, household, schedule, t0, tmp_path
+    engine, store, household, schedule, t0, tmp_path, ring_world
 ):
     """Delete a media file and drop an unsigned redaction.json claiming the
     digest was withheld — the signed manifest's empty media_withheld list must
     expose the lie. This is the audit's core browser-vs-Python asymmetry."""
-    z = _case_pack(engine, store, household, schedule, t0, tmp_path)
+    z = _case_pack(engine, store, household, schedule, t0, tmp_path, ring_world)
     vid = json.loads(z.read("manifest.json"))["visits"][0]["visit_id"]
     bundle = json.loads(z.read(f"visits/{vid}/bundle.json"))
-    digest = next(
+    digest = next(  # the pack must carry at least one signed media digest
         e["media_sha256"] for e in bundle["original"]["payload"]["evidence"] if e.get("media_sha256")
     )
     buf = io.BytesIO()
@@ -1039,7 +1042,9 @@ def test_verify_html_rejects_forged_redaction_masking_deleted_media(
 
 
 @pytest.mark.skipif(NODE is None, reason="node runtime not available")
-def test_verify_html_redacted_pack_still_verifies(engine, store, household, schedule, t0, tmp_path):
+def test_verify_html_redacted_pack_still_verifies(
+    engine, store, household, schedule, t0, tmp_path, ring_world
+):
     """The honest redacted pack — manifest media_withheld + redaction.json
     agree — still VERIFIES with 'withheld' rows, so the parity check doesn't
     over-correct into rejecting legitimate redaction."""
@@ -1048,6 +1053,7 @@ def test_verify_html_redacted_pack_still_verifies(engine, store, household, sche
     from attest.disputepack import build_case_pack
     from attest.reviews import ReviewService, countersign_status
 
+    ring_world.record_event(household[2].id, "button_press", at_ms=int(t0.timestamp() * 1000))
     event = WebhookEvent.model_validate(
         webhooks.build_event(event_type="button_press", device_id=household[2].id, occurred_at=t0)
     )

@@ -247,8 +247,11 @@ def test_review_link_renders_on_a_checked_in_visit(api, store, household, schedu
     assert bad.status_code == 422 and "worker check-in" in bad.text
 
 
-def test_redacted_case_pack_upload_verifies(api, household, t0):
+def test_redacted_case_pack_upload_verifies(api, household, t0, ring_world):
     site, _, cam, _ = household
+    # the sandbox only serves media for windows it actually recorded —
+    # seed the recording the webhook implies
+    ring_world.record_event(cam.id, "motion_detected", at_ms=int(t0.timestamp() * 1000))
     r = _post_hook(api, cam.id, "motion_detected", t0, "human")
     assert r.status_code == 202
     vid = api.attest_state.store.active_visit(site.id).id
@@ -522,10 +525,11 @@ def test_household_page_is_plain_language_and_honest(api, store, household, t0):
     assert "payload_hash" not in page.text and "Ed25519" not in page.text
 
 
-def test_brief_page_carries_anchors_and_boundary(api, store, household, t0):
+def test_brief_page_carries_anchors_and_boundary(api, store, household, t0, ring_world):
     """The printable brief is the hand-to-a-mediator artifact: record state,
     source-by-source table, verbatim voices, signed anchors, verification
     steps — and never media bytes."""
+    ring_world.record_event(household[2].id, "button_press", at_ms=int(t0.timestamp() * 1000))
     _post_hook(api, household[2].id, "button_press", t0)
     visit = store.active_visit(household[0].id)
     assert api.post(f"/api/visits/{visit.id}/close").status_code == 200
@@ -1419,3 +1423,58 @@ def test_visits_csv_register_is_honest_and_injection_safe(api, store, household,
     assert row[8] == "42.0"  # observed span, minutes
     assert row[10] == "7.0"  # check-in lag, minutes
     assert row[11] == ""  # unsigned visit — no receipt id yet
+
+
+def test_resolve_reason_code_flows_to_page_and_csv(api, household, t0):
+    """The coded reason must survive the whole path: signed into the review,
+    rendered on the record page, and exported in the register's columns."""
+    import csv
+    import io
+
+    from ring_sandbox import WebhookEvent, webhooks
+
+    site, worker, doorbell, *_ = household
+    engine = api.attest_state.engine
+    visit = engine.ingest(
+        WebhookEvent.model_validate(
+            webhooks.build_event(event_type="button_press", device_id=doorbell.id, occurred_at=t0)
+        )
+    ).visit
+    engine.close_for_review(visit.id)
+    # the form offers flag-ordered suggestions
+    page = api.get(f"/visits/{visit.id}")
+    assert page.status_code == 200
+    assert 'name="reason_code"' in page.text
+    assert page.text.index("worker_error") < page.text.index("weather_or_disaster")  # suggested first
+
+    r = api.post(
+        f"/api/visits/{visit.id}/resolve",
+        json={
+            "outcome": "account_accepted",
+            "statement": "Worker forgot the app step; account consistent.",
+            "reason_code": "worker_error",
+        },
+    )
+    assert r.status_code == 200
+
+    page = api.get(f"/visits/{visit.id}")
+    assert "<code>worker_error</code>" in page.text
+
+    csv_r = api.get(f"/sites/{site.id}/visits.csv")
+    rows = list(csv.reader(io.StringIO(csv_r.text)))
+    hdr = rows[0]
+    assert hdr[-3:] == ["resolution_outcome", "resolution_reason_code", "resolution_reason_label"]
+    row = next(x for x in rows[1:] if x[0] == visit.id)
+    assert row[hdr.index("resolution_outcome")] == "account_accepted"
+    assert row[hdr.index("resolution_reason_code")] == "worker_error"
+    assert "Worker forgot" in row[hdr.index("resolution_reason_label")]
+
+
+def test_resolve_rejects_unknown_reason_code(api):
+    """Body validation fails closed on codes outside the taxonomy — a free-text
+    reason never reaches the store, let alone the signed payload."""
+    r = api.post(
+        "/api/visits/vis_anything/resolve",
+        json={"outcome": "record_upheld", "statement": "x", "reason_code": "vibes"},
+    )
+    assert r.status_code == 422

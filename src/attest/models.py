@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def _id(prefix: str) -> str:
@@ -316,6 +316,24 @@ class ResolutionInput(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     outcome: Literal["record_upheld", "account_accepted", "inconclusive"]
     statement: str = Field(min_length=1, max_length=2000)
+    # The coded reason behind the conclusion (taxonomy.REASON_CODES) — the
+    # EVV-style exception-code discipline: a disposition is classifiable, so
+    # patterns aggregate. Optional: the conclusion is still complete without one.
+    reason_code: str | None = None
+
+    @field_validator("reason_code", mode="before")
+    @classmethod
+    def blank_is_none(cls, v):
+        return v or None
+
+    @model_validator(mode="after")
+    def reason_known(self):
+        if self.reason_code is not None:
+            from .taxonomy import REASON_CODES
+
+            if self.reason_code not in REASON_CODES:
+                raise ValueError(f"unknown reason code {self.reason_code!r}")
+        return self
 
 
 class ReviewGrant(CheckinGrant):

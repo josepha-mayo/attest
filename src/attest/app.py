@@ -24,7 +24,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 from ring_sandbox import RingAPIError, RingClient, webhooks
 
-from . import ledger, retention
+from . import ledger, retention, taxonomy
 from .config import Settings
 from .config import settings as default_settings
 from .corroborate import corroboration
@@ -714,6 +714,9 @@ def create_app(
             countersign=reviews.countersign(visit_id) if bundle else None,
             coverage=cov,
             late_count=len(late),
+            reason_options=[
+                (code, taxonomy.REASON_CODES[code]) for code in taxonomy.suggest(f.code for f in v.flags)
+            ],
             family_link_active=any(
                 g.id == visit_id and g.expires_at > utcnow() for g in store.family_grants()
             ),
@@ -1263,13 +1266,23 @@ def create_app(
         schedules = {x.id: x for x in store.schedules_for_site(site.id)}
         workers = {w.id: w for w in store.workers()}
         review_states = {
-            v.id: (cs.state if (cs := reviews.countersign(v.id)) else "") for v in visits if v.receipt_id
+            v.id: (cs["state"] if (cs := reviews.countersign(v.id)) else "") for v in visits if v.receipt_id
         }
         receipt_hashes = {
             v.id: (r.payload_hash if (r := store.receipt_for_visit(v.id)) else "") for v in visits
         }
+        resolutions: dict[str, dict | None] = {}
+        for v in visits:
+            if not v.receipt_id:
+                continue
+            bundle = reviews.bundle(v.id)
+            if bundle:
+                for entry in reversed(bundle.reviews):
+                    if entry.receipt.payload.get("review", {}).get("kind") == "resolution":
+                        resolutions[v.id] = entry.receipt.payload["review"]
+                        break
         return Response(
-            content=visits_csv(site, visits, schedules, workers, review_states, receipt_hashes),
+            content=visits_csv(site, visits, schedules, workers, review_states, receipt_hashes, resolutions),
             media_type="text/csv; charset=utf-8",
             headers={"Content-Disposition": f'attachment; filename="{site.id}-visits.csv"'},
         )
