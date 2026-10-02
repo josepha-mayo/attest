@@ -1272,6 +1272,7 @@ def create_app(
             v.id: (r.payload_hash if (r := store.receipt_for_visit(v.id)) else "") for v in visits
         }
         resolutions: dict[str, dict | None] = {}
+        worker_reasons: dict[str, str] = {}
         for v in visits:
             if not v.receipt_id:
                 continue
@@ -1279,11 +1280,23 @@ def create_app(
             if bundle:
                 for entry in reversed(bundle.reviews):
                     rv = entry.receipt.payload.get("review")
-                    if isinstance(rv, dict) and rv.get("kind") == "resolution":
+                    if not isinstance(rv, dict):
+                        continue
+                    actor = entry.receipt.payload.get("actor")
+                    if rv.get("kind") == "resolution" and v.id not in resolutions:
                         resolutions[v.id] = rv
-                        break
+                    if (
+                        isinstance(actor, dict)
+                        and actor.get("role") == "worker"
+                        and rv.get("reason_code")
+                        and v.id not in worker_reasons
+                    ):
+                        worker_reasons[v.id] = rv["reason_code"]
+                # reversed() scan: first hit per role is the latest statement
         return Response(
-            content=visits_csv(site, visits, schedules, workers, review_states, receipt_hashes, resolutions),
+            content=visits_csv(
+                site, visits, schedules, workers, review_states, receipt_hashes, resolutions, worker_reasons
+            ),
             media_type="text/csv; charset=utf-8",
             headers={"Content-Disposition": f'attachment; filename="{site.id}-visits.csv"'},
         )

@@ -1447,6 +1447,19 @@ def test_resolve_reason_code_flows_to_page_and_csv(api, household, t0):
     assert 'name="reason_code"' in page.text
     assert page.text.index("worker_error") < page.text.index("weather_or_disaster")  # suggested first
 
+    # a worker statement carrying a self-reported code lands in the register too
+    link = api.post(f"/api/visits/{visit.id}/review-link").json()["path"]
+    wr = api.post(
+        link,
+        auth=None,
+        data={
+            "decision": "dispute",
+            "statement": "The app never opened the check-in screen.",
+            "reason_code": "mobile_or_network_issue",
+        },
+    )
+    assert wr.status_code == 200
+
     r = api.post(
         f"/api/visits/{visit.id}/resolve",
         json={
@@ -1463,11 +1476,18 @@ def test_resolve_reason_code_flows_to_page_and_csv(api, household, t0):
     csv_r = api.get(f"/sites/{site.id}/visits.csv")
     rows = list(csv.reader(io.StringIO(csv_r.text)))
     hdr = rows[0]
-    assert hdr[-3:] == ["resolution_outcome", "resolution_reason_code", "resolution_reason_label"]
+    assert hdr[-4:] == [
+        "resolution_outcome",
+        "resolution_reason_code",
+        "resolution_reason_label",
+        "worker_stated_reason_code",
+    ]
     row = next(x for x in rows[1:] if x[0] == visit.id)
     assert row[hdr.index("resolution_outcome")] == "account_accepted"
     assert row[hdr.index("resolution_reason_code")] == "worker_error"
     assert "Worker forgot" in row[hdr.index("resolution_reason_label")]
+    # the worker's own coded account exports separately — self-reported, distinct
+    assert row[hdr.index("worker_stated_reason_code")] == "mobile_or_network_issue"
 
 
 def test_resolve_rejects_unknown_reason_code(api):
