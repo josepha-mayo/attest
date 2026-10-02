@@ -803,6 +803,39 @@ class VisitEngine:
             "departed_at": None,
             "duration_minutes": None,
             "observed_span_minutes": visit.observed_span_minutes,
+            # 42 USC 1396b(l)(5)(A) crosswalk — every statutorily-required EVV
+            # element mapped to the basis this record can actually establish.
+            # A crosswalk, not a submission: each basis is the honest qualifier.
+            "cures_act_elements": {
+                "status": "corroboration_map_only_not_an_evv_submission",
+                "service_type": {
+                    "value": sch.service if sch else None,
+                    "basis": "scheduled_expectation_not_verified_performed",
+                },
+                "individual_receiving": {
+                    "value": site.name,
+                    "basis": "premises_not_a_verified_person",
+                },
+                "date": {
+                    "value": sch.window_start.date().isoformat() if sch else None,
+                    "basis": "scheduled_date_observation_timestamps_are_device_reported",
+                },
+                "location": {
+                    "value": site.door_camera_id,
+                    "basis": "device_anchored_at_premises_not_gps",
+                },
+                "individual_providing": {
+                    "value": scheduled_worker.name if scheduled_worker else visit.worker_id,
+                    "basis": "scheduled_worker_plus_self_report_identity_unverified",
+                },
+                "time_begins_ends": {
+                    "value": [
+                        visit.arrived_at.isoformat() if visit.has_observations else None,
+                        visit.last_activity_at.isoformat() if visit.has_observations else None,
+                    ],
+                    "basis": "observed_interval_bounds_never_time_worked",
+                },
+            },
             "assessment": {
                 "attendance": "self_reported" if visit.checked_in_at else "unknown",
                 "identity_verified": False,

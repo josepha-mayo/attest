@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23f4f7fa'/%3E%3Cpath d='M4 8.5l2.5 2.5L12 5.5' stroke='%231a7f4b' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-<meta property="og:title" content="{{ s.page_title }} — {{ site.name }}">
+<meta property="og:title" content="{{ s.page_title }}">
 <meta property="og:description" content="{{ s.og_desc }}">
 <meta property="og:type" content="article">
 <title>{{ site.name }} — {{ s.page_title }}</title>
@@ -61,7 +61,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible{
 <body>
 <main class="wrap">
 {% if not via_link %}<div class="small" style="margin-bottom:14px"><a href="/visits/{{ visit.id }}">&lsaquo; {% if s.lang == "es" %}volver al registro{% else %}back to the record{% endif %}</a></div>{% endif %}
-{% macro t(dt) %}{{ (dt|iso).astimezone(tz).strftime(s.time_fmt if s.time_fmt else "%I:%M %p").lstrip("0") if dt else "—" }}{% endmacro %}
+{% macro t(dt) %}{% if dt %}{% set _v = (dt|iso).astimezone(tz).strftime(s.time_fmt if s.time_fmt else "%I:%M %p") %}{{ _v[1:] if _v.startswith("0") and not s.time_fmt else _v }}{% else %}—{% endif %}{% endmacro %}
 {% macro dayline(dt) %}{% if s.weekdays %}{{ s.weekdays[dt.astimezone(tz).weekday()] }}, {{ dt.astimezone(tz).day }} de {{ s.months[dt.astimezone(tz).month - 1] }}{% else %}{{ dt.astimezone(tz).strftime("%A, %B %d").replace(" 0", " ") }}{% endif %}{% endmacro %}
 <div class="brand">{{ s.brand }} · <a href="?lang={{ "es" if s.lang == "en" else "en" }}" style="letter-spacing:normal;text-transform:none">{{ s.lang_toggle }}</a></div>
 <h1>{{ site.name }}</h1>

@@ -72,7 +72,7 @@ This page describes the evidence system's health, not whether any worker was hon
 <h2>Signed attestations on record</h2>
 <div class="card table-wrap" style="padding:0">
 <table>
-  <th scope="col"ead><tr><th scope="col">Kind</th><th scope="col">Count</th><th scope="col">Latest issued</th></tr></thead>
+  <thead><tr><th scope="col">Kind</th><th scope="col">Count</th><th scope="col">Latest issued</th></tr></thead>
   <tbody>
   {% for kind, a in attestations|dictsort %}
   <tr><td>{{ kind.replace("_", " ") }}</td><td>{{ a.count }}</td><td class="muted">{{ t(a.latest) }}{% if a.rid %} · <a href="/receipts/{{ a.rid }}.json">receipt</a>{% endif %}</td></tr>
@@ -87,7 +87,7 @@ This page describes the evidence system's health, not whether any worker was hon
 <h2>Watching evidence per site</h2>
 <div class="card table-wrap" style="padding:0">
 <table>
-  <th scope="col"ead><tr><th scope="col">Site</th><th scope="col">Poll observations</th><th scope="col">Most recent poll</th><th scope="col">Latest lifecycle event</th></tr></thead>
+  <thead><tr><th scope="col">Site</th><th scope="col">Poll observations</th><th scope="col">Most recent poll</th><th scope="col">Latest lifecycle event</th></tr></thead>
   <tbody>
   {% for sid, p in poll|dictsort %}
   <tr>

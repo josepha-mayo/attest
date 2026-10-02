@@ -373,13 +373,26 @@ def create_app(
             )
             gates = "checking in" if what == "check-in" else "adding a statement"
         tail = "invalid or expired." if what == "family view" else "invalid, expired, or already used."
-        resp = render(
-            request,
-            "link_expired.html",
-            detail=f"This {what} link is {tail}",
-            mechanics=mechanics,
-            gates=gates,
-        )
+        ctx = {
+            "detail": f"This {what} link is {tail}",
+            "mechanics": mechanics,
+            "gates": gates,
+        }
+        if what == "family view":
+            # The only failure page a family member can hit — honor ?lang so the
+            # household isn't dead-ended in a language they didn't choose.
+            s = lang_strings(pick_lang(request.query_params.get("lang")))
+            ctx.update(
+                html_lang=s["lang"],
+                title=s["dead_title"],
+                heading=s["dead_heading"],
+                detail=s["dead_family_detail"],
+                mechanics=s["dead_family_mechanics"],
+                cta=s["dead_cta"],
+                gates_full=s["dead_gates_family"],
+                gates=None,
+            )
+        resp = render(request, "link_expired.html", **ctx)
         resp.status_code = status_code
         return resp
 
@@ -1216,6 +1229,49 @@ def create_app(
             exports=exports,
             coverage_certs=coverage_certs,
             days=days,
+        )
+
+    @app.get("/sites/{site_id}/schedule.ics")
+    async def site_schedule_ics(site_id: str = PathParam(max_length=128)):
+        """Subscribable calendar of the site's visit windows (RFC 5545) — the
+        *plan*, readable in any calendar app. Entries are expectations, never
+        observation evidence."""
+        site = store.site(site_id)
+        if site is None:
+            raise HTTPException(404, "unknown site")
+        from .exports import schedule_ics
+
+        schedules = store.schedules_for_site(site.id)
+        workers = {w.id: w for w in store.workers()}
+        return Response(
+            content=schedule_ics(site, schedules, workers),
+            media_type="text/calendar; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{site.id}-schedule.ics"'},
+        )
+
+    @app.get("/sites/{site_id}/visits.csv")
+    async def site_visits_csv(site_id: str = PathParam(max_length=128)):
+        """The visit register as CSV — one row per record for billing
+        reconciliation or a mediator's spreadsheet. Column names stay honest:
+        'observed', never 'arrived'; worker names marked self-reported."""
+        site = store.site(site_id)
+        if site is None:
+            raise HTTPException(404, "unknown site")
+        from .exports import visits_csv
+
+        visits = store.visits(site_id=site.id, limit=10_000)
+        schedules = {x.id: x for x in store.schedules_for_site(site.id)}
+        workers = {w.id: w for w in store.workers()}
+        review_states = {
+            v.id: (cs.state if (cs := reviews.countersign(v.id)) else "") for v in visits if v.receipt_id
+        }
+        receipt_hashes = {
+            v.id: (r.payload_hash if (r := store.receipt_for_visit(v.id)) else "") for v in visits
+        }
+        return Response(
+            content=visits_csv(site, visits, schedules, workers, review_states, receipt_hashes),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{site.id}-visits.csv"'},
         )
 
     @app.post("/api/sites/{site_id}/digest")

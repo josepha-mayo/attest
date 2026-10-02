@@ -70,6 +70,16 @@ def test_full_visit_matches_schedule_and_issues_receipt(engine, store, household
     assert sum(1 for e in r.payload["evidence"] if e["kind"] == "snapshot") == 2
     assert all(e["media_sha256"] for e in r.payload["evidence"] if e["kind"] == "snapshot")
 
+    cw = r.payload["cures_act_elements"]
+    assert cw["status"] == "corroboration_map_only_not_an_evv_submission"
+    assert cw["service_type"]["value"] == "Morning care"
+    assert cw["service_type"]["basis"] == "scheduled_expectation_not_verified_performed"
+    assert cw["individual_receiving"]["basis"] == "premises_not_a_verified_person"
+    assert cw["individual_providing"]["value"] == "Maria Chen"
+    assert "unverified" in cw["individual_providing"]["basis"]
+    assert all(cw["time_begins_ends"]["value"])
+    assert "never_time_worked" in cw["time_begins_ends"]["basis"]
+
 
 def test_short_visit_is_flagged(engine, store, household, schedule, t0):
     site, worker, cam, sensor = household

@@ -9,7 +9,9 @@
   a new link, ask the agency that issued it to send a fresh one.{% endif %}
   {% if back_href %}<a href="{{ back_href }}" style="color:var(--accent)">{{ back_label or 'Back' }}</a>.{% endif %}</p>
 </div>
-{% if gates %}
+{% if gates_full %}
+<p class="muted small">{{ gates_full }}</p>
+{% elif gates %}
 <p class="muted small">Nothing about the underlying record changed: links gate <em>{{ gates }}</em>, never the signed record itself.</p>
 {% endif %}
 {% endblock %}

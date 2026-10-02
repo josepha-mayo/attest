@@ -123,6 +123,25 @@ svg { break-inside:avoid }
 </table>
 {% endif %}
 
+{% if receipt and receipt.payload.get("cures_act_elements") %}
+<h2>Statutory element crosswalk</h2>
+<p class="small muted">21st Century Cures Act EVV elements (42 U.S.C. §1396b(l)(5)(A)) — each mapped to
+the strongest basis this record establishes. A corroboration map, never an EVV submission.</p>
+<table>
+<tr><th scope="col">Element</th><th scope="col">Value in this record</th><th scope="col">Basis</th></tr>
+{% for label, key in [("Type of service", "service_type"), ("Individual receiving", "individual_receiving"), ("Date", "date"), ("Location", "location"), ("Individual providing", "individual_providing"), ("Time begins / ends", "time_begins_ends")] %}
+{% set el = receipt.payload.cures_act_elements.get(key) %}
+{% if el %}
+<tr>
+  <td>{{ label }}</td>
+  <td>{% if key == "time_begins_ends" %}{{ (el.value or ["—","—"])|join(" → ") if el.value else "—" }}{% else %}{{ el.value or "—" }}{% endif %}</td>
+  <td class="small muted">{{ el.basis.replace("_", " ") }}</td>
+</tr>
+{% endif %}
+{% endfor %}
+</table>
+{% endif %}
+
 {% if receipt %}
 <h2>Signed anchors</h2>
 <table>

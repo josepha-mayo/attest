@@ -795,6 +795,11 @@ def test_family_statement_rejects_bad_input_and_dead_tokens(api, store, househol
     r = api.post(f"/family/{dead}/statement", auth=None, data={})
     assert r.status_code == 404 and "invalid or expired" in r.text
 
+    # the dead-link page honors ?lang — a Spanish household shouldn't dead-end in English
+    r = api.get(f"/family/{dead}?lang=es", auth=None)
+    assert r.status_code == 404 and 'lang="es"' in r.text
+    assert "Este enlace ya no se puede usar" in r.text and "caducado" in r.text
+
     # a worker-link token is not a family token — the grant tables stay separate
     worker_link = api.post(f"/api/visits/{visit.id}/review-link").json()["path"]
     worker_token = worker_link.rsplit("/", 1)[-1]
@@ -1362,3 +1367,55 @@ def test_verify_accepts_an_https_url(monkeypatch, capsys):
     cli._verify(argparse.Namespace(bundle="https://example.test/receipt.json", key=None))
     out = capsys.readouterr().out
     assert "OK:" in out and "verification_report" in out
+
+
+def test_schedule_ics_feed_is_subscribable_and_honest(api, household, schedule):
+    """The site calendar feed publishes expectations only — every event is the
+    plan, labeled as such, never an attendance claim."""
+    site = household[0]
+    r = api.get(f"/sites/{site.id}/schedule.ics")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/calendar")
+    body = r.text
+    assert body.startswith("BEGIN:VCALENDAR") and body.rstrip().endswith("END:VCALENDAR")
+    assert f"UID:{schedule.id}@attest" in body
+    assert "Morning care" in body and "Maria Chen" in body
+    assert "STATUS:CONFIRMED" in body
+    assert "X-WR-CALDESC:" in body  # the honesty disclaimer ships in the feed
+    assert r.headers["content-disposition"].endswith('.ics"')
+
+
+def test_visits_csv_register_is_honest_and_injection_safe(api, store, household, schedule):
+    """The CSV register carries every visit pinned to its receipt hash —
+    'observed'/'self-reported' columns only, and formula-leading text is quoted."""
+    import csv
+    import io
+    from datetime import UTC, datetime
+
+    from attest.models import Visit, Worker
+
+    site, worker, *_ = household
+    hostile = store.put_worker(Worker(name="=cmd|'/c calc", checkin_token="x"))
+    now = datetime.now(UTC)
+    visit = store.put_visit(
+        Visit(
+            site_id=site.id,
+            schedule_id=schedule.id,
+            worker_id=hostile.id,
+            arrived_at=now,
+            last_activity_at=now + timedelta(minutes=42),
+            checkin_received_at=now + timedelta(minutes=7),
+        )
+    )
+    r = api.get(f"/sites/{site.id}/visits.csv")
+    assert r.status_code == 200
+    rows = list(csv.reader(io.StringIO(r.text)))
+    assert rows[0][0] == "visit_id"
+    assert "arrived" not in ",".join(rows[0]).lower()  # honest column names
+    assert len(rows) == 2
+    row = rows[1]
+    assert row[0] == visit.id
+    assert row[5].startswith("'")  # formula-leading worker name is quoted
+    assert row[8] == "42.0"  # observed span, minutes
+    assert row[10] == "7.0"  # check-in lag, minutes
+    assert row[11] == ""  # unsigned visit — no receipt id yet

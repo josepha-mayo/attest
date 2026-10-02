@@ -116,6 +116,13 @@ _EN = {
         "no_one_seen": "nobody was seen",
         "unsure": "not sure",
     },
+    # Dead-link surface — the only page a family member sees when a link fails.
+    "dead_title": "Link unavailable",
+    "dead_heading": "This link is no longer usable",
+    "dead_family_detail": "This family view link is invalid or expired.",
+    "dead_family_mechanics": "Family view links are visit-scoped and expire after 7 days — the link itself is the authorization to view that one record.",
+    "dead_cta": "If you need a new link, ask the agency that issued it to send a fresh one.",
+    "dead_gates_family": "Nothing about the underlying record changed: links gate reading the record, never the signed record itself.",
 }
 
 _ES = {
@@ -212,6 +219,12 @@ _ES = {
         "no_one_seen": "no se vio a nadie",
         "unsure": "no está claro",
     },
+    "dead_title": "Enlace no disponible",
+    "dead_heading": "Este enlace ya no se puede usar",
+    "dead_family_detail": "Este enlace familiar ya no es válido o ha caducado.",
+    "dead_family_mechanics": "Los enlaces familiares están limitados a una visita y caducan a los 7 días — el propio enlace es la autorización para ver ese registro.",
+    "dead_cta": "Si necesita un enlace nuevo, pida a la agencia que lo emitió que envíe uno nuevo.",
+    "dead_gates_family": "Nada del registro ha cambiado: los enlaces solo controlan la lectura, nunca el registro firmado.",
 }
 
 _WEEKDAYS = {

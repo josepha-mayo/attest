@@ -286,8 +286,7 @@ def test_replay_default_story_produces_the_full_demo_dataset(tmp_path):
                 # sub_lapse day — the entitlement lapse is a signed interruption,
                 # a billing fact distinct from a device fault.
                 assert any(
-                    [i["kind"] for i in c["interruptions"]] == ["subscription_deactivated"]
-                    for c in coverages
+                    [i["kind"] for i in c["interruptions"]] == ["subscription_deactivated"] for c in coverages
                 )
                 # liveview day — a bounded session signed into coverage.
                 live = [s for c in coverages for s in c["live_sessions"]]
