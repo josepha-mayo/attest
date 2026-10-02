@@ -500,18 +500,20 @@ def _replay(args: argparse.Namespace) -> None:
             target = max(targets, key=_lag)
             response = api.post(f"/api/visits/{target['id']}/review-link")
             response.raise_for_status()
-            decision, statement = (
-                ("confirm", "Confirmed — I was present for the scheduled window.")
+            decision, statement, reason = (
+                ("confirm", "Confirmed — I was present for the scheduled window.", None)
                 if args.worker_review == "confirm"
                 else (
                     "dispute",
                     "I dispute this record — I arrived before the first observation shown.",
+                    # self-reported coded reason — classifies the account, never verified
+                    "schedule_difference",
                 )
             )
             posted = api.post(
                 response.json()["path"],
                 auth=None,
-                data={"decision": decision, "statement": statement},
+                data={"decision": decision, "statement": statement, "reason_code": reason or ""},
             )
             if posted.status_code != 200:
                 sys.exit("Simulated worker review rejected; inspect the record.")
@@ -729,6 +731,7 @@ def _demo(args: argparse.Namespace) -> None:
                             "absence. Closing as inconclusive: the record states what was "
                             "seen, not what happened."
                         ),
+                        reason_code="no_electronic_confirmation",
                     ),
                 )
                 resolved_visit = v.id
