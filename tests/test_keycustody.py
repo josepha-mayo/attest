@@ -75,3 +75,36 @@ def test_plaintext_path_unchanged_without_kms(tmp_path):
     assert (tmp_path / "k.pem").exists()
     assert not (tmp_path / "k.pem.kms.json").exists()
     assert isinstance(signer, Signer)
+
+
+def test_enabling_kms_wraps_the_existing_pem_instead_of_rotating(tmp_path):
+    """Turning on KMS on a deployed plaintext key must wrap THAT key — minting
+    a new one silently rotates the issuer identity and strands every signed
+    record (the audit chain verifies under the old key)."""
+    pem_path = tmp_path / "attest-ed25519.key"
+    plain = load_or_create_signer(pem_path)
+    pem = pem_path.read_bytes()
+    kms = FakeKms()
+    migrated = load_or_create_signer(pem_path, kms_key_id="key-1", kms_client=kms)
+    assert migrated.public_key_b64 == plain.public_key_b64  # same identity
+    assert not pem_path.exists()  # plaintext gone — that's the point of KMS
+    wrapped = json.loads((tmp_path / "attest-ed25519.key.kms.json").read_text())
+    # unwrap returns the ORIGINAL pem
+    assert KmsBox("key-1", FakeKms()).unwrap(wrapped) == pem
+    assert KmsBox("key-1", FakeKms()).unwrap(wrapped).startswith(b"-----BEGIN")
+
+
+def test_kms_migration_fails_loudly_when_kms_unreachable(tmp_path):
+    class DeadKms:
+        def generate_data_key(self, **kw):
+            raise RuntimeError("KMS unreachable")
+
+    pem_path = tmp_path / "attest-ed25519.key"
+    plain = load_or_create_signer(pem_path)
+    with pytest.raises(RuntimeError, match="unreachable"):
+        load_or_create_signer(pem_path, kms_key_id="key-1", kms_client=DeadKms())
+    assert pem_path.exists()  # migration failed BEFORE touching the PEM
+    assert not (tmp_path / "attest-ed25519.key.kms.json").exists()
+    # and the plaintext signer still works — nothing was silently rotated
+    again = load_or_create_signer(pem_path)
+    assert again.public_key_b64 == plain.public_key_b64

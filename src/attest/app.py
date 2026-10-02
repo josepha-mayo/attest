@@ -29,7 +29,7 @@ from .config import Settings
 from .config import settings as default_settings
 from .corroborate import corroboration
 from .disputepack import build_case_pack, build_pack
-from .engine import VisitEngine
+from .engine import NotYetAdmissible, VisitEngine
 from .i18n import pick as pick_lang
 from .i18n import strings as lang_strings
 from .inbox import WebhookInbox
@@ -54,7 +54,7 @@ from .models import (
 from .poller import HistoryPoller
 from .reviews import ReviewService, verify_bundle
 from .setup import SetupService
-from .store import Store
+from .store import Store, StoreCorrupt
 from .summarize import build as build_summarizer
 from .triage import attention_items, deterministic_brief, run_triage
 
@@ -144,6 +144,15 @@ def create_app(
                 "ingestion source changed; reconciliation required",
             ) or ("not bound to a site" in reason)
             inbox.complete(job, "rejected" if rejected else "done")
+        except NotYetAdmissible as exc:
+            # Early, not poison: retry at the admissibility instant and never
+            # let early arrivals exhaust the attempt budget into "failed".
+            inbox.fail(
+                job,
+                "future_timestamp",
+                retry_at=exc.admissible_at.timestamp(),
+                terminal=False,
+            )
         except Exception as exc:
             inbox.fail(job, type(exc).__name__)
             log.warning("queued webhook processing failed: %s", type(exc).__name__)
@@ -425,6 +434,36 @@ def create_app(
         if request.method == "GET" and "text/html" in accept:
             return _not_found(request, "page")
         return JSONResponse({"detail": exc.detail}, status_code=404)
+
+    @app.exception_handler(StoreCorrupt)
+    async def _store_corrupt(request: Request, exc: StoreCorrupt):
+        """A corrupt row means the store was tampered with or damaged — the
+        honest response is a styled 500 naming the condition and pointing at
+        the journal (which reports exactly which bodies diverge), never a
+        traceback or a silently-truncated page."""
+        detail = (
+            "A stored record failed to parse — the store is corrupt or was "
+            "modified outside Attest. The signed journal is the source of "
+            "truth: `attest status` / /integrity report the divergent bodies."
+        )
+        accept = request.headers.get("accept", "")
+        if request.method == "GET" and "text/html" in accept:
+            resp = render(
+                request,
+                "link_expired.html",
+                title="Store integrity failure",
+                heading="Store integrity failure",
+                detail=detail,
+                mechanics=(
+                    "Signed records are append-only; a body that no longer parses is flagged, not skipped."
+                ),
+                cta="Open",
+                back_href="/integrity",
+                back_label="the integrity report",
+            )
+            resp.status_code = 500
+            return resp
+        return JSONResponse({"detail": detail, "error": "store_corrupt"}, status_code=500)
 
     @app.get("/qr.svg")
     async def link_qr(request: Request, target: str = ""):

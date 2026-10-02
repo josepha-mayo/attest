@@ -18,7 +18,7 @@ class ExecutionClock:
         mode = "replay" if replay else "wall"
         with store.transaction():
             existing = store.setting("execution_mode")
-            if existing and existing["mode"] != mode:
+            if existing and existing.get("mode") != mode:
                 raise ValueError("runtime clock mode cannot change; choose a separate data directory")
             if not existing:
                 if replay and (store.sites() or store.workers() or store.visits() or store.schedules()):
@@ -30,8 +30,8 @@ class ExecutionClock:
         return {
             "mode": "replay" if self.replay else "wall",
             "ready": not self.replay or state is not None,
-            "replay_id": state["id"] if state else None,
-            "now": state["at"] if state else (None if self.replay else utcnow().isoformat()),
+            "replay_id": state.get("id") if state else None,
+            "now": state.get("at") if state else (None if self.replay else utcnow().isoformat()),
         }
 
     def now(self) -> datetime:
@@ -40,7 +40,10 @@ class ExecutionClock:
         state = self.store.setting("replay_clock")
         if state is None:
             raise ValueError("start the replay clock before creating schedules or events")
-        return datetime.fromisoformat(state["at"])
+        at = state.get("at")
+        if not at:
+            raise ValueError("replay clock state is corrupt - restart the replay")
+        return datetime.fromisoformat(at)
 
     def _validate(self, at: datetime) -> datetime:
         if not self.replay:

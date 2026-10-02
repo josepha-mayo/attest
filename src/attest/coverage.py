@@ -76,7 +76,24 @@ def coverage_report(
     """
     end = min(end, now)
     if end <= start:
-        return {"state": "no_window", "fraction": 0.0, "gaps": [], "polls": 0, "events": 0}
+        report = {
+            "state": "no_window",
+            "fraction": 0.0,
+            "covered": [],
+            "gaps": [],
+            "polls": 0,
+            "failed_polls": 0,
+            "events": 0,
+            "window": {"start": start.isoformat(), "end": end.isoformat()},
+            "claim": (
+                "Attest polled Ring Event History during this window; it attests what the "
+                "pipeline observed, not what physically happened"
+            ),
+        }
+        if site_id is not None:
+            report["interruptions"] = []
+            report["live_sessions"] = []
+        return report
 
     covering = [
         o for o in store.poll_observations(device_id, start, now) if _clip(o.since, o.polled_at, start, end)
@@ -96,7 +113,7 @@ def coverage_report(
     lifecycle: list[CoverageEvent] = []
     explained: list[dict] = []
     if site_id is not None:
-        lifecycle = [ev for ev in store.coverage_events(site_id, until=end) if ev.at <= end]
+        lifecycle = [ev for ev in store.coverage_events(site_id, until=end, limit=None) if ev.at <= end]
         explained = _explained_spans(lifecycle, end)
 
     gaps: list[dict] = []
@@ -179,7 +196,7 @@ def coverage_report(
                 "closed_at": s.closed_at.isoformat() if s.closed_at else None,
                 "device_id": s.device_id,
             }
-            for s in store.liveview_sessions(site_id, start, end)
+            for s in store.liveview_sessions(site_id, start, end, limit=None)
             # "failed" sessions never established a stream — they attest the
             # attempt in the audit table, not coverage of the window.
             if s.device_id == device_id and s.state != "failed"

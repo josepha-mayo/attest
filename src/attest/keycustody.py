@@ -100,6 +100,18 @@ def load_or_create_signer(
     if wrapped_path.exists():
         record = json.loads(wrapped_path.read_text(encoding="utf-8"))
         pem = box.unwrap(record)
+    elif path.exists():
+        # Enabling KMS on a deployment that already has a plaintext signing
+        # key must wrap THAT key — minting a new one silently rotates the
+        # issuer identity and strands every signed record (chain verify under
+        # the old key fails, review links die). Order matters: only remove the
+        # plaintext after the wrapped record is durably written; if KMS is
+        # unreachable the wrap raises first and the PEM stays put.
+        pem = path.read_bytes()
+        record = box.wrap(pem)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        wrapped_path.write_text(json.dumps(record, indent=2), encoding="utf-8")
+        path.unlink()  # plaintext key no longer needed — KMS can re-unwrap
     else:
         from cryptography.hazmat.primitives import serialization
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey

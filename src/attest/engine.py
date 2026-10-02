@@ -72,6 +72,16 @@ _DEPART_AFTER_DOOR_CLOSE = timedelta(minutes=2)
 _MIN_VISIT = timedelta(minutes=3)
 
 
+class NotYetAdmissible(ValueError):
+    """Event timestamp lands past the ingestion tolerance — it becomes legal
+    at ``admissible_at``. The inbox should reschedule to that instant rather
+    than burn its retry budget on early arrivals (sender skew, batch flush)."""
+
+    def __init__(self, admissible_at: datetime):
+        super().__init__("event timestamp is in the future")
+        self.admissible_at = admissible_at
+
+
 @dataclass
 class Outcome:
     visit: Visit | None = None
@@ -211,7 +221,10 @@ class VisitEngine:
         if self.clock.replay and at > self.clock.now():
             raise ValueError("advance the replay clock before submitting this event")
         if at > utcnow() + timedelta(seconds=30):
-            raise ValueError("event timestamp is in the future")
+            # Not poison - just early (sender clock skew, batch flush). The
+            # inbox must retry once the event is admissible, not burn its
+            # five-attempt budget on ~62s of exponential backoff.
+            raise NotYetAdmissible(at - timedelta(seconds=30))
         is_camera = ev.device_id == site.door_camera_id
         et, sub = ev.event_type, ev.sub_type
         if et in _COVERAGE_DEVICE_EVENTS:
@@ -281,7 +294,10 @@ class VisitEngine:
         if self.clock.replay and at > self.clock.now():
             raise ValueError("advance the replay clock before submitting this event")
         if at > utcnow() + timedelta(seconds=30):
-            raise ValueError("event timestamp is in the future")
+            # Not poison - just early (sender clock skew, batch flush). The
+            # inbox must retry once the event is admissible, not burn its
+            # five-attempt budget on ~62s of exponential backoff.
+            raise NotYetAdmissible(at - timedelta(seconds=30))
         recorded = 0
         for site in sites:
             if site.disconnected_at is not None:
@@ -623,6 +639,11 @@ class VisitEngine:
         if visit is None or visit.receipt_id:
             raise ValueError("record is missing or already signed")
         site = self.store.site(visit.site_id)
+        if site is None:
+            raise ValueError(
+                "site record is gone — a receipt would name a source binding "
+                "that no longer exists; cannot sign"
+            )
         self._close(visit, site, visit.last_activity_at, reason="coordinator_review", net=net)
         return visit
 
@@ -893,6 +914,10 @@ class VisitEngine:
 
         device = site.door_camera_id or site.door_sensor_id
         report = coverage_report(self.store, device, start, end, now=self.clock.now(), site_id=site.id)
+        if report.get("state") == "no_window":
+            # An inverted or not-yet-arrived window has nothing to attest —
+            # signing one would put the deployment's key on an empty claim.
+            raise ValueError("coverage window is empty (end <= start after clamping to now)")
         pseudo_id = f"coverage:{site.id}:{start.isoformat()}:{end.isoformat()}"
         existing = self.store.receipt_for_visit(pseudo_id)
         if existing:
@@ -927,6 +952,8 @@ class VisitEngine:
         Counts of signed records, never claims about physical presence."""
         from .coverage import coverage_report
 
+        if end <= start:
+            raise ValueError("digest window is empty (end <= start) — nothing to summarize")
         pseudo_id = f"digest:{site.id}:{start.isoformat()}:{end.isoformat()}"
         existing = self.store.receipt_for_visit(pseudo_id)
         if existing:
@@ -1019,7 +1046,9 @@ class VisitEngine:
             # Streams brokered in the interval — a journaled-fact count, never
             # a claim about who watched or what was on screen.
             "liveview_sessions": sum(
-                1 for s in self.store.liveview_sessions(site.id, start, end) if s.state != "failed"
+                1
+                for s in self.store.liveview_sessions(site.id, start, end, limit=None)
+                if s.state != "failed"
             ),
         }
         device = site.door_camera_id or site.door_sensor_id

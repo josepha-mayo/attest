@@ -13,13 +13,22 @@ from .timeline import kind_label
 
 def corroboration(
     visit: Visit,
-    site: Site,
+    site: Site | None,
     schedule: Schedule | None,
     evidence: list[Evidence],
     receipt: Receipt | None,
 ) -> list[dict]:
-    camera = [e for e in evidence if e.source_device_id == site.door_camera_id]
-    sensor = [e for e in evidence if site.door_sensor_id and e.source_device_id == site.door_sensor_id]
+    # A visit whose site row is gone (deleted store, partial restore) still has
+    # its signed evidence — bucket by the receipt's device list, not the live
+    # site row, and label the rows honestly rather than crash.
+    cam_id = site.door_camera_id if site else None
+    sensor_id = site.door_sensor_id if site else None
+    if site is None and receipt:
+        bound = receipt.payload.get("site") or {}
+        cam_id = bound.get("door_camera_id") or cam_id
+        sensor_id = bound.get("door_sensor_id") or sensor_id
+    camera = [e for e in evidence if cam_id and e.source_device_id == cam_id]
+    sensor = [e for e in evidence if sensor_id and e.source_device_id == sensor_id]
     snapshots = [e for e in evidence if e.kind.value == "snapshot" and e.media_sha256]
     history = (receipt.payload.get("ring_history") or []) if receipt else []
     coverage = (receipt.payload.get("history_poll_coverage") or {}) if receipt else {}
@@ -37,7 +46,8 @@ def corroboration(
             "establishes": "What was planned — never what happened",
         },
         {
-            "source": f"Camera/doorbell {site.door_camera_id[-6:] if site.door_camera_id else ''}",
+            "source": f"Camera/doorbell {cam_id[-6:] if cam_id else ''}"
+            + (" (site record unavailable)" if site is None else ""),
             "status": f"{len(camera)} event{'s' if len(camera) != 1 else ''} {times(camera)}"
             if camera
             else "silent",
@@ -45,9 +55,9 @@ def corroboration(
             "establishes": "Device-observed activity timestamps only",
         },
         {
-            "source": f"Contact sensor {site.door_sensor_id[-6:] if site.door_sensor_id else ''}",
+            "source": f"Contact sensor {sensor_id[-6:] if sensor_id else ''}",
             "status": "not bound"
-            if not site.door_sensor_id
+            if not sensor_id
             else (
                 f"{len(sensor)} event{'s' if len(sensor) != 1 else ''} {times(sensor)}"
                 if sensor

@@ -76,6 +76,16 @@ CREATE INDEX IF NOT EXISTS ix_schedules_site ON schedules(site_id, window_start)
 """
 
 
+class StoreCorrupt(RuntimeError):
+    """A stored row failed to parse — or a settings row isn't the dict every
+    writer stores. Failing closed is the only honest response: silently
+    skipping a corrupt row would hide evidence the signed journal is about
+    to flag, and pretending the row parsed would fabricate it. The journal's
+    body-hash check is what proves *which* rows changed; this exception is
+    how read surfaces report "the store needs an integrity check" instead of
+    dying on a raw ValidationError."""
+
+
 def _iso(dt: datetime) -> str:
     if dt.tzinfo is None or dt.utcoffset() is None:
         raise ValueError("timezone-aware timestamp required")
@@ -237,7 +247,15 @@ class Store:
     def setting(self, name: str) -> dict | None:
         with self._lock:
             row = self._conn.execute("SELECT body FROM settings WHERE name=?", (name,)).fetchone()
-            return json.loads(row[0]) if row else None
+            if not row:
+                return None
+            try:
+                value = json.loads(row[0])
+            except Exception as exc:
+                raise StoreCorrupt(f"settings row {name!r} is not valid JSON") from exc
+            if not isinstance(value, dict):
+                raise StoreCorrupt(f"settings row {name!r} is not a dict — the store is corrupt")
+            return value
 
     def put_setting(self, name: str, value: dict) -> None:
         with self.transaction():
@@ -481,7 +499,16 @@ class Store:
     def _rows(self, model: type[T], sql: str, params: Iterable[object] = ()) -> list[T]:
         with self._lock:
             cur = self._conn.execute(sql, tuple(params))
-            return [model.model_validate_json(r[0]) for r in cur.fetchall()]
+            rows = []
+            for r in cur.fetchall():
+                try:
+                    rows.append(model.model_validate_json(r[0]))
+                except Exception as exc:
+                    raise StoreCorrupt(
+                        f"{model.__name__} row failed to parse — the store is corrupt or "
+                        "tampered; verify_journal names the divergent bodies"
+                    ) from exc
+            return rows
 
     def _one(self, model: type[T], sql: str, params: Iterable[object] = ()) -> T | None:
         rows = self._rows(model, sql + " LIMIT 1", params)
@@ -718,7 +745,7 @@ class Store:
         start: datetime | None = None,
         until: datetime | None = None,
         *,
-        limit: int = 500,
+        limit: int | None = 500,
     ) -> list[CoverageEvent]:
         sql = "SELECT body FROM coverage_events WHERE site_id=?"
         params: list[object] = [site_id]
@@ -728,7 +755,11 @@ class Store:
         if until is not None:
             sql += " AND at<=?"
             params.append(_iso(until))
-        return self._rows(CoverageEvent, sql + f" ORDER BY at LIMIT {int(limit)}", params)
+        # None = no cap: signed coverage payloads must see every row — a silent
+        # LIMIT would let a later "restored" event fall outside the report and
+        # over-explain gaps. UI callers pass an explicit bound instead.
+        sql += " ORDER BY at" + (f" LIMIT {int(limit)}" if limit is not None else "")
+        return self._rows(CoverageEvent, sql, params)
 
     def coverage_event_rows(self) -> list[CoverageEvent]:
         return self._rows(CoverageEvent, "SELECT body FROM coverage_events ORDER BY at")
@@ -757,17 +788,19 @@ class Store:
         start: datetime | None = None,
         until: datetime | None = None,
         *,
-        limit: int = 500,
+        limit: int | None = 500,
     ) -> list[LiveViewSession]:
         """Sessions overlapping ``[start, until]`` — a session overlaps when it
         opened before the window ends and closed (or is still open) after it
-        begins."""
+        begins. ``limit=None`` returns all of them (signed payloads must not
+        silently truncate)."""
         sql = "SELECT body FROM liveview_sessions WHERE site_id=?"
         params: list[object] = [site_id]
         if until is not None:
             sql += " AND opened_at<=?"
             params.append(_iso(until))
-        rows = self._rows(LiveViewSession, sql + " ORDER BY opened_at LIMIT " + str(int(limit)), params)
+        sql += " ORDER BY opened_at" + (f" LIMIT {int(limit)}" if limit is not None else "")
+        rows = self._rows(LiveViewSession, sql, params)
         if start is not None:
             rows = [s for s in rows if s.closed_at is None or s.closed_at >= start]
         return rows

@@ -858,7 +858,8 @@ def _verify(args: argparse.Namespace) -> None:
     from .models import Receipt, ReviewBundle
 
     path = Path(args.bundle)
-    if args.bundle.startswith(("http://", "https://")):
+    remote = args.bundle.startswith(("http://", "https://"))
+    if remote:
         # Verification is cryptographic — transport trust is not required —
         # but stream with a byte cap so a hostile endpoint can't buffer
         # unbounded content into memory before we can reject it.
@@ -910,7 +911,11 @@ def _verify(args: argparse.Namespace) -> None:
         kind = receipt.payload.get("record_type") or receipt.payload.get("schema")
         print(f"OK{pinned}: {kind} {receipt.id} — {reason}.")
         print(f"Note: a valid signature proves record integrity {trust_note}, not physical truth.")
-        _report_sibling_ots(Path(args.bundle))
+        # The sibling-.ots check only makes sense for a local file — for a URL
+        # artifact the basename would match some unrelated CWD file (or crash
+        # on a path that doesn't exist locally).
+        if not remote:
+            _report_sibling_ots(Path(args.bundle))
         return
 
     try:
@@ -1050,7 +1055,11 @@ def _stamp_file(path) -> None:
     except RuntimeError as exc:
         sys.exit(f"timestamp failed: {exc}")
     ots_path = path.with_name(path.name + ".ots")
-    ots_path.write_bytes(ots)
+    # Write-then-rename: a crash mid-write must not leave a truncated .ots
+    # next to a valid artifact looking like its proof.
+    tmp = ots_path.with_name(ots_path.name + ".tmp")
+    tmp.write_bytes(ots)
+    tmp.replace(ots_path)
     print(
         f"wrote {ots_path} — submitted via {cal}; {ots_status(ots)}.\n"
         f"  upgrade once the calendar commits to Bitcoin: attest stamp --upgrade {ots_path}\n"
@@ -1075,7 +1084,9 @@ def _stamp(args: argparse.Namespace) -> None:
         if new is None:
             print(f"{ots_status(old)} — the calendar is reachable; check again later")
         elif new != old:
-            target.write_bytes(new)
+            tmp = target.with_name(target.name + ".tmp")
+            tmp.write_bytes(new)
+            tmp.replace(target)
             print(f"upgraded {target} — {ots_status(new)}")
         else:
             print(f"{ots_status(new)} — check again later")
@@ -1154,6 +1165,18 @@ def _triage(args: argparse.Namespace) -> None:
             print(f"\n[source: deterministic triage — agent unavailable: {result.fallback_reason}]")
     finally:
         store.close()
+
+
+def _must_store():
+    """Open the runtime store — or refuse. An integrity/inspection command must
+    never let SQLite silently CREATE an empty db and then report it intact
+    ('attest journal' on a never-written dir must not print entries: 0, ok)."""
+    from .store import Store
+
+    db = settings.data_dir / "attest.sqlite3"
+    if not db.exists():
+        sys.exit(f"no store at {db} — run `attest serve` or `attest replay` first")
+    return Store(db)
 
 
 def _cli_engine(store):
@@ -1257,9 +1280,7 @@ def _digest(args: argparse.Namespace) -> None:
 def _tamper_demo(args: argparse.Namespace) -> None:
     """Non-destructive: forge one row inside a transaction, show the journal catching
     it, then roll back — the store is left exactly as it was."""
-    from .store import Store
-
-    store = Store(settings.data_dir / "attest.sqlite3")
+    store = _must_store()
     try:
         row = store._conn.execute("SELECT id, body FROM visits LIMIT 1").fetchone()
         if not row:
@@ -1294,9 +1315,7 @@ def _tamper_demo(args: argparse.Namespace) -> None:
 
 
 def _journal(args: argparse.Namespace) -> None:
-    from .store import Store
-
-    store = Store(settings.data_dir / "attest.sqlite3")
+    store = _must_store()
     try:
         if args.baseline:
             stamped = store.journal_baseline()
@@ -1418,9 +1437,8 @@ def _export(args: argparse.Namespace) -> None:
     from .disputepack import build_case_pack
     from .models import ReviewBundle
     from .reviews import countersign_status
-    from .store import Store
 
-    store = Store(settings.data_dir / "attest.sqlite3")
+    store = _must_store()
     try:
         site = store.site(args.site) if args.site else (store.sites()[0] if store.sites() else None)
         if site is None:
@@ -1544,7 +1562,7 @@ def _explain(args: argparse.Namespace) -> None:
     try:
         visit = store.visit(args.visit)
         if visit is None:
-            _explain_attestation(store, args.visit)
+            _explain_attestation(store, args.visit, as_json=getattr(args, "json", False))
             return
         site = store.site(visit.site_id)
         schedule = store.schedule(visit.schedule_id) if visit.schedule_id else None
@@ -1636,13 +1654,16 @@ def _explain(args: argparse.Namespace) -> None:
                 spans = ""
                 cov = r.payload.get("coverage") or {}
                 window = cov.get("window") or {}
-                if (
-                    rtype == "coverage_attestation"
-                    and visit.arrived_at
-                    and window.get("start", "") <= visit.arrived_at.isoformat()
-                    and visit.arrived_at.isoformat() <= window.get("end", "")
-                ):
-                    spans = " — spans this visit's window"
+                if rtype == "coverage_attestation" and visit.arrived_at:
+                    # Compare as datetimes — the signed window stores the
+                    # caller's ISO verbatim, so a "-07:00" offset would sort
+                    # wrong as a string against UTC.
+                    try:
+                        ws = datetime.fromisoformat(window.get("start", ""))
+                        we = datetime.fromisoformat(window.get("end", ""))
+                        spans = " — spans this visit's window" if ws <= visit.arrived_at <= we else ""
+                    except ValueError:
+                        spans = ""
                 print(f"  {rtype:<22} {r.payload_hash[:16]}…{spans}")
         print()
         print("Boundary: sources establish what they reported; the signature proves")
@@ -1715,12 +1736,28 @@ def _explain_report(store, visit, site, schedule, evidence, receipt, reviews) ->
             ],
         }
         out["stance"] = reviews.countersign(visit.id)
+
+    def _spans(r) -> bool:
+        """Does this coverage attestation's signed window cover the visit's
+        first observation? Compare as datetimes — the payload stores the
+        caller's ISO verbatim, offsets included."""
+        cov = (r.payload.get("coverage") or {}).get("window") or {}
+        if r.payload.get("record_type") != "coverage_attestation" or not visit.arrived_at:
+            return False
+        try:
+            return (
+                datetime.fromisoformat(cov["start"]) <= visit.arrived_at <= datetime.fromisoformat(cov["end"])
+            )
+        except (KeyError, ValueError):
+            return False
+
     out["attestations"] = [
         {
             "receipt_id": r.id,
             "visit_id": r.visit_id,
             "record_type": r.payload.get("record_type"),
             "payload_hash": r.payload_hash,
+            "spans_visit_window": _spans(r),
         }
         for r in store.receipts()
         if r.visit_id == f"source:{visit.site_id}"
@@ -1731,7 +1768,7 @@ def _explain_report(store, visit, site, schedule, evidence, receipt, reviews) ->
     return out
 
 
-def _explain_attestation(store, ident: str) -> None:
+def _explain_attestation(store, ident: str, *, as_json: bool = False) -> None:
     """Narrate a site-level chain event (coverage cert, digest, export,
     disconnect) by pseudo visit_id or receipt id — same honesty rules."""
     from .ledger import verify_receipt
@@ -1744,6 +1781,29 @@ def _explain_attestation(store, ident: str) -> None:
     ok, why = verify_receipt(receipt, public_key=receipt.public_key)
     p = receipt.payload
     rtype = p.get("record_type", "record")
+    if as_json:
+        print(
+            json.dumps(
+                {
+                    "receipt_id": receipt.id,
+                    "visit_id": receipt.visit_id,
+                    "record_type": rtype,
+                    "sequence": receipt.sequence,
+                    "payload_hash": receipt.payload_hash,
+                    "issued_at": receipt.issued_at,
+                    "issuer_key": receipt.public_key,
+                    "signature": {"verified": ok, "detail": why},
+                    "payload": p,
+                    "boundary": (
+                        "sources establish what they reported; the signature proves the "
+                        "record is intact — never identity, attendance, or physical truth"
+                    ),
+                },
+                indent=2,
+                default=str,
+            )
+        )
+        return
     print(f"{receipt.id} — {rtype} · seq {receipt.sequence} · {receipt.payload_hash[:16]}…")
     print(f"  signature: {'OK' if ok else 'FAILED'} — {why}")
     print(f"  issued {receipt.issued_at.isoformat()} · under issuer key {receipt.public_key[:16]}…")
@@ -1804,7 +1864,6 @@ def _retention(args: argparse.Namespace) -> None:
     """Print a non-destructive lifecycle report for the local runtime. Deletes nothing."""
     from . import retention
     from .inbox import WebhookInbox
-    from .store import Store
 
     policy = retention.RetentionPolicy(
         visits_days=settings.retention_visits_days,
@@ -1817,7 +1876,7 @@ def _retention(args: argparse.Namespace) -> None:
         coverage_events_days=settings.retention_coverage_days,
         liveview_sessions_days=settings.retention_liveview_days,
     )
-    store = Store(settings.data_dir / "attest.sqlite3")
+    store = _must_store()
     inbox_path = settings.data_dir / "webhooks.sqlite3"
     inbox = WebhookInbox(inbox_path) if inbox_path.exists() else None
     media_dir = settings.data_dir / "media"
@@ -2156,7 +2215,17 @@ def main(argv: list[str] | None = None) -> None:
         s.set_defaults(fn=fn)
 
     args = p.parse_args(argv)
-    args.fn(args)
+    from .store import StoreCorrupt
+
+    try:
+        args.fn(args)
+    except (StoreCorrupt, OSError, ValueError) as exc:
+        # Fail closed with an error line, never a traceback — the surfaces that
+        # report "valid/invalid" must never crash ambiguously. StoreCorrupt is
+        # the store's own fail-closed signal; ValueError covers malformed
+        # artifact JSON (pydantic), bad --from/--to dates, and missing files
+        # the subcommand didn't phrase for a human.
+        sys.exit(f"attest: {exc}")
 
 
 if __name__ == "__main__":

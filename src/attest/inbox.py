@@ -87,10 +87,21 @@ class WebhookInbox:
                 (status, job["id"], job["lease"]),
             )
 
-    def fail(self, job: dict, error_code: str, *, now: float | None = None) -> None:
+    def fail(
+        self,
+        job: dict,
+        error_code: str,
+        *,
+        now: float | None = None,
+        retry_at: float | None = None,
+        terminal: bool | None = None,
+    ) -> None:
         now = time.time() if now is None else now
-        status = "failed" if job["attempts"] >= 5 else "pending"
-        retry_at = now + min(60, 2 ** min(job["attempts"], 6))
+        if terminal is None:
+            terminal = job["attempts"] >= 5
+        status = "failed" if terminal else "pending"
+        if retry_at is None:
+            retry_at = now + min(60, 2 ** min(job["attempts"], 6))
         with self._transaction():
             self._db.execute(
                 "UPDATE deliveries SET status=?, retry_at=?, error_code=?, lease=NULL, lease_until=NULL "

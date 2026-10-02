@@ -134,6 +134,9 @@ def _manifest_consistency(manifest: dict, bundles: dict, notes: list[str]) -> li
     failures = []
     seen = set()
     for v in manifest.get("visits", []):
+        if not isinstance(v, dict):
+            failures.append("manifest visit entry malformed")
+            continue
         vid = v.get("visit_id")
         if vid in seen:
             failures.append(f"{vid}: listed twice in manifest")
@@ -165,9 +168,21 @@ def load_artifact(path: str | Path, key: str | None = None) -> dict:
             names = set(z.namelist())
             if "manifest.json" in names:
                 manifest = json.loads(z.read("manifest.json"))
+                if not isinstance(manifest, dict):
+                    raise ValueError(f"{path}: manifest.json is not an object")
                 issuer = key or manifest.get("issuer_key")
-                attestations = {a["receipt_id"]: a for a in manifest.get("attestations", [])}
-                entries = {v["visit_id"]: v for v in manifest.get("visits", [])}
+                attestations = {}
+                for a in manifest.get("attestations", []):
+                    if not isinstance(a, dict) or not a.get("receipt_id"):
+                        failures.append("manifest attestation entry malformed")
+                        continue
+                    attestations[a["receipt_id"]] = a
+                entries = {}
+                for v in manifest.get("visits", []):
+                    if not isinstance(v, dict) or not v.get("visit_id"):
+                        failures.append("manifest visit entry malformed")
+                        continue
+                    entries[v["visit_id"]] = v
                 bundles = {}
                 for vid in entries:
                     try:
@@ -175,7 +190,14 @@ def load_artifact(path: str | Path, key: str | None = None) -> dict:
                     except KeyError:
                         failures.append(f"{vid}: bundle listed but missing from pack")
                         continue
-                    visits[vid] = _visit_summary(bundles[vid], entries[vid])
+                    except (ValueError, TypeError):
+                        failures.append(f"{vid}: bundle member is not valid JSON")
+                        continue
+                    try:
+                        visits[vid] = _visit_summary(bundles[vid], entries[vid])
+                    except Exception as exc:  # noqa: BLE001 — flag the member, keep diffing
+                        failures.append(f"{vid}: bundle malformed ({exc})")
+                        bundles.pop(vid, None)
                 failures += _manifest_consistency(manifest, bundles, notes)
                 failures += _verify_artifact_bundles(bundles, issuer)
                 failures += _verify_attestation_files(z, attestations, issuer)
@@ -220,9 +242,12 @@ def load_artifact(path: str | Path, key: str | None = None) -> dict:
                 }
             if "bundle.json" in names:
                 bundle = json.loads(z.read("bundle.json"))
-                issuer = key or bundle["original"]["public_key"]
-                visits[bundle["original"]["visit_id"]] = _visit_summary(bundle)
-                failures += _verify_artifact_bundles({bundle["original"]["visit_id"]: bundle}, issuer)
+                original = bundle.get("original") if isinstance(bundle, dict) else None
+                if not isinstance(original, dict) or not original.get("visit_id"):
+                    raise ValueError(f"{path}: bundle.json lacks an 'original' receipt")
+                issuer = key or original.get("public_key")
+                visits[original["visit_id"]] = _visit_summary(bundle)
+                failures += _verify_artifact_bundles({original["visit_id"]: bundle}, issuer)
                 allowed = {
                     "bundle.json",
                     "README.txt",
@@ -244,10 +269,15 @@ def load_artifact(path: str | Path, key: str | None = None) -> dict:
                 }
             raise ValueError(f"{path}: zip contains neither manifest.json nor bundle.json")
     data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"{path}: not a pack artifact (expected a JSON object)")
     if "original" in data:
-        issuer = key or data["original"]["public_key"]
-        visits[data["original"]["visit_id"]] = _visit_summary(data)
-        failures += _verify_artifact_bundles({data["original"]["visit_id"]: data}, issuer)
+        original = data.get("original")
+        if not isinstance(original, dict) or not original.get("visit_id"):
+            raise ValueError(f"{path}: 'original' receipt missing or malformed")
+        issuer = key or original.get("public_key")
+        visits[original["visit_id"]] = _visit_summary(data)
+        failures += _verify_artifact_bundles({original["visit_id"]: data}, issuer)
         return {
             "issuer": issuer,
             "visits": visits,
@@ -264,6 +294,9 @@ def load_artifact(path: str | Path, key: str | None = None) -> dict:
             failures.append("bare manifest: bundle signatures cannot be checked without the packs")
         seen = set()
         for v in data["visits"]:
+            if not isinstance(v, dict) or not v.get("visit_id"):
+                failures.append("manifest visit entry malformed")
+                continue
             vid = v["visit_id"]
             if vid in seen:
                 failures.append(f"{vid}: listed twice in manifest")
