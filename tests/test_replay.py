@@ -40,6 +40,35 @@ def test_replay_cannot_target_real_ring_or_repurpose_existing_data():
     store.close()
 
 
+def test_replay_rotate_day_parses_on_demo_and_replay_but_not_seed(monkeypatch):
+    from attest import cli
+
+    seen = {}
+    monkeypatch.setattr(cli, "_replay", lambda a: seen.update(day=a.rotate_day))
+    cli.main(["replay", "home_aide_visit", "--days", "3", "--rotate-day", "1"])
+    assert seen["day"] == 1
+
+    monkeypatch.setattr(cli, "_demo", lambda a: seen.update(day=a.rotate_day))
+    cli.main(["demo", "--days", "3", "--rotate-day", "1"])
+    assert seen["day"] == 1
+
+    with pytest.raises(SystemExit):
+        cli.main(["seed", "--rotate-day", "0"])
+
+
+def test_replay_rotate_day_names_a_story_day(monkeypatch):
+    from pydantic import SecretStr
+
+    from attest import cli
+
+    monkeypatch.setattr(cli.settings, "admin_token", SecretStr("t" * 32))
+    monkeypatch.setattr(cli.settings, "ring_webhook_key", "k")
+    with pytest.raises(SystemExit, match="--rotate-day must name a story day"):
+        cli.main(["replay", "home_aide_visit", "--days", "2", "--rotate-day", "2"])
+    with pytest.raises(SystemExit, match="--rotate-day must name a story day"):
+        cli.main(["replay", "home_aide_visit", "--days", "2", "--rotate-day", "-1"])
+
+
 def test_replay_checkin_uses_event_clock_but_grants_use_wall_clock(store, settings, ring_client, tmp_path):
     from attest.engine import VisitEngine
     from attest.ledger import Signer

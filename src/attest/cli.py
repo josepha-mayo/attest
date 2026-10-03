@@ -2247,6 +2247,16 @@ def main(argv: list[str] | None = None) -> None:
         s.add_argument("--window-minutes", type=int, default=120)
         s.add_argument("--expected-minutes", type=int, default=90)
         s.add_argument("--camera-only", action="store_true", help="leave the optional contact sensor unbound")
+        if name in ("demo", "replay"):
+            s.add_argument(
+                "--rotate-day",
+                type=int,
+                default=None,
+                metavar="K",
+                help="0-based story-day index at which to rotate the signing key mid-story — "
+                "later records sign under the successor and the chain pivots at the "
+                "key_rotation receipt (proves the ledger survives a live key retirement)",
+            )
         if name == "demo":
             s.add_argument(
                 "--port",

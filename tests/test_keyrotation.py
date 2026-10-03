@@ -391,6 +391,46 @@ def test_forged_chain_cannot_pin_to_victim_key():
     assert "does not descend" in why
 
 
+def test_api_rotate_key_rotates_live_signer(settings, store, ring_client, household, schedule, t0):
+    """POST /api/admin/rotate-key runs the same ordered pivot as the CLI:
+    old-key rotation receipt → persisted successor → reloaded signer →
+    adoption — and the running app signs under the new key immediately."""
+    from test_app import _client
+
+    from attest.app import create_app
+
+    app = create_app(
+        settings, store=store, ring=ring_client, signer=Signer.ephemeral(), sweep_interval_s=0
+    )
+    old_key = app.state.signer.public_key_b64
+    with _client(app) as api:
+        api.auth = ("admin", settings.admin_token.get_secret_value())
+        assert api.post("/api/admin/rotate-key", auth=None).status_code == 401
+        r = api.post("/api/admin/rotate-key", json={"reason": "annual"})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["previous_key"] == old_key
+        assert body["new_key"] != old_key
+        # the in-memory signer across engine/reviews/app.state all moved
+        assert app.state.signer.public_key_b64 == body["new_key"]
+        assert app.state.engine.signer.public_key_b64 == body["new_key"]
+        # the key file on disk is the successor — reload proves custody took
+        from attest.keycustody import load_or_create_signer
+
+        assert (
+            load_or_create_signer(settings.key_path).public_key_b64 == body["new_key"]
+        )
+        # a new receipt signs under the new key and the chain still verifies
+        site = store.sites()[0]
+        receipt = app.state.engine.issue_coverage_attestation(
+            site, t0 - timedelta(hours=1), t0 + timedelta(hours=2)
+        )
+        assert receipt.public_key == body["new_key"]
+        ok, why = ledger.verify_chain(store.receipts(), public_key=body["new_key"])
+        assert ok, why
+    app.state.inbox.close()
+
+
 def test_adoption_without_rotation_endorsement_is_no_hop(engine, store, household, schedule, t0):
     """Consent without endorsement is also no hop: an adoption signed by the
     issuer naming a rotation the 'predecessor' never signed cannot graft
