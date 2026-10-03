@@ -150,14 +150,126 @@ def verify_receipt(receipt: Receipt | dict[str, Any], *, public_key: str | None 
     return True, "ok"
 
 
+def _adoption_consent(receipts: list[Receipt], rotation: Receipt, new_key: str) -> bool:
+    """Whether the SUCCESSOR key countersigned ``rotation``.
+
+    A ``key_rotation`` endorsement is self-serve — any key can sign "I retire
+    in favor of your key" and graft attacker-signed history onto a trusted
+    issuer's chain. An ancestor hop therefore only counts when the successor
+    also signed a ``key_adoption`` receipt naming this exact rotation (id and
+    payload hash): consent the attacker cannot forge."""
+    for r in receipts:
+        p = r.payload
+        link = p.get("rotation_receipt") or {}
+        if (
+            p.get("record_type") == "key_adoption"
+            and link.get("id") == rotation.id
+            and link.get("hash") == rotation.payload_hash
+            and r.public_key == new_key
+            and verify_receipt(r, public_key=new_key)[0]
+        ):
+            return True
+    return False
+
+
+def _rotation_hop(receipts: list[Receipt], new_key: str) -> Receipt | None:
+    """The successor-consented ``key_rotation`` receipt endorsing ``new_key``.
+
+    Only a receipt signed by the retiring key counts — a forged rotation
+    naming itself as successor has no pivot power because its signature
+    verifies under nobody trusted. And endorsement alone is self-serve, so
+    the hop additionally requires a ``key_adoption`` receipt countersigned by
+    ``new_key`` naming this exact rotation — without successor consent a
+    claimed predecessor is a graft, not a handoff."""
+    for r in receipts:
+        p = r.payload
+        if (
+            p.get("record_type") == "key_rotation"
+            and p.get("new_key") == new_key
+            and p.get("previous_key") == r.public_key
+            and verify_receipt(r, public_key=r.public_key)[0]
+            and _adoption_consent(receipts, r, new_key)
+        ):
+            return r
+    return None
+
+
+def trusted_issuer_keys(issuer_key: str, key_receipts: list[Receipt], *, max_hops: int = 32) -> set[str]:
+    """The keys a pack verification may trust: the manifest issuer plus every
+    ancestor reachable through signed ``key_rotation`` receipts. Each hop must
+    be a valid receipt signed by the retiring key endorsing its successor AND
+    countersigned by the successor via ``key_adoption`` — endorsement alone is
+    self-serve (any key may claim any successor), so a forged rotation never
+    lands in the set. Pass every ``key:*`` receipt, rotations and adoptions
+    alike; the pool is filtered by record_type."""
+    trusted = {issuer_key}
+    cur = issuer_key
+    for _ in range(max_hops):
+        hop = _rotation_hop(key_receipts, cur)
+        if hop is None:
+            break
+        cur = hop.payload["previous_key"]
+        trusted.add(cur)
+    return trusted
+
+
+def descendant_issuer_keys(root_key: str, rotations: list[Receipt], *, max_hops: int = 32) -> set[str]:
+    """The forward walk for single-visit bundles: reviews append after the
+    original, so a bundle legitimately carries issuer keys the rotations
+    endorse — the original's key plus every verified successor."""
+    trusted = {root_key}
+    cur = root_key
+    for _ in range(max_hops):
+        hop = next(
+            (
+                r
+                for r in rotations
+                if r.payload.get("record_type") == "key_rotation"
+                and r.payload.get("previous_key") == cur
+                and r.public_key == cur
+                and verify_receipt(r, public_key=cur)[0]
+            ),
+            None,
+        )
+        if hop is None:
+            break
+        cur = hop.payload["new_key"]
+        trusted.add(cur)
+    return trusted
+
+
 def verify_chain(receipts: list[Receipt], *, public_key: str | None = None) -> tuple[bool, str]:
-    """Verify every receipt and the ``prev_hash`` links. All receipts must share one issuer key."""
+    """Verify every receipt and the ``prev_hash`` links.
+
+    The issuer key may rotate mid-chain: a ``key_rotation`` receipt signed by
+    the current key is the pivot — every receipt after it must verify under
+    the named successor. With ``public_key`` pinned, the chain's root key must
+    be the pin itself or an ancestor of it reachable through rotation receipts
+    the successor countersigned via ``key_adoption`` (pinning today's key
+    still validates receipts the retired key wrote; an uncountersigned
+    "rotation" is a graft attempt, not a handoff). A rotation naming a key
+    that never signs anything strands the
+    rest of the chain into a signature failure — visible, not silent."""
     if not receipts:
         return True, "0 receipts"
-    key = public_key or receipts[0].public_key
+    ordered = sorted(receipts, key=lambda x: x.sequence)
+    first_key = ordered[0].public_key
+    if public_key is not None and first_key != public_key:
+        cur, reached = public_key, False
+        for _ in range(32):
+            hop = _rotation_hop(ordered, cur)
+            if hop is None:
+                break
+            cur = hop.payload["previous_key"]
+            if cur == first_key:
+                reached = True
+                break
+        if not reached:
+            return False, "chain root was signed by a key the pinned issuer key does not descend from"
+    key = first_key
     prev: str | None = None
     expected_seq = 1
-    for r in sorted(receipts, key=lambda x: x.sequence):
+    for r in ordered:
         ok, why = verify_receipt(r, public_key=key)
         if not ok:
             return False, f"receipt #{r.sequence}: {why}"
@@ -167,4 +279,7 @@ def verify_chain(receipts: list[Receipt], *, public_key: str | None = None) -> t
             return False, f"receipt #{r.sequence}: chain broken (prev_hash mismatch)"
         prev = r.payload_hash
         expected_seq += 1
+        p = r.payload
+        if p.get("record_type") == "key_rotation" and p.get("previous_key") == key and p.get("new_key"):
+            key = p["new_key"]
     return True, f"{len(receipts)} receipts, chain intact"

@@ -9,12 +9,15 @@ offline verification of exported packs.
 from __future__ import annotations
 
 import json
+import tempfile
+import warnings
+import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 
 from .ledger import Signer, verify_chain
 from .media import MediaStore
-from .store import Store
+from .store import Store, StoreCorrupt
 
 
 class _Rollback(Exception):
@@ -34,8 +37,12 @@ def _attempt(store: Store, name: str, fn) -> dict:
     return {"attack": name, "caught": caught, "detail": detail}
 
 
-def run(store: Store, media_root: Path | None = None) -> dict:
-    """Run the battery. Returns {"results": [...], "unchanged": bool}."""
+def run(store: Store, media_root: Path | None = None, inbox=None) -> dict:
+    """Run the battery. Returns {"results": [...], "unchanged": bool}.
+
+    ``inbox`` is the optional WebhookInbox — the delivery-id conflict attack
+    needs real deliveries to collide with; the refused enqueue writes nothing,
+    so the separate inbox database needs no rollback of its own."""
     before = store.verify_journal()
     if before["entries"] == 0 and before["untracked_rows"]:
         stamped = store.journal_baseline()
@@ -132,6 +139,48 @@ def run(store: Store, media_root: Path | None = None) -> dict:
 
     results.append(_attempt(store, "re-sign a receipt with a different key (key swap)", swap_key))
 
+    def forge_rotation() -> tuple[bool, str]:
+        """Self-endorsed pivot: write a key_rotation receipt claiming the
+        deployment key retired to an attacker key — signed by the ATTACKER.
+        A rotation only pivots when the retiring key signed it, so the hop
+        must reject this and the chain must not accept post-pivot forgeries."""
+        from .ledger import _rotation_hop
+        from .models import Receipt
+
+        row = store._conn.execute("SELECT body FROM receipts ORDER BY sequence DESC LIMIT 1").fetchone()
+        if not row:
+            return None, "no receipts to pivot from"
+        latest = Receipt.model_validate_json(row[0])
+        attacker = Signer.ephemeral()
+        forged = attacker.issue(
+            visit_id=f"key:{latest.public_key[:12]}:{attacker.public_key_b64[:12]}",
+            sequence=latest.sequence + 1,
+            prev_hash=latest.payload_hash,
+            facts={
+                "record_type": "key_rotation",
+                "previous_key": latest.public_key,  # claims the deployment endorsed it
+                "new_key": attacker.public_key_b64,
+            },
+        )
+        follow = attacker.issue(
+            visit_id="vis_forged_after_pivot",
+            sequence=forged.sequence + 1,
+            prev_hash=forged.payload_hash,
+            facts={"record_type": "visit_record", "forged": True},
+        )
+        pivot = _rotation_hop([forged], attacker.public_key_b64)
+        chain_ok, chain_why = verify_chain(
+            [Receipt.model_validate_json(r[0]) for r in store._conn.execute("SELECT body FROM receipts")]
+            + [forged, follow]
+        )
+        caught = pivot is None and not chain_ok
+        return caught, (
+            f"pivot hop: {'rejected' if pivot is None else 'ACCEPTED'}; "
+            f"chain verify: {chain_why if not chain_ok else 'missed'}"
+        )
+
+    results.append(_attempt(store, "forge a key_rotation pivot to an attacker key", forge_rotation))
+
     def replay_request() -> tuple[bool, str]:
         row = store._conn.execute("SELECT request_id FROM seen_requests LIMIT 1").fetchone()
         if not row:
@@ -152,6 +201,95 @@ def run(store: Store, media_root: Path | None = None) -> dict:
         )
 
     results.append(_attempt(store, "insert a row out-of-band (bypass the journal)", out_of_band))
+
+    def corrupt_row_body() -> tuple[bool, str]:
+        """Rewrite one row's body to bytes that no longer parse — reads must
+        fail closed with StoreCorrupt (silently skipping would hide evidence)
+        and the journal must still name the divergence."""
+        row = store._conn.execute("SELECT id, body FROM visits LIMIT 1").fetchone()
+        if not row:
+            return None, "no visits to corrupt"
+        visit_id, _ = row
+        store._conn.execute("UPDATE visits SET body=? WHERE id=?", ('{"forged": ', visit_id))
+        try:
+            store.visit(visit_id)
+        except StoreCorrupt:
+            report = store.verify_journal()
+            hit = any("content changed" in m for m in report["mismatches"])
+            return True, f"read refused with StoreCorrupt; journal flagged={hit}"
+        return False, "corrupt body read back without StoreCorrupt"
+
+    results.append(_attempt(store, "corrupt a stored row's body (crash the read surfaces)", corrupt_row_body))
+
+    def corrupt_settings() -> tuple[bool, str]:
+        """A non-dict settings body is corruption, not a default — reads must
+        fail closed instead of pretending the row never existed."""
+        store._conn.execute("INSERT INTO settings (name, body) VALUES ('attack_demo', '42')")
+        try:
+            store.setting("attack_demo")
+        except StoreCorrupt as exc:
+            return True, f"settings read refused: {exc}"
+        return False, "non-dict settings body read back without StoreCorrupt"
+
+    results.append(_attempt(store, "corrupt a settings row (non-dict body)", corrupt_settings))
+
+    def member_name_injection() -> tuple[bool, str]:
+        """A hostile pack zip: duplicate names are ambiguous across extractors
+        and ../absolute/drive segments dodge prefix whitelists. Both fail the
+        pack at load — not just the member."""
+        from .packdiff import check_member_names, load_artifact
+
+        fd, tmp = tempfile.mkstemp(suffix=".zip", prefix="attest-attack-")
+        buf = Path(tmp)
+        with open(fd, "wb") as raw:
+            with warnings.catch_warnings():
+                # the duplicate member name is the attack — the stdlib
+                # warning about it is expected noise, not a finding
+                warnings.simplefilter("ignore")
+                with zipfile.ZipFile(raw, "w") as z:
+                    z.writestr("manifest.json", b'{"visits": []}')
+                    z.writestr("manifest.json", b"{}")
+                    z.writestr("media/../../escape.txt", b"x")
+        try:
+            named = check_member_names(["manifest.json", "manifest.json", "media/../../escape.txt"])
+            try:
+                load_artifact(buf)
+            except ValueError as exc:
+                return True, f"name check: {named}; loader: {exc}"
+            return False, "pack loaded despite hostile member names"
+        finally:
+            buf.unlink(missing_ok=True)
+
+    results.append(
+        _attempt(
+            store,
+            "inject duplicate + traversal member names into a pack zip",
+            member_name_injection,
+        )
+    )
+
+    def inbox_id_conflict() -> tuple[bool, str]:
+        """Reusing a delivery id with different bytes — legit retries repeat
+        the SAME signature under the same id; a different body or signature
+        is a replay probe and must refuse, writing nothing."""
+        if inbox is None:
+            return None, "no webhook inbox configured"
+        rows = inbox.entries(limit=1)
+        if not rows:
+            return None, "no deliveries to collide with"
+        try:
+            inbox.enqueue(rows[0]["id"], b'{"forged": true}', "forged-signature")
+        except ValueError as exc:
+            return True, f"refused: {exc}"
+        return False, "conflicting request id enqueued a second body"
+
+    results.append(
+        _attempt(
+            store,
+            "re-send a delivered request_id with different bytes",
+            inbox_id_conflict,
+        )
+    )
 
     def retimestamp_coverage() -> tuple[bool, str]:
         """Slide a lifecycle event's denormalized `at` column — the signed body
@@ -230,6 +368,39 @@ def run(store: Store, media_root: Path | None = None) -> dict:
         )
 
     results.append(_attempt(store, "forge a resolution's reason code post-signature", forge_reason))
+
+    def graft_predecessor() -> tuple[bool, str]:
+        """Claim the issuer descends from an attacker key: sign a key_rotation
+        under the ATTACKER's key naming the deployment issuer as its
+        successor. Endorsement is self-serve — any key can retire "into" a
+        victim key — so trust must only extend when the successor also signs
+        a key_adoption naming the rotation. No consent, no ancestor."""
+        from .ledger import trusted_issuer_keys
+
+        row = store._conn.execute("SELECT body FROM receipts ORDER BY sequence DESC LIMIT 1").fetchone()
+        if not row:
+            return None, "no receipts to anchor an issuer against"
+        issuer = json.loads(row[0])["public_key"]
+        attacker = Signer.ephemeral()
+        graft = attacker.issue(
+            visit_id=f"key:{attacker.public_key_b64[:12]}:{issuer[:12]}",
+            sequence=1,
+            prev_hash=None,
+            facts={
+                "record_type": "key_rotation",
+                "previous_key": attacker.public_key_b64,
+                "new_key": issuer,
+            },
+        )
+        trusted = trusted_issuer_keys(issuer, [graft])
+        caught = attacker.public_key_b64 not in trusted
+        return caught, (
+            "graft refused — successor never countersigned"
+            if caught
+            else "attacker key entered the trusted issuer set"
+        )
+
+    results.append(_attempt(store, "graft a forged predecessor key onto the issuer", graft_predecessor))
 
     def swap_media() -> tuple[bool, str]:
         """Overwrite a media file's bytes post-signing — the digest check at

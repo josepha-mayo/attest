@@ -75,6 +75,28 @@ against a live store:
 | Submit a coverage/digest request with an inverted window to mint a vacuous signed claim | Refused (`end <= start` raises before signing) — the deployment's key never signs an empty claim |
 | Truncate signed coverage payloads via the store's 500-row listing cap | Signed reads pass `limit=None` — a cap that dropped later "restored" events would over-explain gaps |
 | Feed a malformed bundle member to `attest diff` to mask other anomalies | Malformed members are flagged per-record; the diff still reports every other anomaly |
+| Pack a zip with duplicate member names or `..`/absolute/drive-qualified paths (shadow a verifying member, escape the pack root on unzip) | `check_member_names` fails the whole pack — duplicates are ambiguous across extractors and traversal segments dodge prefix whitelists; enforced identically by `packdiff.load_artifact`, the server's `_verify_pack`, and the browser verifier's `readZipEntries` |
+| Re-send a delivered `request_id` with different bytes or signature (replay probe or upstream key drift) | The inbox refuses with no write — a legitimate retry repeats the same signature under the same id; a changed body or signature under a known id always means something is wrong |
+| Forge a `key_rotation` receipt pivoting the issuer to an attacker key | Only a rotation signed by the retiring key pivots — `verify_chain` verifies the receipt under the current chain key first, so an attacker-signed rotation breaks the chain at its own position before any pivot applies |
+| Graft an attacker key as a trusted issuer *predecessor* (mint "attacker key retired into the victim key") | Endorsement is self-serve, so ancestor hops additionally require a `key_adoption` receipt countersigned by the successor naming the exact rotation — the victim key never consented, so the attacker key never enters `trusted_issuer_keys` and pack verification keeps rejecting it |
+
+## Signing-key rotation
+
+`attest rotate-key` retires the deployment signing key: the retiring key signs
+a `key_rotation` receipt endorsing its successor, the successor lands under the
+same custody posture (plaintext or KMS-wrapped), then countersigns a
+`key_adoption` receipt naming the exact rotation (id + payload hash).
+`verify_chain` reads the rotation as a pivot — receipts before it verify under
+the old key, receipts after under the new — and pack verifiers extend
+pinned-key trust across the handoff through `trusted_issuer_keys` /
+`descendant_issuer_keys`.
+
+Both forgery directions are covered: a pivot signed by anyone but the retiring
+key breaks chain verification outright, and an ancestor claim without the
+successor's countersigned adoption never enters the trusted set — endorsement
+alone is self-serve, consent is not. What rotation does **not** prove: that
+either key was or stayed uncompromised. A compromise discovered after the fact
+is a revocation problem; rotation is the continuity story, not the rescue.
 
 Two paths need an **external anchor** to be provable: truncating the journal
 before the earliest pin, and wholesale replacement of store + receipts + key
@@ -135,6 +157,15 @@ These are architectural boundaries, not missing features:
 - Without KMS, the key is a PEM file in the data dir — written `chmod 600`
   (owner-only) on POSIX; on Windows it inherits the data dir's ACLs, so deploy
   under a service-account directory or use KMS custody there.
+- `attest rotate-key` makes rotation a chain event, not a config swap: the
+  retiring key first signs a `key_rotation` receipt naming the successor (the
+  ledger's pivot — `verify_chain` verifies pre-pivot receipts under the old
+  key and post-pivot under the new), `persist_signer_key` atomically writes
+  the successor under the same custody posture (the old key survives until
+  the new one is durable), and the successor countersigns via `key_adoption`.
+  A pinned `--key` may sit on either side of a rotation — verifiers walk the
+  signed endorsements (`trusted_issuer_keys` backward, `descendant_issuer_keys`
+  forward) and never trust a key that merely shows up in a pack.
 
 ## Ingestion boundary
 
@@ -154,6 +185,11 @@ These are architectural boundaries, not missing features:
 - Webhook signature validation against official Ring delivery is unverified
   (the Playground cannot reach localhost); the inbox verifies HMAC keys for
   emulator deliveries.
+- Contact-sensor ingestion is implemented but not verified against official
+  hardware.
+- Bedrock summarization is wired and provenance-labeled; live inference was
+  quota-limited at verification time, so shipped demos run on the labeled
+  template fallback.
 - Contact-sensor ingestion is implemented but not verified against official
   hardware.
 - Bedrock summarization is wired and provenance-labeled; live inference was

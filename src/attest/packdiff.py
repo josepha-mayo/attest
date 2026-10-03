@@ -58,7 +58,36 @@ def check_member_names(names: list) -> str | None:
     return None
 
 
-def _verify_artifact_bundles(visits_bundles: dict, issuer: str | None) -> list[str]:
+def _key_pool(z, attestations: dict) -> list:
+    """The pack's signed key-rotation link receipts (rotations AND adoptions),
+    read from its attestation files — a pack written across a key rotation
+    legitimately mixes issuer keys, and the trust set derives from these."""
+    from .models import Receipt
+
+    pool = []
+    for rid in attestations:
+        try:
+            att = Receipt.model_validate(json.loads(z.read(f"attestations/{rid}.json")))
+        except Exception:  # noqa: BLE001 — unreadable members fail in the verify loop
+            continue
+        if att.payload.get("record_type") in ("key_rotation", "key_adoption"):
+            pool.append(att)
+    return pool
+
+
+def _trusted_set(issuer: str | None, key_pool: list) -> set | None:
+    """Issuer plus every key the signed, successor-consented rotation chain
+    endorses — ``None`` when there is nothing to derive trust from."""
+    if not issuer:
+        return None
+    from .ledger import descendant_issuer_keys, trusted_issuer_keys
+
+    return trusted_issuer_keys(issuer, key_pool) | descendant_issuer_keys(issuer, key_pool)
+
+
+def _verify_artifact_bundles(
+    visits_bundles: dict, issuer: str | None, trusted: set | None = None
+) -> list[str]:
     """Independently verify each bundle in an artifact before trusting its
     contents — a diff over unverified receipts is meaningless."""
     from .models import ReviewBundle
@@ -71,7 +100,10 @@ def _verify_artifact_bundles(visits_bundles: dict, issuer: str | None) -> list[s
         except Exception as exc:  # noqa: BLE001
             failures.append(f"{vid}: not a valid bundle ({exc})")
             continue
-        ok, why = verify_bundle(parsed, public_key=issuer or parsed.original.public_key)
+        if trusted is not None:
+            ok, why = verify_bundle(parsed, trusted_keys=trusted)
+        else:
+            ok, why = verify_bundle(parsed, public_key=issuer or parsed.original.public_key)
         if not ok:
             failures.append(f"{vid}: {why}")
     return failures
@@ -97,10 +129,13 @@ def _visit_summary(bundle: dict, manifest_entry: dict | None = None) -> dict:
     return out
 
 
-def _verify_attestation_files(z, attestations: dict, issuer: str | None) -> list[str]:
+def _verify_attestation_files(
+    z, attestations: dict, issuer: str | None, trusted: set | None = None
+) -> list[str]:
     """Verify each attestation receipt file the manifest lists — signature AND
     the manifest's claimed visit_id/payload_hash, so a swapped (but validly
-    signed) receipt file cannot pass as the listed attestation."""
+    signed) receipt file cannot pass as the listed attestation. Attestations
+    signed under rotation-endorsed retired keys verify under their own key."""
     from .ledger import verify_receipt
     from .models import Receipt
 
@@ -120,13 +155,16 @@ def _verify_attestation_files(z, attestations: dict, issuer: str | None) -> list
         if entry.get("visit_id") and entry["visit_id"] != att.visit_id:
             failures.append(f"attestation {rid}: visit_id differs from manifest entry")
             continue
-        ok, why = verify_receipt(att, public_key=issuer or att.public_key)
+        if trusted is not None and att.public_key not in trusted:
+            failures.append(f"attestation {rid}: issued under a key outside the rotation chain")
+            continue
+        ok, why = verify_receipt(att, public_key=att.public_key if trusted else issuer or att.public_key)
         if not ok:
             failures.append(f"attestation {rid}: {why}")
     return failures
 
 
-def _verify_manifest_signature(manifest: dict, issuer: str | None) -> str | None:
+def _verify_manifest_signature(manifest: dict, issuer: str | None, trusted: set | None = None) -> str | None:
     """Verify the manifest's signature_receipt and its hash-cover over the
     visit list — returns a failure string or None."""
     from .ledger import payload_hash, verify_receipt
@@ -139,7 +177,11 @@ def _verify_manifest_signature(manifest: dict, issuer: str | None) -> str | None
         receipt = Receipt.model_validate(sig)
     except Exception as exc:  # noqa: BLE001
         return f"manifest signature_receipt invalid ({exc})"
-    ok, why = verify_receipt(receipt, public_key=issuer or receipt.public_key)
+    if trusted is not None and receipt.public_key not in trusted:
+        return "manifest signature: signed by a key outside the rotation chain"
+    ok, why = verify_receipt(
+        receipt, public_key=receipt.public_key if trusted else issuer or receipt.public_key
+    )
     if not ok:
         return f"manifest signature: {why}"
     core = {k: v for k, v in manifest.items() if k != "signature_receipt"}
@@ -223,8 +265,9 @@ def load_artifact(path: str | Path, key: str | None = None) -> dict:
                         failures.append(f"{vid}: bundle malformed ({exc})")
                         bundles.pop(vid, None)
                 failures += _manifest_consistency(manifest, bundles, notes)
-                failures += _verify_artifact_bundles(bundles, issuer)
-                failures += _verify_attestation_files(z, attestations, issuer)
+                trusted = _trusted_set(issuer, _key_pool(z, attestations))
+                failures += _verify_artifact_bundles(bundles, issuer, trusted)
+                failures += _verify_attestation_files(z, attestations, issuer, trusted)
                 # Fail closed on ANY member the signed manifest does not name —
                 # top-level files and extra members inside listed visit dirs
                 # too, not just foreign attestations/visits trees.
@@ -253,7 +296,7 @@ def load_artifact(path: str | Path, key: str | None = None) -> dict:
                     ):
                         continue  # media members — digest-checked upstream
                     failures.append(f"{name}: present but not in the signed manifest")
-                mfail = _verify_manifest_signature(manifest, issuer)
+                mfail = _verify_manifest_signature(manifest, issuer, trusted)
                 if mfail:
                     failures.append(mfail)
                 return {
@@ -271,7 +314,18 @@ def load_artifact(path: str | Path, key: str | None = None) -> dict:
                     raise ValueError(f"{path}: bundle.json lacks an 'original' receipt")
                 issuer = key or original.get("public_key")
                 visits[original["visit_id"]] = _visit_summary(bundle)
-                failures += _verify_artifact_bundles({original["visit_id"]: bundle}, issuer)
+                kr_pool = []
+                if "key_rotations.json" in names:
+                    from .models import Receipt
+
+                    try:
+                        kr = json.loads(z.read("key_rotations.json"))
+                        kr_pool = [Receipt.model_validate(r) for r in kr.get("rotations") or []]
+                    except Exception as exc:  # noqa: BLE001
+                        failures.append(f"key_rotations.json: malformed ({exc})")
+                failures += _verify_artifact_bundles(
+                    {original["visit_id"]: bundle}, issuer, _trusted_set(issuer, kr_pool)
+                )
                 allowed = {
                     "bundle.json",
                     "README.txt",
@@ -279,6 +333,7 @@ def load_artifact(path: str | Path, key: str | None = None) -> dict:
                     "verify.html",
                     "index.html",
                     "redaction.json",
+                    "key_rotations.json",
                 }
                 for name in names:
                     if name.endswith("/") or name in allowed or name.startswith("media/"):

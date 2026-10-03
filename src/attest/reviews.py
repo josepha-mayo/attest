@@ -6,7 +6,13 @@ from datetime import timedelta
 
 from . import taxonomy
 from .clock import ExecutionClock
-from .ledger import Signer, verify_receipt
+from .errors import DomainError
+from .ledger import (
+    Signer,
+    descendant_issuer_keys,
+    trusted_issuer_keys,
+    verify_receipt,
+)
 from .models import (
     HouseholdStatementInput,
     ResolutionInput,
@@ -19,15 +25,29 @@ from .models import (
 from .store import Store, atomic
 
 
-def verify_bundle(bundle: ReviewBundle, *, public_key: str) -> tuple[bool, str]:
+def verify_bundle(
+    bundle: ReviewBundle, *, public_key: str | None = None, trusted_keys: set[str] | None = None
+) -> tuple[bool, str]:
+    """``public_key`` pins a single issuer; ``trusted_keys`` accepts the set of
+    issuer keys a deployment's signed key rotations have endorsed (a bundle
+    written across a rotation legitimately mixes keys)."""
+    allowed = {public_key} if public_key is not None else set(trusted_keys or ())
+    if not allowed:
+        raise ValueError("verify_bundle requires public_key or trusted_keys")
+
+    def _check(r) -> tuple[bool, str]:
+        if r.public_key not in allowed:
+            return False, "signed by a different key than this issuer"
+        return verify_receipt(r, public_key=r.public_key)
+
     original = bundle.original
-    ok, reason = verify_receipt(original, public_key=public_key)
+    ok, reason = _check(original)
     if not ok:
         return False, f"original: {reason}"
     previous = original.payload_hash
     for revision, entry in enumerate(bundle.reviews, 1):
         receipt = entry.receipt
-        ok, reason = verify_receipt(receipt, public_key=public_key)
+        ok, reason = _check(receipt)
         if not ok:
             return False, f"review {revision}: {reason}"
         if (
@@ -145,13 +165,22 @@ class ReviewService:
             status.update(state="unrequested", detail="No worker statement requested")
         return status
 
+    def trusted_issuer_keys(self, key: str | None = None) -> set[str]:
+        """The keys this deployment may verify bundles under: ``key`` (default:
+        the current signer) plus every key the ledger's signed key_rotation
+        receipts link to it — appending a review after rotation must not
+        reject the bundle's pre-rotation receipts."""
+        key = key or self.signer.public_key_b64
+        rotations = [r for r in self.store.receipts() if r.visit_id.startswith("key:")]
+        return trusted_issuer_keys(key, rotations) | descendant_issuer_keys(key, rotations)
+
     def _checked_bundle(self, visit_id: str) -> ReviewBundle:
         bundle = self.bundle(visit_id)
-        ok, reason = verify_bundle(bundle, public_key=self.signer.public_key_b64)
+        ok, reason = verify_bundle(bundle, trusted_keys=self.trusted_issuer_keys())
         if not ok:
             raise ValueError(reason)
         if len(bundle.reviews) >= 500:
-            raise ValueError("review limit reached")
+            raise DomainError("review_limit_reached", "review limit reached")
         return bundle
 
     def _append(self, visit_id: str, data: ReviewInput, actor: dict) -> ReviewEntry:
@@ -283,7 +312,7 @@ class ReviewService:
         if grant is None or grant.used_at or grant.expires_at <= utcnow():
             return None
         bundle = self.bundle(grant.id)
-        ok, _reason = verify_bundle(bundle, public_key=self.signer.public_key_b64)
+        ok, _reason = verify_bundle(bundle, trusted_keys=self.trusted_issuer_keys(bundle.original.public_key))
         if not ok:
             return None
         worker = bundle.original.payload.get("scheduled_worker") or {}
@@ -295,7 +324,7 @@ class ReviewService:
     def worker_review(self, token: str, data: ReviewInput) -> ReviewEntry:
         target = self.worker_target(token)
         if target is None:
-            raise ValueError("invalid, expired, or used review link")
+            raise DomainError("invalid_review_link", "invalid, expired, or used review link")
         grant, bundle = target
         worker = bundle.original.payload["scheduled_worker"]
         entry = self._append(
@@ -328,14 +357,17 @@ class ReviewService:
         never changes the derived worker/coordinator stance."""
         grant = self.store.family_grant(hashlib.sha256(token.encode()).hexdigest())
         if grant is None or grant.expires_at <= utcnow():
-            raise ValueError("invalid or expired family link")
+            raise DomainError("invalid_family_link", "invalid or expired family link")
         household_count = sum(
             1
             for e in self.bundle(grant.id).reviews
             if e.receipt.payload.get("actor", {}).get("role") == "household"
         )
         if household_count >= self.HOUSEHOLD_STATEMENT_LIMIT:
-            raise ValueError("statement limit reached for this family link")
+            raise DomainError(
+                "statement_limit",
+                "statement limit reached for this family link",
+            )
         return self._append(
             grant.id,
             data,

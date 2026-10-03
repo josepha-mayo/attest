@@ -131,3 +131,38 @@ def load_or_create_signer(
     sk = serialization.load_pem_private_key(pem, password=None)
     assert isinstance(sk, Ed25519PrivateKey)
     return Signer(sk)
+
+
+def persist_signer_key(
+    path: Path,
+    pem: bytes,
+    *,
+    kms_key_id: str | None = None,
+    kms_client: Any | None = None,
+    aws_region: str = "us-east-1",
+) -> None:
+    """Atomically replace the deployment signing key with new PEM bytes.
+
+    Used by ``attest rotate-key`` AFTER the old key has already signed the
+    ``key_rotation`` receipt — write order matters: the endorsement must be
+    durable in the ledger before the new key materializes on disk. Under KMS
+    custody the new key wraps to the ``.kms.json`` envelope and any plaintext
+    PEM is removed — custody parity with ``load_or_create_signer``. A crash
+    mid-write can leave the old key in place (rotation re-runs idempotently)
+    but never a half-written key."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if kms_key_id:
+        box = KmsBox(kms_key_id, kms_client or _kms_client(aws_region))
+        wrapped_path = path.with_suffix(path.suffix + ".kms.json")
+        tmp = wrapped_path.with_suffix(wrapped_path.suffix + ".tmp")
+        tmp.write_text(json.dumps(box.wrap(pem), indent=2), encoding="utf-8")
+        if os.name == "posix":
+            os.chmod(tmp, 0o600)
+        os.replace(tmp, wrapped_path)
+        path.unlink(missing_ok=True)  # no plaintext should remain under custody
+    else:
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_bytes(pem)
+        if os.name == "posix":
+            os.chmod(tmp, 0o600)
+        os.replace(tmp, path)

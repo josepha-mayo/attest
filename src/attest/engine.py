@@ -30,6 +30,7 @@ from ring_sandbox import RingAPIError, RingClient, WebhookEvent
 
 from .clock import ExecutionClock
 from .config import Settings
+from .errors import DomainError
 from .ledger import Signer
 from .media import MediaStore
 from .models import (
@@ -488,7 +489,10 @@ class VisitEngine:
             return None
         grant, visit, worker = target
         if at < visit.arrived_at:
-            raise ValueError("check-in cannot precede first observation")
+            raise DomainError(
+                "checkin_precedes_observation",
+                "check-in cannot precede first observation",
+            )
         grant.used_at = utcnow()
         self.store.put_checkin_grant(grant)
         if visit is not None:
@@ -1179,6 +1183,89 @@ class VisitEngine:
                     "A signed statement that these checks ran at this time and "
                     "returned these results — a PASS attests the API call "
                     "succeeded, never the semantics beyond it."
+                ),
+                "journal_head": self.store.journal_head(),
+            },
+        )
+        try:
+            self.store.put_receipt(receipt)
+        except sqlite3.IntegrityError:
+            return self.store.receipt_for_visit(pseudo_id)
+        return receipt
+
+    @atomic
+    def issue_key_rotation(self, new_public_key: str, reason: str = "") -> Receipt:
+        """Sign, under the CURRENT issuer key, that it retires in favor of the
+        named successor. The receipt is the chain's pivot: every receipt before
+        it verifies under the retiring key, every receipt after under the new
+        one — ``verify_chain`` reads it as a key transition, not a break.
+        Idempotent per (old, new) pair via a ``key:`` pseudo visit_id. The
+        successor holder should then countersign via ``issue_key_adoption`` —
+        the pivot alone proves the retiring key asserted the change; the
+        adoption proves the new key holder consented to it."""
+        old_key = self.signer.public_key_b64
+        if new_public_key == old_key:
+            raise ValueError("rotation to the same key is a no-op")
+        pseudo_id = f"key:{old_key[:12]}:{new_public_key[:12]}"
+        existing = self.store.receipt_for_visit(pseudo_id)
+        if existing:
+            return existing
+        prev = self.store.latest_receipt()
+        receipt = self.signer.issue(
+            visit_id=pseudo_id,
+            sequence=prev.sequence + 1 if prev else 1,
+            prev_hash=prev.payload_hash if prev else None,
+            facts={
+                "record_type": "key_rotation",
+                "previous_key": old_key,
+                "new_key": new_public_key,
+                "reason": reason or None,
+                "boundary": (
+                    "A signed statement that the issuer retired the signing key "
+                    "named here and adopted the successor — extends pinned-key "
+                    "trust across the transition; never proves either key was "
+                    "or stayed uncompromised."
+                ),
+                "journal_head": self.store.journal_head(),
+            },
+        )
+        try:
+            self.store.put_receipt(receipt)
+        except sqlite3.IntegrityError:
+            return self.store.receipt_for_visit(pseudo_id)
+        return receipt
+
+    @atomic
+    def issue_key_adoption(self, previous_public_key: str, rotation: Receipt) -> Receipt:
+        """Sign, under the NEW issuer key, that its holder executed the named
+        rotation — a retiring key could claim any successor; only the new key's
+        own signature proves the successor consented. Chained directly after
+        the rotation receipt so the pair reads as one event."""
+        new_key = self.signer.public_key_b64
+        if previous_public_key == new_key:
+            raise ValueError("adoption must be signed by the successor key, not the retiring one")
+        if (
+            rotation.payload.get("record_type") != "key_rotation"
+            or rotation.payload.get("new_key") != new_key
+        ):
+            raise ValueError("adoption must name a key_rotation receipt endorsing THIS key")
+        pseudo_id = f"key:{previous_public_key[:12]}:{new_key[:12]}:adopted"
+        existing = self.store.receipt_for_visit(pseudo_id)
+        if existing:
+            return existing
+        prev = self.store.latest_receipt()
+        receipt = self.signer.issue(
+            visit_id=pseudo_id,
+            sequence=prev.sequence + 1 if prev else 1,
+            prev_hash=prev.payload_hash if prev else None,
+            facts={
+                "record_type": "key_adoption",
+                "previous_key": previous_public_key,
+                "rotation_receipt": {"id": rotation.id, "hash": rotation.payload_hash},
+                "boundary": (
+                    "A signed statement that the holder of the new signing key "
+                    "executed the named rotation — together with the retiring "
+                    "key's endorsement it binds both sides of the transition."
                 ),
                 "journal_head": self.store.journal_head(),
             },

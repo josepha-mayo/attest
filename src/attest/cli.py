@@ -801,7 +801,8 @@ def _demo(args: argparse.Namespace) -> None:
     print("  In another terminal, point at the demo's store first:", flush=True)
     print(f'    $env:ATTEST_DATA_DIR="{data_dir}"   (PowerShell)', flush=True)
     print(f"    ATTEST_DATA_DIR={data_dir} <cmd>      (POSIX)", flush=True)
-    print("  6. attest attack-demo  — 10 tamper attempts, all caught and rolled back", flush=True)
+    print("  6. attest attack-demo  — the tamper battery, every attempt caught", flush=True)
+    print("     and rolled back", flush=True)
     print("  7. attest status       — audits the whole runtime offline (--json for scripts)", flush=True)
     print("  8. attest triage       — the week's brief (agent when AWS is reachable)", flush=True)
     print("  9. attest verify <zip|url> — a pack verifies itself, even straight", flush=True)
@@ -926,7 +927,20 @@ def _verify(args: argparse.Namespace) -> None:
             "  expected a bundle.json, receipt, anchor, or receipts.json export list."
         )
     key = args.key or bundle.original.public_key
-    ok, reason = reviews.verify_bundle(bundle, public_key=key)
+    kr_path = path.parent / "key_rotations.json"
+    if kr_path.is_file():
+        # Mirror the embedded verify_bundle.py: reviews appended after a key
+        # rotation verify under the successor — legitimate only through the
+        # signed rotation+adoption links the pack ships next to the bundle.
+        try:
+            rj = json.loads(kr_path.read_text(encoding="utf-8"))
+            rotations = [Receipt.model_validate(r) for r in rj.get("rotations") or []]
+        except Exception as exc:  # noqa: BLE001
+            sys.exit(f"verification failed: key_rotations.json malformed ({exc})")
+        trusted = ledger.trusted_issuer_keys(key, rotations) | ledger.descendant_issuer_keys(key, rotations)
+        ok, reason = reviews.verify_bundle(bundle, trusted_keys=trusted)
+    else:
+        ok, reason = reviews.verify_bundle(bundle, public_key=key)
     if not ok:
         sys.exit(f"verification failed: {reason}")
     print(f"OK{pinned}: {reason}.")
@@ -1241,6 +1255,66 @@ def _coverage_cert(args: argparse.Namespace) -> None:
         store.close()
 
 
+def _rotate_key(args: argparse.Namespace) -> None:
+    """Retire the deployment signing key and adopt a fresh one.
+
+    Order is the trust story: the retiring key first signs a ``key_rotation``
+    receipt naming its successor (the chain's pivot — receipts before it
+    verify under the old key, receipts after under the new), then the new key
+    lands on disk under the same custody posture (plaintext PEM or KMS wrap),
+    then the new key signs a ``key_adoption`` receipt proving the successor
+    holder consented. A crash after the receipt but before the key write is
+    safe — re-running is idempotent and the ledger never carries a pivot to a
+    key that doesn't exist on disk."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from .keycustody import persist_signer_key
+    from .ledger import Signer
+    from .store import Store
+
+    db = settings.data_dir / "attest.sqlite3"
+    if not db.exists():
+        sys.exit(f"no store at {db}")
+    store = Store(db)
+    try:
+        engine = _cli_engine(store)
+        old_key = engine.signer.public_key_b64
+
+        sk = Ed25519PrivateKey.generate()
+        pem = sk.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+        new_signer = Signer(sk)
+        new_key = new_signer.public_key_b64
+
+        rotation = engine.issue_key_rotation(new_key, args.reason or "")
+        key_path = settings.data_dir / "attest-ed25519.key"
+        persist_signer_key(
+            key_path,
+            pem,
+            kms_key_id=settings.kms_key_id,
+            aws_region=settings.aws_region,
+        )
+        # Adoption under the successor — the retiring key asserted the change,
+        # this proves the new key's holder executed it. Rebuilding the engine
+        # reloads the signer from disk under the same custody rules.
+        adopted = _cli_engine(store).issue_key_adoption(old_key, rotation)
+        print(f"key rotated: {old_key[:16]}... -> {new_key[:16]}...")
+        print(f"  rotation receipt  {rotation.id}")
+        print(f"  adoption receipt  {adopted.id}")
+        print(
+            "  history still verifies: the chain reads the rotation receipt as "
+            "the pivot; `attest status` and pack verification follow it."
+        )
+        if settings.kms_key_id:
+            print("  successor wrapped under the configured KMS key")
+    finally:
+        store.close()
+
+
 def _digest(args: argparse.Namespace) -> None:
     """Sign a digest of the records written for an interval — counts by outcome,
     review counts by stance, and the exact receipt set summarized."""
@@ -1460,6 +1534,7 @@ def _export(args: argparse.Namespace) -> None:
             entries,
             redact_media=args.redact_media,
             manifest_signer=lambda m: engine.issue_export_manifest(site, m),
+            issuer_key=engine.signer.public_key_b64,
         )
         out = Path(args.out or f"case-{site.id}.zip")
         out.write_bytes(data)
@@ -1492,8 +1567,16 @@ def _attack_demo(args: argparse.Namespace) -> None:
     if not db.exists():
         sys.exit(f"no store at {db} — run `attest replay home_aide_visit` first")
     store = Store(db)
+    # The webhook inbox is a separate database — the delivery-id conflict
+    # attack needs it, and the refused write leaves nothing to roll back.
+    inbox = None
+    inbox_path = settings.data_dir / "webhooks.sqlite3"
+    if inbox_path.exists():
+        from .inbox import WebhookInbox
+
+        inbox = WebhookInbox(inbox_path)
     try:
-        out = run(store, settings.data_dir / "media")
+        out = run(store, settings.data_dir / "media", inbox=inbox)
         if out.get("baseline_note"):
             print(out["baseline_note"])
         caught = skipped = 0
@@ -1512,6 +1595,8 @@ def _attack_demo(args: argparse.Namespace) -> None:
             sys.exit(1)
     finally:
         store.close()
+        if inbox is not None:
+            inbox.close()
 
 
 def _diff(args: argparse.Namespace) -> None:
@@ -1622,7 +1707,9 @@ def _explain(args: argparse.Namespace) -> None:
             print("No signed receipt — record still open.")
         bundle = reviews.bundle(visit.id) if receipt else None
         if bundle:
-            ok, why = verify_bundle(bundle, public_key=bundle.original.public_key)
+            ok, why = verify_bundle(
+                bundle, trusted_keys=reviews.trusted_issuer_keys(bundle.original.public_key)
+            )
             print(f"Review chain: {'OK' if ok else 'FAILED'} — {why}")
             for r in bundle.reviews:
                 rv = r.receipt.payload["review"]
@@ -1715,7 +1802,7 @@ def _explain_report(store, visit, site, schedule, evidence, receipt, reviews) ->
             "live_sessions": cov.get("live_sessions") or [],
         }
     if bundle:
-        ok, why = verify_bundle(bundle, public_key=bundle.original.public_key)
+        ok, why = verify_bundle(bundle, trusted_keys=reviews.trusted_issuer_keys(bundle.original.public_key))
         out["review_chain"] = {
             "verified": ok,
             "detail": why,
@@ -2076,6 +2163,16 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--from", dest="start", required=True, help="interval start (ISO 8601, tz-aware)")
     s.add_argument("--to", dest="to", required=True, help="interval end (ISO 8601, tz-aware)")
     s.set_defaults(fn=_digest)
+
+    s = sub.add_parser(
+        "rotate-key",
+        help="retire the signing key — the old key signs a key_rotation attestation "
+        "endorsing its successor, the successor lands under the same custody "
+        "(plaintext or KMS) and signs a key_adoption receipt; history stays "
+        "verifiable through the pivot",
+    )
+    s.add_argument("--reason", default="", help="why the key is being rotated (signed into the receipt)")
+    s.set_defaults(fn=_rotate_key)
 
     s = sub.add_parser(
         "triage",

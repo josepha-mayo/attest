@@ -181,10 +181,16 @@ async function checkBundle(root,key){
   const KNOWN=new Set(["kind","original","reviews"]);
   for(const[k]of root.v)if(!KNOWN.has(k))
     return{ok:false,why:"unsigned extra field in bundle: "+JSON.stringify(k)};
+  /* ``key`` is a pinned issuer key (string) or a trusted-key Set built by
+     trustedKeys()/descendantKeys() — a pack written across a key rotation
+     legitimately mixes issuer keys; only keys the signed rotation chain
+     endorses are inside the set. */
+  const outOf=k=>key instanceof Set?!key.has(k):(key&&k!==key);
   const oNode=get(root,"original");
   if(!oNode)return{ok:false,why:"no original receipt"};
   const original=toJS(oNode);
-  if(key&&original.public_key!==key)return{ok:false,why:"original: different issuer key"};
+  if(outOf(original.public_key))
+    return{ok:false,why:"original: signed by a key outside the trusted issuer chain"};
   const c0=await checkReceipt(oNode);
   if(!c0.ok)return{ok:false,why:"original: "+c0.why};
   let prev=original.payload_hash,n=0;
@@ -196,7 +202,8 @@ async function checkBundle(root,key){
     const rNode=get(entries[i],"receipt");
     if(!rNode)return{ok:false,why:`review ${n}: entry has no receipt`};
     const r=toJS(rNode);
-    if(key&&r.public_key!==key)return{ok:false,why:`review ${n}: different issuer key`};
+    if(outOf(r.public_key))
+      return{ok:false,why:`review ${n}: signed by a key outside the trusted issuer chain`};
     const c=await checkReceipt(rNode);
     if(!c.ok)return{ok:false,why:`review ${n}: ${c.why}`};
     if(e.id!==r.id||e.visit_id!==original.visit_id||r.visit_id!==original.visit_id)
@@ -305,7 +312,8 @@ async function checkManifestNode(mNode,key){
   const c=await checkReceipt(sig);
   if(!c.ok)return{ok:false,why:"manifest signature: "+c.why};
   const js=toJS(sig);
-  if(key&&js.public_key!==key)return{ok:false,why:"manifest signed by a different key"};
+  const sigOut=key instanceof Set?!key.has(js.public_key):(key&&js.public_key!==key);
+  if(sigOut)return{ok:false,why:"manifest signed by a key outside the trusted issuer chain"};
   const p=js.payload;
   const h=await sha256hex(enc(canonical(dropKey(mNode,"signature_receipt"))));
   if(h!==p.manifest_sha256)
@@ -316,6 +324,59 @@ async function checkManifestNode(mNode,key){
     &&Object.keys(listed).every(k=>listed[k]===signed[k]);
   if(!same)return{ok:false,why:"manifest visit list disagrees with the signed export"};
   return{ok:true,why:`export signed: ${Object.keys(listed).length} record(s)`};}
+/* ---------- signed key rotation (ledger.trusted_issuer_keys parity) ---------- */
+async function adoptedBy(keyReceipts,rotation,newKey){
+  /* The successor's countersignature: a key_adoption receipt signed under
+     newKey naming this exact rotation (id + payload hash). A retiring key's
+     endorsement is self-serve — any key can claim any successor — so consent
+     is what separates a real handoff from a grafted "predecessor". */
+  const rr=toJS(rotation),rp=rr.payload||{};
+  for(const an of keyReceipts){
+    const a=toJS(an),ap=a.payload||{},link=ap.rotation_receipt||{};
+    if(ap.record_type==="key_adoption"&&link.id===rr.id&&link.hash===rp.payload_hash
+      &&a.public_key===newKey){
+      const c=await checkReceipt(an);
+      if(c.ok)return true;
+    }
+  }
+  return false;}
+async function trustedKeys(issuerKey,rotationNodes,maxHops=32){
+  /* The keys a case-pack verification may trust: the manifest issuer plus
+     every ancestor reachable through signed key_rotation receipts that the
+     successor countersigned via key_adoption. An uncountersigned rotation
+     is a graft attempt — it never lands in the set. */
+  const trusted=new Set([issuerKey]);let cur=issuerKey;
+  for(let i=0;i<maxHops;i++){
+    let nxt=null;
+    for(const rn of rotationNodes){
+      const r=toJS(rn),p=r.payload||{};
+      if(p.record_type==="key_rotation"&&p.new_key===cur&&r.public_key===p.previous_key){
+        const c=await checkReceipt(rn);
+        if(c.ok&&await adoptedBy(rotationNodes,rn,cur)){nxt=p.previous_key;break;}
+      }
+    }
+    if(nxt===null)break;
+    cur=nxt;trusted.add(cur);
+  }
+  return trusted;}
+async function descendantKeys(rootKey,rotationNodes,maxHops=32){
+  /* The forward walk for single-visit bundles: reviews append after the
+     original, so a bundle legitimately carries keys the signed rotations
+     endorse — the root key plus every verified successor. */
+  const trusted=new Set([rootKey]);let cur=rootKey;
+  for(let i=0;i<maxHops;i++){
+    let nxt=null;
+    for(const rn of rotationNodes){
+      const r=toJS(rn),p=r.payload||{};
+      if(p.record_type==="key_rotation"&&p.previous_key===cur&&r.public_key===cur){
+        const c=await checkReceipt(rn);
+        if(c.ok){nxt=p.new_key;break;}
+      }
+    }
+    if(nxt===null)break;
+    cur=nxt;trusted.add(cur);
+  }
+  return trusted;}
 /* ---------- shared pack helpers ---------- */
 function digests(o,out=[]){
   if(Array.isArray(o))o.forEach(v=>digests(v,out));
@@ -376,6 +437,7 @@ async function verifyFiles(files){
       return out.join("");
     }
   }
+  let trusted=null;
   if(mText){
     mNode=parseKeep(mText);
     manifest=toJS(mNode);
@@ -387,6 +449,18 @@ async function verifyFiles(files){
       say("bad",`manifest: unsupported schema ${esc(String(manifest.schema||"?"))}`);
     }
     say("ok",`manifest: ${esc(String(Number(manifest.visits?.length)||0))} visit(s)`);
+    /* Rotation receipts travel as manifest-listed attestations — collect them
+       before the bundle loop so the trusted issuer set spans the signed
+       rotation chain (a pack exported after rotation mixes keys). */
+    const rotNodes=[];
+    for(const a of manifest.attestations||[]){
+      const at=await text(`attestations/${a.receipt_id}.json`);
+      if(!at)continue;
+      const aNode=parseKeep(at);
+      const art=(toJS(aNode).payload||{}).record_type;
+      if(art==="key_rotation"||art==="key_adoption")rotNodes.push(aNode);
+    }
+    trusted=await trustedKeys(manifest.issuer_key||"",rotNodes);
     for(const v of manifest.visits||[]){
       const t=await text(`visits/${v.visit_id}/bundle.json`);
       /* A manifest-listed bundle absent from the zip fails closed — the row is
@@ -400,11 +474,27 @@ async function verifyFiles(files){
     const root=parseKeep(t);
     const vid=toJS(get(root,"original")||{t:"obj",v:[]}).visit_id||"visit";
     bundles.push([vid,root]);
+    /* key_rotations.json carries the signed pivot links — reviews appended
+       after a rotation verify under the successor. Malformed content fails
+       closed, mirroring verify_bundle.py. */
+    const kt=await text("key_rotations.json");
+    if(kt){
+      const oKey=toJS(get(root,"original")||{t:"obj",v:[]}).public_key;
+      const rn=get(parseKeep(kt),"rotations");
+      if(!rn||rn.t!=="arr"){
+        anyBad=true;say("bad","key_rotations.json: malformed");
+      }else{
+        trusted=new Set([
+          ...(await trustedKeys(oKey,rn.v)),
+          ...(await descendantKeys(oKey,rn.v)),
+        ]);
+      }
+    }
   }
   for(const[vid,root]of bundles){
     const oNode=get(root,"original");
     if(!key)key=toJS(get(oNode,"public_key"));
-    const c=await checkBundle(root,key);
+    const c=await checkBundle(root,trusted||key);
     if(!c.ok)anyBad=true;
     const js=toJS(root);
     actual[vid]=(js.original||{}).payload_hash;
@@ -459,15 +549,15 @@ async function verifyFiles(files){
     }
   }
   if(mNode){
-    const mc=await checkManifestNode(mNode,key);
+    const mc=await checkManifestNode(mNode,trusted||key);
     if(!mc.ok)anyBad=true;
     say(mc.ok?"ok":"bad",`manifest: ${esc(mc.why)}`);
     if(!manifest.issuer_key){
       anyBad=true;
       say("bad","manifest: missing issuer_key");
-    }else if(key&&manifest.issuer_key!==key){
+    }else if(trusted&&!trusted.has(manifest.issuer_key)){
       anyBad=true;
-      say("bad","manifest: issuer_key disagrees with the bundles' issuer");
+      say("bad","manifest: issuer_key outside the trusted rotation chain");
     }
     for(const v of manifest.visits||[]){
       if(actual[v.visit_id]&&actual[v.visit_id]!==v.payload_hash){
@@ -481,8 +571,10 @@ async function verifyFiles(files){
       const at=await text(`attestations/${a.receipt_id}.json`);
       if(!at){anyBad=true;say("bad",`attestation ${esc(a.receipt_id)}: missing from pack`);continue;}
       const aNode=parseKeep(at);const rjs=toJS(aNode);
-      if(key&&rjs.public_key!==key){
-        anyBad=true;say("bad",`attestation ${esc(a.receipt_id)}: different issuer key`);continue;}
+      const aOut=trusted?!trusted.has(rjs.public_key):(key&&rjs.public_key!==key);
+      if(aOut){
+        anyBad=true;
+        say("bad",`attestation ${esc(a.receipt_id)}: key outside the trusted issuer chain`);continue;}
       const rc=await checkReceipt(aNode);
       if(!rc.ok){anyBad=true;say("bad",`attestation ${esc(a.receipt_id)}: ${esc(rc.why)}`);continue;}
       if(rjs.payload_hash!==a.payload_hash||rjs.visit_id!==a.visit_id){
@@ -506,7 +598,8 @@ async function verifyFiles(files){
     /* Single-visit dispute pack — the format names a fixed top-level set plus
        media/* (digest-checked above). */
     const allowed=new Set([
-      "bundle.json","README.txt","verify_bundle.py","verify.html","index.html","redaction.json"]);
+      "bundle.json","README.txt","verify_bundle.py","verify.html","index.html","redaction.json",
+      "key_rotations.json"]);
     for(const name of Object.keys(byName)){
       if(name.endsWith("/")||allowed.has(name)||name.startsWith("media/"))continue;
       anyBad=true;say("bad",`${esc(name)}: present but not in the signed manifest`);
@@ -1020,12 +1113,27 @@ async function renderIndex(){
   const verdict=document.getElementById("verdict");
   let key=null,anyBad=false,n=0,declared=0;
   const rows=[];const actual={};const payloads=[];
+  /* Rotation receipts ride as inlined attestation tags — build the trusted
+     issuer set (both directions from the declared issuer) BEFORE checking
+     bundles, so a pack exported across a key rotation verifies. */
+  const rotNodes=[];
+  for(const tag of document.querySelectorAll("script.attestation")){
+    const aN=parseKeep(d64(tag.textContent));
+    const art=(toJS(aN).payload||{}).record_type;
+    if(art==="key_rotation"||art==="key_adoption")rotNodes.push(aN);
+  }
+  const trusted=meta.issuer_key&&rotNodes.length
+    ?new Set([
+        ...(await trustedKeys(meta.issuer_key,rotNodes)),
+        ...(await descendantKeys(meta.issuer_key,rotNodes)),
+      ])
+    :null;
   for(const tag of document.querySelectorAll("script.bundle")){
     const root=parseKeep(d64(tag.textContent));
     const js=toJS(root);
     const oNode=get(root,"original");
     if(!key)key=toJS(get(oNode,"public_key"));
-    const c=await checkBundle(root,key);
+    const c=await checkBundle(root,trusted||key);
     if(!c.ok)anyBad=true;
     n++;
     actual[tag.dataset.vid]=(js.original||{}).payload_hash;
@@ -1073,7 +1181,7 @@ async function renderIndex(){
   const mtag=document.getElementById("packmanifest");
   if(mtag&&mtag.textContent){
     const mNode=parseKeep(d64(mtag.textContent));
-    const mc=await checkManifestNode(mNode,key);
+    const mc=await checkManifestNode(mNode,trusted||key);
     if(!mc.ok)anyBad=true;
     mLine=`<div class="row ${mc.ok?"ok":"bad"}">manifest: ${esc(mc.why)}</div>`;
     const listedVids=new Set();
@@ -1105,8 +1213,10 @@ async function renderIndex(){
       const aNode=parseKeep(d64(tag.textContent));const rjs=toJS(aNode);
       const listed=alist[tag.dataset.rid];
       const rid=esc(tag.dataset.rid);
-      if(key&&rjs.public_key!==key){
-        anyBad=true;mLine+=`<div class="row bad">attestation ${esc(rid)}: different issuer key</div>`;
+      const aOut=trusted?!trusted.has(rjs.public_key):(key&&rjs.public_key!==key);
+      if(aOut){
+        anyBad=true;
+        mLine+=`<div class="row bad">attestation ${esc(rid)}: key outside the trusted issuer chain</div>`;
         continue;}
       const rc=await checkReceipt(aNode);
       if(!rc.ok){

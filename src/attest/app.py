@@ -542,7 +542,11 @@ def create_app(
                 site=store.site(v.site_id),
                 token=token,
                 done=False,
-                checkin_error=(s["wk_err_precedes"] if "precede first observation" in str(exc) else str(exc)),
+                checkin_error=(
+                    s["wk_err_precedes"]
+                    if getattr(exc, "code", None) == "checkin_precedes_observation"
+                    else str(exc)
+                ),
                 s=s,
                 html_lang=lang,
             )
@@ -778,8 +782,14 @@ def create_app(
             receipt=receipt,
             bundle=bundle,
             reviews=bundle.reviews if bundle else [],
-            review_verification=verify_bundle(bundle, public_key=signer.public_key_b64) if bundle else None,
-            verified=ledger.verify_receipt(receipt, public_key=signer.public_key_b64) if receipt else None,
+            review_verification=(
+                verify_bundle(bundle, trusted_keys=reviews.trusted_issuer_keys()) if bundle else None
+            ),
+            verified=(
+                ledger.verify_receipt(receipt, public_key=receipt.public_key)
+                if receipt and receipt.public_key in reviews.trusted_issuer_keys()
+                else ((False, "signed by a key outside the rotation chain") if receipt else None)
+            ),
             countersign=reviews.countersign(visit_id) if bundle else None,
             coverage=cov,
             late_count=len(late),
@@ -910,7 +920,9 @@ def create_app(
             "brief.html",
             **ctx,
             corroboration=corroboration(v, site, ctx["schedule"], ctx["evidence"], ctx["receipt"]),
-            review_verification=verify_bundle(bundle, public_key=signer.public_key_b64) if bundle else None,
+            review_verification=(
+                verify_bundle(bundle, trusted_keys=reviews.trusted_issuer_keys()) if bundle else None
+            ),
             issuer_key=signer.public_key_b64,
             generated_at=engine.clock.now(),
         )
@@ -984,7 +996,7 @@ def create_app(
         try:
             await asyncio.to_thread(reviews.household_statement, token, data)
         except ValueError as exc:
-            if "statement limit" in str(exc):
+            if getattr(exc, "code", None) == "statement_limit":
                 return _household_render(
                     request,
                     visit,
@@ -1076,7 +1088,11 @@ def create_app(
                 return render(
                     request,
                     "verify.html",
-                    result=_verify_pack(data, signer.public_key_b64),
+                    result=_verify_pack(
+                        data,
+                        signer.public_key_b64,
+                        known_rotations=[r for r in store.receipts() if r.visit_id.startswith("key:")],
+                    ),
                     public_key=signer.public_key_b64,
                 )
             raw = data.decode("utf-8", errors="replace")
@@ -1090,7 +1106,10 @@ def create_app(
             if isinstance(data, list):
                 ok, why = ledger.verify_chain([Receipt.model_validate(d) for d in data], public_key=pk)
             elif isinstance(data, dict) and data.get("kind") == "attest.review_bundle/1":
-                ok, why = verify_bundle(ReviewBundle.model_validate(data), public_key=pk)
+                ok, why = verify_bundle(
+                    ReviewBundle.model_validate(data),
+                    trusted_keys=reviews.trusted_issuer_keys(),
+                )
             else:
                 ok, why = ledger.verify_receipt(data, public_key=pk)
         except Exception as exc:  # noqa: BLE001
@@ -1134,7 +1153,11 @@ def create_app(
         try:
             return await asyncio.to_thread(function, *args, **kwargs)
         except ValueError as exc:
-            raise HTTPException(409, str(exc)) from exc
+            err = HTTPException(409, str(exc))
+            # A DomainError's stable code survives the 409 translation —
+            # handlers route on it, never on the message's wording.
+            err.domain_code = getattr(exc, "code", None)
+            raise err from exc
         except RingAPIError as exc:
             raise HTTPException(
                 502, f"Ring API returned HTTP {exc.status_code}; check access and retry"
@@ -1480,6 +1503,7 @@ def create_app(
                 entries,
                 redact_media=redact_media,
                 manifest_signer=lambda m: engine.issue_export_manifest(site, m),
+                issuer_key=engine.signer.public_key_b64,
             )
 
         data = await asyncio.to_thread(build)
@@ -1581,9 +1605,10 @@ def create_app(
         try:
             await action(reviews.worker_review, token, body)
         except HTTPException as exc:
-            if exc.status_code == 409 and "review link" in str(exc.detail):
+            domain_code = getattr(exc, "domain_code", None)
+            if exc.status_code == 409 and domain_code == "invalid_review_link":
                 return _dead_link(request, "review", status_code=410)
-            if exc.status_code == 409 and "review limit reached" in str(exc.detail):
+            if exc.status_code == 409 and domain_code == "review_limit_reached":
                 ctx = await _worker_ctx(token, lang)
                 if ctx is None:
                     return _dead_link(request, "review")
@@ -1742,9 +1767,14 @@ def create_app(
     return app
 
 
-def _verify_pack(data: bytes, public_key: str) -> tuple[bool, str]:
+def _verify_pack(data: bytes, public_key: str, known_rotations: list | None = None) -> tuple[bool, str]:
     """Verify an exported pack: dispute pack (bundle.json) or site case pack
-    (manifest.json + visits/<id>/bundle.json) — signatures + media digests."""
+    (manifest.json + visits/<id>/bundle.json) — signatures + media digests.
+
+    ``known_rotations`` lets the deployment's own ledger extend trust forward:
+    a pack exported before a rotation carries no link to the current key, but
+    the ledger's signed pivots prove the continuation — the pinned current
+    key still verifies the pack."""
     import io
     import zipfile
 
@@ -1761,9 +1791,26 @@ def _verify_pack(data: bytes, public_key: str) -> tuple[bool, str]:
         z = BoundedZip(z)
         names = set(z.namelist())
         if "manifest.json" in names:
-            return _verify_case_pack(z, public_key)
+            return _verify_case_pack(z, public_key, known_rotations=known_rotations)
         bundle = ReviewBundle.model_validate(json.loads(z.read("bundle.json")))
-        ok, detail = _check_pack_bundle(z, bundle, public_key, media_prefix="media/")
+        # Reviews appended after a key rotation verify under the successor —
+        # legitimate only through the signed links in key_rotations.json.
+        rotation_receipts = list(known_rotations or [])
+        if "key_rotations.json" in names:
+            rj = json.loads(z.read("key_rotations.json"))
+            rotations = rj.get("rotations") if isinstance(rj, dict) else None
+            if not isinstance(rotations, list):
+                return False, "key_rotations.json: malformed"
+            try:
+                rotation_receipts += [Receipt.model_validate(r) for r in rotations]
+            except Exception as exc:  # noqa: BLE001
+                return False, f"key_rotations.json: malformed ({exc})"
+        trusted: str | set = public_key
+        if rotation_receipts:
+            trusted = ledger.trusted_issuer_keys(
+                public_key, rotation_receipts
+            ) | ledger.descendant_issuer_keys(public_key, rotation_receipts)
+        ok, detail = _check_pack_bundle(z, bundle, trusted, media_prefix="media/")
         if not ok:
             return False, detail
         # Fail closed on files the pack format doesn't name (media members are
@@ -1775,6 +1822,7 @@ def _verify_pack(data: bytes, public_key: str) -> tuple[bool, str]:
             "verify.html",
             "index.html",
             "redaction.json",
+            "key_rotations.json",
         }
         for name in names:
             if name.endswith("/") or name in allowed or name.startswith("media/"):
@@ -1785,8 +1833,13 @@ def _verify_pack(data: bytes, public_key: str) -> tuple[bool, str]:
         return False, f"not a valid exported pack: {exc}"
 
 
-def _check_pack_bundle(z, bundle: ReviewBundle, public_key: str, *, media_prefix: str) -> tuple[bool, str]:
-    ok, why = verify_bundle(bundle, public_key=public_key)
+def _check_pack_bundle(
+    z, bundle: ReviewBundle, public_key: str | set, *, media_prefix: str
+) -> tuple[bool, str]:
+    ok, why = verify_bundle(
+        bundle,
+        **({"trusted_keys": public_key} if isinstance(public_key, set) else {"public_key": public_key}),
+    )
     if not ok:
         return False, f"bundle: {why}"
     digests = {
@@ -1818,13 +1871,35 @@ def _check_pack_bundle(z, bundle: ReviewBundle, public_key: str, *, media_prefix
     return (covered == len(digests), detail)
 
 
-def _verify_case_pack(z, public_key: str) -> tuple[bool, str]:
+def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -> tuple[bool, str]:
     """Verify every visit bundle in a case pack plus the manifest's hash list."""
     manifest = json.loads(z.read("manifest.json"))
     if manifest.get("schema") != "attest.case-pack/1":
         return False, f"unsupported case pack schema {manifest.get('schema')!r}"
-    if manifest.get("issuer_key") != public_key:
-        return False, "case pack was not issued under this deployment's key"
+    issuer = manifest.get("issuer_key")
+    # Trust = the manifest issuer plus every ancestor reachable through signed
+    # key_rotation receipts — a pack exported after rotation legitimately
+    # carries bundles written under retired keys. ``known_rotations`` (the
+    # deployment's own ledger pivots) extends trust forward: a pack exported
+    # before a rotation still verifies under the current pinned key.
+    rotations = []
+    for a in manifest.get("attestations", []):
+        rid = a.get("receipt_id")
+        try:
+            att = Receipt.model_validate(json.loads(z.read(f"attestations/{rid}.json")))
+        except Exception:  # noqa: BLE001 — unreadable members fail in the loop below
+            continue
+        if att.payload.get("record_type") in ("key_rotation", "key_adoption"):
+            rotations.append(att)
+    trusted = ledger.trusted_issuer_keys(issuer, rotations)
+    if known_rotations:
+        trusted |= ledger.descendant_issuer_keys(issuer, known_rotations)
+    if public_key not in trusted:
+        return (
+            False,
+            "case pack was not issued under this deployment's key "
+            "(no signed key_rotation links the pinned key to the issuer)",
+        )
     lines = []
     for v in manifest.get("visits", []):
         vid = v.get("visit_id", "?")
@@ -1832,7 +1907,7 @@ def _verify_case_pack(z, public_key: str) -> tuple[bool, str]:
             bundle = ReviewBundle.model_validate(json.loads(z.read(f"visits/{vid}/bundle.json")))
         except Exception as exc:  # noqa: BLE001
             return False, f"{vid}: missing or invalid bundle ({exc})"
-        ok, detail = _check_pack_bundle(z, bundle, public_key, media_prefix=f"visits/{vid}/media/")
+        ok, detail = _check_pack_bundle(z, bundle, trusted, media_prefix=f"visits/{vid}/media/")
         if not ok:
             return False, f"{vid}: {detail}"
         if bundle.original.payload_hash != v.get("payload_hash"):
@@ -1848,9 +1923,10 @@ def _verify_case_pack(z, public_key: str) -> tuple[bool, str]:
     sig = manifest.get("signature_receipt")
     manifest_note = "unsigned manifest (pre-signature pack)"
     if sig is not None:
-        ok, why = ledger.verify_receipt(Receipt.model_validate(sig), public_key=public_key)
-        if not ok:
-            return False, f"manifest signature: {why}"
+        ok, why = ledger.verify_receipt(Receipt.model_validate(sig), public_key=sig.get("public_key"))
+        if not ok or sig.get("public_key") not in trusted:
+            detail = why if not ok else "signed by a key outside the rotation chain"
+            return False, f"manifest signature: {detail}"
         core = {k: v for k, v in manifest.items() if k != "signature_receipt"}
         if ledger.payload_hash(core) != sig["payload"].get("manifest_sha256"):
             return False, "manifest content hash mismatch (manifest was altered)"
@@ -1865,9 +1941,9 @@ def _verify_case_pack(z, public_key: str) -> tuple[bool, str]:
             att = Receipt.model_validate(json.loads(z.read(f"attestations/{rid}.json")))
         except Exception as exc:  # noqa: BLE001
             return False, f"attestation {rid}: missing or invalid ({exc})"
-        if att.public_key != public_key:
-            return False, f"attestation {rid}: issued under a different key"
-        ok, why = ledger.verify_receipt(att, public_key=public_key)
+        if att.public_key not in trusted:
+            return False, f"attestation {rid}: issued under a key outside the rotation chain"
+        ok, why = ledger.verify_receipt(att, public_key=att.public_key)
         if not ok:
             return False, f"attestation {rid}: {why}"
         if att.visit_id != a.get("visit_id") or att.payload_hash != a.get("payload_hash"):

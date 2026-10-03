@@ -10,6 +10,7 @@ on any machine with plain Python; no attest install, no pip, no trust in us.
 from __future__ import annotations
 
 import io
+import json
 import zipfile
 from pathlib import Path
 
@@ -31,11 +32,19 @@ index.html     Offline record browser — the record verified live in-browser
                with its timeline, a day-by-day strip of the whole window,
                source-by-source corroboration, and any signed
                worker/household/coordinator statements rendered verbatim.
+key_rotations.json  Present only if the deployment rotated its signing key:
+               the signed pivot receipts — each endorsed by the retiring key —
+               that let reviews written under the successor verify. A key that
+               appears without a signed endorsement link is rejected, never
+               trusted.
 
 WHAT A VALID VERIFICATION PROVES
 - Every receipt in bundle.json is byte-identical to what was signed: the payload
   hashes to payload_hash, and the Ed25519 signature covers that hash.
 - Reviews are anchored to the original receipt's hash and ordered by revision.
+- If the deployment rotated keys, the rotation receipts prove the retiring
+  key endorsed each successor — records on both sides of the transition
+  verify under one signed chain.
 - Media files match the sha256 digests recorded in the evidence list (when the
   verifier is run from this directory, it checks media/ too).
 
@@ -167,25 +176,36 @@ def check_receipt(r, key):
     return True, "ok"
 
 
+def _member_check(r, allowed):
+    if r.get("public_key") not in allowed:
+        return False, "signed by a key outside the trusted issuer chain"
+    return check_receipt(r, r["public_key"])
+
+
 def check_bundle(bundle, key):
-    """Verify one bundle's original + review chain. Returns (ok, detail, n_reviews)."""
+    """Verify one bundle's original + review chain. Returns (ok, detail, n_reviews).
+
+    ``key`` is either a single pinned issuer key (str) or the trusted-key set
+    returned by trusted_keys() — a pack written across a key rotation
+    legitimately mixes issuer keys."""
     # ReviewBundle is extra="forbid": honest files carry exactly kind,
     # original, reviews. Any other top-level key (e.g. a forged
     # countersign_status) is unsigned attacker content — fail, don't render it.
+    allowed = {key} if isinstance(key, str) else set(key)
     if bundle.get("kind") != "attest.review_bundle/1":
         return False, "unrecognized bundle kind", 0
     extra = set(bundle) - {"kind", "original", "reviews"}
     if extra:
         return False, f"unsigned extra field in bundle: {sorted(extra)[0]}", 0
     original = bundle["original"]
-    ok, why = check_receipt(original, key)
+    ok, why = _member_check(original, allowed)
     if not ok:
         return False, f"original: {why}", 0
     prev = original["payload_hash"]
     n = 0
     for n, entry in enumerate(bundle.get("reviews", []), 1):
         r = entry["receipt"]
-        ok, why = check_receipt(r, key)
+        ok, why = _member_check(r, allowed)
         if not ok:
             return False, f"review {n}: {why}", n
         if (
@@ -266,11 +286,14 @@ def check_manifest(manifest, key):
     """If the manifest carries a signature_receipt, verify it: the export was
     signed at pack time and names exactly which receipt hashes it carries —
     a pack that drops or swaps a record fails here, not just on a missing
-    file. Older packs without a signature are reported, not failed."""
+    file. Older packs without a signature are reported, not failed. ``key``
+    is a single pinned key or the trusted_keys() set — the signature receipt
+    must verify under a key inside the trusted issuer chain."""
     sig = manifest.get("signature_receipt")
     if sig is None:
         return True, "unsigned manifest (pre-signature pack)"
-    ok, why = check_receipt(sig, key)
+    allowed = {key} if isinstance(key, str) else set(key)
+    ok, why = _member_check(sig, allowed)
     if not ok:
         return False, f"manifest signature: {why}"
     core = {k: v for k, v in manifest.items() if k != "signature_receipt"}
@@ -282,6 +305,81 @@ def check_manifest(manifest, key):
     if listed != signed_hashes:
         return False, "manifest visit list disagrees with the signed export"
     return True, f"export signed: {len(listed)} record(s)"
+
+
+def _adoption_consent(receipts, rotation, new_key):
+    """Whether the SUCCESSOR key countersigned the rotation via a
+    key_adoption receipt naming it (id + payload hash). A retiring key's
+    endorsement is self-serve — any key can claim any successor — so consent
+    is what separates a real handoff from a grafted "predecessor"."""
+    for r in receipts:
+        p = r.get("payload", {})
+        link = p.get("rotation_receipt") or {}
+        if (
+            p.get("record_type") == "key_adoption"
+            and link.get("id") == rotation.get("id")
+            and link.get("hash") == rotation.get("payload_hash")
+            and r.get("public_key") == new_key
+        ):
+            ok, _ = check_receipt(r, new_key)
+            if ok:
+                return True
+    return False
+
+
+def trusted_keys(issuer_key, rotation_receipts, max_hops=32):
+    """The keys a pack verification may trust: the manifest issuer plus every
+    ancestor reachable through signed key_rotation receipts. Each hop must be
+    a valid receipt signed by the retiring key endorsing its successor AND
+    countersigned by that successor via key_adoption — a forged or
+    unconsented rotation never lands in the set."""
+    trusted = {issuer_key}
+    cur = issuer_key
+    for _ in range(max_hops):
+        nxt = None
+        for r in rotation_receipts:
+            p = r.get("payload", {})
+            if (
+                p.get("record_type") == "key_rotation"
+                and p.get("new_key") == cur
+                and r.get("public_key") == p.get("previous_key")
+            ):
+                ok, _ = check_receipt(r, r["public_key"])
+                if ok and _adoption_consent(rotation_receipts, r, cur):
+                    nxt = p["previous_key"]
+                    break
+        if nxt is None:
+            break
+        cur = nxt
+        trusted.add(cur)
+    return trusted
+
+
+def descendant_keys(root_key, rotation_receipts, max_hops=32):
+    """The mirror walk for single-visit bundles: reviews append forward in
+    time, so a bundle legitimately carries keys AFTER its original — every
+    successor reachable through signed rotations. Each hop must be a valid
+    receipt signed by the retiring key endorsing the successor."""
+    trusted = {root_key}
+    cur = root_key
+    for _ in range(max_hops):
+        nxt = None
+        for r in rotation_receipts:
+            p = r.get("payload", {})
+            if (
+                p.get("record_type") == "key_rotation"
+                and p.get("previous_key") == cur
+                and r.get("public_key") == cur
+            ):
+                ok, _ = check_receipt(r, cur)
+                if ok:
+                    nxt = p["new_key"]
+                    break
+        if nxt is None:
+            break
+        cur = nxt
+        trusted.add(cur)
+    return trusted
 '''
 
 # verify_bundle.py — verifies one pack's bundle.json (and media/ next to it).
@@ -296,8 +394,22 @@ def main():
         key = args[i + 1]
         del args[i : i + 2]
     bundle = json.loads(Path(args[0]).read_text(encoding="utf-8"))
+    pack_dir = Path(args[0]).resolve().parent
     key = key or bundle["original"]["public_key"]
-    ok, why, n = check_bundle(bundle, key)
+    # Reviews appended after a key rotation verify under the successor —
+    # legitimate only through the signed rotation links in key_rotations.json.
+    trusted = {key}
+    rot_path = pack_dir / "key_rotations.json"
+    if rot_path.is_file():
+        try:
+            rj = json.loads(rot_path.read_text(encoding="utf-8"))
+            rotations = rj.get("rotations") if isinstance(rj, dict) else None
+        except Exception:
+            rotations = None
+        if not isinstance(rotations, list):
+            sys.exit("FAIL key_rotations.json: malformed")
+        trusted = trusted_keys(key, rotations) | descendant_keys(key, rotations)
+    ok, why, n = check_bundle(bundle, trusted)
     if not ok:
         sys.exit(f"FAIL {why}")
     try:
@@ -312,9 +424,14 @@ def main():
     # Fail closed on files the pack format doesn't name — but only when the
     # directory looks like an extracted pack (README/media/pack pages present).
     # A bare bundle.json shared alone has no pack around it to smuggle into.
-    pack_dir = Path(args[0]).resolve().parent
     allowed_top = {
-        "bundle.json", "README.txt", "verify_bundle.py", "verify.html", "index.html", "redaction.json",
+        "bundle.json",
+        "README.txt",
+        "verify_bundle.py",
+        "verify.html",
+        "index.html",
+        "redaction.json",
+        "key_rotations.json",
     }
     markers = ("README.txt", "media", "verify.html", "index.html")
     if any((pack_dir / m).exists() for m in markers):
@@ -361,8 +478,27 @@ def main():
     declared = manifest.get("issuer_key")
     if not declared:
         sys.exit("FAIL manifest: missing issuer_key")
-    if key is not None and declared != key:
-        sys.exit("FAIL manifest: issuer_key disagrees with the pinned --key")
+    # The trusted issuer set: the manifest issuer plus every ancestor the
+    # pack's signed key_rotation receipts endorse — post-rotation packs mix
+    # keys legitimately. Rotation receipts that don't parse or don't verify
+    # are ignored here and fail in the attestation loop below.
+    rotations = []
+    for a in manifest.get("attestations", []):
+        rid = a.get("receipt_id")
+        if not isinstance(rid, str) or "/" in rid or chr(92) in rid or ".." in rid:
+            continue  # a receipt_id that walks out of attestations/ is malformed
+        try:
+            r = json.loads((root / "attestations" / f"{rid}.json").read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if r.get("payload", {}).get("record_type") in ("key_rotation", "key_adoption"):
+            rotations.append(r)
+    trusted = trusted_keys(declared, rotations)
+    if key is not None and key not in trusted:
+        sys.exit(
+            "FAIL manifest: issuer_key disagrees with the pinned --key "
+            "(no signed key_rotation links them)"
+        )
     # Without --key the issuer is self-declared by the pack — the signatures
     # still verify, but 'who signed' is only as trustworthy as the source of
     # this file. Pin --key to rule out a whole-pack forgery under another key.
@@ -383,7 +519,7 @@ def main():
             print(f"FAIL {vid}: bundle listed but missing or unreadable ({exc})")
             failed += 1
             continue
-        ok, why, n = check_bundle(bundle, key)
+        ok, why, n = check_bundle(bundle, trusted)
         if not ok:
             print(f"FAIL {vid}: {why}")
             failed += 1
@@ -417,6 +553,10 @@ def main():
               f" ({n} receipt(s), {checked} media digest(s){redact_note})")
     for a in manifest.get("attestations", []):
         rid = a.get("receipt_id", "?")
+        if not isinstance(rid, str) or "/" in rid or chr(92) in rid or ".." in rid:
+            print(f"FAIL attestation: malformed receipt_id {rid!r}")
+            failed += 1
+            continue
         apath = root / "attestations" / f"{rid}.json"
         if not apath.exists():
             print(f"FAIL attestation {rid}: manifest lists it but the file is missing")
@@ -428,7 +568,11 @@ def main():
             print(f"FAIL attestation {rid}: unreadable ({exc})")
             failed += 1
             continue
-        aok, awhy = check_receipt(ar, key)
+        if ar.get("public_key") not in trusted:
+            print(f"FAIL attestation {rid}: issued under a key outside the rotation chain")
+            failed += 1
+            continue
+        aok, awhy = check_receipt(ar, ar["public_key"])
         if not aok:
             print(f"FAIL attestation {rid}: {awhy}")
             failed += 1
@@ -471,7 +615,7 @@ def main():
                 elif p.is_dir() and p.name != "media":
                     print(f"FAIL {vd.name}/{p.name}/: directory not in the signed manifest")
                     failed += 1
-    mok, mwhy = check_manifest(manifest, key)
+    mok, mwhy = check_manifest(manifest, trusted)
     print(f"{'OK  ' if mok else 'FAIL'} manifest: {mwhy}")
     if not mok:
         failed += 1
@@ -507,9 +651,14 @@ index.html          START HERE — a self-contained offline record browser. It
                     timeline. No install, no network.
 manifest.json       Every visit's receipt hash, state, and worker stance.
 visits/<id>/        Per-visit bundle.json + the media bytes it references.
+attestations/       Site-level signed receipts: coverage certificates, period
+                    digests, prior exports — and any key_rotation pivots, each
+                    signed by the retiring key endorsing its successor.
 verify_case.py      Offline verifier. Run:  python verify_case.py .
                     Pass --key <base64> to pin the expected issuer key —
-                    without it the issuer is self-declared by the pack.
+                    without it the issuer is self-declared by the pack. A
+                    pinned pre-rotation key still verifies: the signed
+                    rotation chain links it to the manifest's issuer.
 verify.html         Zero-install verifier — open in any browser and drop the
                     pack files in. Same checks, pure JavaScript, works offline.
                     Also checks the media bytes index.html can only list.
@@ -520,6 +669,10 @@ WHAT A VALID VERIFICATION PROVES
 - manifest.json's receipt hashes match the signed originals — the case summary
   cannot quietly describe different records than the signed ones.
 - Media files match the sha256 digests in each record's evidence list.
+- If the deployment rotated its signing key, the rotation receipts are signed
+  pivots: the retiring key endorsed each successor, so records on both sides
+  of the transition verify under one signed chain — a key that appears in
+  the pack without a signed endorsement link is rejected, never trusted.
 
 WHAT IT DOES NOT PROVE
 - Identity. Signatures authenticate records, not who appears in media.
@@ -589,6 +742,11 @@ def build_pack(
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         bundle_text = bundle.model_dump_json(indent=2)
+        # Rotation receipts the review chain may span — a review appended
+        # after a key rotation verifies under the successor, and this member
+        # is the signed link that makes that legitimate instead of "different
+        # key". Only written when rotations exist.
+        rotations = [r.model_dump(mode="json") for r in store.receipts() if r.visit_id.startswith("key:")]
         z.writestr("bundle.json", bundle_text)
         z.writestr("README.txt", _README)
         z.writestr("verify_bundle.py", _VERIFIER)
@@ -606,8 +764,18 @@ def build_pack(
                     "media_redacted": redact_media,
                 },
                 [(bundle.original.visit_id, bundle_text)],
+                attestations=[(r["id"], json.dumps(r, indent=2, ensure_ascii=False)) for r in rotations],
             ),
         )
+        if rotations:
+            z.writestr(
+                "key_rotations.json",
+                json.dumps(
+                    {"schema": "attest.key-rotations/1", "rotations": rotations},
+                    indent=2,
+                    ensure_ascii=False,
+                ),
+            )
         if redact_media:
             z.writestr("redaction.json", _redaction_marker(bundle))
         elif include_media:
@@ -625,6 +793,7 @@ def build_case_pack(
     include_media: bool = True,
     redact_media: bool = False,
     manifest_signer=None,
+    issuer_key: str | None = None,
 ) -> bytes:
     """A whole-site export: every visit's signed bundle + media, one manifest of
     receipt hashes and worker stances, and a stdlib-only verifier that checks
@@ -644,6 +813,9 @@ def build_case_pack(
     # and travel with every pack: they evidence the issuer, not the site.
     # Collected before signing: this export's own manifest receipt cannot
     # reference its own hash, so it is the one attestation the pack cannot carry.
+    # ``key:*`` receipts are deployment-scoped trust anchors (a signed
+    # key_rotation extends pinned-key trust across an issuer change) and
+    # travel with every pack like the verify:* provenance receipts.
     attestations = [
         r
         for r in store.receipts()
@@ -652,6 +824,7 @@ def build_case_pack(
         or r.visit_id.startswith(f"digest:{site.id}:")
         or r.visit_id.startswith(f"export:{site.id}:")
         or r.visit_id.startswith("verify:")
+        or r.visit_id.startswith("key:")
     ]
     manifest = {
         "schema": "attest.case-pack/1",
@@ -661,7 +834,11 @@ def build_case_pack(
             "source_disconnected_at": (site.disconnected_at.isoformat() if site.disconnected_at else None),
         },
         "generated_at": datetime.now(tz=UTC).isoformat(),
-        "issuer_key": entries[0][1].original.public_key if entries else None,
+        # The issuer is the deployment's CURRENT signing key — verifiers walk
+        # ancestors from here through signed key_rotation receipts. Falling
+        # back to a visit's original key would strand post-rotation packs:
+        # a retired key has no ancestors to walk to.
+        "issuer_key": issuer_key or (entries[0][1].original.public_key if entries else None),
         "media_redacted": redact_media,
         "attestations": [
             {

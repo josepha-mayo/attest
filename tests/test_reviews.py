@@ -4,7 +4,8 @@ from datetime import timedelta
 import pytest
 from ring_sandbox import WebhookEvent, webhooks
 
-from attest.models import ReviewInput, utcnow
+from attest.errors import DomainError
+from attest.models import HouseholdStatementInput, ReviewInput, utcnow
 from attest.reviews import ReviewService, verify_bundle
 
 
@@ -309,6 +310,28 @@ def test_taxonomy_suggestions_cover_every_visit_flag():
         assert len(codes) == len(REASON_CODES)  # suggestions then the rest
     # deduped — overlapping suggestions collapse
     assert len(suggest(["no_observation", "observation_gap"])) == len(REASON_CODES)
+
+
+def test_link_failures_carry_stable_domain_codes(review_case):
+    """Handlers route on DomainError.code, never the message wording — the
+    codes are the contract localized pages and dead-link decisions key on."""
+    service, visit_id = review_case
+    with pytest.raises(DomainError) as worker_exc:
+        service.worker_review("bogus-token", ReviewInput(decision="confirm", statement="x"))
+    assert worker_exc.value.code == "invalid_review_link"
+    with pytest.raises(DomainError) as family_exc:
+        service.household_statement(
+            "bogus-token",
+            HouseholdStatementInput(perception="unsure", statement="Not sure."),
+        )
+    assert family_exc.value.code == "invalid_family_link"
+    # a used worker link fails with the same code as a bogus one — an
+    # attacker cannot probe link state from the error surface
+    token = service.issue_worker_link(visit_id)
+    service.worker_review(token, ReviewInput(decision="confirm", statement="Noted."))
+    with pytest.raises(DomainError) as reused_exc:
+        service.worker_review(token, ReviewInput(decision="confirm", statement="Again."))
+    assert reused_exc.value.code == "invalid_review_link"
 
 
 def test_worker_statement_reason_code_is_self_reported(review_case):

@@ -1,10 +1,13 @@
 """Drive the visit engine with v1.1 webhook payloads built by ring-sandbox."""
 
+import hashlib
 from datetime import UTC, timedelta
 
+import pytest
 from ring_sandbox import WebhookEvent, webhooks
 
 from attest import ledger
+from attest.errors import DomainError
 from attest.models import EvidenceKind, VisitState
 
 
@@ -79,6 +82,21 @@ def test_full_visit_matches_schedule_and_issues_receipt(engine, store, household
     assert "unverified" in cw["individual_providing"]["basis"]
     assert all(cw["time_begins_ends"]["value"])
     assert "never_time_worked" in cw["time_begins_ends"]["basis"]
+
+
+def test_checkin_before_first_observation_carries_domain_code(engine, store, household, schedule, t0):
+    """The check-in page localizes this rejection by code — a reworded message
+    must never silently break the routing."""
+    site, worker, cam, sensor = household
+    engine.ingest(ev(cam.id, "motion_detected", t0, "human"))
+    visit = store.active_visit(site.id)
+    token = engine.issue_checkin(visit.id)
+    with pytest.raises(DomainError) as exc_info:
+        engine.check_in(token, at=t0 - timedelta(seconds=1))
+    assert exc_info.value.code == "checkin_precedes_observation"
+    # the failed attempt does NOT consume the single-use link
+    grant = store.checkin_grant(hashlib.sha256(token.encode()).hexdigest())
+    assert grant.used_at is None
 
 
 def test_short_visit_is_flagged(engine, store, household, schedule, t0, ring_world):

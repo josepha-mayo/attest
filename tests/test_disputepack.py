@@ -69,7 +69,7 @@ def test_pack_verifier_rejects_key_swap(pack):
     # a foreign key must fail pinning even though the pack is self-consistent
     result = _run(pack, "--key", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
     assert result.returncode != 0
-    assert "different key" in result.stderr
+    assert "outside the trusted issuer chain" in result.stderr
 
 
 def test_pack_verifier_handles_nonascii_statement(engine, store, household, t0, tmp_path):
