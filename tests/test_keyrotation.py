@@ -399,9 +399,7 @@ def test_api_rotate_key_rotates_live_signer(settings, store, ring_client, househ
 
     from attest.app import create_app
 
-    app = create_app(
-        settings, store=store, ring=ring_client, signer=Signer.ephemeral(), sweep_interval_s=0
-    )
+    app = create_app(settings, store=store, ring=ring_client, signer=Signer.ephemeral(), sweep_interval_s=0)
     old_key = app.state.signer.public_key_b64
     with _client(app) as api:
         api.auth = ("admin", settings.admin_token.get_secret_value())
@@ -417,9 +415,7 @@ def test_api_rotate_key_rotates_live_signer(settings, store, ring_client, househ
         # the key file on disk is the successor — reload proves custody took
         from attest.keycustody import load_or_create_signer
 
-        assert (
-            load_or_create_signer(settings.key_path).public_key_b64 == body["new_key"]
-        )
+        assert load_or_create_signer(settings.key_path).public_key_b64 == body["new_key"]
         # a new receipt signs under the new key and the chain still verifies
         site = store.sites()[0]
         receipt = app.state.engine.issue_coverage_attestation(
