@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     # When set, the Ed25519 signing key is envelope-encrypted under this KMS
     # key — the PEM on disk is AES-GCM wrapped and unwrap needs a live Decrypt.
     kms_key_id: str | None = None
+    # Local key custody without an AWS dependency: "dpapi" wraps the PEM under
+    # the Windows DPAPI user master key (bound to user + machine). Mutually
+    # exclusive with kms_key_id — pick one protection posture.
+    key_custody: str | None = None
     # Nova Lite is a first-party multimodal model (no Anthropic use-case form needed).
     bedrock_model_id: str = "us.amazon.nova-lite-v1:0"
 

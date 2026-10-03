@@ -667,7 +667,12 @@ def _demo(args: argparse.Namespace) -> None:
         engine = VisitEngine(
             store,
             RingClient(None, base_url=ring_url),
-            load_or_create_signer(demo.key_path, kms_key_id=demo.kms_key_id, aws_region=demo.aws_region),
+            load_or_create_signer(
+                demo.key_path,
+                kms_key_id=demo.kms_key_id,
+                aws_region=demo.aws_region,
+                custody=demo.key_custody,
+            ),
             MediaStore(data_dir / "media"),
             TemplateSummarizer("UTC"),
             demo,
@@ -1053,6 +1058,7 @@ def _anchor(args: argparse.Namespace) -> None:
         signer = load_or_create_signer(
             settings.data_dir / "attest-ed25519.key",
             kms_key_id=settings.kms_key_id,
+            custody=settings.key_custody,
             aws_region=settings.aws_region,
         )
         prev = store.latest_receipt()
@@ -1185,6 +1191,7 @@ def _triage(args: argparse.Namespace) -> None:
         signer = load_or_create_signer(
             settings.data_dir / "attest-ed25519.key",
             kms_key_id=settings.kms_key_id,
+            custody=settings.key_custody,
             aws_region=settings.aws_region,
         )
         from .clock import ExecutionClock
@@ -1245,6 +1252,7 @@ def _cli_engine(store):
         load_or_create_signer(
             settings.data_dir / "attest-ed25519.key",
             kms_key_id=settings.kms_key_id,
+            custody=settings.key_custody,
             aws_region=settings.aws_region,
         ),
         MediaStore(settings.data_dir / "media"),
@@ -1290,7 +1298,7 @@ def _rotate_key(args: argparse.Namespace) -> None:
     Order is the trust story: the retiring key first signs a ``key_rotation``
     receipt naming its successor (the chain's pivot — receipts before it
     verify under the old key, receipts after under the new), then the new key
-    lands on disk under the same custody posture (plaintext PEM or KMS wrap),
+    lands on disk under the same custody posture (plaintext PEM, KMS wrap, or DPAPI),
     then the new key signs a ``key_adoption`` receipt proving the successor
     holder consented. A crash after the receipt but before the key write is
     safe — re-running is idempotent and the ledger never carries a pivot to a
@@ -1325,6 +1333,7 @@ def _rotate_key(args: argparse.Namespace) -> None:
             key_path,
             pem,
             kms_key_id=settings.kms_key_id,
+            custody=settings.key_custody,
             aws_region=settings.aws_region,
         )
         # Adoption under the successor — the retiring key asserted the change,
@@ -1340,6 +1349,8 @@ def _rotate_key(args: argparse.Namespace) -> None:
         )
         if settings.kms_key_id:
             print("  successor wrapped under the configured KMS key")
+        elif settings.key_custody == "dpapi":
+            print("  successor wrapped under the Windows DPAPI user master key")
     finally:
         store.close()
 
@@ -1477,6 +1488,18 @@ def _status(args: argparse.Namespace) -> None:
             intake = "OFF — no signing key at last server boot; deliveries rejected 503"
         else:
             intake = "unknown — server has not booted since this field existed"
+        # Key custody is what's on disk, not what env asks for — a dpapi blob
+        # wrapped by a different user just fails unwrap; the files themselves
+        # are the deployment's truth.
+        key_path = settings.key_path
+        if (key_path.parent / (key_path.name + ".kms.json")).exists():
+            custody = "AWS KMS envelope"
+        elif (key_path.parent / (key_path.name + ".dpapi")).exists():
+            custody = "Windows DPAPI"
+        elif key_path.exists():
+            custody = "plaintext PEM"
+        else:
+            custody = "no key yet"
         if getattr(args, "json", False):
             print(
                 json.dumps(
@@ -1489,6 +1512,7 @@ def _status(args: argparse.Namespace) -> None:
                         "stats": stats,
                         "queue": queue,
                         "webhook": posture or None,
+                        "custody": custody,
                         "attestations": att_types,
                     },
                     default=str,
@@ -1526,6 +1550,7 @@ def _status(args: argparse.Namespace) -> None:
         print(f"reviews:  {stats['reviews']}, late events retained: {stats['late_events']}")
         print(f"inbox:    {queue if queue else 'empty'}")
         print(f"webhooks: {intake}")
+        print(f"key:      {custody}")
         print(f"status:   {'healthy' if healthy else 'ATTENTION — integrity check failed'}")
         if not healthy:
             sys.exit(1)
@@ -1971,6 +1996,24 @@ def _explain_attestation(store, ident: str, *, as_json: bool = False) -> None:
             f"{s.get('warn', 0)} warn · {s.get('skip', 0)} skip — "
             "only PASS is verified evidence"
         )
+    elif rtype == "key_rotation":
+        print(
+            f"  {str(p.get('previous_key'))[:16]}… retires, endorsing "
+            f"{str(p.get('new_key'))[:16]}… — the chain's trust pivot"
+        )
+        if p.get("reason"):
+            print(f"  stated reason: {p['reason']} (unverified, like all stated facts)")
+        print("  receipts before this pivot verify under the retiring key;")
+        print("  later receipts verify under the successor. This proves a")
+        print("  signed handoff — never that either key was uncompromised.")
+    elif rtype == "key_adoption":
+        link = p.get("rotation_receipt") or {}
+        print(
+            f"  successor {str(p.get('new_key') or receipt.public_key)[:16]}… countersigns "
+            f"the rotation {str(link.get('id'))[:16]}…"
+        )
+        print("  proof the new key holder accepted the handoff — consent,")
+        print("  not physical possession by an identified person.")
     print()
     print("Boundary: a signature attests what the record claims and that it is")
     print("intact under the issuer key — never identity, attendance, or truth.")
@@ -2197,7 +2240,7 @@ def main(argv: list[str] | None = None) -> None:
         "rotate-key",
         help="retire the signing key — the old key signs a key_rotation attestation "
         "endorsing its successor, the successor lands under the same custody "
-        "(plaintext or KMS) and signs a key_adoption receipt; history stays "
+        "(plaintext, KMS, or DPAPI) and signs a key_adoption receipt; history stays "
         "verifiable through the pivot",
     )
     s.add_argument("--reason", default="", help="why the key is being rotated (signed into the receipt)")

@@ -1,4 +1,4 @@
-"""AWS KMS envelope encryption for the Ed25519 signing key.
+"""Key custody for the Ed25519 signing key: AWS KMS envelope or Windows DPAPI.
 
 With ``ATTEST_KMS_KEY_ID`` set, the signing key never touches disk in
 plaintext: a KMS data key wraps the PEM via AES-256-GCM, and the wrapped
@@ -7,7 +7,12 @@ Unwrapping requires a live KMS ``Decrypt`` call with the same encryption
 context — so a stolen data directory yields nothing signable, and every
 key use is an auditable KMS event.
 
-Without the setting nothing changes: the PEM is written as before. This
+With ``ATTEST_KEY_CUSTODY=dpapi`` (Windows only), the PEM instead wraps
+under the OS user's DPAPI master key via CryptProtectData — bound to this
+account on this machine, no AWS dependency, stored as
+``attest-ed25519.key.dpapi``. The two postures are mutually exclusive.
+
+Without either setting nothing changes: the PEM is written as before. This
 is honest key custody — it protects the key at rest; it does not make a
 compromised host safe while the server is running.
 """
@@ -77,22 +82,155 @@ def _kms_client(region: str):
     return boto3.client("kms", region_name=region)
 
 
+def _dpapi_types():
+    """Build the ctypes plumbing lazily so non-Windows imports stay clean."""
+    import ctypes
+    from ctypes import wintypes
+
+    class DATA_BLOB(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+
+    return ctypes, wintypes, DATA_BLOB
+
+
+class DpapiBox:
+    """Wrap/unwrap key bytes under the Windows DPAPI user master key.
+
+    CryptProtectData binds the blob to the OS user account and machine — a
+    stolen ``attest-ed25519.key.dpapi`` is inert anywhere else, with no AWS
+    dependency and no shipped secret. Like the KMS path this is honest key
+    custody *at rest*: it does not make a compromised host safe while the
+    server is running. Only available on Windows — requesting it elsewhere
+    fails loudly rather than silently falling back to plaintext.
+    """
+
+    _ENTROPY = b"attest-ed25519-signing-key"
+    _UI_FORBIDDEN = 0x1  # CRYPTPROTECT_UI_FORBIDDEN — services must never prompt
+
+    def __init__(self) -> None:
+        if os.name != "nt":
+            raise RuntimeError(
+                "DPAPI key custody is only available on Windows — unset ATTEST_KEY_CUSTODY or use KMS instead"
+            )
+        self._ct, self._wt, self._BLOB = _dpapi_types()
+        self._crypt32 = self._ct.windll.crypt32
+        self._kernel32 = self._ct.windll.kernel32
+
+    def _make_blob(self, data: bytes):
+        ct, BLOB = self._ct, self._BLOB
+        buf = ct.create_string_buffer(data, len(data))
+        blob = BLOB(len(data), ct.cast(buf, ct.POINTER(ct.c_char)))
+        return blob, buf  # buf must stay alive for the duration of the call
+
+    def wrap(self, plaintext: bytes) -> bytes:
+        ct = self._ct
+        in_blob, _keep1 = self._make_blob(plaintext)
+        ent_blob, _keep2 = self._make_blob(self._ENTROPY)
+        out_blob = self._BLOB()
+        if not self._crypt32.CryptProtectData(
+            ct.byref(in_blob),
+            None,
+            ct.byref(ent_blob),
+            None,
+            None,
+            self._UI_FORBIDDEN,
+            ct.byref(out_blob),
+        ):
+            raise ct.WinError()
+        try:
+            return ct.string_at(out_blob.pbData, out_blob.cbData)
+        finally:
+            self._kernel32.LocalFree(out_blob.pbData)
+
+    def unwrap(self, blob: bytes) -> bytes:
+        ct = self._ct
+        in_blob, _keep1 = self._make_blob(blob)
+        ent_blob, _keep2 = self._make_blob(self._ENTROPY)
+        out_blob = self._BLOB()
+        if not self._crypt32.CryptUnprotectData(
+            ct.byref(in_blob),
+            None,
+            ct.byref(ent_blob),
+            None,
+            None,
+            self._UI_FORBIDDEN,
+            ct.byref(out_blob),
+        ):
+            raise ct.WinError()
+        try:
+            return ct.string_at(out_blob.pbData, out_blob.cbData)
+        finally:
+            self._kernel32.LocalFree(out_blob.pbData)
+
+
+def _dpapi_path(path: Path) -> Path:
+    return path.with_suffix(path.suffix + ".dpapi")
+
+
+def _check_custody_combo(kms_key_id: str | None, custody: str | None) -> None:
+    if kms_key_id and custody:
+        raise ValueError("KMS and DPAPI custody are mutually exclusive — pick one protection posture")
+    if custody not in (None, "dpapi"):
+        raise ValueError(f"unknown key custody {custody!r} — supported: dpapi")
+
+
 def load_or_create_signer(
     path: Path,
     *,
     kms_key_id: str | None = None,
     kms_client: Any | None = None,
     aws_region: str = "us-east-1",
+    custody: str | None = None,
 ) -> Signer:
     """Load the deployment signing key, creating it on first run.
 
     ``kms_key_id`` switches the on-disk format to the KMS envelope described
-    above; ``kms_client`` is injectable for tests. A configured KMS path that
-    cannot reach KMS fails loudly — silently falling back to a plaintext key
-    file would be a downgrade the operator never asked for.
+    above; ``kms_client`` is injectable for tests. ``custody="dpapi"`` wraps
+    the PEM under the Windows DPAPI user master key (``.dpapi`` blob) with no
+    external dependency. A configured custody path that cannot unwrap fails
+    loudly — silently falling back to a plaintext key file would be a
+    downgrade the operator never asked for.
     """
-    if not kms_key_id:
+    _check_custody_combo(kms_key_id, custody)
+    if not kms_key_id and custody != "dpapi":
         return Signer.load_or_create(path)
+
+    if custody == "dpapi":
+        box = DpapiBox()
+        blob_path = _dpapi_path(path)
+        if blob_path.exists():
+            pem = box.unwrap(blob_path.read_bytes())
+        elif path.exists():
+            # Enabling custody on a plaintext deployment must wrap THAT key —
+            # minting a new one silently rotates the issuer identity and
+            # strands every signed record. Order matters: only remove the
+            # plaintext after the blob is durably written.
+            pem = path.read_bytes()
+            blob_path.parent.mkdir(parents=True, exist_ok=True)
+            blob_path.write_bytes(box.wrap(pem))
+            path.unlink()
+        else:
+            from cryptography.hazmat.primitives import serialization
+            from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+                Ed25519PrivateKey,
+            )
+
+            pem = Ed25519PrivateKey.generate().private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            )
+            blob_path.parent.mkdir(parents=True, exist_ok=True)
+            blob_path.write_bytes(box.wrap(pem))
+
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+            Ed25519PrivateKey,
+        )
+
+        sk = serialization.load_pem_private_key(pem, password=None)
+        assert isinstance(sk, Ed25519PrivateKey)
+        return Signer(sk)
 
     box = KmsBox(kms_key_id, kms_client or _kms_client(aws_region))
     wrapped_path = path.with_suffix(path.suffix + ".kms.json")
@@ -140,6 +278,7 @@ def persist_signer_key(
     kms_key_id: str | None = None,
     kms_client: Any | None = None,
     aws_region: str = "us-east-1",
+    custody: str | None = None,
 ) -> None:
     """Atomically replace the deployment signing key with new PEM bytes.
 
@@ -147,11 +286,21 @@ def persist_signer_key(
     ``key_rotation`` receipt — write order matters: the endorsement must be
     durable in the ledger before the new key materializes on disk. Under KMS
     custody the new key wraps to the ``.kms.json`` envelope and any plaintext
-    PEM is removed — custody parity with ``load_or_create_signer``. A crash
-    mid-write can leave the old key in place (rotation re-runs idempotently)
-    but never a half-written key."""
+    PEM is removed; under DPAPI it wraps to the ``.dpapi`` blob the same way —
+    custody parity with ``load_or_create_signer``. A crash mid-write can leave
+    the old key in place (rotation re-runs idempotently) but never a
+    half-written key."""
+    _check_custody_combo(kms_key_id, custody)
     path.parent.mkdir(parents=True, exist_ok=True)
-    if kms_key_id:
+    if custody == "dpapi":
+        blob_path = _dpapi_path(path)
+        tmp = blob_path.with_suffix(blob_path.suffix + ".tmp")
+        tmp.write_bytes(DpapiBox().wrap(pem))
+        if os.name == "posix":
+            os.chmod(tmp, 0o600)
+        os.replace(tmp, blob_path)
+        path.unlink(missing_ok=True)  # no plaintext should remain under custody
+    elif kms_key_id:
         box = KmsBox(kms_key_id, kms_client or _kms_client(aws_region))
         wrapped_path = path.with_suffix(path.suffix + ".kms.json")
         tmp = wrapped_path.with_suffix(wrapped_path.suffix + ".tmp")

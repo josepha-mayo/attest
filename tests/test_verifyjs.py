@@ -364,6 +364,13 @@ def test_sample_pack_artifact_verifies():
     data = path.read_bytes()
     with zipfile.ZipFile(io.BytesIO(data)) as z:
         issuer = json.loads(z.read("manifest.json"))["issuer_key"]
+        # The shipped verifiers must be the current sources — a stale embedded
+        # script would check the pack with rules the repo has since tightened.
+        from attest.disputepack import _CASE_VERIFIER
+        from attest.verifyjs import VERIFY_HTML
+
+        assert z.read("verify_case.py").decode() == _CASE_VERIFIER
+        assert z.read("verify.html").decode() == VERIFY_HTML
     ok, detail = _verify_pack(data, issuer)
     assert ok, detail
 

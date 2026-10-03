@@ -58,7 +58,7 @@ pack.zip ──▶ signed manifest + per-visit bundles + site attestations + med
         ──▶ index.html / verify.html / verify_case.py / attest verify — checkable with no Attest install
 ```
 
-The signing key itself can be wrapped under an AWS KMS CMK (`ATTEST_KMS_KEY_ID`), and rotating it is a signed chain event (`attest rotate-key`): the retiring key signs a `key_rotation` receipt endorsing its successor — the ledger's pivot — so receipts on both sides verify under one pinned key and the successor countersigns consent via `key_adoption`. Packs carry the rotation links: a pinned pre-rotation key still verifies a post-rotation pack, and a key that merely *appears* in a pack never becomes trusted. Summaries and the weekly triage brief run on Bedrock/Strands when reachable and label their fallback honestly when not.
+The signing key itself can be wrapped under an AWS KMS CMK (`ATTEST_KMS_KEY_ID`) or — on Windows, with no AWS dependency — under the OS user's DPAPI master key (`ATTEST_KEY_CUSTODY=dpapi`, bound to user + machine; the two postures are mutually exclusive). Rotating it is a signed chain event (`attest rotate-key`): the retiring key signs a `key_rotation` receipt endorsing its successor — the ledger's pivot — so receipts on both sides verify under one pinned key and the successor countersigns consent via `key_adoption`. Packs carry the rotation links: a pinned pre-rotation key still verifies a post-rotation pack, and a key that merely *appears* in a pack never becomes trusted. Summaries and the weekly triage brief run on Bedrock/Strands when reachable and label their fallback honestly when not.
 
 ## Implemented
 
@@ -186,7 +186,11 @@ signing key — the PEM on disk is AES-256-GCM wrapped under a KMS data key, and
 requires a live `Decrypt` call with the matching encryption context, so every key use is a
 CloudTrail-audited event and a stolen data directory contains nothing signable. Verified
 end-to-end against a real CMK (GenerateDataKey → wrap → Decrypt → sign). Without the setting
-the key is stored as a plain PEM as before.
+the key is stored as a plain PEM as before. On Windows deployments with no AWS dependency,
+`ATTEST_KEY_CUSTODY=dpapi` wraps the PEM under the OS user's DPAPI master key
+(`attest-ed25519.key.dpapi`) — a stolen data directory yields a blob that's inert on any
+other host or account. Migration is identity-preserving in both modes: a plaintext key is
+*wrapped*, never silently regenerated.
 
 **S3 checkpoint custody (verified live):** `attest anchor --publish s3://bucket/key` uploads
 the signed anchor to S3 with the file SHA-256 and payload hash in object metadata — external

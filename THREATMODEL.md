@@ -84,7 +84,7 @@ against a live store:
 
 `attest rotate-key` retires the deployment signing key: the retiring key signs
 a `key_rotation` receipt endorsing its successor, the successor lands under the
-same custody posture (plaintext or KMS-wrapped), then countersigns a
+same custody posture (plaintext, KMS-wrapped, or DPAPI), then countersigns a
 `key_adoption` receipt naming the exact rotation (id + payload hash).
 `verify_chain` reads the rotation as a pivot — receipts before it verify under
 the old key, receipts after under the new — and pack verifiers extend
@@ -154,9 +154,19 @@ These are architectural boundaries, not missing features:
   Unwrapping requires a live `Decrypt` — every unwrap is a CloudTrail event.
   A KMS path that cannot reach KMS fails loudly rather than downgrading to a
   plaintext key.
-- Without KMS, the key is a PEM file in the data dir — written `chmod 600`
-  (owner-only) on POSIX; on Windows it inherits the data dir's ACLs, so deploy
-  under a service-account directory or use KMS custody there.
+- `ATTEST_KEY_CUSTODY=dpapi` is the AWS-free middle ground (Windows only):
+  the PEM wraps under the OS user's DPAPI master key via `CryptProtectData`
+  (UI forbidden — a service never prompts) and stores as
+  `attest-ed25519.key.dpapi`. The blob is bound to this user on this
+  machine — a stolen data directory yields an inert blob on any other
+  host or account, with no CloudTrail equivalent (the trade: local custody,
+  no audit trail). Migration mirrors KMS: a plaintext PEM is wrapped, not
+  replaced, so issuer identity survives enabling custody. DPAPI on a
+  non-Windows host fails loudly, and configuring both KMS and DPAPI is a
+  hard error — protection postures never combine or silently pick one.
+- Without KMS or DPAPI, the key is a PEM file in the data dir — written
+  `chmod 600` (owner-only) on POSIX; on Windows it inherits the data dir's
+  ACLs, so deploy under a service-account directory or use custody there.
 - `attest rotate-key` makes rotation a chain event, not a config swap: the
   retiring key first signs a `key_rotation` receipt naming the successor (the
   ledger's pivot — `verify_chain` verifies pre-pivot receipts under the old

@@ -4,6 +4,7 @@ disk, unwrap requires a Decrypt call with the right context, and a missing
 or foreign data key fails loudly."""
 
 import json
+import os
 
 import pytest
 
@@ -108,3 +109,79 @@ def test_kms_migration_fails_loudly_when_kms_unreachable(tmp_path):
     # and the plaintext signer still works — nothing was silently rotated
     again = load_or_create_signer(pem_path)
     assert again.public_key_b64 == plain.public_key_b64
+
+
+dpapi = pytest.mark.skipif(os.name != "nt", reason="DPAPI is Windows-only")
+
+
+@dpapi
+def test_dpapi_blob_never_writes_plaintext_pem(tmp_path):
+    signer = load_or_create_signer(tmp_path / "k.pem", custody="dpapi")
+    blob = tmp_path / "k.pem.dpapi"
+    assert blob.exists() and not (tmp_path / "k.pem").exists()
+    assert b"PRIVATE KEY" not in blob.read_bytes()
+    assert signer.public_key_b64
+
+
+@dpapi
+def test_dpapi_unwrap_roundtrip(tmp_path):
+    s1 = load_or_create_signer(tmp_path / "k.pem", custody="dpapi")
+    s2 = load_or_create_signer(tmp_path / "k.pem", custody="dpapi")  # a "reboot"
+    assert s1.public_key_b64 == s2.public_key_b64  # same unwrapped key
+    receipt = s2.issue(visit_id="v", sequence=1, prev_hash=None, facts={"x": 1})
+    assert verify_receipt(receipt, public_key=s2.public_key_b64)[0]
+
+
+@dpapi
+def test_enabling_dpapi_wraps_the_existing_pem_instead_of_rotating(tmp_path):
+    """Like KMS migration: turning on DPAPI on a plaintext deployment must
+    wrap THAT key — minting a new one strands the audit chain."""
+    pem_path = tmp_path / "attest-ed25519.key"
+    plain = load_or_create_signer(pem_path)
+    migrated = load_or_create_signer(pem_path, custody="dpapi")
+    assert migrated.public_key_b64 == plain.public_key_b64
+    assert not pem_path.exists()  # plaintext gone under custody
+    assert (tmp_path / "attest-ed25519.key.dpapi").exists()
+
+
+@dpapi
+def test_dpapi_tampered_blob_fails_loudly(tmp_path):
+    load_or_create_signer(tmp_path / "k.pem", custody="dpapi")
+    blob = tmp_path / "k.pem.dpapi"
+    blob.write_bytes(blob.read_bytes()[:-8] + b"\x00" * 8)
+    with pytest.raises(OSError):
+        load_or_create_signer(tmp_path / "k.pem", custody="dpapi")
+
+
+@dpapi
+def test_dpapi_persist_writes_blob_and_removes_plaintext(tmp_path):
+    """rotate-key persists the successor under the same custody posture — the
+    .dpapi blob lands atomically and no plaintext PEM survives."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from attest.keycustody import persist_signer_key
+
+    path = tmp_path / "k.pem"
+    old = load_or_create_signer(path, custody="dpapi")
+    sk = Ed25519PrivateKey.generate()
+    pem = sk.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+    persist_signer_key(path, pem, custody="dpapi")
+    assert not path.exists()
+    assert b"PRIVATE KEY" not in (tmp_path / "k.pem.dpapi").read_bytes()
+    new = load_or_create_signer(path, custody="dpapi")
+    assert new.public_key_b64 != old.public_key_b64
+
+
+def test_kms_and_dpapi_custody_are_mutually_exclusive(tmp_path):
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        load_or_create_signer(tmp_path / "k.pem", kms_key_id="key-1", custody="dpapi")
+
+
+def test_unknown_custody_fails_loudly(tmp_path):
+    with pytest.raises(ValueError, match="unknown key custody"):
+        load_or_create_signer(tmp_path / "k.pem", custody="tpm")

@@ -109,7 +109,9 @@ def create_app(
     if signer is None:
         from .keycustody import load_or_create_signer
 
-        signer = load_or_create_signer(s.key_path, kms_key_id=s.kms_key_id, aws_region=s.aws_region)
+        signer = load_or_create_signer(
+            s.key_path, kms_key_id=s.kms_key_id, aws_region=s.aws_region, custody=s.key_custody
+        )
     media = MediaStore(s.data_dir / "media")
     summarizer = build_summarizer(
         s.summarizer, tz=s.timezone, model_id=s.bedrock_model_id, region=s.aws_region
@@ -673,6 +675,8 @@ def create_app(
             custody=(
                 f"AWS KMS envelope — unwrap audited (key {s.kms_key_id})"
                 if s.kms_key_id
+                else "Windows DPAPI — bound to this OS user and machine"
+                if s.key_custody == "dpapi"
                 else "local key file — plaintext at rest"
             ),
             webhook={
@@ -731,6 +735,8 @@ def create_app(
                 "custody": (
                     f"AWS KMS envelope — unwrap audited (key {s.kms_key_id})"
                     if s.kms_key_id
+                    else "Windows DPAPI — bound to this user + machine"
+                    if s.key_custody == "dpapi"
                     else "local key file — plaintext at rest"
                 ),
                 "webhook": {
@@ -1484,6 +1490,7 @@ def create_app(
             persist_signer_key,
             s.key_path,
             pem,
+            custody=s.key_custody,
             kms_key_id=s.kms_key_id,
             aws_region=s.aws_region,
         )
@@ -1493,6 +1500,7 @@ def create_app(
         signer = await asyncio.to_thread(
             load_or_create_signer,
             s.key_path,
+            custody=s.key_custody,
             kms_key_id=s.kms_key_id,
             aws_region=s.aws_region,
         )
