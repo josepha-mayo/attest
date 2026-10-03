@@ -500,3 +500,88 @@ def test_adoption_without_rotation_endorsement_is_no_hop(engine, store, househol
     # issuer retired — r.public_key != previous_key, so no forward hop either
     assert ledger.descendant_issuer_keys(issuer, pool) == {issuer}
     assert ledger.trusted_issuer_keys(attacker.public_key_b64, pool) == {attacker.public_key_b64}
+
+
+def test_orphaned_rotation_is_inert_and_retryable(engine, store, household, t0):
+    """Crash window 1: rotation committed, process died before persist. The
+    ledger holds an unconsented rotation; chain must NOT pivot (the pivot
+    needs both signatures), post-rotation old-key receipts stay valid, and
+    re-running rotate supersedes cleanly."""
+    _closed_visit(engine, household, t0)
+    old_key = engine.signer.public_key_b64
+    ghost = Signer.ephemeral()
+    engine.issue_key_rotation(ghost.public_key_b64)  # adoption never arrives
+    # keep signing under the still-on-disk old key — that's the real crash state
+    site = store.sites()[0]
+    engine.issue_coverage_attestation(site, t0 - timedelta(hours=1), t0 + timedelta(hours=2))
+    receipts = store.receipts()
+    ok, why = ledger.verify_chain(receipts)
+    assert ok, why
+    # the ghost key is trusted by nobody: descendants stay under the old key
+    assert ghost.public_key_b64 not in ledger.descendant_issuer_keys(old_key, receipts)
+    # re-running rotate after the crash Just Works: a fresh consented pivot
+    new_signer = Signer.ephemeral()
+    rotation2 = engine.issue_key_rotation(new_signer.public_key_b64)
+    engine.signer = new_signer
+    engine.issue_key_adoption(old_key, rotation2)
+    ok, why = ledger.verify_chain(store.receipts())
+    assert ok and "rotation" in why
+    assert ledger.descendant_issuer_keys(old_key, store.receipts()) == {
+        old_key,
+        new_signer.public_key_b64,
+    }
+
+
+def test_resume_pending_adoptions_heals_persist_crash(engine, store, household, t0):
+    """Crash window 2: rotation committed, successor persisted, adoption never
+    signed (process died). Boot-time resume_pending_adoptions countersigns it
+    so pinned verification under the NEW key trusts the retired-key history."""
+    _closed_visit(engine, household, t0)
+    new_signer = Signer.ephemeral()
+    rotation = engine.issue_key_rotation(new_signer.public_key_b64)
+    engine.signer = new_signer  # disk state survived; adoption call never ran
+    # unpinned still fine — in-chain pivot is consent-gated, so the chain
+    # reads as all-old-key until consent lands.
+    ok, _ = ledger.verify_chain(store.receipts())
+    assert ok
+    resumed = engine.resume_pending_adoptions()
+    assert len(resumed) == 1 and resumed[0].payload["rotation_receipt"]["id"] == rotation.id
+    ok, why = ledger.verify_chain(store.receipts(), public_key=new_signer.public_key_b64)
+    assert ok, why
+    # idempotent — a second resume is a no-op
+    assert engine.resume_pending_adoptions() == []
+
+
+def test_rotation_to_previously_used_key_refused(engine, store, household, t0):
+    """Re-adopting a retired key makes lineage non-monotonic — refuse at issue
+    time rather than let a rollback smuggle a compromised key back in."""
+    _closed_visit(engine, household, t0)
+    old_key, new_signer, _, _ = _rotate(engine)
+    with pytest.raises(ValueError, match="already signed"):
+        engine.issue_key_rotation(old_key)
+
+
+def test_adoption_binds_the_predecessor(engine, store, household, t0):
+    """An adoption's stated previous_key must match BOTH the rotation payload
+    and the rotation's actual signing key — the pair can't lie."""
+    _closed_visit(engine, household, t0)
+    other = Signer.ephemeral()
+    rotation = engine.issue_key_rotation(other.public_key_b64)
+    engine.signer = other
+    with pytest.raises(ValueError, match="endorsing THIS key"):
+        engine.issue_key_adoption(Signer.ephemeral().public_key_b64, rotation)
+
+
+def test_competing_rotations_resolve_to_the_consented_one(engine, store, household, t0):
+    """Orphan-then-rerun leaves two rotations from one predecessor — the
+    descendant walk must follow the consented branch, not list order."""
+    _closed_visit(engine, household, t0)
+    old_key = engine.signer.public_key_b64
+    dead = Signer.ephemeral()
+    live = Signer.ephemeral()
+    engine.issue_key_rotation(dead.public_key_b64)  # orphan
+    rotation2 = engine.issue_key_rotation(live.public_key_b64)
+    engine.signer = live
+    engine.issue_key_adoption(old_key, rotation2)
+    trusted = ledger.descendant_issuer_keys(old_key, store.receipts())
+    assert trusted == {old_key, live.public_key_b64}
