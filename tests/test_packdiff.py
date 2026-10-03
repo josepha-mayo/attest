@@ -236,3 +236,37 @@ def test_diff_pins_to_an_issuer_document(engine, store, household, schedule, t0,
     lines, anomalies = diff(first, second, key=doc["issuer_key"], extra_key_receipts=known)
     assert anomalies == 0, lines
     assert any("pinned issuer" in line for line in lines)
+
+
+def test_diff_json_report_is_structured_and_consistent(exports, tmp_path, capsys):
+    """--json output carries the same verdict as the text report — both are
+    built from one event stream so they can never disagree."""
+    import argparse
+    import json as _json
+
+    from attest import cli
+    from attest.packdiff import diff_report
+
+    first, second, v1, v2 = exports
+    report = diff_report(first, second)
+    assert report["clean"] is True and report["anomalies"] == 0
+    assert report["old"]["verified"] and report["new"]["verified"]
+    assert report["old"]["kind"] == report["new"]["kind"] == "case-pack"
+    kinds = {e["severity"] for e in report["events"]}
+    assert {"ok", "info", "drift"} <= kinds
+    assert any(e.get("target") == v2 for e in report["events"])
+
+    # A clean diff exits 0 and prints parseable JSON — the CI-gate contract.
+    with pytest.raises(SystemExit) as se:
+        cli._diff(argparse.Namespace(old=str(first), new=str(second), key=None, issuer_url=None, json=True))
+    assert se.value.code == 0
+    out = _json.loads(capsys.readouterr().out)
+    assert out["clean"] is True
+
+    # Reversed order: v2 was present before and absent now — a real anomaly.
+    with pytest.raises(SystemExit) as se:
+        cli._diff(argparse.Namespace(old=str(second), new=str(first), key=None, issuer_url=None, json=True))
+    assert se.value.code == 1
+    out = _json.loads(capsys.readouterr().out)
+    assert out["clean"] is False and out["anomalies"] >= 1
+    assert any(e["severity"] == "anomaly" and e.get("target") == v2 for e in out["events"])

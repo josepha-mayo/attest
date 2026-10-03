@@ -2139,6 +2139,14 @@ def _diff(args: argparse.Namespace) -> None:
         )
 
     try:
+        if getattr(args, "json", False):
+            import json as _json
+
+            from .packdiff import diff_report
+
+            report = diff_report(args.old, args.new, key=key, extra_key_receipts=extra)
+            print(_json.dumps(report, indent=2))
+            sys.exit(0 if report["clean"] else 1)
         lines, anomalies = diff(args.old, args.new, key=key, extra_key_receipts=extra)
     except (ValueError, OSError, KeyError, TypeError, AttributeError, zipfile.BadZipFile) as exc:
         sys.exit(f"cannot compare: {exc}")
@@ -2713,6 +2721,12 @@ def main(argv: list[str] | None = None) -> None:
         "(HTTPS; loopback excepted) or an issuer document file written by "
         "`attest issuer --out` — the deployment's signed lifecycle extends "
         "trust to pre-rotation exports",
+    )
+    s.add_argument(
+        "--json",
+        action="store_true",
+        help="emit a machine-readable report (severity/target/detail per event) — "
+        "exit 1 on any anomaly, so the append-only audit can gate CI",
     )
     s.set_defaults(fn=_diff)
 

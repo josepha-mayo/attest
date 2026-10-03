@@ -421,55 +421,128 @@ def diff(
     extends the lineage (an issuer document's signed lifecycle receipts)."""
     old = load_artifact(old_path, key, extra_key_receipts)
     new = load_artifact(new_path, key, extra_key_receipts)
-    lines = [f"{old_path} [{old['kind']}] -> {new_path} [{new['kind']}]"]
+    events, anomalies = _diff_events(old, new, key, str(old_path), str(new_path))
+    return [e["line"] for e in events], anomalies
+
+
+def diff_report(
+    old_path: str | Path,
+    new_path: str | Path,
+    key: str | None = None,
+    extra_key_receipts: list | None = None,
+) -> dict:
+    """Machine-readable diff — the same events `diff` renders, structured so
+    `attest diff --json` can gate CI on append-only drift. Every event carries
+    a severity (ok/info/drift/anomaly), the visit or attestation it names, and
+    the human detail string."""
+    old = load_artifact(old_path, key, extra_key_receipts)
+    new = load_artifact(new_path, key, extra_key_receipts)
+    events, anomalies = _diff_events(old, new, key, str(old_path), str(new_path))
+    side = lambda art: {  # noqa: E731
+        "kind": art["kind"],
+        "issuer": art.get("issuer"),
+        "verify_failures": art.get("verify_failures") or [],
+        "notes": art.get("notes") or [],
+        "verified": art.get("verify_failures") == [],
+    }
+    return {
+        "old": {"path": str(old_path), **side(old)},
+        "new": {"path": str(new_path), **side(new)},
+        "events": [
+            {k: e[k] for k in ("severity", "target", "detail") if e.get(k) is not None} for e in events
+        ],
+        "anomalies": anomalies,
+        "clean": anomalies == 0,
+    }
+
+
+def _diff_events(old: dict, new: dict, key: str | None, old_path: str, new_path: str):
+    """The single comparison core — text output and the JSON report are built
+    from the same event stream so the two can never disagree."""
+    events: list[dict] = []
     anomalies = 0
+
+    def ev(severity: str, target: str | None, detail: str, marker: str | None = None) -> None:
+        events.append(
+            {
+                "severity": severity,
+                "target": target,
+                "detail": detail,
+                "line": f"{marker}{detail}" if marker else detail,
+            }
+        )
+
+    ev("info", None, f"{old_path} [{old['kind']}] -> {new_path} [{new['kind']}]")
 
     for label, art in (("old", old), ("new", new)):
         for fail in art.get("verify_failures") or []:
-            lines.append(f"!! {label} artifact fails verification: {fail}")
+            ev("anomaly", label, f"{label} artifact fails verification: {fail}", "!! ")
             anomalies += 1
         for note in art.get("notes") or []:
-            lines.append(f"~  {label} artifact: {note}")
+            ev("drift", label, f"{label} artifact: {note}", "~  ")
         if art.get("verify_failures") is not None and not art.get("verify_failures"):
             issuer_note = (
                 f"issuer {art['issuer'][:20]}… (self-declared)" if art.get("issuer") else "no issuer"
             )
             if key:
                 issuer_note = f"pinned issuer {key[:20]}…"
-            lines.append(f"ok {label} artifact: all signed contents verify under the {issuer_note}")
+            ev("ok", label, f"{label} artifact: all signed contents verify under the {issuer_note}", "ok ")
 
     if old["issuer"] and new["issuer"] and old["issuer"] != new["issuer"]:
-        lines.append("!! issuer key differs between exports — one was not signed by this deployment")
+        ev(
+            "anomaly",
+            None,
+            "issuer key differs between exports — one was not signed by this deployment",
+            "!! ",
+        )
         anomalies += 1
 
     for vid in sorted(set(old["visits"]) | set(new["visits"])):
         a, b = old["visits"].get(vid), new["visits"].get(vid)
         if a is None:
-            lines.append(f"+  {vid}: new visit ({b['state']})")
+            ev("info", vid, f"{vid}: new visit ({b['state']})", "+  ")
             continue
         if b is None:
-            lines.append(f"!! {vid}: record present before, absent now — records are append-only")
+            ev(
+                "anomaly",
+                vid,
+                f"{vid}: record present before, absent now — records are append-only",
+                "!! ",
+            )
             anomalies += 1
             continue
         if a["payload_hash"] != b["payload_hash"]:
-            lines.append(
-                f"!! {vid}: signed original changed ({a['payload_hash'][:12]} -> "
-                f"{b['payload_hash'][:12]}) — a signed record cannot change; one export is inauthentic"
+            ev(
+                "anomaly",
+                vid,
+                f"{vid}: signed original changed ({a['payload_hash'][:12]} -> "
+                f"{b['payload_hash'][:12]}) — a signed record cannot change; one export is inauthentic",
+                "!!",
             )
             anomalies += 1
             continue
         added = [h for h in b["review_hashes"] if h not in a["review_hashes"]]
         removed = [h for h in a["review_hashes"] if h not in b["review_hashes"]]
         if removed:
-            lines.append(f"!! {vid}: {len(removed)} review receipt(s) vanished — reviews are append-only")
+            ev(
+                "anomaly",
+                vid,
+                f"{vid}: {len(removed)} review receipt(s) vanished — reviews are append-only",
+                "!! ",
+            )
             anomalies += 1
         if added:
-            lines.append(f"~  {vid}: +{len(added)} appended review receipt(s)")
+            ev("drift", vid, f"{vid}: +{len(added)} appended review receipt(s)", "~  ")
         ac, bc = a.get("countersign"), b.get("countersign")
         if ac and bc and ac != bc:
-            lines.append(f"~  {vid}: worker stance {ac} -> {bc}")
+            ev("drift", vid, f"{vid}: worker stance {ac} -> {bc}", "~  ")
         if a["media_digests"] != b["media_digests"]:
-            lines.append(f"!! {vid}: media digest set changed — evidence cannot change post-signature")
+            ev(
+                "anomaly",
+                vid,
+                f"{vid}: media digest set changed — evidence cannot change post-signature",
+                "!! ",
+            )
             anomalies += 1
 
     # Site attestations (coverage certs, digests, prior exports, disconnects)
@@ -480,15 +553,30 @@ def diff(
     for rid in sorted(set(old_att) | set(new_att)):
         a, b = old_att.get(rid), new_att.get(rid)
         if a is None:
-            lines.append(f"+  attestation {b['record_type'] or 'record'} ({rid[:20]}…): new site event")
+            ev(
+                "info",
+                rid,
+                f"attestation {b['record_type'] or 'record'} ({rid[:20]}…): new site event",
+                "+  ",
+            )
             continue
         if b is None:
-            lines.append(f"!! attestation {rid}: present before, absent now — receipts are append-only")
+            ev(
+                "anomaly",
+                rid,
+                f"attestation {rid}: present before, absent now — receipts are append-only",
+                "!! ",
+            )
             anomalies += 1
             continue
         if a["payload_hash"] != b["payload_hash"]:
-            lines.append(f"!! attestation {rid}: signed payload changed — one export is inauthentic")
+            ev(
+                "anomaly",
+                rid,
+                f"attestation {rid}: signed payload changed — one export is inauthentic",
+                "!! ",
+            )
             anomalies += 1
     if not anomalies:
-        lines.append("clean: all changes are append-only")
-    return lines, anomalies
+        ev("ok", None, "clean: all changes are append-only")
+    return events, anomalies
