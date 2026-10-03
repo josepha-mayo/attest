@@ -1225,7 +1225,13 @@ def create_app(
             data = json.loads(raw)
             pk = signer.public_key_b64
             if isinstance(data, list):
-                ok, why = ledger.verify_chain([Receipt.model_validate(d) for d in data], public_key=pk)
+                ok, why = ledger.verify_chain(
+                    [Receipt.model_validate(d) for d in data],
+                    public_key=pk,
+                    extra_key_receipts=[
+                        r for r in store.receipts() if r.visit_id.startswith("key:")
+                    ],
+                )
             elif isinstance(data, dict) and data.get("kind") == "attest.review_bundle/1":
                 ok, why = verify_bundle(
                     ReviewBundle.model_validate(data),
@@ -2138,16 +2144,19 @@ def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -
             continue
         if att.payload.get("record_type") in ("key_rotation", "key_adoption", "key_revocation"):
             rotations.append(att)
-    trusted = ledger.trusted_issuer_keys(issuer, rotations)
-    if known_rotations:
-        trusted |= ledger.descendant_issuer_keys(issuer, known_rotations)
+    # Pack-carried lifecycle receipts and the caller's known pool (the
+    # deployment ledger's, or an --issuer document's) form ONE lineage —
+    # the embedded and browser verifiers walk the same union, so a link
+    # split across the two sources bridges identically on every surface.
+    pool = rotations + list(known_rotations or [])
+    trusted = ledger.trusted_issuer_keys(issuer, pool) | ledger.descendant_issuer_keys(issuer, pool)
     if public_key not in trusted:
         return (
             False,
             "case pack was not issued under this deployment's key "
             "(no signed key_rotation links the pinned key to the issuer)",
         )
-    revoked = ledger.revoked_issuer_keys(rotations)
+    revoked = ledger.revoked_issuer_keys(pool)
     suspect_total = 0
     lines = []
     for v in manifest.get("visits", []):

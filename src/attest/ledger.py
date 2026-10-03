@@ -250,7 +250,12 @@ def descendant_issuer_keys(root_key: str, rotations: list[Receipt], *, max_hops:
     return trusted
 
 
-def verify_chain(receipts: list[Receipt], *, public_key: str | None = None) -> tuple[bool, str]:
+def verify_chain(
+    receipts: list[Receipt],
+    *,
+    public_key: str | None = None,
+    extra_key_receipts: list[Receipt] | None = None,
+) -> tuple[bool, str]:
     """Verify every receipt and the ``prev_hash`` links.
 
     The issuer key may rotate mid-chain: a ``key_rotation`` receipt signed by
@@ -262,15 +267,20 @@ def verify_chain(receipts: list[Receipt], *, public_key: str | None = None) -> t
     With ``public_key`` pinned, the chain's root key must be the pin itself
     or an ancestor of it reachable through consented rotations (pinning
     today's key still validates receipts the retired key wrote; an
-    uncountersigned "rotation" is a graft attempt, not a handoff)."""
+    uncountersigned "rotation" is a graft attempt, not a handoff).
+    ``extra_key_receipts`` (e.g. a deployment issuer document's signed
+    lifecycle) widens only that pin walk — a filtered export that omits the
+    chain's own lifecycle receipts still links to the pin; the sequence and
+    prev_hash loop always runs on ``receipts`` alone."""
     if not receipts:
         return True, "0 receipts"
     ordered = sorted(receipts, key=lambda x: x.sequence)
     first_key = ordered[0].public_key
     if public_key is not None and first_key != public_key:
         cur, reached = public_key, False
+        walk_pool = ordered + list(extra_key_receipts or [])
         for _ in range(32):
-            hop = _rotation_hop(ordered, cur)
+            hop = _rotation_hop(walk_pool, cur)
             if hop is None:
                 break
             cur = hop.payload["previous_key"]

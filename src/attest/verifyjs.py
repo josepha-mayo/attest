@@ -455,6 +455,13 @@ async function verifyFiles(files){
   const bundles=[];let mNode=null,manifest=null;
   let anyBad=false,key=null;const actual={};
   const mText=await text("manifest.json");
+  if(issuerDoc&&!issuerDoc.nodes){
+    /* Callers that assign the parsed doc directly (tests, tooling) skip the
+       drop path's parseKeep — derive the nodes here so either arming route
+       feeds the lineage walks identically. */
+    issuerDoc={issuer_key:issuerDoc.issuer_key,
+      nodes:(issuerDoc.key_receipts||[]).map(r=>parseKeep(JSON.stringify(r)))};
+  }
   /* A lone signed receipt (verify-live report, anchor, any exported receipt
      JSON) verifies too — detect the receipt shape before the pack paths so
      `attest verify-live --sign --out report.json` drops straight onto this
@@ -465,6 +472,24 @@ async function verifyFiles(files){
     if(r.signature&&r.payload_hash&&r.public_key&&r.payload){
       const c=await checkReceipt(node);
       const p=r.payload||{};
+      if(issuerDoc){
+        /* An armed pin applies to lone receipts too: the signer must sit
+           inside the pinned deployment's signed lineage — a foreign receipt
+           fails rather than verifying under its self-declared key. */
+        const inodes=issuerDoc.nodes||[];
+        const lin=new Set([issuerDoc.issuer_key,
+          ...(await trustedKeys(issuerDoc.issuer_key,inodes)),
+          ...(await descendantKeys(issuerDoc.issuer_key,inodes))]);
+        say("warn",`pinned to the issuer document's deployment key `
+          +`${esc(String(issuerDoc.issuer_key).slice(0,16))}…`);
+        if(!lin.has(r.public_key)){
+          say("bad","receipt signed by a key outside the pinned deployment's lineage");
+          say("bad","<strong>FAILED</strong>");
+          return out.join("");
+        }
+        if(suspectRecords([node],await revokedKeys(inodes)).length)
+          say("warn","receipt signed inside its issuer's declared suspect window");
+      }
       if(p.record_type==="verification_report"){
         const s=p.summary||{};
         const cls=x=>x==="pass"?"ok":x==="fail"?"bad":x==="warn"?"warn":"muted";
@@ -663,7 +688,7 @@ async function verifyFiles(files){
     for(const a of manifest.attestations||[]){
       const at=await text(`attestations/${a.receipt_id}.json`);
       if(!at){anyBad=true;say("bad",`attestation ${esc(a.receipt_id)}: missing from pack`);continue;}
-      const aNode=parseKeep(at);const rjs=toJS(aNode);
+      const aNode=parseKeep(at);const rjs=toJS(aNode)||{};
       const aOut=trusted?!trusted.has(rjs.public_key):(key&&rjs.public_key!==key);
       if(aOut){
         anyBad=true;

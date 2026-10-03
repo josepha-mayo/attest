@@ -459,6 +459,13 @@ async function verifyFiles(files){
   const bundles=[];let mNode=null,manifest=null;
   let anyBad=false,key=null;const actual={};
   const mText=await text("manifest.json");
+  if(issuerDoc&&!issuerDoc.nodes){
+    /* Callers that assign the parsed doc directly (tests, tooling) skip the
+       drop path's parseKeep — derive the nodes here so either arming route
+       feeds the lineage walks identically. */
+    issuerDoc={issuer_key:issuerDoc.issuer_key,
+      nodes:(issuerDoc.key_receipts||[]).map(r=>parseKeep(JSON.stringify(r)))};
+  }
   /* A lone signed receipt (verify-live report, anchor, any exported receipt
      JSON) verifies too — detect the receipt shape before the pack paths so
      `attest verify-live --sign --out report.json` drops straight onto this
@@ -469,6 +476,24 @@ async function verifyFiles(files){
     if(r.signature&&r.payload_hash&&r.public_key&&r.payload){
       const c=await checkReceipt(node);
       const p=r.payload||{};
+      if(issuerDoc){
+        /* An armed pin applies to lone receipts too: the signer must sit
+           inside the pinned deployment's signed lineage — a foreign receipt
+           fails rather than verifying under its self-declared key. */
+        const inodes=issuerDoc.nodes||[];
+        const lin=new Set([issuerDoc.issuer_key,
+          ...(await trustedKeys(issuerDoc.issuer_key,inodes)),
+          ...(await descendantKeys(issuerDoc.issuer_key,inodes))]);
+        say("warn",`pinned to the issuer document's deployment key `
+          +`${esc(String(issuerDoc.issuer_key).slice(0,16))}…`);
+        if(!lin.has(r.public_key)){
+          say("bad","receipt signed by a key outside the pinned deployment's lineage");
+          say("bad","<strong>FAILED</strong>");
+          return out.join("");
+        }
+        if(suspectRecords([node],await revokedKeys(inodes)).length)
+          say("warn","receipt signed inside its issuer's declared suspect window");
+      }
       if(p.record_type==="verification_report"){
         const s=p.summary||{};
         const cls=x=>x==="pass"?"ok":x==="fail"?"bad":x==="warn"?"warn":"muted";
@@ -493,8 +518,10 @@ async function verifyFiles(files){
      issuer fails closed rather than silently downgrading the pin). */
   let issuerNodes=[];
   if(issuerDoc){
-    try{issuerNodes=(issuerDoc.key_receipts||[]).map(r=>parseKeep(JSON.stringify(r)));}
-    catch(e){issuerNodes=[];}
+    /* The doc's lifecycle receipts arrive as parseKeep nodes — canonical
+       spellings preserved (a JSON.parse→stringify round-trip would respell
+       34.0 as 34 and silently break the receipts' own payload hashes). */
+    issuerNodes=issuerDoc.nodes||[];
     key=issuerDoc.issuer_key;
     say("warn",`pinned to the issuer document's deployment key ${esc(String(key).slice(0,16))}… `
       +`(${issuerNodes.length} lifecycle receipt(s)) — the pin's authenticity rides on how that `
@@ -502,7 +529,7 @@ async function verifyFiles(files){
   }
   if(mText){
     mNode=parseKeep(mText);
-    manifest=toJS(mNode);
+    manifest=toJS(mNode)||{};
     /* Structural claims on the manifest itself — unsigned manifests have no
        hash-cover over these fields, so check them explicitly (the server-side
        verifier requires both). */
@@ -519,7 +546,7 @@ async function verifyFiles(files){
       const at=await text(`attestations/${a.receipt_id}.json`);
       if(!at)continue;
       const aNode=parseKeep(at);
-      const art=(toJS(aNode).payload||{}).record_type;
+      const art=((toJS(aNode)||{}).payload||{}).record_type;
       if(art==="key_rotation"||art==="key_adoption"||art==="key_revocation")rotNodes.push(aNode);
     }
     lifecycleNodes=rotNodes;
@@ -665,7 +692,7 @@ async function verifyFiles(files){
     for(const a of manifest.attestations||[]){
       const at=await text(`attestations/${a.receipt_id}.json`);
       if(!at){anyBad=true;say("bad",`attestation ${esc(a.receipt_id)}: missing from pack`);continue;}
-      const aNode=parseKeep(at);const rjs=toJS(aNode);
+      const aNode=parseKeep(at);const rjs=toJS(aNode)||{};
       const aOut=trusted?!trusted.has(rjs.public_key):(key&&rjs.public_key!==key);
       if(aOut){
         anyBad=true;
@@ -789,8 +816,11 @@ async function go(fileList){
          can't be mistaken for smuggled content. */
       if(/\.json$/i.test(f.name||"")){
         try{
-          const d=JSON.parse(await f.text());
-          if(d&&d.schema==="attest.issuer/1"&&d.issuer_key){freshDoc=d;continue;}
+          const dn=parseKeep(await f.text()),d=toJS(dn);
+          if(d&&d.schema==="attest.issuer/1"&&d.issuer_key){
+            const kn=get(dn,"key_receipts");
+            freshDoc={issuer_key:d.issuer_key,nodes:kn&&kn.t==="arr"?kn.v:[]};
+            continue;}
         }catch(e){/* ordinary pack JSON — stays in the verify set */}
       }
       rest.push(f);

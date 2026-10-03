@@ -1060,7 +1060,9 @@ def _verify(args: argparse.Namespace) -> None:
 
     if isinstance(data, list):
         receipts = [Receipt.model_validate(r) for r in data]
-        ok, reason = ledger.verify_chain(receipts, public_key=pinned_key)
+        ok, reason = ledger.verify_chain(
+            receipts, public_key=pinned_key, extra_key_receipts=known_rotations
+        )
         if not ok:
             sys.exit(f"verification failed: {reason}")
         print(f"OK{pinned}: {reason}.")
@@ -1069,7 +1071,21 @@ def _verify(args: argparse.Namespace) -> None:
 
     if isinstance(data, dict) and "payload" in data and "signature" in data:
         receipt = Receipt.model_validate(data)
-        ok, reason = ledger.verify_receipt(receipt, public_key=pinned_key)
+        trusted_key = pinned_key
+        if pinned_key and known_rotations is not None:
+            # The issuer document's signed lifecycle names every key the
+            # deployment ever signed under — a receipt written before the
+            # rotation verifies under the pin too, and a foreign key fails.
+            lineage = ledger.trusted_issuer_keys(
+                pinned_key, known_rotations
+            ) | ledger.descendant_issuer_keys(pinned_key, known_rotations)
+            if receipt.public_key not in lineage:
+                sys.exit(
+                    "verification failed: receipt signed by a key outside the "
+                    "pinned issuer document's lineage"
+                )
+            trusted_key = receipt.public_key
+        ok, reason = ledger.verify_receipt(receipt, public_key=trusted_key)
         if not ok:
             sys.exit(f"verification failed: {reason}")
         kind = receipt.payload.get("record_type") or receipt.payload.get("schema")

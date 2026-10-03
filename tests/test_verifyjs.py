@@ -14,6 +14,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from ring_sandbox import WebhookEvent, webhooks
 
 from attest.disputepack import build_pack
 from attest.ledger import Signer
@@ -185,6 +186,101 @@ eval(src + `
     out = run(["bundle.json", "bundle.json"])
     assert "duplicate member name" in out
     assert check_member_names(["bundle.json", "bundle.json"]) is not None
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_js_issuer_doc_pin_bridges_and_rejects_foreign(tmp_path):
+    """A dropped attest.issuer/1 document pins a pre-rotation pack to the
+    deployment's CURRENT issuer — the doc's signed lifecycle receipts bridge
+    the lineage. A foreign deployment's doc fails closed. The rotation
+    payload carries a float (34.0) so the doc's receipts must keep canonical
+    spellings — a JSON.parse→stringify round-trip would respell 34.0 as 34
+    and silently break their payload hashes."""
+    from attest.ledger import Signer
+
+    old, new = Signer.ephemeral(), Signer.ephemeral()
+    rotation = old.issue(
+        visit_id="key:rot",
+        sequence=1,
+        prev_hash="bb" * 32,
+        facts={
+            "record_type": "key_rotation",
+            "previous_key": old.public_key_b64,
+            "new_key": new.public_key_b64,
+            "drift_ratio": 34.0,
+        },
+    )
+    adoption = new.issue(
+        visit_id="key:adopt",
+        sequence=2,
+        prev_hash=rotation.payload_hash,
+        facts={
+            "record_type": "key_adoption",
+            "previous_key": old.public_key_b64,
+            "rotation_receipt": {"id": rotation.id, "hash": rotation.payload_hash},
+        },
+    )
+    original = old.issue(
+        visit_id="vis_pre",
+        sequence=3,
+        prev_hash=adoption.payload_hash,
+        facts={"record_type": "visit", "state": "closed"},
+    )
+    bundle = json.dumps(
+        {
+            "kind": "attest.review_bundle/1",
+            "original": original.model_dump(mode="json"),
+            "reviews": [],
+        },
+        ensure_ascii=False,
+    )
+    doc = {
+        "schema": "attest.issuer/1",
+        "issuer_key": new.public_key_b64,
+        "key_receipts": [rotation.model_dump(mode="json"), adoption.model_dump(mode="json")],
+    }
+    foreign = Signer.ephemeral()
+    (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
+    (tmp_path / "bundle.json").write_text(bundle, encoding="utf-8")
+    (tmp_path / "doc.json").write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+    (tmp_path / "fk.txt").write_text(foreign.public_key_b64, encoding="utf-8")
+    driver = """
+const fs=require('fs');
+let src=fs.readFileSync(process.argv[2],'utf8').replace(/const dz=[\\s\\S]*$/,'');
+eval(src + `
+const mk=(n,t)=>({name:n,text:async()=>t,arrayBuffer:async()=>new TextEncoder().encode(t).buffer});
+const arm=dt=>{const dn=parseKeep(dt),d=toJS(dn)||{},kn=get(dn,'key_receipts');
+  return{issuer_key:d.issuer_key,nodes:kn&&kn.t==='arr'?kn.v:[]};};
+(async()=>{
+  const b=fs.readFileSync(process.argv[3],'utf8');
+  const docT=fs.readFileSync(process.argv[4],'utf8');
+  const fk=fs.readFileSync(process.argv[5],'utf8').trim();
+  issuerDoc=null;
+  let html=await verifyFiles([mk('bundle.json',b)]);
+  console.log('bare:',/VERIFIED/.test(html),/FAILED/.test(html));
+  issuerDoc=arm(docT);
+  html=await verifyFiles([mk('bundle.json',b)]);
+  console.log('pinned:',/VERIFIED/.test(html),/pinned to the issuer/.test(html),/no signed link/.test(html));
+  /* Foreign issuer, but carrying THIS pack's real lifecycle pool — the walk
+     runs, the key is simply unreachable through it. */
+  issuerDoc={issuer_key:fk,nodes:arm(docT).nodes};
+  html=await verifyFiles([mk('bundle.json',b)]);
+  console.log('foreign:',/FAILED/.test(html),/no signed link/.test(html));
+})();`);
+"""
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "verify.js", "bundle.json", "doc.json", "fk.txt"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout
+    assert "bare: true false" in out  # unpinned: verifies under its own key
+    assert "pinned: true true false" in out  # doc pins + lifecycle bridges, no link failure
+    assert "foreign: true true" in out  # foreign deployment fails closed
 
 
 @pytest.mark.skipif(NODE is None, reason="node runtime not available")
@@ -1172,3 +1268,67 @@ const receiptText=${JSON.stringify(rt)};
     )
     assert proc.returncode == 0, proc.stderr
     assert 'edge: {"ok":true}' in proc.stdout, proc.stdout
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_js_issuer_doc_pins_across_rotation(engine, store, household, schedule, t0, tmp_path):
+    """Dropping an attest.issuer/1 doc arms a deployment pin in the browser
+    verifier: a bundle signed by the RETIRED key verifies under the doc's
+    CURRENT issuer via the doc's signed lifecycle receipts — and an unrelated
+    doc fails closed."""
+    import json
+
+    from attest import ledger
+    from attest.ledger import Signer
+    from attest.reviews import ReviewService
+
+    event = WebhookEvent.model_validate(
+        webhooks.build_event(
+            event_type="button_press", device_id=household[2].id, occurred_at=t0
+        )
+    )
+    visit = engine.ingest(event).visit
+    engine.close_for_review(visit.id)
+    service = ReviewService(store, engine.signer, engine.clock)
+    bundle_text = service.bundle(visit.id).model_dump_json()
+
+    old_key = engine.signer.public_key_b64
+    new_signer = Signer.ephemeral()
+    rotation = engine.issue_key_rotation(new_signer.public_key_b64, "")
+    engine.signer = new_signer
+    engine.issue_key_adoption(old_key, rotation)
+    doc = ledger.issuer_document(new_signer.public_key_b64, store.receipts())
+    assert len(doc["key_receipts"]) == 2, doc["key_receipts"]
+
+    (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
+    (tmp_path / "doc.json").write_text(json.dumps(doc), encoding="utf-8")
+    (tmp_path / "b.json").write_text(bundle_text, encoding="utf-8")
+    driver = """
+const fs=require('fs');
+let src=fs.readFileSync(process.argv[2],'utf8').replace(/const dz=[\s\S]*$/,'');
+const doc=fs.readFileSync(process.argv[3],'utf8');
+const b=fs.readFileSync(process.argv[4],'utf8');
+eval(src + `
+const fileOf=t=>({name:'bundle.json',text:()=>Promise.resolve(t),arrayBuffer:()=>Promise.resolve(new TextEncoder().encode(t).buffer)});
+(async()=>{
+  issuerDoc=JSON.parse(doc);
+  const html=await verifyFiles([fileOf(b)]);
+  console.log('HTML:',html);
+  console.log('pinned:',/VERIFIED/.test(html),/pinned to the issuer document/.test(html));
+  issuerDoc={schema:'attest.issuer/1',issuer_key:'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',key_receipts:[]};
+  const bad=await verifyFiles([fileOf(b)]);
+  console.log('wrongdoc:',/FAILED/.test(bad),/no signed link/.test(bad));
+  issuerDoc=null;
+})();`);
+"""
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "verify.js", "doc.json", "b.json"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "pinned: true true" in proc.stdout, proc.stdout
+    assert "wrongdoc: true true" in proc.stdout, proc.stdout
