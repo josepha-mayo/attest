@@ -1272,6 +1272,86 @@ const receiptText=${JSON.stringify(rt)};
 
 
 @pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_js_canonicalization_fuzz_matches_python(tmp_path):
+    """Differential fuzz: random payload shapes must canonicalize to identical
+    bytes in Python and the browser JS — the signature contract lives and dies
+    on those being the same bytes. Hand-picked edge cases cover what we already
+    know; the fuzz covers what we don't."""
+    import hashlib
+    import random
+
+    from attest.ledger import canonical as ledger_canonical
+
+    rng = random.Random(0xA77E57)
+    strchars = 'abcxyz _éöü—😀\U0001f600\t\n"\\\x7f∑'
+
+    def rand_scalar():
+        return rng.choice(
+            [
+                lambda: rng.randint(-(10**20), 10**20),  # beyond JS's 2^53 safe range
+                lambda: rng.choice([0, -1, 1, 2**53, 2**53 + 1, -(2**63), 2**63]),
+                lambda: rng.choice([0.0, -0.0, 1.5, 34.0, 1e300, 5e-324, 1e-7]),
+                lambda: rng.random() * rng.choice([1e-10, 1.0, 1e10, -1.0]),
+                lambda: rng.choice([True, False, None]),
+                lambda: "".join(rng.choice(strchars) for _ in range(rng.randint(0, 24))),
+            ]
+        )()
+
+    def rand_val(depth=0):
+        if depth >= 4 or rng.random() < 0.45:
+            return rand_scalar()
+        if rng.random() < 0.5:
+            return [rand_val(depth + 1) for _ in range(rng.randint(0, 6))]
+        return {
+            "".join(rng.choice(strchars + "{}[]:.,") for _ in range(rng.randint(1, 10))) or "k": rand_val(
+                depth + 1
+            )
+            for _ in range(rng.randint(0, 6))
+        }
+
+    payloads = [rand_val() for _ in range(400)]
+    # The input text is arbitrary valid JSON — vary the spelling on purpose:
+    # escaped vs raw unicode, spaced vs tight separators.
+    texts = [
+        json.dumps(
+            p,
+            ensure_ascii=bool(rng.getrandbits(1)),
+            separators=rng.choice([((", "), (": ")), ((","), (":"))]),
+        )
+        for p in payloads
+    ]
+    oracle = [hashlib.sha256(ledger_canonical(p)).hexdigest() for p in payloads]
+
+    (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
+    (tmp_path / "cases.json").write_text(json.dumps(texts), encoding="utf-8")
+    driver = """
+const fs=require('fs'),crypto=require('crypto');
+let src=fs.readFileSync(process.argv[2],'utf8').replace(/const dz=[\\s\\S]*$/,'');
+const texts=JSON.parse(fs.readFileSync(process.argv[3],'utf8'));
+eval(src + `
+(async()=>{
+  for(const t of texts){
+    const h=crypto.createHash('sha256').update(canonical(parseKeep(t))).digest('hex');
+    console.log(h);
+  }
+})();`);
+"""
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "verify.js", "cases.json"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert proc.returncode == 0, proc.stderr
+    js_hashes = proc.stdout.strip().splitlines()
+    assert len(js_hashes) == len(oracle)
+    for i, (got, want) in enumerate(zip(js_hashes, oracle, strict=True)):
+        assert got == want, f"canonicalization diverged on payload {i}: {texts[i]!r}\njs={got} py={want}"
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
 def test_js_issuer_doc_pins_across_rotation(engine, store, household, schedule, t0, tmp_path):
     """Dropping an attest.issuer/1 doc arms a deployment pin in the browser
     verifier: a bundle signed by the RETIRED key verifies under the doc's
