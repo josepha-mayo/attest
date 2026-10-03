@@ -1312,6 +1312,7 @@ eval(src + `
 const fileOf=t=>({name:'bundle.json',text:()=>Promise.resolve(t),arrayBuffer:()=>Promise.resolve(new TextEncoder().encode(t).buffer)});
 (async()=>{
   issuerDoc=JSON.parse(doc);
+  console.log('armed receipts:',(issuerDoc.key_receipts||[]).length);
   const html=await verifyFiles([fileOf(b)]);
   console.log('HTML:',html);
   console.log('pinned:',/VERIFIED/.test(html),/pinned to the issuer document/.test(html));
