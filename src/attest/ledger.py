@@ -323,25 +323,34 @@ def revoked_issuer_keys(receipts: list[Receipt]) -> dict[str, str]:
     overlay on top of integrity — records still verify; the flag is for
     humans and tools to weight them."""
     ordered = sorted(receipts, key=lambda x: x.sequence)
-    if not ordered:
-        return {}
-    tip = ordered[-1].public_key
     revoked: dict[str, str] = {}
+    in_effect: str | None = None
     for r in ordered:
+        # Walk the in-effect issuer like verify_chain: a receipt verifies under
+        # the key in force at its position, and only a consented rotation moves
+        # that authority. "Tip" can never be derived from position alone — a
+        # forged high-sequence revocation would make itself the tip and
+        # self-authorize (the compromised-key smear this check exists to stop).
+        ok, _ = verify_receipt(r, public_key=in_effect or r.public_key)
+        if not ok:
+            continue
+        if in_effect is None:
+            in_effect = r.public_key
         p = r.payload
         if (
-            p.get("record_type") == "key_revocation"
-            and p.get("revoked_key")
-            and r.public_key == tip
-            and verify_receipt(r, public_key=tip)[0]
+            p.get("record_type") == "key_rotation"
+            and p.get("previous_key") == in_effect
+            and p.get("new_key")
+            and _adoption_consent(ordered, r, p["new_key"])
         ):
+            in_effect = p["new_key"]
+            continue
+        if p.get("record_type") == "key_revocation" and p.get("revoked_key") and r.public_key == in_effect:
             revoked[p["revoked_key"]] = p.get("suspect_after") or ""
     return revoked
 
 
-def suspect_receipts(
-    receipts: list[Receipt], revoked: dict[str, str] | None = None
-) -> list[Receipt]:
+def suspect_receipts(receipts: list[Receipt], revoked: dict[str, str] | None = None) -> list[Receipt]:
     """Receipts signed by a revoked key INSIDE its suspect window —
     cryptographically valid, declared untrustworthy. Integrity verdicts
     never depend on this; it's the annotation surfaces report. Pass a

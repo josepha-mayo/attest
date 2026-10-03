@@ -381,6 +381,38 @@ async function descendantKeys(rootKey,rotationNodes,maxHops=32){
     cur=nxt;trusted.add(cur);
   }
   return trusted;}
+async function revokedKeys(keyNodes){
+  /* key -> suspect_after ISO for valid key_revocation receipts signed by the
+     in-effect issuer at their position. Only the live key can revoke — a
+     retired key revoking its successor would let a compromised key smear the
+     healthy one, and position alone can't name the tip: a forged
+     high-sequence revocation would make itself the tip and self-authorize.
+     Authority follows the same consented pivots as verify_chain. */
+  const ord=[...keyNodes].sort((a,b)=>(toJS(a).sequence||0)-(toJS(b).sequence||0));
+  let inEffect=null;const out={};
+  for(const rn of ord){
+    const r=toJS(rn),p=r.payload||{};
+    /* not signed by the in-effect key: out-of-band history, no authority */
+    if(inEffect!==null&&r.public_key!==inEffect)continue;
+    const c=await checkReceipt(rn);
+    if(!c.ok)continue;
+    if(inEffect===null)inEffect=r.public_key;
+    if(p.record_type==="key_rotation"&&p.previous_key===inEffect&&p.new_key
+       &&await adoptedBy(ord,rn,p.new_key)){inEffect=p.new_key;continue;}
+    if(p.record_type==="key_revocation"&&p.revoked_key&&r.public_key===inEffect){
+      out[p.revoked_key]=p.suspect_after||"";
+    }
+  }
+  return out;}
+function suspectRecords(receiptNodes,revoked){
+  /* Receipts signed by a revoked key inside its suspect window — valid,
+     but annotated. Revocation overlays trust; it never flips integrity. */
+  const out=[];
+  for(const rn of receiptNodes){
+    const r=toJS(rn),after=revoked[r.public_key];
+    if(after!==undefined&&r.issued_at&&new Date(r.issued_at)>new Date(after))out.push(rn);
+  }
+  return out;}
 /* ---------- shared pack helpers ---------- */
 function digests(o,out=[]){
   if(Array.isArray(o))o.forEach(v=>digests(v,out));
@@ -439,7 +471,7 @@ async function verifyFiles(files){
       return out.join("");
     }
   }
-  let trusted=null;
+  let trusted=null;let revoked={};let suspectTotal=0;
   if(mText){
     mNode=parseKeep(mText);
     manifest=toJS(mNode);
@@ -460,9 +492,10 @@ async function verifyFiles(files){
       if(!at)continue;
       const aNode=parseKeep(at);
       const art=(toJS(aNode).payload||{}).record_type;
-      if(art==="key_rotation"||art==="key_adoption")rotNodes.push(aNode);
+      if(art==="key_rotation"||art==="key_adoption"||art==="key_revocation")rotNodes.push(aNode);
     }
     trusted=await trustedKeys(manifest.issuer_key||"",rotNodes);
+    revoked=await revokedKeys(rotNodes);
     for(const v of manifest.visits||[]){
       const t=await text(`visits/${v.visit_id}/bundle.json`);
       /* A manifest-listed bundle absent from the zip fails closed — the row is
@@ -490,6 +523,7 @@ async function verifyFiles(files){
           ...(await trustedKeys(oKey,rn.v)),
           ...(await descendantKeys(oKey,rn.v)),
         ]);
+        revoked=await revokedKeys(rn.v);
       }
     }
   }
@@ -499,6 +533,13 @@ async function verifyFiles(files){
     const c=await checkBundle(root,trusted||key);
     if(!c.ok)anyBad=true;
     const js=toJS(root);
+    /* Revocation is a trust overlay — never a FAIL: count bundle records
+       signed by a revoked key inside its declared suspect window and warn. */
+    const sN=suspectRecords(
+      [oNode].concat((get(root,"reviews")||{v:[]}).v.map(en=>get(en,"receipt"))),
+      revoked).length;
+    if(sN){suspectTotal+=sN;
+      say("warn",`${esc(vid)}: ${sN} record(s) signed by a revoked issuer inside its suspect window`);}
     actual[vid]=(js.original||{}).payload_hash;
     /* Stance derives from the verified review chain — a countersign_status
        field in the file is unsigned forgery bait and is never consulted. */

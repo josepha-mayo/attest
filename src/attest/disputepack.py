@@ -382,6 +382,62 @@ def descendant_keys(root_key, rotation_receipts, max_hops=32):
         cur = nxt
         trusted.add(cur)
     return trusted
+
+
+def revoked_keys(key_receipts):
+    """Key -> suspect_after ISO for valid key_revocation receipts signed by
+    the in-effect issuer at their position. Only the live key can revoke —
+    a retired key revoking its successor would let a compromised key smear
+    the healthy one, and position alone can't name the tip: a forged
+    high-sequence revocation would make itself the tip and self-authorize.
+    Authority is therefore tracked through the same consented pivots
+    verify_chain uses."""
+    ordered = sorted(key_receipts, key=lambda x: x.get("sequence", 0))
+    revoked = {}
+    in_effect = None
+    for r in ordered:
+        ok, _ = check_receipt(r, in_effect or r.get("public_key"))
+        if not ok:
+            continue
+        if in_effect is None:
+            in_effect = r.get("public_key")
+        p = r.get("payload", {})
+        if (
+            p.get("record_type") == "key_rotation"
+            and p.get("previous_key") == in_effect
+            and p.get("new_key")
+            and _adoption_consent(ordered, r, p["new_key"])
+        ):
+            in_effect = p["new_key"]
+            continue
+        if (
+            p.get("record_type") == "key_revocation"
+            and p.get("revoked_key")
+            and r.get("public_key") == in_effect
+        ):
+            revoked[p["revoked_key"]] = p.get("suspect_after") or ""
+    return revoked
+
+
+def suspect_records(receipts, revoked):
+    """Receipts signed by a revoked key inside its declared suspect window —
+    cryptographically valid, annotated suspect. Integrity never depends on
+    this; it's what a compromised key's history deserves."""
+    from datetime import datetime
+
+    def _instant(s):
+        try:
+            return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
+    out = []
+    for r in receipts:
+        after = _instant(revoked.get(r.get("public_key"), ""))
+        at = _instant(r.get("issued_at", ""))
+        if after is not None and at is not None and at > after:
+            out.append(r)
+    return out
 '''
 
 # verify_bundle.py — verifies one pack's bundle.json (and media/ next to it).
@@ -400,7 +456,10 @@ def main():
     key = key or bundle["original"]["public_key"]
     # Reviews appended after a key rotation verify under the successor —
     # legitimate only through the signed rotation links in key_rotations.json.
+    # Revocation receipts ride the same file: the overlay annotates suspect
+    # windows without touching the integrity verdict.
     trusted = {key}
+    rotations = []
     rot_path = pack_dir / "key_rotations.json"
     if rot_path.is_file():
         try:
@@ -411,6 +470,7 @@ def main():
         if not isinstance(rotations, list):
             sys.exit("FAIL key_rotations.json: malformed")
         trusted = trusted_keys(key, rotations) | descendant_keys(key, rotations)
+    revoked = revoked_keys(rotations)
     ok, why, n = check_bundle(bundle, trusted)
     if not ok:
         sys.exit(f"FAIL {why}")
@@ -446,6 +506,10 @@ def main():
     print(f"OK: {n} receipt(s) verified; {checked} media digests matched{redact_note}.")
     if len(trusted) > 1:
         print(f"    ({len(trusted)} issuer keys linked via the signed rotation chain)")
+    suspect = suspect_records(
+        [bundle["original"]] + [e["receipt"] for e in bundle.get("reviews", [])], revoked)
+    if suspect:
+        print(f"    ({len(suspect)} record(s) signed by a revoked issuer inside its suspect window)")
     print("Signature proves record integrity under the issuer key - not identity,")
     print("attendance, or absence.")
 
@@ -495,9 +559,11 @@ def main():
             r = json.loads((root / "attestations" / f"{rid}.json").read_text(encoding="utf-8"))
         except Exception:
             continue
-        if r.get("payload", {}).get("record_type") in ("key_rotation", "key_adoption"):
+        if r.get("payload", {}).get("record_type") in ("key_rotation", "key_adoption", "key_revocation"):
             rotations.append(r)
     trusted = trusted_keys(declared, rotations)
+    revoked = revoked_keys(rotations)
+    suspect_n = 0
     if key is not None and key not in trusted:
         sys.exit(
             "FAIL manifest: issuer_key disagrees with the pinned --key "
@@ -528,6 +594,8 @@ def main():
             print(f"FAIL {vid}: {why}")
             failed += 1
             continue
+        suspect_n += len(suspect_records(
+            [bundle["original"]] + [e["receipt"] for e in bundle.get("reviews", [])], revoked))
         if bundle["original"]["payload_hash"] != v.get("payload_hash"):
             print(f"FAIL {vid}: manifest hash disagrees with signed original")
             failed += 1
@@ -631,6 +699,8 @@ def main():
         # The pack spans a signed key rotation — the lineage is the pivot, not
         # a weaker check; say so plainly rather than hiding it behind one key.
         print(f"    ({len(trusted)} issuer keys linked via the signed rotation chain)")
+    if suspect_n:
+        print(f"    ({suspect_n} record(s) signed by a revoked issuer inside its suspect window)")
     if declared == key and "--key" not in sys.argv:
         print("    (issuer self-declared by the pack — pass --key to pin it)")
     print("Integrity only — not identity, attendance, or absence.")

@@ -81,6 +81,8 @@ against a live store:
 | Graft an attacker key as a trusted issuer *predecessor* (mint "attacker key retired into the victim key") | Endorsement is self-serve, so ancestor hops additionally require a `key_adoption` receipt countersigned by the successor naming the exact rotation — the victim key never consented, so the attacker key never enters `trusted_issuer_keys` and pack verification keeps rejecting it |
 | Run a second `attest serve` or offline signer against a live runtime dir (split-brain: two in-memory signers diverge, a rotate on one leaves the other signing under the retired key, and competing writes race the journal) | Every mutating command holds an exclusive advisory writer lock (`attest.lock`, OS byte-range, non-blocking) for its lifetime — a second writer fails fast naming the lock file and the recorded pid; read-only commands never take it, and the OS releases on exit or crash. The lock is advisory, not a sandbox: an attacker who can delete the file can already rewrite the store directly |
 | Flood `/webhooks/ring` or the grant-link POSTs to starve the intake worker or fill the dedupe/review tables | Per-client-IP token buckets run in the outermost middleware, before a byte of the body is read — webhooks 300/min, grant links 30/min, 0 disables; the 429 is styled for household-facing surfaces and JSON for machines. Buckets are per-worker: horizontal scaling needs a shared limiter upstream (documented in `config.py`) |
+| Revoke the healthy successor key from a compromised retired key, or append a forged high-sequence `key_revocation` that names itself the tip | `revoked_issuer_keys`/`revokedKeys` track the in-effect issuer through consented pivots (same walk as `verify_chain`) — a revocation carries authority only when signed by the key in force at its position. Position can never confer authority: sequence is self-asserted, so the smear receipt is simply not the in-effect signer and is ignored |
+| Compromise discovered after rotation — declare the retired key's output untrustworthy | `issue_key_revocation` signs a `key_revocation` receipt under the live issuer naming the key + `suspect_after` instant. Verifiers (server, embedded Python, JS, Lambda) annotate suspect-window record counts as a trust overlay — integrity verdicts never flip, nothing is erased, and the revocation itself is a chained receipt that travels in packs |
 
 ## Signing-key rotation
 
@@ -105,8 +107,11 @@ into the gap, and `resume_pending_adoptions()` at every server boot and
 `rotate-key` run countersigns any unconsented pivot endorsing the current
 signer — the wreckage of a crashed rotate completes instead of stranding.
 What rotation does **not** prove: that either key was or stayed
-uncompromised. A compromise discovered after the fact is a revocation
-problem; rotation is the continuity story, not the rescue.
+uncompromised — rotation is the continuity story, not the rescue. A
+compromise discovered after the fact is handled by `key_revocation` (above):
+the live issuer declares the retired key's signatures suspect after a
+declared instant. Both mechanisms annotate; neither erases — a revoked key's
+records still verify cryptographically, they just carry the suspect flag.
 
 Two paths need an **external anchor** to be provable: truncating the journal
 before the earliest pin, and wholesale replacement of store + receipts + key

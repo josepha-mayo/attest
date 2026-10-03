@@ -379,6 +379,38 @@ async function descendantKeys(rootKey,rotationNodes,maxHops=32){
     cur=nxt;trusted.add(cur);
   }
   return trusted;}
+async function revokedKeys(keyNodes){
+  /* key -> suspect_after ISO for valid key_revocation receipts signed by the
+     in-effect issuer at their position. Only the live key can revoke — a
+     retired key revoking its successor would let a compromised key smear the
+     healthy one, and position alone can't name the tip: a forged
+     high-sequence revocation would make itself the tip and self-authorize.
+     Authority follows the same consented pivots as verify_chain. */
+  const ord=[...keyNodes].sort((a,b)=>(toJS(a).sequence||0)-(toJS(b).sequence||0));
+  let inEffect=null;const out={};
+  for(const rn of ord){
+    const r=toJS(rn),p=r.payload||{};
+    /* not signed by the in-effect key: out-of-band history, no authority */
+    if(inEffect!==null&&r.public_key!==inEffect)continue;
+    const c=await checkReceipt(rn);
+    if(!c.ok)continue;
+    if(inEffect===null)inEffect=r.public_key;
+    if(p.record_type==="key_rotation"&&p.previous_key===inEffect&&p.new_key
+       &&await adoptedBy(ord,rn,p.new_key)){inEffect=p.new_key;continue;}
+    if(p.record_type==="key_revocation"&&p.revoked_key&&r.public_key===inEffect){
+      out[p.revoked_key]=p.suspect_after||"";
+    }
+  }
+  return out;}
+function suspectRecords(receiptNodes,revoked){
+  /* Receipts signed by a revoked key inside its suspect window — valid,
+     but annotated. Revocation overlays trust; it never flips integrity. */
+  const out=[];
+  for(const rn of receiptNodes){
+    const r=toJS(rn),after=revoked[r.public_key];
+    if(after!==undefined&&r.issued_at&&new Date(r.issued_at)>new Date(after))out.push(rn);
+  }
+  return out;}
 /* ---------- shared pack helpers ---------- */
 function digests(o,out=[]){
   if(Array.isArray(o))o.forEach(v=>digests(v,out));
@@ -439,7 +471,7 @@ async function verifyFiles(files){
       return out.join("");
     }
   }
-  let trusted=null;
+  let trusted=null;let revoked={};let suspectTotal=0;
   if(mText){
     mNode=parseKeep(mText);
     manifest=toJS(mNode);
@@ -460,9 +492,10 @@ async function verifyFiles(files){
       if(!at)continue;
       const aNode=parseKeep(at);
       const art=(toJS(aNode).payload||{}).record_type;
-      if(art==="key_rotation"||art==="key_adoption")rotNodes.push(aNode);
+      if(art==="key_rotation"||art==="key_adoption"||art==="key_revocation")rotNodes.push(aNode);
     }
     trusted=await trustedKeys(manifest.issuer_key||"",rotNodes);
+    revoked=await revokedKeys(rotNodes);
     for(const v of manifest.visits||[]){
       const t=await text(`visits/${v.visit_id}/bundle.json`);
       /* A manifest-listed bundle absent from the zip fails closed — the row is
@@ -490,6 +523,7 @@ async function verifyFiles(files){
           ...(await trustedKeys(oKey,rn.v)),
           ...(await descendantKeys(oKey,rn.v)),
         ]);
+        revoked=await revokedKeys(rn.v);
       }
     }
   }
@@ -499,6 +533,13 @@ async function verifyFiles(files){
     const c=await checkBundle(root,trusted||key);
     if(!c.ok)anyBad=true;
     const js=toJS(root);
+    /* Revocation is a trust overlay — never a FAIL: count bundle records
+       signed by a revoked key inside its declared suspect window and warn. */
+    const sN=suspectRecords(
+      [oNode].concat((get(root,"reviews")||{v:[]}).v.map(en=>get(en,"receipt"))),
+      revoked).length;
+    if(sN){suspectTotal+=sN;
+      say("warn",`${esc(vid)}: ${sN} record(s) signed by a revoked issuer inside its suspect window`);}
     actual[vid]=(js.original||{}).payload_hash;
     /* Stance derives from the verified review chain — a countersign_status
        field in the file is unsigned forgery bait and is never consulted. */
@@ -1084,6 +1125,25 @@ function attestationHTML(p){
       +`<small>${esc(p.reason||"consent revoked")}`
       +` — ingestion and polling stopped; signed records preserved</small>`;
   }
+  if(t==="key_rotation"){
+    return `<div class="row warn"><span class="pill">key rotation</span> `
+      +`<strong>issuer key retired</strong> — ${esc(String(p.previous_key||"").slice(0,12))}…`
+      +` → ${esc(String(p.new_key||"").slice(0,12))}…</div>`
+      +`<small>${esc(p.reason||"planned rotation")} — the signed pivot; `
+      +`receipts before it verify under the retiring key</small>`;
+  }
+  if(t==="key_adoption"){
+    const link=p.rotation_receipt||{};
+    return `<div class="row ok"><span class="pill">key adoption</span> `
+      +`<strong>successor countersigned</strong> — rotation ${esc(String(link.id||"").slice(0,12))}…</div>`
+      +`<small>the new key holder consented — consent, not just a claim</small>`;
+  }
+  if(t==="key_revocation"){
+    return `<div class="row bad"><span class="pill">key revoked</span> `
+      +`<strong>issuer key declared suspect</strong> — ${esc(String(p.revoked_key||"").slice(0,12))}…</div>`
+      +`<small>suspect for records after ${esc(String(p.suspect_after||""))}`
+      +`${p.reason?" · "+esc(p.reason):""} — a trust annotation, never an erasure</small>`;
+  }
   if(t==="case_export"){
     const n2=Object.keys(p.receipt_hashes||{}).length;
     return `<div class="row ok"><span class="pill">export</span> `
@@ -1126,7 +1186,7 @@ async function renderIndex(){
   for(const tag of document.querySelectorAll("script.attestation")){
     const aN=parseKeep(d64(tag.textContent));
     const art=(toJS(aN).payload||{}).record_type;
-    if(art==="key_rotation"||art==="key_adoption")rotNodes.push(aN);
+    if(art==="key_rotation"||art==="key_adoption"||art==="key_revocation")rotNodes.push(aN);
   }
   const trusted=meta.issuer_key&&rotNodes.length
     ?new Set([
@@ -1134,6 +1194,7 @@ async function renderIndex(){
         ...(await descendantKeys(meta.issuer_key,rotNodes)),
       ])
     :null;
+  const revoked=await revokedKeys(rotNodes);let suspectTotal=0;
   for(const tag of document.querySelectorAll("script.bundle")){
     const root=parseKeep(d64(tag.textContent));
     const js=toJS(root);
@@ -1142,6 +1203,9 @@ async function renderIndex(){
     const c=await checkBundle(root,trusted||key);
     if(!c.ok)anyBad=true;
     n++;
+    suspectTotal+=suspectRecords(
+      [oNode].concat((get(root,"reviews")||{v:[]}).v.map(en=>get(en,"receipt"))),
+      revoked).length;
     actual[tag.dataset.vid]=(js.original||{}).payload_hash;
     const p=(js.original||{}).payload||{};
     if(c.ok)payloads.push(p);
@@ -1244,6 +1308,9 @@ async function renderIndex(){
      +" record(s), at least one does not verify. Do not rely on this pack.</div>"+mLine
     :`<div class="row ok">VERIFIED — ${n} record(s), chains intact under issuer key `
      +esc(String(key||"").slice(0,16))+"…</div>"+mLine
+     +(suspectTotal
+       ?`<div class="row warn">${suspectTotal} record(s) signed by a revoked issuer `
+        +"inside its suspect window</div>":"")
      +`<small>${declared} declared media digest(s)`
      +(meta.media_redacted?" — media withheld by redaction; signed digests preserved":"")+"</small>";
 }

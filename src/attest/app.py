@@ -1601,6 +1601,48 @@ def create_app(
             "adoption_receipt": adoption.id,
         }
 
+    @app.post("/api/admin/revoke-key")
+    async def revoke_key(request: Request):
+        """Sign a ``key_revocation`` receipt under the live issuer — declares a
+        prior key's signatures suspect after an instant without touching the
+        records. Revocation is a trust overlay: verification still reports the
+        records intact and annotates the suspect window."""
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001
+            body = {}
+        revoked = str(body.get("revoked_key") or "")
+        if not revoked:
+            raise HTTPException(400, "revoked_key is required")
+        raw_when = str(body.get("suspect_after") or "")
+        if raw_when:
+            try:
+                when = datetime.fromisoformat(raw_when.replace("Z", "+00:00"))
+            except ValueError:
+                raise HTTPException(400, "suspect_after is not ISO 8601") from None
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=UTC)
+        else:
+            # Default: the key's first signed receipt — when a compromise was
+            # discovered is knowable, when it started is not; the honest
+            # default declares the key's whole output suspect. An explicit
+            # suspect_after narrows it when forensics justify a later bound.
+            when = next(
+                (r.issued_at for r in store.receipts() if r.public_key == revoked),
+                engine.clock.now(),
+            )
+        try:
+            receipt = await asyncio.to_thread(
+                engine.issue_key_revocation, revoked, when, str(body.get("reason") or "")[:500]
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {
+            "revoked_key": revoked,
+            "suspect_after": when.isoformat(),
+            "revocation_receipt": receipt.id,
+        }
+
     @app.post("/api/sites/{site_id}/liveview")
     async def liveview_open(request: Request, site_id: str = PathParam(max_length=128)):
         """Broker a WHEP live-view session: the browser's SDP offer goes to Ring
@@ -2072,7 +2114,7 @@ def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -
             att = Receipt.model_validate(json.loads(z.read(f"attestations/{rid}.json")))
         except Exception:  # noqa: BLE001 — unreadable members fail in the loop below
             continue
-        if att.payload.get("record_type") in ("key_rotation", "key_adoption"):
+        if att.payload.get("record_type") in ("key_rotation", "key_adoption", "key_revocation"):
             rotations.append(att)
     trusted = ledger.trusted_issuer_keys(issuer, rotations)
     if known_rotations:
@@ -2083,6 +2125,8 @@ def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -
             "case pack was not issued under this deployment's key "
             "(no signed key_rotation links the pinned key to the issuer)",
         )
+    revoked = ledger.revoked_issuer_keys(rotations)
+    suspect_total = 0
     lines = []
     for v in manifest.get("visits", []):
         vid = v.get("visit_id", "?")
@@ -2091,6 +2135,9 @@ def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -
         except Exception as exc:  # noqa: BLE001
             return False, f"{vid}: missing or invalid bundle ({exc})"
         ok, detail = _check_pack_bundle(z, bundle, trusted, media_prefix=f"visits/{vid}/media/")
+        suspect_total += len(
+            ledger.suspect_receipts([bundle.original] + [e.receipt for e in bundle.reviews], revoked=revoked)
+        )
         if not ok:
             return False, f"{vid}: {detail}"
         if bundle.original.payload_hash != v.get("payload_hash"):
@@ -2149,6 +2196,8 @@ def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -
         return False, f"{name}: present but not in the signed manifest"
     if len(trusted) > 1:
         manifest_note += f"; {len(trusted)} issuer keys linked via the signed rotation chain"
+    if suspect_total:
+        manifest_note += f"; {suspect_total} record(s) signed by a revoked issuer inside its suspect window"
     return True, f"case pack verified — {total} visit record(s) intact ({manifest_note}): " + "; ".join(lines)
 
 

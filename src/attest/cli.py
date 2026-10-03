@@ -854,6 +854,13 @@ def _demo(args: argparse.Namespace) -> None:
     print("     (attest rotate-key is the offline path — it rotates the key file", flush=True)
     print("      while the server is stopped; the running server keeps its", flush=True)
     print("      loaded signer. --rotate-day K does the live pivot mid-story.)", flush=True)
+    print("     then the incident-response move — declare the retired key's", flush=True)
+    print("     signatures suspect without erasing a record:", flush=True)
+    print(
+        f'     curl -u admin:{token} -X POST "{app_url}/api/admin/revoke-key" '
+        '-d \'{"revoked_key":"<old-key>","reason":"compromise"}\'',
+        flush=True,
+    )
     if "verify" in signed_ids:
         print(f"     e.g. attest explain {signed_ids['verify']} — the API sweep just", flush=True)
         print("     signed as a chained attestation (verify-live --sign does it live)", flush=True)
@@ -1384,6 +1391,45 @@ def _rotate_key(args: argparse.Namespace) -> None:
         store.close()
 
 
+def _revoke_key(args: argparse.Namespace) -> None:
+    """Sign a ``key_revocation`` receipt under the CURRENT issuer — the
+    incident-response counterpart to rotation: it declares the named key's
+    post-``--suspect-after`` signatures untrustworthy without erasing or
+    rewriting a single record. Rotate first if the suspect key is still
+    live — a key cannot revoke itself."""
+    from .instance import acquire_instance_lock
+    from .store import Store
+
+    db = settings.data_dir / "attest.sqlite3"
+    if not db.exists():
+        sys.exit(f"no store at {db}")
+    acquire_instance_lock(settings.data_dir)
+    store = Store(db)
+    try:
+        engine = _cli_engine(store)
+        if args.suspect_after:
+            try:
+                when = datetime.fromisoformat(args.suspect_after.replace("Z", "+00:00"))
+            except ValueError:
+                sys.exit(f"--suspect-after is not ISO 8601: {args.suspect_after!r}")
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=UTC)
+        else:
+            when = engine.clock.now()
+        try:
+            receipt = engine.issue_key_revocation(args.key, when, args.reason or "")
+        except ValueError as exc:
+            sys.exit(str(exc))
+        print(f"key revoked: {args.key[:16]}... declared suspect after {when.isoformat()}")
+        print(f"  revocation receipt  {receipt.id}")
+        print(
+            "  records still verify — every verifier now annotates the "
+            "suspect window instead of failing the chain."
+        )
+    finally:
+        store.close()
+
+
 def _digest(args: argparse.Namespace) -> None:
     """Sign a digest of the records written for an interval — counts by outcome,
     review counts by stance, and the exact receipt set summarized."""
@@ -1484,7 +1530,7 @@ def _status(args: argparse.Namespace) -> None:
     """One-command self-audit: journal integrity, receipt chain, coverage, queue —
     the integrity posture of the local runtime, checkable without the server."""
     from .inbox import WebhookInbox
-    from .ledger import verify_chain
+    from .ledger import revoked_issuer_keys, suspect_receipts, verify_chain
     from .store import Store
 
     db = settings.data_dir / "attest.sqlite3"
@@ -1494,7 +1540,8 @@ def _status(args: argparse.Namespace) -> None:
     try:
         stats = store.stats()
         journal = store.verify_journal()
-        chain_ok, chain_detail = verify_chain(store.receipts())
+        all_receipts = store.receipts()
+        chain_ok, chain_detail = verify_chain(all_receipts)
         inbox_path = settings.data_dir / "webhooks.sqlite3"
         queue: dict = {}
         if inbox_path.exists():
@@ -1511,10 +1558,14 @@ def _status(args: argparse.Namespace) -> None:
         # Site-level chain events: coverage certs, digests, exports, disconnects —
         # the signed ledger's record of watching, summarizing, and consent.
         att_types: dict[str, int] = {}
-        for r in store.receipts():
+        for r in all_receipts:
             if ":" in r.visit_id:
                 rtype = r.payload.get("record_type") or "record"
                 att_types[rtype] = att_types.get(rtype, 0) + 1
+        # Revocation overlays the chain: integrity still verifies — this is
+        # how many receipts sit inside a declared suspect window.
+        revoked = revoked_issuer_keys(all_receipts)
+        suspect_n = len(suspect_receipts(all_receipts, revoked=revoked))
         # The running server records its own posture at boot — a bare `attest
         # status` reports the deployment's truth, not this process's env.
         posture = store.setting("webhook_intake") or {}
@@ -1557,6 +1608,8 @@ def _status(args: argparse.Namespace) -> None:
                         "webhook": posture or None,
                         "custody": custody,
                         "issuer_keys": issuer_count,
+                        "revoked_issuers": revoked,
+                        "suspect_receipts": suspect_n,
                         "attestations": att_types,
                     },
                     default=str,
@@ -1598,6 +1651,11 @@ def _status(args: argparse.Namespace) -> None:
         if issuer_count > 1:
             key_line += f" — {issuer_count} issuer keys linked via the signed rotation chain"
         print(key_line)
+        if revoked:
+            print(
+                f"revoked:  {len(revoked)} issuer key(s) declared suspect — "
+                f"{suspect_n} receipt(s) sit inside suspect windows"
+            )
         print(f"status:   {'healthy' if healthy else 'ATTENTION — integrity check failed'}")
         if not healthy:
             sys.exit(1)
@@ -2264,6 +2322,15 @@ def _explain_attestation(store, ident: str, *, as_json: bool = False) -> None:
         )
         print("  proof the new key holder accepted the handoff — consent,")
         print("  not physical possession by an identified person.")
+    elif rtype == "key_revocation":
+        print(
+            f"  issuer declares {str(p.get('revoked_key'))[:16]}… compromised — "
+            f"its signatures are suspect for records after {p.get('suspect_after')}"
+        )
+        if p.get("reason"):
+            print(f"  stated reason: {p['reason']} (unverified, like all stated facts)")
+        print("  a trust annotation, not an erasure: the records still verify;")
+        print("  verifiers weight them as suspect-window signatures.")
     print()
     print("Boundary: a signature attests what the record claims and that it is")
     print("intact under the issuer key — never identity, attendance, or truth.")
@@ -2511,6 +2578,21 @@ def main(argv: list[str] | None = None) -> None:
     )
     s.add_argument("--reason", default="", help="why the key is being rotated (signed into the receipt)")
     s.set_defaults(fn=_rotate_key)
+
+    s = sub.add_parser(
+        "revoke-key",
+        help="declare a prior issuer key's signatures suspect after an instant — "
+        "signed under the live key (rotate away from a compromised key first); "
+        "records still verify, verifiers annotate the suspect window",
+    )
+    s.add_argument("key", help="base64 public key to revoke — must already exist in this chain's history")
+    s.add_argument(
+        "--suspect-after",
+        help="ISO 8601 instant; the key's signatures after it are declared suspect "
+        "(default: the key's first signed receipt — compromise timing is unknowable)",
+    )
+    s.add_argument("--reason", default="", help="incident note signed into the receipt")
+    s.set_defaults(fn=_revoke_key)
 
     s = sub.add_parser(
         "triage",

@@ -1346,9 +1346,7 @@ class VisitEngine:
             return rotation, adoption
 
     @atomic
-    def issue_key_revocation(
-        self, revoked_key: str, suspect_after: datetime, reason: str = ""
-    ) -> Receipt:
+    def issue_key_revocation(self, revoked_key: str, suspect_after: datetime, reason: str = "") -> Receipt:
         """Sign, under the CURRENT issuer key, that ``revoked_key``'s
         signatures are suspect for anything timestamped after
         ``suspect_after`` — the incident-response counterpart to rotation.
