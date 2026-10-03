@@ -200,3 +200,39 @@ def test_diff_verify_pins_the_supplied_key(exports, tmp_path):
     lines, anomalies = diff(first, second, key="A" * 43 + "=")
     assert anomalies >= 1
     assert any("fails verification" in line for line in lines)
+
+
+def test_diff_pins_to_an_issuer_document(engine, store, household, schedule, t0, tmp_path):
+    """--issuer-url parity: exports spanning a rotation verify under the
+    deployment's CURRENT issuer when the discovery doc's signed lifecycle
+    receipts supply the lineage — and fail without them."""
+    from attest import ledger
+    from attest.ledger import Signer
+
+    service = ReviewService(store, engine.signer, engine.clock)
+    site = store.sites()[0]
+    v1 = _visit(engine, household, t0)
+    first = _case(store, tmp_path, site, service, [v1])
+
+    old_key = engine.signer.public_key_b64
+    new_signer = Signer.ephemeral()
+    rotation = engine.issue_key_rotation(new_signer.public_key_b64, "")
+    engine.signer = new_signer
+    engine.issue_key_adoption(old_key, rotation)
+
+    v2 = _visit(engine, household, t0, offset=90)
+    second = _case(store, tmp_path, site, service, [v1, v2])
+
+    doc = ledger.issuer_document(new_signer.public_key_b64, store.receipts())
+    known = [ledger.Receipt.model_validate(r) for r in doc["key_receipts"]]
+
+    # Pinned to the current issuer alone, the pre-rotation export fails — the
+    # old key is outside the trust set without the lifecycle link.
+    lines, anomalies = diff(first, second, key=doc["issuer_key"])
+    assert anomalies >= 1
+    assert any("fails verification" in line for line in lines)
+
+    # With the issuer document's receipts the lineage bridges both directions.
+    lines, anomalies = diff(first, second, key=doc["issuer_key"], extra_key_receipts=known)
+    assert anomalies == 0, lines
+    assert any("pinned issuer" in line for line in lines)

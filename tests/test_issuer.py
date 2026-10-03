@@ -172,6 +172,47 @@ def test_issuer_doc_schema_enforced(tmp_path):
         cli._fetch_issuer_doc(str(bad))
 
 
+def test_issuer_doc_over_loopback_http(tmp_path, settings, store, ring_client, household, schedule):
+    """End to end over a real socket: a live deployment's well-known endpoint
+    is fetchable over plain HTTP *on loopback* — the remote-verifier path,
+    not the file path."""
+    import socket
+    import threading
+    import time
+    from contextlib import contextmanager
+
+    import uvicorn
+
+    from attest.app import create_app
+
+    @contextmanager
+    def serve(app):
+        sock = socket.socket()
+        sock.bind(("127.0.0.1", 0))
+        sock.listen(32)
+        port = sock.getsockname()[1]
+        server = uvicorn.Server(uvicorn.Config(app, log_level="error", access_log=False))
+        thread = threading.Thread(target=lambda: server.run(sockets=[sock]), daemon=True)
+        thread.start()
+        try:
+            deadline = time.monotonic() + 5
+            while not server.started and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert server.started
+            yield f"http://127.0.0.1:{port}"
+        finally:
+            server.should_exit = True
+            thread.join(timeout=10)
+            sock.close()
+
+    app = create_app(settings, store=store, ring=ring_client, signer=Signer.ephemeral(), sweep_interval_s=0)
+    with serve(app) as base:
+        doc = cli._fetch_issuer_doc(base)  # plain http, loopback — allowed
+        assert doc["schema"] == "attest.issuer/1"
+        assert doc["issuer_key"] == app.state.signer.public_key_b64
+    app.state.inbox.close()
+
+
 def test_issuer_file_roundtrip(tmp_path):
     """--issuer-url accepts a local doc file written by `attest issuer --out`."""
     vec = zipfile.ZipFile("tests/vectors/ok-rotated-case/pack.zip")

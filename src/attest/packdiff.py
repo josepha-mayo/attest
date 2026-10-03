@@ -215,11 +215,13 @@ def _manifest_consistency(manifest: dict, bundles: dict, notes: list[str]) -> li
     return failures
 
 
-def load_artifact(path: str | Path, key: str | None = None) -> dict:
+def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: list | None = None) -> dict:
     """Load a case pack, dispute pack, or bare bundle.json into a normalized map.
     Each artifact's signed contents are independently verified — a diff over
     unverified receipts would silently compare forged data. A pinned `key`
-    makes verification trust only that issuer."""
+    makes verification trust only that issuer. ``extra_key_receipts`` (e.g. a
+    deployment's fetched issuer document) extends the lineage the pack itself
+    carries — a pre-rotation export still verifies under the current issuer."""
     path = Path(path)
     visits: dict[str, dict] = {}
     issuer = None
@@ -265,7 +267,8 @@ def load_artifact(path: str | Path, key: str | None = None) -> dict:
                         failures.append(f"{vid}: bundle malformed ({exc})")
                         bundles.pop(vid, None)
                 failures += _manifest_consistency(manifest, bundles, notes)
-                trusted = _trusted_set(issuer, _key_pool(z, attestations))
+                pool = _key_pool(z, attestations) + list(extra_key_receipts or [])
+                trusted = _trusted_set(issuer, pool)
                 failures += _verify_artifact_bundles(bundles, issuer, trusted)
                 failures += _verify_attestation_files(z, attestations, issuer, trusted)
                 # Fail closed on ANY member the signed manifest does not name —
@@ -323,6 +326,7 @@ def load_artifact(path: str | Path, key: str | None = None) -> dict:
                         kr_pool = [Receipt.model_validate(r) for r in kr.get("rotations") or []]
                     except Exception as exc:  # noqa: BLE001
                         failures.append(f"key_rotations.json: malformed ({exc})")
+                kr_pool += list(extra_key_receipts or [])
                 failures += _verify_artifact_bundles(
                     {original["visit_id"]: bundle}, issuer, _trusted_set(issuer, kr_pool)
                 )
@@ -356,7 +360,9 @@ def load_artifact(path: str | Path, key: str | None = None) -> dict:
             raise ValueError(f"{path}: 'original' receipt missing or malformed")
         issuer = key or original.get("public_key")
         visits[original["visit_id"]] = _visit_summary(data)
-        failures += _verify_artifact_bundles({original["visit_id"]: data}, issuer)
+        failures += _verify_artifact_bundles(
+            {original["visit_id"]: data}, issuer, _trusted_set(issuer, list(extra_key_receipts or []))
+        )
         return {
             "issuer": issuer,
             "visits": visits,
@@ -404,10 +410,17 @@ def load_artifact(path: str | Path, key: str | None = None) -> dict:
     raise ValueError(f"{path}: unrecognized artifact (no 'original' or 'visits' key)")
 
 
-def diff(old_path: str | Path, new_path: str | Path, key: str | None = None) -> tuple[list[str], int]:
+def diff(
+    old_path: str | Path,
+    new_path: str | Path,
+    key: str | None = None,
+    extra_key_receipts: list | None = None,
+) -> tuple[list[str], int]:
     """Return (report lines, anomaly count). Order: old export, newer export.
-    `key` pins verification to a trusted issuer public key."""
-    old, new = load_artifact(old_path, key), load_artifact(new_path, key)
+    `key` pins verification to a trusted issuer public key; `extra_key_receipts`
+    extends the lineage (an issuer document's signed lifecycle receipts)."""
+    old = load_artifact(old_path, key, extra_key_receipts)
+    new = load_artifact(new_path, key, extra_key_receipts)
     lines = [f"{old_path} [{old['kind']}] -> {new_path} [{new['kind']}]"]
     anomalies = 0
 

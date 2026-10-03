@@ -45,6 +45,18 @@
   turn a fail into a pass.</p>
 </div>
 
+<p>Verifying a pack pins it to an <em>issuer</em>, not just a fingerprint:
+every deployment serves <code>/.well-known/attest-issuer.json</code> — the
+JWKS analogue — carrying the current issuer key plus every signed
+rotation/adoption/revocation receipt. <code>attest verify pack.zip
+--issuer-url &lt;deployment&gt;</code> (or a doc file exported by
+<code>attest issuer --out</code>) pins the pack to that deployment and walks
+the signed lifecycle itself, so a pack exported <em>before</em> a key
+rotation still verifies against the deployment's <em>current</em> key.
+Remote loads are HTTPS-only (loopback excepted) and byte-capped — and the
+document itself says the pin's authenticity rides on transport, so
+<code>--key</code> remains the zero-trust path.</p>
+
 <p><strong>What verification proves:</strong> the records in the pack are the
 records the issuing deployment signed, and nothing was added, removed, or
 altered since. It does <em>not</em> prove physical attendance, identity, or

@@ -2121,10 +2121,25 @@ def _diff(args: argparse.Namespace) -> None:
     drift is normal; vanished or altered records are anomalies."""
     import zipfile
 
+    from .models import Receipt
     from .packdiff import diff
 
+    key = args.key
+    extra: list | None = None
+    if getattr(args, "issuer_url", None):
+        doc = _fetch_issuer_doc(args.issuer_url)
+        key = doc["issuer_key"]
+        try:
+            extra = [Receipt.model_validate(r) for r in doc.get("key_receipts") or []]
+        except Exception as exc:  # noqa: BLE001
+            sys.exit(f"issuer document carried malformed key receipts: {exc}")
+        print(
+            f"pinned to issuer key served by {args.issuer_url} "
+            f"({len(extra)} lifecycle receipt(s)) — authenticity rides on transport"
+        )
+
     try:
-        lines, anomalies = diff(args.old, args.new, key=args.key)
+        lines, anomalies = diff(args.old, args.new, key=key, extra_key_receipts=extra)
     except (ValueError, OSError, KeyError, TypeError, AttributeError, zipfile.BadZipFile) as exc:
         sys.exit(f"cannot compare: {exc}")
     for line in lines:
@@ -2685,9 +2700,19 @@ def main(argv: list[str] | None = None) -> None:
     )
     s.add_argument("old", help="earlier export: case pack, pack.zip, or bundle.json")
     s.add_argument("new", help="later export")
-    s.add_argument(
+    g = s.add_mutually_exclusive_group()
+    g.add_argument(
         "--key",
         help="trusted issuer public key (base64) — verify against this, not the pack's self-declared key",
+    )
+    g.add_argument(
+        "--issuer-url",
+        default=None,
+        metavar="URL_OR_FILE",
+        help="pin to the issuer key served by <url>/.well-known/attest-issuer.json "
+        "(HTTPS; loopback excepted) or an issuer document file written by "
+        "`attest issuer --out` — the deployment's signed lifecycle extends "
+        "trust to pre-rotation exports",
     )
     s.set_defaults(fn=_diff)
 
