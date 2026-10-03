@@ -792,6 +792,12 @@ def _demo(args: argparse.Namespace) -> None:
     print("     record' signs the coordinator's call — pick a coded reason too:", flush=True)
     print("     EVV-style exception codes classify the stated explanation, never", flush=True)
     print("     a verified cause, and they aggregate on the signed period digest.", flush=True)
+    if args.rotate_day is not None:
+        print(
+            f"     (The signing key rotated on story day {args.rotate_day} — receipts",
+            flush=True,
+        )
+        print("      on both sides verify through the signed key_rotation pivot.)", flush=True)
     print("  3. Download a pack, then 'Verify a pack in-browser' on the dashboard —", flush=True)
     print("     drop the .zip; it self-verifies, no install, no unzip. Site packs", flush=True)
     print("     carry the signed coverage cert: 'was anyone watching?' In the", flush=True)
@@ -822,6 +828,15 @@ def _demo(args: argparse.Namespace) -> None:
     print("  9. attest verify <zip|url> — a pack verifies itself, even straight", flush=True)
     print("     from https://josepha-mayo.github.io/attest/sample-pack.zip", flush=True)
     print(" 10. attest explain <visit_or_receipt_id> — full provenance, in words", flush=True)
+    print(" 11. rotate the signing key live — the pivot is a signed chain event", flush=True)
+    print("     and receipts on both sides still verify:", flush=True)
+    print(
+        f'     curl -u admin:{token} -X POST "{app_url}/api/admin/rotate-key"',
+        flush=True,
+    )
+    print("     (attest rotate-key is the offline path — it rotates the key file", flush=True)
+    print("      while the server is stopped; the running server keeps its", flush=True)
+    print("      loaded signer. --rotate-day K does the live pivot mid-story.)", flush=True)
     if "verify" in signed_ids:
         print(f"     e.g. attest explain {signed_ids['verify']} — the API sweep just", flush=True)
         print("     signed as a chained attestation (verify-live --sign does it live)", flush=True)
