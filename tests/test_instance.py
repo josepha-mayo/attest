@@ -25,7 +25,10 @@ def test_instance_lock_is_reentrant_in_process(tmp_path):
     assert instance.acquire_instance_lock(tmp_path) == path
     # the holder's pid is recorded for the loser to report — read through the
     # held fd, since Windows byte-range locks are mandatory for other handles
-    (fd,) = instance._HELD.values()
+    key = str(path.resolve())
+    if os.name == "nt":
+        key = os.path.normcase(key)
+    fd = instance._HELD[key]
     os.lseek(fd, 0, os.SEEK_SET)
     assert str(os.getpid()).encode() in os.read(fd, 64)
 
