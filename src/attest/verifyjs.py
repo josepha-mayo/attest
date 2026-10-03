@@ -381,15 +381,38 @@ async function descendantKeys(rootKey,rotationNodes,maxHops=32){
     cur=nxt;trusted.add(cur);
   }
   return trusted;}
-async function revokedKeys(keyNodes){
+async function lineageRoot(issuerKey,keyNodes){
+  /* The oldest ancestor the consented pivots reach from issuerKey — where a
+     revocation-authority walk must seed. In a pack the receipt pool is
+     attacker-controlled, so pool position can never confer authority: a
+     self-signed key_revocation at sequence 0 must not make itself the root. */
+  let cur=issuerKey;
+  for(let i=0;i<32;i++){
+    let nxt=null;
+    for(const rn of keyNodes){
+      const r=toJS(rn)||{},p=r.payload||{};
+      if(p.record_type==="key_rotation"&&p.new_key===cur&&r.public_key===p.previous_key){
+        const c=await checkReceipt(rn);
+        if(c.ok&&await adoptedBy(keyNodes,rn,cur)){nxt=p.previous_key;break;}
+      }
+    }
+    if(nxt===null)break;
+    cur=nxt;}
+  return cur;}
+async function revokedKeys(keyNodes,issuerKey){
   /* key -> suspect_after ISO for valid key_revocation receipts signed by the
      in-effect issuer at their position. Only the live key can revoke — a
      retired key revoking its successor would let a compromised key smear the
      healthy one, and position alone can't name the tip: a forged
      high-sequence revocation would make itself the tip and self-authorize.
-     Authority follows the same consented pivots as verify_chain. */
+     The walk seeds at the lineage ROOT reachable from the verified issuer,
+     not pool order, and a revocation counts only for a key the lineage has
+     already produced — a grafted foreign key or a retired key smearing a
+     successor that hasn't pivoted in yet are both inert. */
   const ord=[...keyNodes].sort((a,b)=>((toJS(a)||{}).sequence||0)-((toJS(b)||{}).sequence||0));
-  let inEffect=null;const out={};
+  let inEffect=issuerKey?await lineageRoot(issuerKey,ord):null;
+  const seen=new Set();if(inEffect)seen.add(inEffect);
+  const out={};
   for(const rn of ord){
     const r=toJS(rn)||{},p=r.payload||{};
     /* not signed by the in-effect key: out-of-band history, no authority */
@@ -397,9 +420,10 @@ async function revokedKeys(keyNodes){
     const c=await checkReceipt(rn);
     if(!c.ok)continue;
     if(inEffect===null)inEffect=r.public_key;
+    seen.add(r.public_key);
     if(p.record_type==="key_rotation"&&p.previous_key===inEffect&&p.new_key
-       &&await adoptedBy(ord,rn,p.new_key)){inEffect=p.new_key;continue;}
-    if(p.record_type==="key_revocation"&&p.revoked_key&&r.public_key===inEffect){
+       &&await adoptedBy(ord,rn,p.new_key)){inEffect=p.new_key;seen.add(inEffect);continue;}
+    if(p.record_type==="key_revocation"&&seen.has(p.revoked_key)&&r.public_key===inEffect){
       out[p.revoked_key]=p.suspect_after||"";
     }
   }
@@ -490,7 +514,7 @@ async function verifyFiles(files){
           say("bad","<strong>FAILED</strong>");
           return out.join("");
         }
-        if(suspectRecords([node],await revokedKeys(inodes)).length)
+        if(suspectRecords([node],await revokedKeys(inodes,issuerDoc.issuer_key)).length)
           say("warn","receipt signed inside its issuer's declared suspect window");
       }
       if(p.record_type==="verification_report"){
@@ -562,7 +586,7 @@ async function verifyFiles(files){
         say("bad","issuer document pin has no signed link to this pack — wrong deployment?");
       }
     }
-    revoked=await revokedKeys(rotNodes);
+    revoked=await revokedKeys(rotNodes,manifest.issuer_key||"");
     for(const v of manifest.visits||[]){
       const t=await text(`visits/${v.visit_id}/bundle.json`);
       /* A manifest-listed bundle absent from the zip fails closed — the row is
@@ -594,7 +618,7 @@ async function verifyFiles(files){
         ...(await trustedKeys(oKey,rnV)),
         ...(await descendantKeys(oKey,rnV)),
       ]);
-      revoked=await revokedKeys(rnV);
+      revoked=await revokedKeys(rnV,oKey);
       if(issuerDoc&&!trusted.has(issuerDoc.issuer_key)){
         anyBad=true;
         say("bad","issuer document pin has no signed link to this bundle — wrong deployment?");
@@ -769,7 +793,7 @@ async function readZipEntries(file){
   if(eocd<0)throw new Error("not a zip file (no end-of-central-directory)");
   const n=dv.getUint16(eocd+10,true),cdOff=dv.getUint32(eocd+16,true);
   const dec=new TextDecoder();let p=cdOff;const files=[];
-  let totalUncompressed=0;const seenNames=new Set();
+  let totalUncompressed=0,actualTotal=0;const seenNames=new Set();
   for(let e=0;e<n;e++){
     if(dv.getUint32(p,true)!==0x02014b50)throw new Error("corrupt central directory");
     const method=dv.getUint16(p+10,true),csize=dv.getUint32(p+20,true);
@@ -795,6 +819,12 @@ async function readZipEntries(file){
     if(method===0)data=raw;
     else if(method===8)data=await inflate(raw);
     else continue;  // unsupported compression — skip, the verifier reports it missing
+    /* Declared usize can lie — bound ACTUAL decompressed bytes cumulatively
+       too, else many small entries each under the per-member cap still
+       inflate the tab into OOM. Mirrors packdiff.BoundedZip's seen counter. */
+    actualTotal+=data.length;
+    if(actualTotal>256*1024*1024)
+      throw new Error("pack expands beyond the 256 MB verification bound");
     files.push({name,
       arrayBuffer:async()=>data.buffer.slice(data.byteOffset,data.byteOffset+data.byteLength),
       text:async()=>dec.decode(data)});
@@ -807,7 +837,7 @@ async function go(fileList){
     let files=[...fileList];if(!files.length)return;
     /* A fresh doc replaces the armed pin; the pin persists across drops so a
        reviewer can arm it once and check several packs. */
-    let freshDoc=null;
+    let freshDoc=null,multiDoc=false;
     const rest=[];
     for(const f of files){
       /* An attest.issuer/1 document among the drops pins verification to the
@@ -819,8 +849,9 @@ async function go(fileList){
       if(/\\.json$/i.test(f.name||"")&&!f.webkitRelativePath){
         try{
           const dn=parseKeep(await f.text()),d=toJS(dn);
-          if(d&&d.schema==="attest.issuer/1"&&d.issuer_key){
+          if(d&&d.schema==="attest.issuer/1"&&typeof d.issuer_key==="string"){
             const kn=get(dn,"key_receipts");
+            if(freshDoc)multiDoc=true;
             freshDoc={issuer_key:d.issuer_key,nodes:kn&&kn.t==="arr"?kn.v:[]};
             continue;}
         }catch(e){/* ordinary pack JSON — stays in the verify set */}
@@ -831,7 +862,8 @@ async function go(fileList){
     files=rest;
     if(issuerDoc&&!files.length){
       out.innerHTML="<div class='row warn'>issuer document armed — the pin now applies to the "
-        +"next pack you drop. Its authenticity rides on how the document reached you.</div>";
+        +"next pack you drop. Its authenticity rides on how the document reached you.</div>"
+        +(multiDoc?"<div class='row warn'>multiple issuer documents dropped — armed the last one.</div>":"");
       return;
     }
     if(files.length===1&&/\\.zip$/i.test(files[0].name))files=await readZipEntries(files[0]);
@@ -1313,7 +1345,7 @@ async function renderIndex(){
         ...(await descendantKeys(meta.issuer_key,rotNodes)),
       ])
     :null;
-  const revoked=await revokedKeys(rotNodes);let suspectTotal=0;
+  const revoked=await revokedKeys(rotNodes,meta.issuer_key||"");let suspectTotal=0;
   for(const tag of document.querySelectorAll("script.bundle")){
     const root=parseKeep(d64(tag.textContent));
     const js=toJS(root)||{};

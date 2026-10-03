@@ -71,6 +71,8 @@ def test_server_verifier_matches_oracle(vec: Path):
     assert ok == (spec["verdict"] == "ok"), f"{vec.name}: {detail}"
     for frag in spec.get("detail_contains", []):
         assert frag in detail, f"{vec.name}: missing {frag!r} in {detail!r}"
+    for frag in spec.get("detail_excludes", []):
+        assert frag not in detail, f"{vec.name}: unexpected {frag!r} in {detail!r}"
 
 
 @pytest.mark.parametrize("vec", _vectors(), ids=lambda d: d.name)
@@ -106,6 +108,8 @@ def test_embedded_verifier_matches_oracle(vec: Path, tmp_path: Path):
     # trust-pivot lines are the revocation feature's observable surface.
     for frag in spec.get("detail_contains", []):
         assert frag in out, f"{vec.name}: missing {frag!r} in {out!r}"
+    for frag in spec.get("detail_excludes", []):
+        assert frag not in out, f"{vec.name}: unexpected {frag!r} in {out!r}"
 
 
 def _js_driver() -> str:
@@ -137,7 +141,6 @@ eval(src + `
       if(rt==='key_rotation'||rt==='key_adoption'||rt==='key_revocation')rotNodes.push(n);
     }
   }
-  const revoked=await revokedKeys(rotNodes);
   let trusted=null;
   let manifestIssuer=null;
   if(job.manifest){
@@ -145,6 +148,15 @@ eval(src + `
     manifestIssuer=m.issuer_key||'';
     trusted=await trustedKeys(manifestIssuer,rotNodes);
   }
+  // Revocation authority anchors at the same key verifyFiles uses: the
+  // manifest issuer for case packs, the bundle's own original key for
+  // dispute packs — never pool order.
+  let revAnchor=manifestIssuer||'';
+  if(!revAnchor){
+    const n0=parseKeep(await read(job.bundles[0]));
+    revAnchor=(toJS(get(n0,'original'))||{}).public_key||'';
+  }
+  const revoked=await revokedKeys(rotNodes,revAnchor);
   const results=[];
   for(const b of job.bundles){
     const node=parseKeep(await read(b));

@@ -237,3 +237,115 @@ def test_suspect_pivot_qualifies_the_lineage(engine, store, household, schedule,
         ok, detail = _verify_case_pack(z, new_signer.public_key_b64)
     assert ok, detail
     assert "trust pivot" in detail
+
+
+def test_low_sequence_revocation_graft_is_inert(engine, store, household, schedule, t0):
+    """The pool-root graft: a self-signed ``key_revocation`` sorted BEFORE
+    every honest receipt (sequence 0) must not make itself the revocation
+    root — pool position never confers authority in an attacker-controlled
+    pool, so the walk anchors at the verified issuer's lineage root."""
+    _closed_visit(engine, household, t0)
+    old_key, new_signer, _, _ = _rotate(engine)
+    attacker = Signer.ephemeral()
+    forged = attacker.issue(
+        visit_id="key:graft",
+        sequence=0,  # sorts ahead of the whole honest chain
+        prev_hash=None,
+        facts={
+            "record_type": "key_revocation",
+            "revoked_key": new_signer.public_key_b64,
+            "suspect_after": "2000-01-01T00:00:00+00:00",
+        },
+    )
+    pool = store.receipts() + [forged]
+    # Anchored at the verified issuer, the graft cannot self-authorize and —
+    # just as important — cannot blind HONEST revocations by hijacking the
+    # walk root.
+    revoked = ledger.revoked_issuer_keys(pool, issuer_key=new_signer.public_key_b64)
+    assert forged.public_key not in revoked
+    assert new_signer.public_key_b64 not in revoked
+    assert ledger.suspect_receipts(pool, revoked=revoked) == []
+
+    # And an honest revocation still lands beside the graft.
+    suspect_after = store.receipts()[0].issued_at - timedelta(seconds=1)
+    engine.issue_key_revocation(old_key, suspect_after, "real compromise")
+    pool = store.receipts() + [forged]
+    revoked = ledger.revoked_issuer_keys(pool, issuer_key=new_signer.public_key_b64)
+    assert revoked == {old_key: suspect_after.isoformat()}
+
+
+def test_retired_key_low_sequence_smear_is_inert(engine, store, household, schedule, t0):
+    """A RETIRED key's low-sequence revocation naming its healthy successor:
+    the signature verifies (the key is real) but the successor is not yet in
+    the lineage at that pool position — the seen-lineage gate keeps it
+    inert, where the in-effect check alone would not."""
+    _closed_visit(engine, household, t0)
+    old_signer = engine.signer
+    _, new_signer, _, _ = _rotate(engine)
+    forged = old_signer.issue(
+        visit_id="key:retired-smear",
+        sequence=0,  # before the pivot, when old_signer WAS in effect
+        prev_hash=None,
+        facts={
+            "record_type": "key_revocation",
+            "revoked_key": new_signer.public_key_b64,
+            "suspect_after": "2000-01-01T00:00:00+00:00",
+        },
+    )
+    pool = store.receipts() + [forged]
+    revoked = ledger.revoked_issuer_keys(pool, issuer_key=new_signer.public_key_b64)
+    assert revoked == {}
+
+    # A revocation naming a key that was never in the lineage is inert too.
+    foreign = Signer.ephemeral()
+    alien = old_signer.issue(
+        visit_id="key:alien",
+        sequence=0,
+        prev_hash=None,
+        facts={
+            "record_type": "key_revocation",
+            "revoked_key": foreign.public_key_b64,
+            "suspect_after": "2000-01-01T00:00:00+00:00",
+        },
+    )
+    assert ledger.revoked_issuer_keys(pool + [alien], issuer_key=new_signer.public_key_b64) == {}
+
+
+def test_grafted_revocation_in_pack_pool_is_inert(engine, store, household, schedule, t0, tmp_path):
+    """End-to-end over the wire format: ``key_rotations.json`` is unsigned
+    pack content — a forged seq-0 revocation inside it must not annotate the
+    honest issuer. This is the reproduced pool-root graft."""
+    from attest.app import _verify_pack
+    from attest.disputepack import build_pack
+
+    _closed_visit(engine, household, t0)
+    _rotate(engine)
+    v2 = _closed_visit(engine, household, t0, offset_min=90)
+    service = ReviewService(store, engine.signer, engine.clock)
+    data = build_pack(store, tmp_path / "media", service.bundle(v2.id))
+
+    forged = Signer.ephemeral().issue(
+        visit_id="key:graft",
+        sequence=0,
+        prev_hash=None,
+        facts={
+            "record_type": "key_revocation",
+            "revoked_key": engine.signer.public_key_b64,
+            "suspect_after": "2000-01-01T00:00:00+00:00",
+        },
+    )
+    src = zipfile.ZipFile(io.BytesIO(data))
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for n in src.namelist():
+            if n.endswith("/"):
+                continue
+            body = src.read(n)
+            if n == "key_rotations.json":
+                rj = json.loads(body)
+                rj["rotations"] = [forged.model_dump(mode="json")] + rj["rotations"]
+                body = json.dumps(rj).encode()
+            z.writestr(n, body)
+    ok, detail = _verify_pack(out.getvalue(), engine.signer.public_key_b64)
+    assert ok, detail
+    assert "suspect window" not in detail

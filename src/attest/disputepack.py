@@ -301,7 +301,13 @@ def check_manifest(manifest, key):
     if digest != sig["payload"].get("manifest_sha256"):
         return False, "manifest content hash mismatch (manifest was altered)"
     signed_hashes = sig["payload"].get("receipt_hashes", {})
-    listed = {v["visit_id"]: v["payload_hash"] for v in manifest.get("visits", [])}
+    # A malformed visit entry must fail the comparison, never raise out of
+    # the verifier — the unsigned manifest cannot name a trusted shape.
+    listed = {
+        v["visit_id"]: v["payload_hash"]
+        for v in manifest.get("visits", [])
+        if isinstance(v, dict) and "visit_id" in v and "payload_hash" in v
+    }
     if listed != signed_hashes:
         return False, "manifest visit list disagrees with the signed export"
     return True, f"export signed: {len(listed)} record(s)"
@@ -384,23 +390,58 @@ def descendant_keys(root_key, rotation_receipts, max_hops=32):
     return trusted
 
 
-def revoked_keys(key_receipts):
+def _lineage_root(issuer_key, key_receipts):
+    """The oldest ancestor the consented pivots reach from ``issuer_key`` —
+    where a revocation-authority walk must seed. In a pack the receipt pool
+    is attacker-controlled, so pool position can never confer authority:
+    a self-signed key_revocation at sequence 0 must not make itself the
+    root. Anchoring inside the verified lineage keeps that graft inert."""
+    cur = issuer_key
+    for _ in range(32):
+        nxt = None
+        for r in key_receipts:
+            p = r.get("payload", {})
+            if (
+                p.get("record_type") == "key_rotation"
+                and p.get("new_key") == cur
+                and r.get("public_key") == p.get("previous_key")
+            ):
+                ok, _ = check_receipt(r, r["public_key"])
+                if ok and _adoption_consent(key_receipts, r, cur):
+                    nxt = p["previous_key"]
+                    break
+        if nxt is None:
+            break
+        cur = nxt
+    return cur
+
+
+def revoked_keys(key_receipts, issuer_key=None):
     """Key -> suspect_after ISO for valid key_revocation receipts signed by
     the in-effect issuer at their position. Only the live key can revoke —
     a retired key revoking its successor would let a compromised key smear
     the healthy one, and position alone can't name the tip: a forged
     high-sequence revocation would make itself the tip and self-authorize.
-    Authority is therefore tracked through the same consented pivots
-    verify_chain uses."""
+
+    ``issuer_key`` anchors the walk at the lineage root — pass it always in
+    pack verification, where the pool is attacker-controlled. A revocation
+    also counts only for a key the lineage has already produced: a retired
+    key smearing a successor that hasn't pivoted in yet is just as inert
+    as a foreign key."""
     ordered = sorted(key_receipts, key=lambda x: x.get("sequence", 0))
     revoked = {}
-    in_effect = None
+    if issuer_key is not None:
+        in_effect = _lineage_root(issuer_key, ordered)
+    else:
+        in_effect = None
+    seen = {in_effect} if in_effect is not None else set()
     for r in ordered:
         ok, _ = check_receipt(r, in_effect or r.get("public_key"))
         if not ok:
             continue
         if in_effect is None:
             in_effect = r.get("public_key")
+        seen.add(r.get("public_key"))
         p = r.get("payload", {})
         if (
             p.get("record_type") == "key_rotation"
@@ -409,10 +450,11 @@ def revoked_keys(key_receipts):
             and _adoption_consent(ordered, r, p["new_key"])
         ):
             in_effect = p["new_key"]
+            seen.add(in_effect)
             continue
         if (
             p.get("record_type") == "key_revocation"
-            and p.get("revoked_key")
+            and p.get("revoked_key") in seen
             and r.get("public_key") == in_effect
         ):
             revoked[p["revoked_key"]] = p.get("suspect_after") or ""
@@ -457,7 +499,12 @@ def load_issuer_doc(path):
         doc = json.loads(Path(path).read_text(encoding="utf-8"))
     except Exception as exc:
         sys.exit(f"FAIL issuer document unreadable: {exc}")
-    if not isinstance(doc, dict) or doc.get("schema") != "attest.issuer/1" or not doc.get("issuer_key"):
+    if (
+        not isinstance(doc, dict)
+        or doc.get("schema") != "attest.issuer/1"
+        or not isinstance(doc.get("issuer_key"), str)
+        or not doc["issuer_key"]
+    ):
         sys.exit("FAIL issuer document is not attest.issuer/1")
     receipts = doc.get("key_receipts") or []
     if not isinstance(receipts, list):
@@ -508,15 +555,15 @@ def main():
         rotations += extra
     if rotations:
         trusted = trusted_keys(key, rotations) | descendant_keys(key, rotations)
-    revoked = revoked_keys(rotations)
+    revoked = revoked_keys(rotations, key)
     ok, why, n = check_bundle(bundle, trusted)
     if not ok:
         sys.exit(f"FAIL {why}")
     try:
-        withheld = redaction_for(bundle)
+        withheld = redaction_for(bundle, pack_dir)
     except ValueError as exc:
         sys.exit(f"FAIL {exc}")
-    checked, held, bad = check_media(bundle, Path("media"), withheld)
+    checked, held, bad = check_media(bundle, pack_dir / "media", withheld)
     if bad:
         if str(bad).startswith("smuggled:"):
             sys.exit(f"FAIL media file not named by the signed evidence: {bad[9:]}")
@@ -618,7 +665,7 @@ def main():
         if r.get("payload", {}).get("record_type") in ("key_rotation", "key_adoption", "key_revocation"):
             rotations.append(r)
     trusted = trusted_keys(declared, rotations)
-    revoked = revoked_keys(rotations)
+    revoked = revoked_keys(rotations, declared)
     suspect_n = 0
     if key is not None and key not in trusted and key not in descendant_keys(declared, rotations):
         sys.exit(
@@ -637,7 +684,14 @@ def main():
     failed = 0
     listed_vids = set()
     for v in visits:
-        vid = v.get("visit_id", "?")
+        vid = v.get("visit_id") if isinstance(v, dict) else None
+        if not isinstance(vid, str) or not vid or "/" in vid or chr(92) in vid or ".." in vid:
+            # Same guard as attestation receipt_id: a visit_id that walks out
+            # of visits/ would verify an unrelated on-disk bundle as a pack
+            # member — an unsigned manifest cannot name a path.
+            print(f"FAIL manifest: malformed visit_id {vid!r}")
+            failed += 1
+            continue
         listed_vids.add(vid)
         try:
             bundle = json.loads((root / "visits" / vid / "bundle.json").read_text(encoding="utf-8"))
@@ -928,6 +982,21 @@ def build_pack(
     return buf.getvalue()
 
 
+def _newest_issuer_key(entries, attestations) -> str | None:
+    """The lineage tip to declare when no issuer_key is given: the signer of
+    the newest packed receipt. Verifiers trust ancestors OF the declared key,
+    so the declaration must sit at the live end of the rotation chain."""
+    newest = None
+    for receipt in (
+        [e[1].original for e in entries]
+        + [r.receipt for e in entries for r in e[1].reviews]
+        + list(attestations)
+    ):
+        if newest is None or receipt.issued_at > newest.issued_at:
+            newest = receipt
+    return newest.public_key if newest is not None else None
+
+
 def build_case_pack(
     store: Store,
     media_root: Path,
@@ -981,8 +1050,10 @@ def build_case_pack(
         # The issuer is the deployment's CURRENT signing key — verifiers walk
         # ancestors from here through signed key_rotation receipts. Falling
         # back to a visit's original key would strand post-rotation packs:
-        # a retired key has no ancestors to walk to.
-        "issuer_key": issuer_key or (entries[0][1].original.public_key if entries else None),
+        # a retired key has no ancestors to walk to. With no explicit issuer
+        # the tip is the newest packed receipt's signer — the key still live
+        # at export time.
+        "issuer_key": issuer_key or _newest_issuer_key(entries, attestations),
         "media_redacted": redact_media,
         "attestations": [
             {

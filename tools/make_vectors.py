@@ -149,7 +149,9 @@ def _write_vector(name: str, pack: bytes, expected: dict, extras: dict[str, byte
         shutil.rmtree(d)
     d.mkdir(parents=True)
     (d / "pack.zip").write_bytes(pack)
-    (d / "expected.json").write_text(json.dumps(expected, indent=2) + "\n", encoding="utf-8")
+    # LF bytes explicitly — .gitattributes pins tests/vectors/** to -text, so
+    # a CRLF from Windows text mode would land in the committed corpus.
+    (d / "expected.json").write_bytes((json.dumps(expected, indent=2) + "\n").encode("utf-8"))
     for fname, body in (extras or {}).items():
         (d / fname).write_bytes(body)
     print(f"  {name}: {expected['note']}")
@@ -219,6 +221,50 @@ def main() -> None:
         },
     )
 
+    # The pool-root graft: key_rotations.json is unsigned pack content, so a
+    # self-signed key_revocation written at sequence 0 sorts ahead of every
+    # honest receipt. Revocation authority must anchor at the verified
+    # issuer's lineage, not pool position — the graft is inert everywhere.
+    bundle2 = ReviewService(store, KEY_B, engine.clock).bundle(v2.id)
+    forged_revocation = ATTACKER.issue(
+        visit_id="key:graft",
+        sequence=0,
+        prev_hash=None,
+        facts={
+            "record_type": "key_revocation",
+            "revoked_key": KEY_B.public_key_b64,
+            "suspect_after": "2000-01-01T00:00:00+00:00",
+            "reason": "grafted low-sequence smear attempt",
+        },
+    )
+
+    def graft_revocation(name: str, body: bytes):
+        if name != "key_rotations.json":
+            return body
+        rj = json.loads(body)
+        rj["rotations"] = [forged_revocation.model_dump(mode="json")] + rj["rotations"]
+        return json.dumps(rj).encode()
+
+    _write_vector(
+        "ok-grafted-revocation",
+        _rewrite_zip(build_pack(store, media_root, bundle2), graft_revocation),
+        {
+            "kind": "bundle",
+            "pin": "declared",
+            "verdict": "ok",
+            "detail_contains": ["verified"],
+            "detail_excludes": ["suspect window"],
+            "js": {
+                "bundle_ok": True,
+                "trusted_count": 2,
+                "suspect_count": 0,
+                "lifecycle_suspect_count": 0,
+            },
+            "note": "a self-signed key_revocation grafted at sequence 0 cannot "
+            "make itself the revocation root — the smear is inert",
+        },
+    )
+
     # Revoke the retired key with a suspect window covering its whole output —
     # the rotation receipt itself lands inside the window (an honest pack
     # flags that the pivot's own provenance is qualified).
@@ -260,6 +306,37 @@ def main() -> None:
             "annotates the retired key's window",
         },
         extras={"issuer.json": json.dumps(issuer_doc_now, indent=2).encode()},
+    )
+
+    # The same graft riding the discovery channel: an issuer document whose
+    # key_receipts carry a forged seq-0 revocation naming the CURRENT key.
+    # The honest revocation (retired KEY_A) must still annotate while the
+    # graft stays inert — the suspect count proves both at once.
+    issuer_doc_grafted = json.loads(json.dumps(issuer_doc_now))
+    issuer_doc_grafted["key_receipts"] = [forged_revocation.model_dump(mode="json")] + issuer_doc_grafted[
+        "key_receipts"
+    ]
+    _write_vector(
+        "ok-issuer-doc-graft",
+        rotated_pack,
+        {
+            "kind": "case",
+            "issuer_doc": "issuer.json",
+            "verdict": "ok",
+            "detail_contains": ["suspect window"],
+            "js": {
+                "bundle_ok": True,
+                "trusted_count": 2,
+                "pin_linked": True,
+                "suspect_count": 1,
+                # the KEY_A-signed rotation rides BOTH the doc and the pack's
+                # own attestations — two copies inside its suspect window
+                "lifecycle_suspect_count": 2,
+            },
+            "note": "a forged revocation inside the issuer document cannot "
+            "smear the live key — the honest revocation still annotates",
+        },
+        extras={"issuer.json": json.dumps(issuer_doc_grafted, indent=2).encode()},
     )
 
     _write_vector(
@@ -474,7 +551,7 @@ def main() -> None:
 
 
 def _write_readme() -> None:
-    (VECTORS / "README.md").write_text(
+    (VECTORS / "README.md").write_bytes(
         """# Verifier conformance vectors
 
 Fixed evidence packs that every Attest verifier must judge identically —
@@ -490,6 +567,8 @@ the same discipline Wycheproof vectors bring to crypto implementations.
   pool on every surface (`--issuer`, `known_rotations`, the browser drop)
 - `verdict`: `ok` or `fail` — integrity verdicts are identical everywhere
 - `detail_contains`: fragments the human-readable detail must carry
+- `detail_excludes`: fragments that must NOT appear — e.g. a grafted
+  revocation must leave no "suspect window" annotation behind
 - `js`: browser-lib expectations when the check is algorithm-level —
   `bundle_ok`, `trusted_count` (issuer lineage width), `suspect_count`
   (records inside a revoked key's suspect window), `pin_linked` (whether
@@ -498,8 +577,7 @@ the same discipline Wycheproof vectors bring to crypto implementations.
 Regenerate with `tools/make_vectors.py` when the pack format changes —
 never hand-edit the zips. The vectors are the contract: a verifier that
 disagrees with `expected.json` is wrong, whatever surface it runs on.
-""",
-        encoding="utf-8",
+""".encode()
     )
 
 

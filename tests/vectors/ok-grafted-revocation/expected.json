@@ -1,0 +1,18 @@
+{
+  "kind": "bundle",
+  "pin": "declared",
+  "verdict": "ok",
+  "detail_contains": [
+    "verified"
+  ],
+  "detail_excludes": [
+    "suspect window"
+  ],
+  "js": {
+    "bundle_ok": true,
+    "trusted_count": 2,
+    "suspect_count": 0,
+    "lifecycle_suspect_count": 0
+  },
+  "note": "a self-signed key_revocation grafted at sequence 0 cannot make itself the revocation root \u2014 the smear is inert"
+}

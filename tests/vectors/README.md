@@ -13,6 +13,8 @@ the same discipline Wycheproof vectors bring to crypto implementations.
   pool on every surface (`--issuer`, `known_rotations`, the browser drop)
 - `verdict`: `ok` or `fail` — integrity verdicts are identical everywhere
 - `detail_contains`: fragments the human-readable detail must carry
+- `detail_excludes`: fragments that must NOT appear — e.g. a grafted
+  revocation must leave no "suspect window" annotation behind
 - `js`: browser-lib expectations when the check is algorithm-level —
   `bundle_ok`, `trusted_count` (issuer lineage width), `suspect_count`
   (records inside a revoked key's suspect window), `pin_linked` (whether

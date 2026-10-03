@@ -70,7 +70,7 @@ def _key_pool(z, attestations: dict) -> list:
             att = Receipt.model_validate(json.loads(z.read(f"attestations/{rid}.json")))
         except Exception:  # noqa: BLE001 — unreadable members fail in the verify loop
             continue
-        if att.payload.get("record_type") in ("key_rotation", "key_adoption"):
+        if att.payload.get("record_type") in ("key_rotation", "key_adoption", "key_revocation"):
             pool.append(att)
     return pool
 
@@ -213,6 +213,20 @@ def _verify_manifest_signature(manifest: dict, issuer: str | None, trusted: set 
     core = {k: v for k, v in manifest.items() if k != "signature_receipt"}
     if payload_hash(core) != sig["payload"].get("manifest_sha256"):
         return "manifest content hash mismatch (manifest was altered)"
+    # The signed export also names the exact visit↔hash set — a manifest whose
+    # listed records disagree with what was signed is an altered export, not
+    # an unsigned one. Mirrors _verify_case_pack's receipt_hashes check.
+    signed_hashes = sig["payload"].get("receipt_hashes")
+    if signed_hashes is not None:
+        # Guard like _manifest_consistency: a malformed visit entry must fail
+        # the comparison, never raise out of the verifier on a signed export.
+        listed = {
+            v["visit_id"]: v["payload_hash"]
+            for v in manifest.get("visits", [])
+            if isinstance(v, dict) and "visit_id" in v and "payload_hash" in v
+        }
+        if listed != signed_hashes:
+            return "manifest visit list disagrees with the signed export"
     return None
 
 
@@ -307,6 +321,32 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                     )
                 failures += _verify_artifact_bundles(bundles, issuer, trusted)
                 failures += _verify_attestation_files(z, attestations, issuer, trusted)
+                # The revocation overlay annotates, never fails — the same
+                # suspect-window line every other verifier surface reports.
+                from .ledger import revoked_issuer_keys, suspect_receipts
+                from .models import Receipt as _R
+
+                revoked = revoked_issuer_keys(pool, issuer_key=issuer)
+                if revoked:
+                    recs = []
+                    for b in bundles.values():
+                        try:
+                            recs.append(_R.model_validate(b["original"]))
+                            recs += [_R.model_validate(e["receipt"]) for e in b.get("reviews", [])]
+                        except Exception:  # noqa: BLE001 — malformed already flagged
+                            continue
+                    sN = len(suspect_receipts(recs, revoked=revoked))
+                    if sN:
+                        notes.append(
+                            f"{sN} record(s) signed by a revoked issuer inside its "
+                            "suspect window — integrity intact, trust qualified"
+                        )
+                    pN = len(suspect_receipts(pool, revoked=revoked))
+                    if pN:
+                        notes.append(
+                            f"{pN} key-lifecycle receipt(s) signed inside a suspect "
+                            "window — the trust pivot itself inherits the doubt"
+                        )
                 # Fail closed on ANY member the signed manifest does not name —
                 # top-level files and extra members inside listed visit dirs
                 # too, not just foreign attestations/visits trees.
@@ -366,6 +406,24 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                 failures += _verify_artifact_bundles(
                     {original["visit_id"]: bundle}, issuer, _trusted_set(issuer, kr_pool)
                 )
+                from .ledger import revoked_issuer_keys, suspect_receipts
+
+                revoked = revoked_issuer_keys(kr_pool, issuer_key=issuer)
+                if revoked:
+                    from .models import Receipt as _R
+
+                    try:
+                        recs = [_R.model_validate(bundle["original"])] + [
+                            _R.model_validate(e["receipt"]) for e in bundle.get("reviews", [])
+                        ]
+                    except Exception:  # noqa: BLE001 — malformed already flagged
+                        recs = []
+                    sN = len(suspect_receipts(recs, revoked=revoked))
+                    if sN:
+                        notes.append(
+                            f"{sN} record(s) signed by a revoked issuer inside its "
+                            "suspect window — integrity intact, trust qualified"
+                        )
                 allowed = {
                     "bundle.json",
                     "README.txt",

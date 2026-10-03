@@ -14,6 +14,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from ring_sandbox import WebhookEvent, webhooks
 
 from attest.disputepack import build_pack
@@ -1348,14 +1349,12 @@ def test_verify_html_folder_drop_keeps_issuer_doc_as_member(tmp_path):
             "attestations": [],
         }
     )
-    doc = json.dumps(
-        {"schema": "attest.issuer/1", "issuer_key": "K" * 43 + "=", "key_receipts": []}
-    )
+    doc = json.dumps({"schema": "attest.issuer/1", "issuer_key": "K" * 43 + "=", "key_receipts": []})
     (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
-    driver = """
+    driver = r"""
 const fs=require('fs');
 let src=fs.readFileSync(process.argv[2],'utf8').replace(/const dz=[\s\S]*$/,'');
-const manifest=%s, doc=%s;
+const manifest=__MANIFEST__, doc=__DOC__;
 eval(src + `
 const out={innerHTML:''};
 global.document={getElementById:()=>out};
@@ -1369,7 +1368,7 @@ const F=(n,t,p)=>{const f={name:n,text:async()=>t};if(p)f.webkitRelativePath=p;r
   console.log('folder:',/FAILED/.test(out.innerHTML),
     /not in the signed manifest/.test(out.innerHTML));
 })();`);
-""" % (json.dumps(manifest), json.dumps(doc))
+""".replace("__MANIFEST__", json.dumps(manifest)).replace("__DOC__", json.dumps(doc))
     (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
     proc = subprocess.run(
         [NODE, "drive.js", "verify.js"], cwd=tmp_path, capture_output=True, text=True, timeout=60
@@ -1439,11 +1438,9 @@ def test_verify_html_rejects_forward_signed_member(tmp_path):
     )
     (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
     (tmp_path / "manifest.json").write_text(manifest, encoding="utf-8")
-    (tmp_path / "att.json").write_text(
-        json.dumps(att.model_dump(mode="json")), encoding="utf-8"
-    )
+    (tmp_path / "att.json").write_text(json.dumps(att.model_dump(mode="json")), encoding="utf-8")
     (tmp_path / "doc.json").write_text(doc, encoding="utf-8")
-    driver = """
+    driver = r"""
 const fs=require('fs');
 let src=fs.readFileSync(process.argv[2],'utf8').replace(/const dz=[\s\S]*$/,'');
 const m=fs.readFileSync(process.argv[3],'utf8');
@@ -1455,7 +1452,8 @@ const arm=dt=>{const dn=parseKeep(dt),o=toJS(dn)||{},kn=get(dn,'key_receipts');
   return{issuer_key:o.issuer_key,nodes:kn&&kn.t==='arr'?kn.v:[]};};
 (async()=>{
   issuerDoc=arm(d);
-  const html=await verifyFiles([F('manifest.json',m),F('attestations/x.json',a)]);
+  const rid=JSON.parse(m).attestations[0].receipt_id;
+  const html=await verifyFiles([F('manifest.json',m),F('attestations/'+rid+'.json',a)]);
   console.log('forward:',/FAILED/.test(html),
     /outside the trusted issuer chain/.test(html),
     /pinned to the issuer document/.test(html));

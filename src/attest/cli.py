@@ -953,6 +953,7 @@ def _fetch_issuer_doc(url: str, client=None) -> dict:
     that issuer authenticity rides on transport). Byte-capped and
     schema-checked; anything else fails closed. A local file path loads a
     document previously written by ``attest issuer --out`` instead."""
+    import os
     from pathlib import Path
 
     if "://" not in url and Path(url).is_file():
@@ -962,21 +963,31 @@ def _fetch_issuer_doc(url: str, client=None) -> dict:
             sys.exit(f"issuer document unreadable: {exc}")
         if len(raw) > 4 * 1024 * 1024:
             sys.exit("issuer document exceeds the 4 MB bound")
-        try:
-            doc = json.loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            sys.exit(f"issuer document is not valid JSON: {exc}")
-        if doc.get("schema") != "attest.issuer/1" or not doc.get("issuer_key"):
-            sys.exit(f"{url} is not an attest.issuer/1 document")
-        return doc
-    if "://" not in url and Path(url).suffix.lower() == ".json":
+        return _parse_issuer_doc(raw, url)
+    if "://" not in url and (
+        Path(url).suffix.lower() == ".json" or os.sep in url or (os.altsep and os.altsep in url)
+    ):
+        # Path-shaped input that doesn't exist — a mistyped local path fails
+        # with a clear error instead of becoming a hostname lookup.
         sys.exit(f"issuer document not found: {url}")
-    base = urlsplit(url if "://" in url else f"https://{url}")
+    if "://" in url:
+        base = urlsplit(url)
+    else:
+        # A schemeless loopback host (localhost:8080) means a plain-HTTP dev
+        # server — forcing https would fail on TLS. The downgrade must happen
+        # BEFORE the scheme check: urlsplit("https://…") always reads https,
+        # so probing scheme first would leave this branch unreachable. Only
+        # loopback gets the downgrade; remote hosts never do.
+        probe = urlsplit(f"https://{url}")
+        base = urlsplit(f"{'http' if _is_loopback(probe.hostname or '') else 'https'}://{url}")
     host = base.hostname or ""
     if base.scheme != "https" and not _is_loopback(host):
         sys.exit("issuer discovery requires HTTPS — loopback excepted for local verification")
     endpoint = f"{base.scheme}://{base.netloc}/.well-known/attest-issuer.json"
     stream_ctx = client.stream if client is not None else httpx.stream
+    import time as _time
+
+    deadline = _time.monotonic() + 30  # total wall-clock bound, not per-read
     try:
         with stream_ctx("GET", endpoint, timeout=15) as r:
             if r.status_code != 200:
@@ -986,14 +997,32 @@ def _fetch_issuer_doc(url: str, client=None) -> dict:
                 raw.extend(chunk)
                 if len(raw) > 4 * 1024 * 1024:
                     sys.exit("issuer document exceeds the 4 MB bound")
+                if _time.monotonic() > deadline:
+                    sys.exit("issuer discovery timed out")
     except httpx.HTTPError as exc:
         sys.exit(f"issuer discovery failed: {exc}")
+    except httpx.InvalidURL as exc:
+        sys.exit(f"issuer discovery URL malformed: {exc}")
+    return _parse_issuer_doc(raw, endpoint)
+
+
+def _parse_issuer_doc(raw: bytes, source: str) -> dict:
+    """JSON → a validated attest.issuer/1 dict — the shared shape check for
+    the file and HTTP fetch paths. Anything else fails closed, never a
+    traceback."""
     try:
         doc = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         sys.exit(f"issuer document is not valid JSON: {exc}")
-    if doc.get("schema") != "attest.issuer/1" or not doc.get("issuer_key"):
-        sys.exit(f"{endpoint} did not serve an attest.issuer/1 document")
+    if (
+        not isinstance(doc, dict)
+        or doc.get("schema") != "attest.issuer/1"
+        or not isinstance(doc.get("issuer_key"), str)
+        or not doc["issuer_key"]
+    ):
+        sys.exit(f"{source} did not serve a valid attest.issuer/1 document")
+    if not isinstance(doc.get("key_receipts") or [], list):
+        sys.exit(f"{source}: issuer document key_receipts is not a list")
     return doc
 
 
@@ -1093,7 +1122,9 @@ def _verify(args: argparse.Namespace) -> None:
         if known_rotations:
             # The issuer doc's revocations are a trust overlay too — the
             # browser verifier warns on suspect-window signings; match it.
-            revoked = ledger.revoked_issuer_keys(known_rotations)
+            # Anchor at the pinned key: the doc's pool is attacker-controlled,
+            # so pool position must never confer revocation authority.
+            revoked = ledger.revoked_issuer_keys(known_rotations, issuer_key=pinned_key or receipt.public_key)
             if ledger.suspect_receipts([receipt], revoked=revoked):
                 print(
                     "WARNING: signed inside its issuer's declared suspect window — "
@@ -1117,7 +1148,7 @@ def _verify(args: argparse.Namespace) -> None:
     key = pinned_key or bundle.original.public_key
     kr_path = path.parent / "key_rotations.json"
     rotations = list(known_rotations or [])
-    if kr_path.is_file():
+    if not remote and kr_path.is_file():
         # Mirror the embedded verify_bundle.py: reviews appended after a key
         # rotation verify under the successor — legitimate only through the
         # signed rotation+adoption links the pack ships next to the bundle.
@@ -1134,6 +1165,16 @@ def _verify(args: argparse.Namespace) -> None:
     if not ok:
         sys.exit(f"verification failed: {reason}")
     print(f"OK{pinned}: {reason}.")
+    if rotations:
+        # Match verify_bundle.py: a revocation overlays trust without
+        # touching the verdict — surface suspect-window signings, anchored
+        # at the verified key so a grafted foreign receipt stays inert.
+        revoked = ledger.revoked_issuer_keys(rotations, issuer_key=key)
+        if ledger.suspect_receipts([bundle.original] + [e.receipt for e in bundle.reviews], revoked=revoked):
+            print(
+                "WARNING: record(s) signed inside their issuer's declared suspect window — "
+                "integrity intact, trust qualified."
+            )
     stance = reviews.countersign_status(bundle)
     print(f"Worker stance: {stance['state']} — {stance['detail']}")
     print(f"Note: a valid signature proves record integrity {trust_note}, not physical truth.")

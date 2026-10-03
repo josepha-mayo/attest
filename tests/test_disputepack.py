@@ -160,6 +160,42 @@ def test_case_pack_verifier_rejects_manifest_tamper(case_pack):
     assert "manifest hash disagrees" in result.stdout
 
 
+@pytest.mark.parametrize(
+    "bad",
+    ["../escape", "..\\escape", "/abs/path", "..", "", "a/b", "a\\b", 123, None],
+)
+def test_case_pack_verifier_rejects_traversal_visit_ids(case_pack, bad):
+    """A manifest visit_id that walks out of visits/ — separators, dot-dot,
+    non-strings — fails closed instead of reading an unsigned on-disk bundle
+    as a pack member."""
+    manifest_path = case_pack / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["visits"].append({"visit_id": bad, "payload_hash": "0" * 64})
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    result = _run_case(case_pack)
+    assert result.returncode != 0
+    assert "malformed visit_id" in result.stdout
+
+
+def test_pack_verifier_ignores_cwd_redaction_and_media(pack, tmp_path):
+    """verify_bundle.py resolves redaction.json and media/ next to the
+    bundle — never the caller's CWD — so a hostile redaction file beside the
+    terminal can't falsify withheld-media claims."""
+    hostile = tmp_path / "hostile-cwd"
+    (hostile / "media").mkdir(parents=True)
+    (hostile / "redaction.json").write_text(
+        json.dumps({"withheld_digests": ["deadbeef" * 8]}), encoding="utf-8"
+    )
+    result = subprocess.run(
+        [sys.executable, str(pack / "verify_bundle.py"), str(pack / "bundle.json")],
+        cwd=hostile,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "media digests matched" in result.stdout
+
+
 @pytest.fixture
 def case_pack_signed(engine, store, household, schedule, t0, tmp_path):
     """Same two-visit pack, but the manifest is signed at export time."""

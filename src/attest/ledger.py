@@ -312,8 +312,12 @@ def verify_chain(
             # rotation that crashed before the successor was persisted strand
             # every later receipt. An unconsented rotation is inert history —
             # the chain stays under the retiring key, and a later rotation can
-            # still pivot (retrying rotate-key after a crash is safe).
-            and _adoption_consent(ordered, r, p["new_key"])
+            # still pivot (retrying rotate-key after a crash is safe). The
+            # consent scan sees extra_key_receipts too: a filtered export
+            # carrying the rotation but not the adoption still pivots when a
+            # pinned issuer document supplies the countersignature — consent
+            # is the successor's signature, wherever the receipt came from.
+            and _adoption_consent(ordered + list(extra_key_receipts or []), r, p["new_key"])
         ):
             key = p["new_key"]
             pivots += 1
@@ -323,18 +327,40 @@ def verify_chain(
     return True, detail
 
 
-def revoked_issuer_keys(receipts: list[Receipt]) -> dict[str, str]:
+def revoked_issuer_keys(receipts: list[Receipt], *, issuer_key: str | None = None) -> dict[str, str]:
     """Keys declared suspect by a ``key_revocation`` receipt → suspect_after ISO.
 
-    Only the chain's TIP issuer can revoke: a retired key revoking its
-    successor would let a compromised key smear the healthy one, so
-    revocations signed by anything but the final in-effect key are ignored
-    (not errors — they simply carry no authority). Revocation is a trust
-    overlay on top of integrity — records still verify; the flag is for
-    humans and tools to weight them."""
+    A revocation carries authority only when signed by the key in force at
+    its position — a retired key revoking its successor would let a
+    compromised key smear the healthy one, so revocations signed by
+    anything but the in-effect key are ignored (not errors — they simply
+    carry no authority). Revocation is a trust overlay on top of integrity
+    — records still verify; the flag is for humans and tools to weight them.
+
+    ``issuer_key`` anchors the walk inside the verified lineage: in pack
+    verification the receipt pool is attacker-controlled, so pool position
+    can never confer authority — a self-signed ``key_revocation`` at
+    sequence 0 would otherwise make itself the root and smear the real
+    issuer. With an anchor the walk seeds at the lineage ROOT (the oldest
+    ancestor the consented pivots reach from the verified issuer), and a
+    revocation counts only for a key the lineage has already produced —
+    a grafted foreign key or a retired key smearing a successor that
+    hasn't pivoted in yet are both inert. Omit it only for full-chain
+    pools (the deployment's own ledger), where the first receipt IS the
+    root and the pool is not adversarial."""
     ordered = sorted(receipts, key=lambda x: x.sequence)
     revoked: dict[str, str] = {}
-    in_effect: str | None = None
+    seen: set[str] = set()
+    if issuer_key is not None:
+        in_effect = issuer_key
+        for _ in range(32):
+            hop = _rotation_hop(ordered, in_effect)
+            if hop is None:
+                break
+            in_effect = hop.payload["previous_key"]
+        seen.add(in_effect)
+    else:
+        in_effect = None
     for r in ordered:
         # Walk the in-effect issuer like verify_chain: a receipt verifies under
         # the key in force at its position, and only a consented rotation moves
@@ -346,6 +372,7 @@ def revoked_issuer_keys(receipts: list[Receipt]) -> dict[str, str]:
             continue
         if in_effect is None:
             in_effect = r.public_key
+        seen.add(r.public_key)
         p = r.payload
         if (
             p.get("record_type") == "key_rotation"
@@ -354,8 +381,13 @@ def revoked_issuer_keys(receipts: list[Receipt]) -> dict[str, str]:
             and _adoption_consent(ordered, r, p["new_key"])
         ):
             in_effect = p["new_key"]
+            seen.add(in_effect)
             continue
-        if p.get("record_type") == "key_revocation" and p.get("revoked_key") and r.public_key == in_effect:
+        if (
+            p.get("record_type") == "key_revocation"
+            and p.get("revoked_key") in seen
+            and r.public_key == in_effect
+        ):
             revoked[p["revoked_key"]] = p.get("suspect_after") or ""
     return revoked
 

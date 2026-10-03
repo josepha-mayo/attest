@@ -3,6 +3,28 @@
   "issuer_key": "oJql9HpnWYAv+VX43C0qFKXJnSO+l/hkEn/5ODRVpPA=",
   "key_receipts": [
     {
+      "id": "rcpt_85fdd27d7e7240b99821448f0aa2e087",
+      "visit_id": "key:graft",
+      "sequence": 0,
+      "prev_hash": null,
+      "payload": {
+        "record_type": "key_revocation",
+        "revoked_key": "oJql9HpnWYAv+VX43C0qFKXJnSO+l/hkEn/5ODRVpPA=",
+        "suspect_after": "2000-01-01T00:00:00+00:00",
+        "reason": "grafted low-sequence smear attempt",
+        "schema": "attest.receipt/2",
+        "sequence": 0,
+        "prev_hash": null,
+        "visit_id": "key:graft",
+        "receipt_id": "rcpt_85fdd27d7e7240b99821448f0aa2e087",
+        "issued_at": "2026-10-03T23:18:30.919599+00:00"
+      },
+      "payload_hash": "1ff67cb7491040bc7aab91246ebcf93c078899c9e19a469e2cce9b0a765926a6",
+      "signature": "to5Xl07tj0GvULoNvHgiCeVJ6CkE2nP/QbfkilBXHUS2zW9pTdg1pXF1SFDWRaTljpOOZ15REcnZJd35GaoABg==",
+      "public_key": "NLTZBDFWy23PC+sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y=",
+      "issued_at": "2026-10-03T23:18:30.919599Z"
+    },
+    {
       "id": "rcpt_cb1ce2bc4955465e82d60e42fef226c1",
       "visit_id": "key:0EqyMnQrtKs6:oJql9HpnWYAv",
       "sequence": 3,

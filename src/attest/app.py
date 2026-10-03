@@ -90,8 +90,13 @@ class _TokenBuckets:
     In-process and per-worker: a multi-worker deployment needs a shared
     limiter upstream (nginx limit_req, ALB rules). Buckets are keyed by
     (surface class, client host) so a webhook flood can't exhaust a
-    household's grant budget or vice versa.
+    household's grant budget or vice versa. The map is hard-bounded: a
+    spoofed-source flood gets denied once every slot is hot rather than
+    growing memory without limit.
     """
+
+    _MAX_BUCKETS = 10_000
+    _IDLE_S = 600.0
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -103,12 +108,16 @@ class _TokenBuckets:
         refill = per_minute / 60.0
         key = (surface, client)
         with self._lock:
-            tokens, ts = self._buckets.get(key, (cap, now))
+            entry = self._buckets.get(key)
+            if entry is None and len(self._buckets) >= self._MAX_BUCKETS:
+                # reclaim idle buckets first; when every slot is hot a
+                # spoofed-source flood is in progress and the unseen key is
+                # the flood — deny it rather than grow the map unbounded
+                self._buckets = {k: v for k, v in self._buckets.items() if now - v[1] < self._IDLE_S}
+                if len(self._buckets) >= self._MAX_BUCKETS:
+                    return False
+            tokens, ts = entry if entry is not None else (cap, now)
             tokens = min(cap, tokens + (now - ts) * refill)
-            # idle entries never expire on their own — bound the map when it
-            # grows so a spoofed-source flood can't leak memory
-            if len(self._buckets) > 10_000:
-                self._buckets = {k: v for k, v in self._buckets.items() if now - v[1] < 600}
             if tokens < 1.0:
                 self._buckets[key] = (tokens, now)
                 return False
@@ -860,6 +869,7 @@ def create_app(
         The doc rebuilds only when the chain tip or issuer key moves — this
         route is unauthenticated, so a full receipts scan per request would
         be a self-imposed DoS amplifier on a busy deployment."""
+
         def gather():
             tip = store.latest_receipt()
             cache_key = (signer.public_key_b64, tip.id if tip else None)
@@ -2062,7 +2072,7 @@ def _verify_pack(data: bytes, public_key: str, known_rotations: list | None = No
         if ok:
             # Revocation is an overlay, never a verdict flip — surface the
             # suspect-window count so a compromised-key pack reads honestly.
-            revoked = ledger.revoked_issuer_keys(rotation_receipts)
+            revoked = ledger.revoked_issuer_keys(rotation_receipts, issuer_key=public_key)
             suspect = ledger.suspect_receipts(
                 [bundle.original] + [e.receipt for e in bundle.reviews], revoked=revoked
             )
@@ -2177,7 +2187,7 @@ def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -
             "case pack was not issued under this deployment's key "
             "(no signed key_rotation links the pinned key to the issuer)",
         )
-    revoked = ledger.revoked_issuer_keys(pool)
+    revoked = ledger.revoked_issuer_keys(pool, issuer_key=issuer)
     suspect_total = 0
     lines = []
     for v in manifest.get("visits", []):
@@ -2213,7 +2223,13 @@ def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -
         if ledger.payload_hash(core) != sig["payload"].get("manifest_sha256"):
             return False, "manifest content hash mismatch (manifest was altered)"
         signed_hashes = sig["payload"].get("receipt_hashes", {})
-        listed = {v["visit_id"]: v["payload_hash"] for v in manifest.get("visits", [])}
+        # A malformed visit entry must fail the comparison, never raise out
+        # of the verifier — the unsigned manifest cannot name a trusted shape.
+        listed = {
+            v["visit_id"]: v["payload_hash"]
+            for v in manifest.get("visits", [])
+            if isinstance(v, dict) and "visit_id" in v and "payload_hash" in v
+        }
         if listed != signed_hashes:
             return False, "manifest visit list disagrees with the signed export"
         manifest_note = f"export signed: {total} record(s)"

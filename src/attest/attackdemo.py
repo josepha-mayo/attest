@@ -211,6 +211,41 @@ def run(store: Store, media_root: Path | None = None, inbox=None) -> dict:
 
     results.append(_attempt(store, "forge a key_revocation against the live issuer", forge_revocation))
 
+    def graft_revocation() -> tuple[bool, str]:
+        """Pool-order graft: a self-signed revocation at sequence 0 sorts
+        ahead of the honest chain in an attacker-assembled pool (pack
+        key_rotations.json, an issuer document's key_receipts). Revocation
+        authority anchors at the verified issuer's lineage root — pool
+        position can never confer it."""
+        from .ledger import revoked_issuer_keys
+        from .models import Receipt
+
+        rows = store._conn.execute("SELECT body FROM receipts ORDER BY sequence").fetchall()
+        if not rows:
+            return None, "no receipts"
+        receipts = [Receipt.model_validate_json(r[0]) for r in rows]
+        tip = receipts[-1].public_key
+        forged = Signer.ephemeral().issue(
+            visit_id="key:graft",
+            sequence=0,  # sorts ahead of the honest chain
+            prev_hash=None,
+            facts={
+                "record_type": "key_revocation",
+                "revoked_key": tip,
+                "suspect_after": receipts[0].issued_at.isoformat(),
+                "reason": "grafted low-sequence smear attempt",
+            },
+        )
+        revoked = revoked_issuer_keys(receipts + [forged], issuer_key=tip)
+        caught = tip not in revoked
+        return caught, (
+            "grafted root ignored — authority stayed on the verified lineage"
+            if caught
+            else "POOL GRAFT WON: tip marked suspect"
+        )
+
+    results.append(_attempt(store, "graft a sequence-0 key_revocation ahead of the chain", graft_revocation))
+
     def replay_request() -> tuple[bool, str]:
         row = store._conn.execute("SELECT request_id FROM seen_requests LIMIT 1").fetchone()
         if not row:

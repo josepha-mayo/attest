@@ -172,6 +172,143 @@ def test_issuer_doc_schema_enforced(tmp_path):
         cli._fetch_issuer_doc(str(bad))
 
 
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b"[1, 2, 3]",  # valid JSON, not an object — must not traceback
+        b'"just a string"',
+        b'{"schema":"attest.issuer/1","issuer_key":42}',  # non-string key
+        b'{"schema":"attest.issuer/1","issuer_key":""}',  # empty key
+        b'{"schema":"attest.issuer/1","issuer_key":"abc","key_receipts":{"x":1}}',
+        b"this is not json at all",
+    ],
+)
+def test_issuer_doc_malformed_variants_fail_closed(tmp_path, raw):
+    """Every malformed issuer-document shape exits cleanly — never a traceback."""
+    doc = tmp_path / "doc.json"
+    doc.write_bytes(raw)
+    with pytest.raises(SystemExit):
+        cli._fetch_issuer_doc(str(doc))
+
+
+def test_issuer_doc_oversized_file_refused(tmp_path):
+    """The local-file path enforces the same 4 MB bound as the HTTP path."""
+    doc = tmp_path / "big.json"
+    doc.write_bytes(b" " * (4 * 1024 * 1024 + 1))
+    with pytest.raises(SystemExit, match="4 MB"):
+        cli._fetch_issuer_doc(str(doc))
+
+
+def test_issuer_doc_redirect_fails_closed():
+    """A redirect is not followed — the pin must come from the URL the
+    operator asked for, or the fetch fails."""
+    transport = httpx.MockTransport(
+        lambda r: httpx.Response(302, headers={"location": "https://elsewhere.example/doc"})
+    )
+    with httpx.Client(transport=transport) as client:
+        with pytest.raises(SystemExit, match="HTTP 302"):
+            cli._fetch_issuer_doc("https://attest.example", client=client)
+
+
+def test_issuer_doc_fetch_total_deadline(monkeypatch):
+    """The fetch is bounded by a total wall-clock deadline — a response that
+    trickles bytes forever still gives up."""
+    import time as _t
+
+    times = iter([0.0, 9999.0])  # deadline at t=30; the first chunk lands past it
+    monkeypatch.setattr(_t, "monotonic", lambda: next(times))
+
+    class _Resp:
+        status_code = 200
+
+        def iter_bytes(self, _n):
+            yield b"x" * 8
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    class _Client:
+        def stream(self, *a, **k):
+            return _Resp()
+
+    with pytest.raises(SystemExit, match="timed out"):
+        cli._fetch_issuer_doc("https://attest.example", client=_Client())
+
+
+def test_remote_artifact_ignores_cwd_key_rotations(tmp_path, monkeypatch, capsys):
+    """`attest verify https://…/bundle.json` must not merge a caller-CWD
+    key_rotations.json — a planted revocation there would annotate (or a
+    planted rotation widen) trust for an artifact the file never shipped
+    with."""
+    import argparse
+
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    signer = Signer(Ed25519PrivateKey.from_private_bytes(b"\x07" * 32))
+    orig = signer.issue(
+        visit_id="vis_r",
+        sequence=1,
+        prev_hash=None,
+        facts={"record_type": "review", "summary": "ok"},
+    )
+    bundle = {"original": orig.model_dump(mode="json"), "reviews": []}
+    blob = json.dumps(bundle).encode()
+
+    class _Resp:
+        status_code = 200
+
+        def iter_bytes(self, _n):
+            yield blob
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(cli.httpx, "stream", lambda *a, **k: _Resp())
+    # A self-revocation planted in CWD: if the remote path read it, every
+    # issuer-signed record would print a suspect-window WARNING.
+    planted = signer.issue(
+        visit_id="key:rev",
+        sequence=2,
+        prev_hash=orig.payload_hash,
+        facts={
+            "record_type": "key_revocation",
+            "revoked_key": signer.public_key_b64,
+            "suspect_after": "2000-01-01T00:00:00Z",
+        },
+    )
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "key_rotations.json").write_text(json.dumps({"rotations": [planted.model_dump(mode="json")]}))
+    cli._verify(
+        argparse.Namespace(bundle="https://attest.example/pack/bundle.json", key=None, issuer_url=None)
+    )
+    out = capsys.readouterr().out
+    assert out.startswith("OK")
+    assert "suspect window" not in out
+
+
+def test_issuer_endpoint_reflects_a_new_revocation(api):
+    """The doc cache is keyed on the chain tip — a revocation issued after a
+    cached serve must appear on the next request, not be masked by staleness."""
+    doc = api.get("/.well-known/attest-issuer.json", auth=None).json()
+    old_key = doc["issuer_key"]
+    api.post("/api/admin/rotate-key")
+    api.get("/.well-known/attest-issuer.json", auth=None)  # prime the cache
+    r = api.post(
+        "/api/admin/revoke-key",
+        json={"revoked_key": old_key, "suspect_after": "2026-01-01T00:00:00Z", "reason": "t"},
+    )
+    assert r.status_code == 200, r.text
+    doc2 = api.get("/.well-known/attest-issuer.json", auth=None).json()
+    kinds = [r["payload"]["record_type"] for r in doc2["key_receipts"]]
+    assert "key_revocation" in kinds
+
+
 def test_issuer_doc_over_loopback_http(tmp_path, settings, store, ring_client, household, schedule):
     """End to end over a real socket: a live deployment's well-known endpoint
     is fetchable over plain HTTP *on loopback* — the remote-verifier path,
@@ -210,6 +347,10 @@ def test_issuer_doc_over_loopback_http(tmp_path, settings, store, ring_client, h
         doc = cli._fetch_issuer_doc(base)  # plain http, loopback — allowed
         assert doc["schema"] == "attest.issuer/1"
         assert doc["issuer_key"] == app.state.signer.public_key_b64
+        # The schemeless form an operator actually types — 127.0.0.1:port —
+        # downgrades to http on loopback instead of dying on TLS.
+        doc2 = cli._fetch_issuer_doc(base.split("://", 1)[1])
+        assert doc2["issuer_key"] == doc["issuer_key"]
     app.state.inbox.close()
 
 
@@ -431,9 +572,7 @@ def test_verify_single_receipt_annotates_suspect_window(tmp_path, capsys):
     receipt_file = tmp_path / "receipt.json"
     receipt_file.write_text(json.dumps(receipt.model_dump(mode="json")))
 
-    cli._verify(
-        argparse.Namespace(bundle=str(receipt_file), key=None, issuer_url=str(docfile))
-    )
+    cli._verify(argparse.Namespace(bundle=str(receipt_file), key=None, issuer_url=str(docfile)))
     out = capsys.readouterr().out
     assert "OK" in out
     assert "suspect window" in out
