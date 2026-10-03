@@ -1495,37 +1495,30 @@ def create_app(
             serialization.NoEncryption(),
         )
 
-        def _rotate() -> tuple[Signer, Receipt, Receipt]:
-            # One worker thread across the whole sequence: the barrier holds
-            # the store's write lock so no @atomic issuance can sign under the
-            # retiring key between the pivot commit and the signer swap — a
-            # receipt landing in that window would be a retired-key signature
-            # post-pivot, and the chain would break for good. The lock is a
-            # thread-affine RLock, so persist/reload ride inside it too (the
-            # KMS round-trip stalls ingestion briefly — correct, vs a race).
-            with engine.signing_barrier():
-                rotation = engine.issue_key_rotation(new_key, reason)
-                persist_signer_key(
-                    s.key_path,
-                    pem,
-                    custody=s.key_custody,
-                    kms_key_id=s.kms_key_id,
-                    aws_region=s.aws_region,
-                )
-                # Reload from the custody layer rather than trusting the PEM
-                # just written — a KMS-mode deployment must never adopt a
-                # signer KMS couldn't wrap.
-                successor = load_or_create_signer(
-                    s.key_path,
-                    custody=s.key_custody,
-                    kms_key_id=s.kms_key_id,
-                    aws_region=s.aws_region,
-                )
-                engine.signer = successor
-                adoption = engine.issue_key_adoption(old_key, rotation)
-                return successor, rotation, adoption
+        def _adopt() -> Signer:
+            persist_signer_key(
+                s.key_path,
+                pem,
+                custody=s.key_custody,
+                kms_key_id=s.kms_key_id,
+                aws_region=s.aws_region,
+            )
+            # Reload from the custody layer rather than trusting the PEM just
+            # written — a KMS-mode deployment must never adopt a signer KMS
+            # couldn't wrap.
+            return load_or_create_signer(
+                s.key_path,
+                custody=s.key_custody,
+                kms_key_id=s.kms_key_id,
+                aws_region=s.aws_region,
+            )
 
-        signer, rotation, adoption = await asyncio.to_thread(_rotate)
+        # One worker thread for the whole sequence: the signing barrier holds
+        # the store's RLock, which is thread-affine — every step must run on
+        # the thread that holds it so no @atomic issuance can slip a
+        # retired-key signature into the pivot→adopt gap.
+        rotation, adoption = await asyncio.to_thread(engine.rotate_signing_key, new_key, _adopt, reason)
+        signer = engine.signer
         reviews.signer = app.state.signer = signer
         return {
             "previous_key": old_key,

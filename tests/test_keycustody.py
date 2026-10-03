@@ -203,3 +203,29 @@ def test_orphaned_custody_artifact_never_mints_plaintext(tmp_path):
             persist_signer_key(path, b"pem")
         assert not path.exists()
         artifact.unlink()
+
+
+@dpapi
+def test_dpapi_divergent_plaintext_next_to_blob_fails(tmp_path):
+    """A plaintext PEM whose bytes differ from the wrapped key is a second
+    identity on disk — planted or a botched migration; never silently pick.
+    Identical bytes are a crash remnant and drop quietly."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    path = tmp_path / "k.pem"
+    signer = load_or_create_signer(path)  # plaintext first — capture the PEM
+    pem = path.read_bytes()
+    load_or_create_signer(path, custody="dpapi")  # wraps it, deletes plaintext
+    foreign = Ed25519PrivateKey.generate().private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+    path.write_bytes(foreign)  # a different identity beside the blob
+    with pytest.raises(RuntimeError, match="two identities"):
+        load_or_create_signer(path, custody="dpapi")
+    path.write_bytes(pem)  # crash remnant: same bytes as the wrapped key
+    again = load_or_create_signer(path, custody="dpapi")
+    assert again.public_key_b64 == signer.public_key_b64
+    assert not path.exists()

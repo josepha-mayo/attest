@@ -167,6 +167,32 @@ def _dpapi_path(path: Path) -> Path:
     return path.with_suffix(path.suffix + ".dpapi")
 
 
+def _atomic_write(path: Path, data: bytes) -> None:
+    """tmp file + ``os.replace`` so a crash never leaves a truncated custody
+    artifact to fail unwrap on next boot; 0600 on POSIX like the key itself."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_bytes(data)
+    if os.name == "posix":
+        os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
+
+
+def _drop_stale_plaintext(path: Path, pem: bytes) -> None:
+    """Under custody, a leftover ``path`` PEM defeats the at-rest guarantee —
+    but it can also be a DIFFERENT key (planted, or a botched migration).
+    Identical bytes are a crash remnant and drop quietly; divergent bytes
+    mean two key identities are on disk — refuse rather than silently pick."""
+    if not path.exists():
+        return
+    if path.read_bytes() != pem:
+        raise RuntimeError(
+            f"plaintext {path.name} disagrees with the wrapped issuer key — "
+            "two identities on disk; remove the stale PEM only after checking "
+            "which chain records it signed"
+        )
+    path.unlink()
+
+
 def _check_custody_combo(kms_key_id: str | None, custody: str | None) -> None:
     if kms_key_id and custody:
         raise ValueError("KMS and DPAPI custody are mutually exclusive — pick one protection posture")
@@ -220,6 +246,7 @@ def load_or_create_signer(
         blob_path = _dpapi_path(path)
         if blob_path.exists():
             pem = box.unwrap(blob_path.read_bytes())
+            _drop_stale_plaintext(path, pem)
         elif path.exists():
             # Enabling custody on a plaintext deployment must wrap THAT key —
             # minting a new one silently rotates the issuer identity and
@@ -227,7 +254,7 @@ def load_or_create_signer(
             # plaintext after the blob is durably written.
             pem = path.read_bytes()
             blob_path.parent.mkdir(parents=True, exist_ok=True)
-            blob_path.write_bytes(box.wrap(pem))
+            _atomic_write(blob_path, box.wrap(pem))
             path.unlink()
         else:
             from cryptography.hazmat.primitives import serialization
@@ -241,7 +268,7 @@ def load_or_create_signer(
                 serialization.NoEncryption(),
             )
             blob_path.parent.mkdir(parents=True, exist_ok=True)
-            blob_path.write_bytes(box.wrap(pem))
+            _atomic_write(blob_path, box.wrap(pem))
 
         from cryptography.hazmat.primitives import serialization
         from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -258,6 +285,7 @@ def load_or_create_signer(
     if wrapped_path.exists():
         record = json.loads(wrapped_path.read_text(encoding="utf-8"))
         pem = box.unwrap(record)
+        _drop_stale_plaintext(path, pem)
     elif path.exists():
         # Enabling KMS on a deployment that already has a plaintext signing
         # key must wrap THAT key — minting a new one silently rotates the
@@ -268,7 +296,7 @@ def load_or_create_signer(
         pem = path.read_bytes()
         record = box.wrap(pem)
         path.parent.mkdir(parents=True, exist_ok=True)
-        wrapped_path.write_text(json.dumps(record, indent=2), encoding="utf-8")
+        _atomic_write(wrapped_path, json.dumps(record, indent=2).encode("utf-8"))
         path.unlink()  # plaintext key no longer needed — KMS can re-unwrap
     else:
         from cryptography.hazmat.primitives import serialization
@@ -281,7 +309,7 @@ def load_or_create_signer(
         )
         record = box.wrap(pem)
         path.parent.mkdir(parents=True, exist_ok=True)
-        wrapped_path.write_text(json.dumps(record, indent=2), encoding="utf-8")
+        _atomic_write(wrapped_path, json.dumps(record, indent=2).encode("utf-8"))
 
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -314,25 +342,12 @@ def persist_signer_key(
     _check_stray_custody_artifact(path, kms_key_id, custody)
     path.parent.mkdir(parents=True, exist_ok=True)
     if custody == "dpapi":
-        blob_path = _dpapi_path(path)
-        tmp = blob_path.with_suffix(blob_path.suffix + ".tmp")
-        tmp.write_bytes(DpapiBox().wrap(pem))
-        if os.name == "posix":
-            os.chmod(tmp, 0o600)
-        os.replace(tmp, blob_path)
+        _atomic_write(_dpapi_path(path), DpapiBox().wrap(pem))
         path.unlink(missing_ok=True)  # no plaintext should remain under custody
     elif kms_key_id:
         box = KmsBox(kms_key_id, kms_client or _kms_client(aws_region))
         wrapped_path = path.with_suffix(path.suffix + ".kms.json")
-        tmp = wrapped_path.with_suffix(wrapped_path.suffix + ".tmp")
-        tmp.write_text(json.dumps(box.wrap(pem), indent=2), encoding="utf-8")
-        if os.name == "posix":
-            os.chmod(tmp, 0o600)
-        os.replace(tmp, wrapped_path)
+        _atomic_write(wrapped_path, json.dumps(box.wrap(pem), indent=2).encode("utf-8"))
         path.unlink(missing_ok=True)  # no plaintext should remain under custody
     else:
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_bytes(pem)
-        if os.name == "posix":
-            os.chmod(tmp, 0o600)
-        os.replace(tmp, path)
+        _atomic_write(path, pem)

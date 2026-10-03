@@ -26,17 +26,45 @@ def acquire_instance_lock(data_dir: Path) -> Path:
     loud RuntimeError naming the lock file and the recorded pid.
     """
     path = data_dir / "attest.lock"
+    # normcase: Windows spellings of the same dir (case, 8.3 short names) must
+    # share one reentrancy key or the process "contends" with its own lock.
     key = str(path.resolve())
+    if os.name == "nt":
+        key = os.path.normcase(key)
     if key in _HELD:
         return path
     data_dir.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
     try:
         _lock_byte(fd)
+        try:
+            # POSIX: the lock guards the inode, not the name — if a cleanup
+            # unlinked or replaced the path between open and lock, this fd is
+            # a dead file and re-opening would hand a second process a fresh
+            # lock. Refuse rather than split-brain on a detached inode.
+            try:
+                named_ino = os.stat(path).st_ino
+            except OSError:
+                named_ino = None  # unlinked under us — same refusal
+            if named_ino != os.fstat(fd).st_ino:
+                raise RuntimeError(
+                    f"lock file {path} was replaced while acquiring — "
+                    "never delete attest.lock from a live data dir"
+                )
+            # The holder pid sits at byte 1+: byte 0 is the locked byte, and
+            # a Windows byte-range lock is mandatory — a contender reading
+            # offset 0 would hit ERROR_LOCK_VIOLATION and never see the pid.
+            payload = b" " + f"{os.getpid()}\n".encode()
+            os.lseek(fd, 0, os.SEEK_SET)
+            os.write(fd, payload)
+            os.ftruncate(fd, len(payload))
+        except BaseException:
+            os.close(fd)
+            raise
     except OSError as exc:
         holder = ""
         try:
-            os.lseek(fd, 0, os.SEEK_SET)
+            os.lseek(fd, 1, os.SEEK_SET)
             holder = os.read(fd, 64).decode(errors="replace").strip()
         except OSError:
             pass
@@ -46,10 +74,6 @@ def acquire_instance_lock(data_dir: Path) -> Path:
             + (f" (pid {holder})" if holder else "")
             + " — stop it first, or point this process at a different data dir"
         ) from exc
-    payload = f"{os.getpid()}\n".encode()
-    os.lseek(fd, 0, os.SEEK_SET)
-    os.write(fd, payload)
-    os.ftruncate(fd, len(payload))
     _HELD[key] = fd
     return path
 
@@ -58,8 +82,9 @@ def writer_held(data_dir: Path) -> tuple[bool, int | None]:
     """Probe without taking: ``(held, holder_pid_or_None)``.
 
     Closes its probe fd immediately — never registers in ``_HELD`` — so it is
-    safe in read-only commands. Windows byte locks are mandatory, so a held
-    lock also blocks reading the recorded pid; the pid is best-effort.
+    safe in read-only commands. The holder records its pid at byte 1+ — the
+    locked byte 0 is unreadable to contenders on Windows, where byte-range
+    locks are mandatory — so the pid survives on both platforms.
     """
     path = data_dir / "attest.lock"
     if not path.exists():
@@ -70,7 +95,7 @@ def writer_held(data_dir: Path) -> tuple[bool, int | None]:
     except OSError:
         holder = None
         try:
-            os.lseek(fd, 0, os.SEEK_SET)
+            os.lseek(fd, 1, os.SEEK_SET)  # byte 0 is the locked byte — skip it
             holder = int(os.read(fd, 64).decode(errors="replace").strip())
         except (OSError, ValueError):
             pass

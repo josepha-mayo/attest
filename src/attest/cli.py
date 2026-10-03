@@ -837,13 +837,15 @@ def _demo(args: argparse.Namespace) -> None:
     print("  8. attest verify <zip|url> — a pack verifies itself, even straight", flush=True)
     print("     from https://josepha-mayo.github.io/attest/sample-pack.zip", flush=True)
     print("  9. attest explain <visit_or_receipt_id> — full provenance, in words", flush=True)
+    print(" 10. attest doctor       — the deployment preflight; it also shows this", flush=True)
+    print("     demo process holding the runtime's writer lock", flush=True)
     print("     (read-only commands run alongside the live demo; writer commands —", flush=True)
     print("      export, coverage, digest, rotate-key, attack-demo — take the", flush=True)
     print("      single-instance lock, so Ctrl+C the demo first. The dashboard's", flush=True)
     print("      pack download and /api/admin/rotate-key are the live paths.)", flush=True)
-    print(" 10. attest attack-demo — the tamper battery, every attempt caught", flush=True)
+    print(" 11. attest attack-demo — the tamper battery, every attempt caught", flush=True)
     print("     and rolled back (offline runtimes only — it holds the writer lock)", flush=True)
-    print(" 11. rotate the signing key live — the pivot is a signed chain event", flush=True)
+    print(" 12. rotate the signing key live — the pivot is a signed chain event", flush=True)
     print("     and receipts on both sides still verify:", flush=True)
     print(
         f'     curl -u admin:{token} -X POST "{app_url}/api/admin/rotate-key"',
@@ -1324,7 +1326,7 @@ def _rotate_key(args: argparse.Namespace) -> None:
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-    from .keycustody import persist_signer_key
+    from .keycustody import load_or_create_signer, persist_signer_key
     from .ledger import Signer
     from .store import Store
 
@@ -1348,27 +1350,25 @@ def _rotate_key(args: argparse.Namespace) -> None:
         new_signer = Signer(sk)
         new_key = new_signer.public_key_b64
 
-        with engine.signing_barrier():
-            # A previous rotate that died after persist but before adoption
-            # left a consent gap for the CURRENT signer — close it first so
-            # the chain's pivots are all consummated before the new one.
-            for r in engine.resume_pending_adoptions():
-                print(f"  resumed pending adoption {r.id}")
-            rotation = engine.issue_key_rotation(new_key, args.reason or "")
-            key_path = settings.key_path
+        def _adopt() -> Signer:
             persist_signer_key(
-                key_path,
+                settings.key_path,
                 pem,
                 kms_key_id=settings.kms_key_id,
                 custody=settings.key_custody,
                 aws_region=settings.aws_region,
             )
-            # Adoption under the successor — the retiring key asserted the
-            # change, this proves the new key's holder executed it. Rebuilding
-            # the engine reloads the signer from disk under the same custody
-            # rules; the barrier is the store's shared RLock, so its nested
-            # @atomic calls re-enter on this thread.
-            adopted = _cli_engine(store).issue_key_adoption(old_key, rotation)
+            return load_or_create_signer(
+                settings.key_path,
+                kms_key_id=settings.kms_key_id,
+                custody=settings.key_custody,
+                aws_region=settings.aws_region,
+            )
+
+        # Shared rotate path: pending-adoption resume, pivot, persist+reload,
+        # adoption — serialized under the signing barrier so a crash window
+        # has a recovery at every step.
+        rotation, adopted = engine.rotate_signing_key(new_key, _adopt, args.reason or "")
         print(f"key rotated: {old_key[:16]}... -> {new_key[:16]}...")
         print(f"  rotation receipt  {rotation.id}")
         print(f"  adoption receipt  {adopted.id}")

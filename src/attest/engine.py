@@ -1319,6 +1319,32 @@ class VisitEngine:
             return self.store.receipt_for_visit(pseudo_id)
         return receipt
 
+    def rotate_signing_key(
+        self, new_public_key: str, adopt_signer, reason: str = ""
+    ) -> tuple[Receipt, Receipt]:
+        """The whole issuer rotation, ordered and serialized under the
+        signing barrier — shared by `attest rotate-key` and the admin
+        endpoint so both paths hold identical crash/race semantics.
+
+        Steps (each commits independently, so every crash window has a
+        recovery): first, any pending adoption owed to the CURRENT signer
+        is countersigned (a prior rotate that died post-persist heals
+        before a new pivot); the retiring key signs the ``key_rotation``
+        receipt; ``adopt_signer`` persists the successor under the
+        deployment's custody posture and returns the reloaded Signer;
+        this engine's signer swaps to it; the successor countersigns
+        ``key_adoption``. Because the barrier blocks all other ``@atomic``
+        issuance for the duration, no receipt can be minted mid-pivot.
+        If ``adopt_signer`` raises, the rotation is an unconsented orphan —
+        ``verify_chain`` ignores it and the chain stays valid under the
+        retiring key."""
+        with self.signing_barrier():
+            self.resume_pending_adoptions()
+            rotation = self.issue_key_rotation(new_public_key, reason)
+            self.signer = adopt_signer()  # persist + reload; raises → inert orphan
+            adoption = self.issue_key_adoption(rotation.payload["previous_key"], rotation)
+            return rotation, adoption
+
     @atomic
     def disconnect_site(self, site: Site, reason: str = "") -> Receipt:
         """Revoke a site's Ring source binding: tombstone the site and sign a
