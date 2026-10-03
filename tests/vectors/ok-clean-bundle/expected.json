@@ -1,0 +1,16 @@
+{
+  "kind": "bundle",
+  "pin": "declared",
+  "verdict": "ok",
+  "detail_contains": [
+    "verified",
+    "media"
+  ],
+  "js": {
+    "bundle_ok": true,
+    "trusted_count": 1,
+    "suspect_count": 0,
+    "lifecycle_suspect_count": 0
+  },
+  "note": "one visit, one key, media digests all present \u2014 the baseline"
+}

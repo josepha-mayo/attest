@@ -423,16 +423,21 @@ def suspect_records(receipts, revoked):
     """Receipts signed by a revoked key inside its declared suspect window —
     cryptographically valid, annotated suspect. Integrity never depends on
     this; it's what a compromised key's history deserves."""
-    from datetime import datetime
+    from datetime import UTC, datetime
 
     def _instant(s):
         try:
-            return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
-        except ValueError:
+            at = s if isinstance(s, datetime) else datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
             return None
+        # Naive spellings read as UTC: a forged or sloppy timestamp must not
+        # crash the comparison, only compare conservatively.
+        return at.replace(tzinfo=UTC) if at.tzinfo is None else at
 
     out = []
     for r in receipts:
+        if not isinstance(r, dict):
+            continue
         after = _instant(revoked.get(r.get("public_key"), ""))
         at = _instant(r.get("issued_at", ""))
         if after is not None and at is not None and at > after:

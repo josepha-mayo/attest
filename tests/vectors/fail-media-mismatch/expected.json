@@ -1,0 +1,10 @@
+{
+  "kind": "bundle",
+  "pin": "declared",
+  "verdict": "fail",
+  "detail_contains": [
+    "media"
+  ],
+  "js": null,
+  "note": "media bytes that don't hash to the signed digest are caught"
+}

@@ -726,11 +726,14 @@ def create_app(
                     slot["count"] += 1
                     if slot["latest"] is None or r.issued_at > slot["latest"]:
                         slot["latest"], slot["rid"] = r.issued_at, r.id
+            revoked = ledger.revoked_issuer_keys(receipts)
             return {
                 "stats": store.stats(),
                 "journal": store.verify_journal(),
                 "chain": ledger.verify_chain(receipts, public_key=signer.public_key_b64),
                 "attestations": att_types,
+                "revoked": revoked,
+                "suspect": len(ledger.suspect_receipts(receipts, revoked=revoked)),
                 "poll": {
                     sid: {
                         "count": p["count"],
@@ -815,6 +818,8 @@ def create_app(
                 "mode": (store.setting("execution_mode") or {}).get("mode", "wall"),
                 "journal": journal,
                 "chain": {"ok": chain_ok, "detail": chain_why},
+                "revoked_issuers": (revoked := ledger.revoked_issuer_keys(receipts)),
+                "suspect_receipts": len(ledger.suspect_receipts(receipts, revoked=revoked)),
                 "custody": (
                     f"AWS KMS envelope — unwrap audited (key {s.kms_key_id})"
                     if s.kms_key_id

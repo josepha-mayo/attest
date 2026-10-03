@@ -78,6 +78,7 @@ function parseKeep(text){
     return literal();}
   const v=val();ws();if(i!==n)throw new Error("trailing bytes");return v;}
 function toJS(n){
+  if(!n)return null;
   if(n.t==="lit")return n.str!==undefined?n.str:JSON.parse(n.r);
   if(n.t==="arr")return n.v.map(toJS);
   const o={};for(const[k,v]of n.v)o[k]=toJS(v);return o;}
@@ -104,7 +105,7 @@ function canonical(n){
 function get(node,k){
   /* Duplicate keys: last wins — matching toJS/canonical/JSON.parse so the
      value hashed is always the value semantically checked. */
-  if(node.t!=="obj")return null;
+  if(!node||node.t!=="obj")return null;
   let hit=null;for(const[kk,vv]of node.v)if(kk===k)hit=vv;return hit;}
 /* ---------- hashing ---------- */
 async function sha256hex(b){const d=await crypto.subtle.digest("SHA-256",b);
@@ -333,7 +334,7 @@ async function adoptedBy(keyReceipts,rotation,newKey){
   const rr=toJS(rotation),rp=rr.payload||{};
   for(const an of keyReceipts){
     const a=toJS(an),ap=a.payload||{},link=ap.rotation_receipt||{};
-    if(ap.record_type==="key_adoption"&&link.id===rr.id&&link.hash===rp.payload_hash
+    if(ap.record_type==="key_adoption"&&link.id===rr.id&&link.hash===rr.payload_hash
       &&a.public_key===newKey){
       const c=await checkReceipt(an);
       if(c.ok)return true;
@@ -349,7 +350,7 @@ async function trustedKeys(issuerKey,rotationNodes,maxHops=32){
   for(let i=0;i<maxHops;i++){
     let nxt=null;
     for(const rn of rotationNodes){
-      const r=toJS(rn),p=r.payload||{};
+      const r=toJS(rn)||{},p=r.payload||{};
       if(p.record_type==="key_rotation"&&p.new_key===cur&&r.public_key===p.previous_key){
         const c=await checkReceipt(rn);
         if(c.ok&&await adoptedBy(rotationNodes,rn,cur)){nxt=p.previous_key;break;}
@@ -369,7 +370,7 @@ async function descendantKeys(rootKey,rotationNodes,maxHops=32){
   for(let i=0;i<maxHops;i++){
     let nxt=null;
     for(const rn of rotationNodes){
-      const r=toJS(rn),p=r.payload||{};
+      const r=toJS(rn)||{},p=r.payload||{};
       if(p.record_type==="key_rotation"&&p.previous_key===cur&&r.public_key===cur){
         const c=await checkReceipt(rn);
         if(c.ok&&await adoptedBy(rotationNodes,rn,p.new_key)){nxt=p.new_key;break;}
@@ -386,10 +387,10 @@ async function revokedKeys(keyNodes){
      healthy one, and position alone can't name the tip: a forged
      high-sequence revocation would make itself the tip and self-authorize.
      Authority follows the same consented pivots as verify_chain. */
-  const ord=[...keyNodes].sort((a,b)=>(toJS(a).sequence||0)-(toJS(b).sequence||0));
+  const ord=[...keyNodes].sort((a,b)=>((toJS(a)||{}).sequence||0)-((toJS(b)||{}).sequence||0));
   let inEffect=null;const out={};
   for(const rn of ord){
-    const r=toJS(rn),p=r.payload||{};
+    const r=toJS(rn)||{},p=r.payload||{};
     /* not signed by the in-effect key: out-of-band history, no authority */
     if(inEffect!==null&&r.public_key!==inEffect)continue;
     const c=await checkReceipt(rn);
@@ -404,10 +405,15 @@ async function revokedKeys(keyNodes){
   return out;}
 function suspectRecords(receiptNodes,revoked){
   /* Receipts signed by a revoked key inside its suspect window — valid,
-     but annotated. Revocation overlays trust; it never flips integrity. */
+     but annotated. Revocation overlays trust; it never flips integrity.
+     Malformed members (missing fields, literal nodes) annotate as nothing —
+     never crash the verifier's report on adversarial input. */
   const out=[];
   for(const rn of receiptNodes){
-    const r=toJS(rn),after=revoked[r.public_key];
+    if(!rn)continue;
+    const r=toJS(rn);
+    if(!r||typeof r!=="object")continue;
+    const after=revoked[r.public_key];
     if(after!==undefined&&r.issued_at&&new Date(r.issued_at)>new Date(after))out.push(rn);
   }
   return out;}
@@ -537,8 +543,9 @@ async function verifyFiles(files){
     const js=toJS(root);
     /* Revocation is a trust overlay — never a FAIL: count bundle records
        signed by a revoked key inside its declared suspect window and warn. */
+    const revN=get(root,"reviews");
     const sN=suspectRecords(
-      [oNode].concat((get(root,"reviews")||{v:[]}).v.map(en=>get(en,"receipt"))),
+      [oNode].concat((revN&&revN.t==="arr"?revN.v:[]).map(en=>get(en,"receipt"))),
       revoked).length;
     if(sN){suspectTotal+=sN;
       say("warn",`${esc(vid)}: ${sN} record(s) signed by a revoked issuer inside its suspect window`);}
@@ -663,6 +670,8 @@ async function verifyFiles(files){
          say so: the lineage is the signed pivot, not a weaker check. */
       +(trusted&&trusted.size>1
         ?` · ${trusted.size} issuer keys via the signed rotation chain`:""));
+  if(suspectTotal)
+    say("warn",`${suspectTotal} record(s) signed by a revoked issuer inside its suspect window`);
   return out.join("");}
 /* ---------- minimal zip reader: stored + deflate via DecompressionStream ---------- */
 async function inflate(raw){
@@ -1193,7 +1202,7 @@ async function renderIndex(){
   const rotNodes=[];
   for(const tag of document.querySelectorAll("script.attestation")){
     const aN=parseKeep(d64(tag.textContent));
-    const art=(toJS(aN).payload||{}).record_type;
+    const art=((toJS(aN)||{}).payload||{}).record_type;
     if(art==="key_rotation"||art==="key_adoption"||art==="key_revocation")rotNodes.push(aN);
   }
   const trusted=meta.issuer_key&&rotNodes.length
@@ -1211,8 +1220,9 @@ async function renderIndex(){
     const c=await checkBundle(root,trusted||key);
     if(!c.ok)anyBad=true;
     n++;
+    const bRev=get(root,"reviews");
     suspectTotal+=suspectRecords(
-      [oNode].concat((get(root,"reviews")||{v:[]}).v.map(en=>get(en,"receipt"))),
+      [oNode].concat((bRev&&bRev.t==="arr"?bRev.v:[]).map(en=>get(en,"receipt"))),
       revoked).length;
     actual[tag.dataset.vid]=(js.original||{}).payload_hash;
     const p=(js.original||{}).payload||{};
@@ -1263,7 +1273,7 @@ async function renderIndex(){
     if(!mc.ok)anyBad=true;
     mLine=`<div class="row ${mc.ok?"ok":"bad"}">manifest: ${esc(mc.why)}</div>`;
     const listedVids=new Set();
-    for(const v of toJS(mNode).visits||[]){
+    for(const v of (toJS(mNode)||{}).visits||[]){
       listedVids.add(v.visit_id);
       /* Fail closed both directions: a listed visit with no inlined bundle is
          a dropped record; an inlined bundle the manifest does not list is
@@ -1284,11 +1294,11 @@ async function renderIndex(){
     }
     /* Attestations inlined as <script class="attestation"> — verify each
        against the manifest's signed list (signature + hash + visit_id). */
-    const alist={};for(const a of toJS(mNode).attestations||[])alist[a.receipt_id]=a;
+    const alist={};for(const a of (toJS(mNode)||{}).attestations||[])alist[a.receipt_id]=a;
     const present=new Set();
     for(const tag of document.querySelectorAll("script.attestation")){
       present.add(tag.dataset.rid);
-      const aNode=parseKeep(d64(tag.textContent));const rjs=toJS(aNode);
+      const aNode=parseKeep(d64(tag.textContent));const rjs=toJS(aNode)||{};
       const listed=alist[tag.dataset.rid];
       const rid=esc(tag.dataset.rid);
       const aOut=trusted?!trusted.has(rjs.public_key):(key&&rjs.public_key!==key);
@@ -1305,7 +1315,7 @@ async function renderIndex(){
       mLine+=`<div class="row ok">attestation ${esc(listed.record_type||"record")}: signed and intact</div>`;
       cards.innerHTML+=`<div class="card">${attestationHTML(rjs.payload||{})}</div>`;
     }
-    for(const a of toJS(mNode).attestations||[]){
+    for(const a of (toJS(mNode)||{}).attestations||[]){
       if(!present.has(a.receipt_id)){
         anyBad=true;
         mLine+=`<div class="row bad">attestation ${esc(a.receipt_id)}: listed but not inlined</div>`;}

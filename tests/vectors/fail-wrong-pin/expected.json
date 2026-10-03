@@ -1,0 +1,8 @@
+{
+  "kind": "bundle",
+  "pin": "NLTZBDFWy23PC+sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y=",
+  "verdict": "fail",
+  "detail_contains": [],
+  "js": null,
+  "note": "pinning an unrelated key must not bless the pack"
+}

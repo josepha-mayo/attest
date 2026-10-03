@@ -1,0 +1,12 @@
+{
+  "kind": "case",
+  "pin": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=",
+  "verdict": "fail",
+  "detail_contains": [
+    "issuer"
+  ],
+  "js": {
+    "bundle_ok": false
+  },
+  "note": "a rotation the successor never countersigned cannot pivot trust"
+}

@@ -1726,3 +1726,30 @@ def test_rate_limit_caps_unauthenticated_posts(tmp_path, store, ring_client):
         assert c.get("/", auth=None).status_code != 429
         assert c.post("/api/sites", json={"name": "x"}).status_code != 429
     app.state.inbox.close()
+
+
+def test_integrity_surfaces_the_suspect_window(api, household, t0):
+    """Rotate + revoke the retired key: /integrity.json reports the overlay
+    and the page shows it — annotation, never an integrity failure."""
+    site, _, cam, _ = household
+    r = _post_hook(api, cam.id, "motion_detected", t0, "human")
+    assert r.status_code == 202
+    vid = api.attest_state.store.active_visit(site.id).id
+    assert api.post(f"/api/visits/{vid}/close").status_code == 200
+
+    rot = api.post("/api/admin/rotate-key").json()
+    rev = api.post(
+        "/api/admin/revoke-key",
+        json={"revoked_key": rot["previous_key"], "reason": "drill"},
+    )
+    assert rev.status_code == 200, rev.text
+    rev_key = rev.json()["revoked_key"]
+
+    data = api.get("/integrity.json").json()
+    assert data["healthy"] is True  # revocation never flips the audit
+    assert rev_key in data["revoked_issuers"]
+    assert data["suspect_receipts"] >= 1
+
+    page = api.get("/integrity")
+    assert "issuer key(s) revoked" in page.text
+    assert "suspect windows" in page.text

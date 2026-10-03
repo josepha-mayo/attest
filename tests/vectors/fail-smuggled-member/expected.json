@@ -1,0 +1,10 @@
+{
+  "kind": "bundle",
+  "pin": "declared",
+  "verdict": "fail",
+  "detail_contains": [
+    "smuggled.txt"
+  ],
+  "js": null,
+  "note": "a member the pack format doesn't name fails closed"
+}

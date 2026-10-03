@@ -1,0 +1,10 @@
+{
+  "kind": "bundle",
+  "pin": "declared",
+  "verdict": "fail",
+  "detail_contains": [],
+  "js": {
+    "bundle_ok": false
+  },
+  "note": "a corrupted signature must never verify"
+}

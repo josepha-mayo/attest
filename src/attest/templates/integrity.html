@@ -39,7 +39,8 @@ This page describes the evidence system's health, not whether any worker was hon
     {{ custody }}
     <div class="muted small" style="margin-top:.5rem">
       Issuer <code>{{ issuer[:16] }}…</code> · clock mode <code>{{ mode }}</code>{% if issuer_lineage and issuer_lineage > 1 %}<br>
-      Lineage {{ issuer_lineage }} keys — retired via signed key_rotation/adoption pivots{% endif %}
+      Lineage {{ issuer_lineage }} keys — retired via signed key_rotation/adoption pivots{% endif %}{% if revoked %}<br>
+      <span class="warn">&#9888; {{ revoked|length }} issuer key(s) revoked</span> — {{ suspect }} receipt(s) sit inside suspect windows (annotation, not erasure){% endif %}
     </div>
   </div>
   <div class="card">

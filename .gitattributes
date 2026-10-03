@@ -1,3 +1,6 @@
 # docs/verify.html is byte-compared against attest.verifyjs.VERIFY_HTML in CI —
 # a CRLF checkout on Windows would drift it. Generated artifact: never convert.
 docs/verify.html -text
+# Conformance vectors are fixed bytes — CRLF conversion would corrupt them.
+tests/vectors/** -text
+docs/sample-pack.zip -text

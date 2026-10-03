@@ -1,0 +1,12 @@
+{
+  "kind": "bundle",
+  "pin": "declared",
+  "verdict": "fail",
+  "detail_contains": [
+    "hash"
+  ],
+  "js": {
+    "bundle_ok": false
+  },
+  "note": "a flipped payload field breaks the signed hash"
+}

@@ -1,0 +1,394 @@
+"""Regenerate tests/vectors/ — the conformance corpus every verifier shares.
+
+Each vector is a small directory holding a real exported pack (pack.zip)
+plus expected.json describing what EVERY verifier must conclude about it:
+server-side _verify_pack, the embedded verify_bundle.py/verify_case.py
+scripts, and the browser _JS_LIB algorithms under node. Fixed Ed25519 seed
+bytes keep the issuer keys stable across regenerations; timestamps are
+wall-time at generation (the corpus is committed, not byte-reproduced).
+
+Run:  .\\.venv\\Scripts\\python tools/make_vectors.py
+"""
+
+from __future__ import annotations
+
+import io
+import json
+import shutil
+import sys
+import tempfile
+import zipfile
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "src"))
+
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey  # noqa: E402
+from ring_sandbox import WebhookEvent, webhooks  # noqa: E402
+from ring_sandbox.client import RingClient  # noqa: E402
+from ring_sandbox.emulator import create_app  # noqa: E402
+from ring_sandbox.pytest_plugin import _SyncASGITransport  # noqa: E402
+from ring_sandbox.world import DeviceKind, default_world  # noqa: E402
+
+from attest.config import Settings  # noqa: E402
+from attest.disputepack import build_case_pack, build_pack  # noqa: E402
+from attest.engine import VisitEngine  # noqa: E402
+from attest.ledger import Signer  # noqa: E402
+from attest.media import MediaStore  # noqa: E402
+from attest.models import Role, Schedule, Site, Worker  # noqa: E402
+from attest.reviews import ReviewService, countersign_status  # noqa: E402
+from attest.store import Store  # noqa: E402
+from attest.summarize import TemplateSummarizer  # noqa: E402
+
+VECTORS = ROOT / "tests" / "vectors"
+
+# Fixed seed material — the corpus's issuer identities are stable so a regen
+# diffs only in timestamps/ids, never in which keys the vectors name.
+KEY_A = Signer(Ed25519PrivateKey.from_private_bytes(b"\x11" * 32))
+KEY_B = Signer(Ed25519PrivateKey.from_private_bytes(b"\x22" * 32))
+ATTACKER = Signer(Ed25519PrivateKey.from_private_bytes(b"\x66" * 32))
+
+
+def _sandbox():
+    world = default_world()
+    client = RingClient(
+        "sandbox-token",
+        base_url="http://sandbox",
+        transport=_SyncASGITransport(create_app(world)),
+    )
+    return world, client
+
+
+def _deployment(tmp: Path, signer: Signer):
+    """A fresh engine + a household: site, worker, doorbell cam, sensor."""
+    world, client = _sandbox()
+    tmp.mkdir(parents=True, exist_ok=True)
+    store = Store(tmp / "attest.sqlite3")
+    settings = Settings(
+        data_dir=tmp,
+        admin_token="vectors-admin-token" + "x" * 32,
+        ring_webhook_key="k",
+        summarizer="template",
+        timezone="UTC",
+        idle_close_minutes=20,
+        arrival_grace_minutes=30,
+    )
+    engine = VisitEngine(
+        store, client, signer, MediaStore(tmp / "media"), TemplateSummarizer("UTC"), settings
+    )
+    cam = next(d for d in world.devices.values() if d.kind == DeviceKind.DOORBELL)
+    sensor = next(d for d in world.devices.values() if d.kind == DeviceKind.CONTACT_SENSOR)
+    site = store.put_site(
+        Site(
+            name="Vector household",
+            ring_account_id=world.account_id,
+            door_camera_id=cam.id,
+            door_sensor_id=sensor.id,
+        )
+    )
+    worker = store.put_worker(Worker(name="Sam Vector", role=Role.HOME_HEALTH_AIDE))
+    t0 = (datetime.now(tz=UTC) - timedelta(hours=6)).replace(microsecond=0)
+    store.put_schedule(
+        Schedule(
+            site_id=site.id,
+            worker_id=worker.id,
+            window_start=t0,
+            window_end=t0 + timedelta(hours=1),
+            expected_minutes=60,
+            service="Vector visit",
+        )
+    )
+    return store, engine, site, cam, t0, world
+
+
+def _visit(engine: VisitEngine, cam, t0: datetime, world, offset_min: int = 0):
+    at = t0 + timedelta(minutes=offset_min)
+    # The event must exist in device history before snapshot fetches can
+    # serve media for it — mirror what ring_sandbox's fixtures do.
+    world.record_event(cam.id, "button_press", at_ms=int(at.timestamp() * 1000))
+    ev = WebhookEvent.model_validate(
+        webhooks.build_event(event_type="button_press", device_id=cam.id, occurred_at=at)
+    )
+    visit = engine.ingest(ev).visit
+    engine.close_for_review(visit.id)
+    return visit
+
+
+def _case_pack(store, engine, site, visits, tmp: Path, *, redact=False) -> bytes:
+    service = ReviewService(store, engine.signer, engine.clock)
+    entries = [(v, service.bundle(v.id), countersign_status(service.bundle(v.id))) for v in visits]
+    return build_case_pack(
+        store,
+        tmp / "media",
+        site,
+        entries,
+        redact_media=redact,
+        manifest_signer=lambda m: engine.issue_export_manifest(site, m),
+        issuer_key=engine.signer.public_key_b64,
+    )
+
+
+def _rewrite_zip(data: bytes, transform) -> bytes:
+    """Rebuild the zip through transform(name, bytes) -> bytes|None|DROP."""
+    src = zipfile.ZipFile(io.BytesIO(data))
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for name in src.namelist():
+            if name.endswith("/"):
+                continue
+            body = transform(name, src.read(name))
+            if body is not None:
+                z.writestr(name, body)
+    return out.getvalue()
+
+
+def _write_vector(name: str, pack: bytes, expected: dict) -> None:
+    d = VECTORS / name
+    if d.exists():
+        shutil.rmtree(d)
+    d.mkdir(parents=True)
+    (d / "pack.zip").write_bytes(pack)
+    (d / "expected.json").write_text(json.dumps(expected, indent=2) + "\n", encoding="utf-8")
+    print(f"  {name}: {expected['note']}")
+
+
+def main() -> None:
+    print("generating conformance vectors into tests/vectors/")
+    tmp = Path(tempfile.mkdtemp(prefix="attest-vectors-"))
+
+    # --- deployment one: rotate mid-story, then revoke the retired key ---
+    store, engine, site, cam, t0, world = _deployment(tmp / "d1", KEY_A)
+    v1 = _visit(engine, cam, t0, world)
+    service_a = ReviewService(store, KEY_A, engine.clock)
+    bundle1 = service_a.bundle(v1.id)
+    media_root = tmp / "d1" / "media"
+
+    clean_bundle = build_pack(store, media_root, bundle1)
+    _write_vector(
+        "ok-clean-bundle",
+        clean_bundle,
+        {
+            "kind": "bundle",
+            "pin": "declared",
+            "verdict": "ok",
+            "detail_contains": ["verified", "media"],
+            "js": {"bundle_ok": True, "trusted_count": 1, "suspect_count": 0, "lifecycle_suspect_count": 0},
+            "note": "one visit, one key, media digests all present — the baseline",
+        },
+    )
+
+    redacted = build_pack(store, media_root, bundle1, redact_media=True)
+    _write_vector(
+        "ok-redacted-media",
+        redacted,
+        {
+            "kind": "bundle",
+            "pin": "declared",
+            "verdict": "ok",
+            "detail_contains": ["withheld"],
+            "js": {"bundle_ok": True, "trusted_count": 1, "suspect_count": 0, "lifecycle_suspect_count": 0},
+            "note": "media bytes withheld by redaction; signed digests still verify",
+        },
+    )
+
+    first_signed = store.receipt_for_visit(v1.id).issued_at
+    rotation = engine.issue_key_rotation(KEY_B.public_key_b64, "planned rotation")
+    engine.signer = KEY_B
+    engine.issue_key_adoption(KEY_A.public_key_b64, rotation)
+    v2 = _visit(engine, cam, t0, world, offset_min=90)
+
+    rotated_pack = _case_pack(store, engine, site, [v1, v2], tmp / "d1")
+    _write_vector(
+        "ok-rotated-case",
+        rotated_pack,
+        {
+            "kind": "case",
+            "pin": KEY_A.public_key_b64,  # pinning the RETIRED key still verifies
+            "verdict": "ok",
+            "detail_contains": ["issuer keys linked via the signed rotation chain"],
+            "js": {"bundle_ok": True, "trusted_count": 2, "suspect_count": 0, "lifecycle_suspect_count": 0},
+            "note": "case pack spanning a signed rotation — predecessor pin verifies both eras",
+        },
+    )
+
+    # Revoke the retired key with a suspect window covering its whole output —
+    # the rotation receipt itself lands inside the window (an honest pack
+    # flags that the pivot's own provenance is qualified).
+    engine.issue_key_revocation(KEY_A.public_key_b64, first_signed - timedelta(seconds=1), "demo compromise")
+    revoked_pack = _case_pack(store, engine, site, [v1, v2], tmp / "d1")
+    _write_vector(
+        "ok-revoked-case",
+        revoked_pack,
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "ok",
+            "detail_contains": ["suspect window", "trust pivot"],
+            "js": {"bundle_ok": True, "trusted_count": 2, "suspect_count": 1, "lifecycle_suspect_count": 1},
+            "note": "revocation annotates: records + the pivot receipt itself sit in the suspect window",
+        },
+    )
+
+    # --- deployment two: orphaned rotation (pivot without countersign) ---
+    s2, e2, site2, cam2, t02, world2 = _deployment(tmp / "d2", KEY_A)
+    w1 = _visit(e2, cam2, t02, world2)
+    e2.issue_key_rotation(KEY_B.public_key_b64, "crash before adoption")
+    e2.signer = KEY_B  # successor signs a visit but NEVER countersigned
+    w2 = _visit(e2, cam2, t02, world2, offset_min=90)
+    orphan_pack = _case_pack(s2, e2, site2, [w1, w2], tmp / "d2")
+    _write_vector(
+        "fail-orphan-rotation",
+        orphan_pack,
+        {
+            "kind": "case",
+            "pin": KEY_A.public_key_b64,
+            "verdict": "fail",
+            "detail_contains": ["issuer"],
+            "js": {"bundle_ok": False},  # issuer self-declares as B; A-signed bundle can't verify
+            "note": "a rotation the successor never countersigned cannot pivot trust",
+        },
+    )
+
+    # --- negative vectors: byte-level tampering on the clean pack ---
+    def tamper_payload(name: str, body: bytes):
+        if name != "bundle.json":
+            return body
+        b = json.loads(body)
+        b["original"]["payload"]["tampered"] = True
+        return json.dumps(b).encode()
+
+    _write_vector(
+        "fail-payload-tamper",
+        _rewrite_zip(clean_bundle, tamper_payload),
+        {
+            "kind": "bundle",
+            "pin": "declared",
+            "verdict": "fail",
+            "detail_contains": ["hash"],
+            "js": {"bundle_ok": False},
+            "note": "a flipped payload field breaks the signed hash",
+        },
+    )
+
+    def tamper_sig(name: str, body: bytes):
+        if name != "bundle.json":
+            return body
+        b = json.loads(body)
+        b["original"]["signature"] = "A" + b["original"]["signature"][1:]
+        return json.dumps(b).encode()
+
+    _write_vector(
+        "fail-signature-tamper",
+        _rewrite_zip(clean_bundle, tamper_sig),
+        {
+            "kind": "bundle",
+            "pin": "declared",
+            "verdict": "fail",
+            "detail_contains": [],
+            "js": {"bundle_ok": False},
+            "note": "a corrupted signature must never verify",
+        },
+    )
+
+    def tamper_media(name: str, body: bytes):
+        if name.startswith("media/"):
+            return bytes([body[0] ^ 0xFF]) + body[1:]
+        return body
+
+    _write_vector(
+        "fail-media-mismatch",
+        _rewrite_zip(clean_bundle, tamper_media),
+        {
+            "kind": "bundle",
+            "pin": "declared",
+            "verdict": "fail",
+            "detail_contains": ["media"],
+            "js": None,  # media byte checks live in the pack driver, not the lib
+            "note": "media bytes that don't hash to the signed digest are caught",
+        },
+    )
+
+    src = zipfile.ZipFile(io.BytesIO(clean_bundle))
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for n in src.namelist():
+            if not n.endswith("/"):
+                z.writestr(n, src.read(n))
+        z.writestr("smuggled.txt", b"planted content")
+    _write_vector(
+        "fail-smuggled-member",
+        out.getvalue(),
+        {
+            "kind": "bundle",
+            "pin": "declared",
+            "verdict": "fail",
+            "detail_contains": ["smuggled.txt"],
+            "js": None,
+            "note": "a member the pack format doesn't name fails closed",
+        },
+    )
+
+    _write_vector(
+        "fail-wrong-pin",
+        clean_bundle,
+        {
+            "kind": "bundle",
+            "pin": ATTACKER.public_key_b64,
+            "verdict": "fail",
+            "detail_contains": [],
+            "js": None,  # pin semantics are a CLI/server concept
+            "note": "pinning an unrelated key must not bless the pack",
+        },
+    )
+
+    # Case pack with a manifest-listed visit removed from the zip.
+    gone = _rewrite_zip(
+        rotated_pack,
+        lambda name, body: None if name == f"visits/{v1.id}/bundle.json" else body,
+    )
+    _write_vector(
+        "fail-missing-listed",
+        gone,
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "fail",
+            "detail_contains": [v1.id],
+            "js": None,
+            "note": "a bundle the signed manifest lists but the zip lacks fails",
+        },
+    )
+
+    _write_readme()
+    print("done — commit tests/vectors/ and run tests/test_conformance.py")
+
+
+def _write_readme() -> None:
+    (VECTORS / "README.md").write_text(
+        """# Verifier conformance vectors
+
+Fixed evidence packs that every Attest verifier must judge identically —
+the same discipline Wycheproof vectors bring to crypto implementations.
+`pack.zip` is real exported evidence; `expected.json` is the shared oracle:
+
+- `kind`: `bundle` (single-visit dispute pack) or `case` (site case pack)
+- `pin`: `"declared"` (self-consistency under the pack's own issuer) or an
+  explicit base64 Ed25519 public key — pinning the retired key exercises
+  the rotation lineage
+- `verdict`: `ok` or `fail` — integrity verdicts are identical everywhere
+- `detail_contains`: fragments the human-readable detail must carry
+- `js`: browser-lib expectations when the check is algorithm-level —
+  `bundle_ok`, `trusted_count` (issuer lineage width), `suspect_count`
+  (records inside a revoked key's suspect window)
+
+Regenerate with `tools/make_vectors.py` when the pack format changes —
+never hand-edit the zips. The vectors are the contract: a verifier that
+disagrees with `expected.json` is wrong, whatever surface it runs on.
+""",
+        encoding="utf-8",
+    )
+
+
+if __name__ == "__main__":
+    main()

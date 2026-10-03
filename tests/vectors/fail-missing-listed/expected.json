@@ -1,0 +1,10 @@
+{
+  "kind": "case",
+  "pin": "declared",
+  "verdict": "fail",
+  "detail_contains": [
+    "vis_a37e71587a8b"
+  ],
+  "js": null,
+  "note": "a bundle the signed manifest lists but the zip lacks fails"
+}
