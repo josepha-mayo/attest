@@ -216,18 +216,30 @@ def trusted_issuer_keys(issuer_key: str, key_receipts: list[Receipt], *, max_hop
 def descendant_issuer_keys(root_key: str, rotations: list[Receipt], *, max_hops: int = 32) -> set[str]:
     """The forward walk for single-visit bundles: reviews append after the
     original, so a bundle legitimately carries issuer keys the rotations
-    endorse — the original's key plus every verified successor."""
+    endorse — the original's key plus every verified successor.
+
+    A hop requires the successor's ``key_adoption`` consent, same as the
+    chain pivot and ancestor walk: a rotation whose successor key was never
+    persisted is a dead branch, not a trusted descendant — without the gate
+    an orphaned rotation would strand every later legitimate receipt into
+    "outside the rotation chain". Competing rotations from one predecessor
+    resolve deterministically: consented hops first, then highest sequence."""
     trusted = {root_key}
     cur = root_key
     for _ in range(max_hops):
+        candidates = [
+            r
+            for r in rotations
+            if r.payload.get("record_type") == "key_rotation"
+            and r.payload.get("previous_key") == cur
+            and r.public_key == cur
+            and verify_receipt(r, public_key=cur)[0]
+        ]
         hop = next(
             (
                 r
-                for r in rotations
-                if r.payload.get("record_type") == "key_rotation"
-                and r.payload.get("previous_key") == cur
-                and r.public_key == cur
-                and verify_receipt(r, public_key=cur)[0]
+                for r in sorted(candidates, key=lambda x: x.sequence, reverse=True)
+                if _adoption_consent(rotations, r, r.payload["new_key"])
             ),
             None,
         )
@@ -242,14 +254,15 @@ def verify_chain(receipts: list[Receipt], *, public_key: str | None = None) -> t
     """Verify every receipt and the ``prev_hash`` links.
 
     The issuer key may rotate mid-chain: a ``key_rotation`` receipt signed by
-    the current key is the pivot — every receipt after it must verify under
-    the named successor. With ``public_key`` pinned, the chain's root key must
-    be the pin itself or an ancestor of it reachable through rotation receipts
-    the successor countersigned via ``key_adoption`` (pinning today's key
-    still validates receipts the retired key wrote; an uncountersigned
-    "rotation" is a graft attempt, not a handoff). A rotation naming a key
-    that never signs anything strands the
-    rest of the chain into a signature failure — visible, not silent."""
+    the current key AND countersigned by the successor's ``key_adoption`` is
+    the pivot — every receipt after it must verify under the named successor.
+    Endorsement alone has no pivot power: a rotation orphaned between its
+    signature and the successor's persist/adoption (a mid-rotation crash)
+    leaves the chain under the retiring key, verifiable and retryable.
+    With ``public_key`` pinned, the chain's root key must be the pin itself
+    or an ancestor of it reachable through consented rotations (pinning
+    today's key still validates receipts the retired key wrote; an
+    uncountersigned "rotation" is a graft attempt, not a handoff)."""
     if not receipts:
         return True, "0 receipts"
     ordered = sorted(receipts, key=lambda x: x.sequence)
@@ -269,6 +282,7 @@ def verify_chain(receipts: list[Receipt], *, public_key: str | None = None) -> t
     key = first_key
     prev: str | None = None
     expected_seq = 1
+    pivots = 0
     for r in ordered:
         ok, why = verify_receipt(r, public_key=key)
         if not ok:
@@ -280,6 +294,20 @@ def verify_chain(receipts: list[Receipt], *, public_key: str | None = None) -> t
         prev = r.payload_hash
         expected_seq += 1
         p = r.payload
-        if p.get("record_type") == "key_rotation" and p.get("previous_key") == key and p.get("new_key"):
+        if (
+            p.get("record_type") == "key_rotation"
+            and p.get("previous_key") == key
+            and p.get("new_key")
+            # The pivot needs BOTH signatures: endorsement alone would let a
+            # rotation that crashed before the successor was persisted strand
+            # every later receipt. An unconsented rotation is inert history —
+            # the chain stays under the retiring key, and a later rotation can
+            # still pivot (retrying rotate-key after a crash is safe).
+            and _adoption_consent(ordered, r, p["new_key"])
+        ):
             key = p["new_key"]
-    return True, f"{len(receipts)} receipts, chain intact"
+            pivots += 1
+    detail = f"{len(receipts)} receipts, chain intact"
+    if pivots:
+        detail += f" across {pivots} signed key rotation{'s' if pivots > 1 else ''}"
+    return True, detail

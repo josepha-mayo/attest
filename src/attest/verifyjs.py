@@ -362,7 +362,9 @@ async function trustedKeys(issuerKey,rotationNodes,maxHops=32){
 async function descendantKeys(rootKey,rotationNodes,maxHops=32){
   /* The forward walk for single-visit bundles: reviews append after the
      original, so a bundle legitimately carries keys the signed rotations
-     endorse — the root key plus every verified successor. */
+     endorse — the root key plus every verified successor. Each hop needs
+     BOTH signatures (retiring endorsement + successor key_adoption): an
+     orphaned rotation is a dead branch, not a trusted descendant. */
   const trusted=new Set([rootKey]);let cur=rootKey;
   for(let i=0;i<maxHops;i++){
     let nxt=null;
@@ -370,7 +372,7 @@ async function descendantKeys(rootKey,rotationNodes,maxHops=32){
       const r=toJS(rn),p=r.payload||{};
       if(p.record_type==="key_rotation"&&p.previous_key===cur&&r.public_key===cur){
         const c=await checkReceipt(rn);
-        if(c.ok){nxt=p.new_key;break;}
+        if(c.ok&&await adoptedBy(rotationNodes,rn,p.new_key)){nxt=p.new_key;break;}
       }
     }
     if(nxt===null)break;

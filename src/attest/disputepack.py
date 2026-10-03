@@ -358,8 +358,10 @@ def trusted_keys(issuer_key, rotation_receipts, max_hops=32):
 def descendant_keys(root_key, rotation_receipts, max_hops=32):
     """The mirror walk for single-visit bundles: reviews append forward in
     time, so a bundle legitimately carries keys AFTER its original — every
-    successor reachable through signed rotations. Each hop must be a valid
-    receipt signed by the retiring key endorsing the successor."""
+    successor reachable through signed rotations. Each hop needs BOTH
+    signatures: the retiring key's endorsement and the successor's
+    key_adoption consent — an orphaned rotation (crashed before adoption)
+    is a dead branch, not a trusted descendant."""
     trusted = {root_key}
     cur = root_key
     for _ in range(max_hops):
@@ -372,7 +374,7 @@ def descendant_keys(root_key, rotation_receipts, max_hops=32):
                 and r.get("public_key") == cur
             ):
                 ok, _ = check_receipt(r, cur)
-                if ok:
+                if ok and _adoption_consent(rotation_receipts, r, p["new_key"]):
                     nxt = p["new_key"]
                     break
         if nxt is None:

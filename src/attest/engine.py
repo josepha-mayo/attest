@@ -22,6 +22,7 @@ import logging
 import secrets
 import sqlite3
 import statistics
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -1193,6 +1194,40 @@ class VisitEngine:
             return self.store.receipt_for_visit(pseudo_id)
         return receipt
 
+    @contextmanager
+    def signing_barrier(self):
+        """Hold the store write lock across a multi-step signing sequence.
+
+        ``@atomic`` methods keep their own transactions (the lock is an
+        RLock, so nested acquisitions re-enter and each step still commits
+        independently) — but no other ``@atomic`` issuance can interleave
+        between the steps. Key rotation needs exactly this: a receipt signed
+        between the rotation commit and the signer swap would land under the
+        retired key post-pivot and break the chain for good."""
+        with self.store._lock:  # noqa: SLF001 — engine is the store's writer peer
+            yield
+
+    def resume_pending_adoptions(self) -> list[Receipt]:
+        """Countersign any unconsented rotation endorsing THIS signer — the
+        recovery path for a crash between successor persist and adoption.
+        Each adoption is idempotent via its ``key:``:``adopted`` pseudo
+        visit_id, so calling this on boot and before every rotate is safe:
+        a fully consummated history returns []."""
+        from .ledger import _adoption_consent
+
+        new_key = self.signer.public_key_b64
+        receipts = self.store.receipts()
+        issued = []
+        for r in receipts:
+            p = r.payload
+            if (
+                p.get("record_type") == "key_rotation"
+                and p.get("new_key") == new_key
+                and not _adoption_consent(receipts, r, new_key)
+            ):
+                issued.append(self.issue_key_adoption(p["previous_key"], r))
+        return issued
+
     @atomic
     def issue_key_rotation(self, new_public_key: str, reason: str = "") -> Receipt:
         """Sign, under the CURRENT issuer key, that it retires in favor of the
@@ -1206,6 +1241,12 @@ class VisitEngine:
         old_key = self.signer.public_key_b64
         if new_public_key == old_key:
             raise ValueError("rotation to the same key is a no-op")
+        used = {r.public_key for r in self.store.receipts()}
+        if new_public_key in used:
+            raise ValueError(
+                "successor key already signed receipts — re-adopting a retired "
+                "key would make lineage non-monotonic; generate a fresh key"
+            )
         pseudo_id = f"key:{old_key[:12]}:{new_public_key[:12]}"
         existing = self.store.receipt_for_visit(pseudo_id)
         if existing:
@@ -1247,6 +1288,8 @@ class VisitEngine:
         if (
             rotation.payload.get("record_type") != "key_rotation"
             or rotation.payload.get("new_key") != new_key
+            or rotation.payload.get("previous_key") != previous_public_key
+            or rotation.public_key != previous_public_key
         ):
             raise ValueError("adoption must name a key_rotation receipt endorsing THIS key")
         pseudo_id = f"key:{previous_public_key[:12]}:{new_key[:12]}:adopted"

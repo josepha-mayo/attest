@@ -95,9 +95,17 @@ pinned-key trust across the handoff through `trusted_issuer_keys` /
 Both forgery directions are covered: a pivot signed by anyone but the retiring
 key breaks chain verification outright, and an ancestor claim without the
 successor's countersigned adoption never enters the trusted set — endorsement
-alone is self-serve, consent is not. What rotation does **not** prove: that
-either key was or stayed uncompromised. A compromise discovered after the fact
-is a revocation problem; rotation is the continuity story, not the rescue.
+alone is self-serve, consent is not. Crash safety is designed the same way:
+an adoption that never landed leaves the rotation inert (the chain stays
+under the retiring key, later receipts still verify, and a retried rotate
+can still pivot), `engine.signing_barrier()` holds the store write lock
+across pivot→persist→adopt so no issuance can slip a retired-key signature
+into the gap, and `resume_pending_adoptions()` at every server boot and
+`rotate-key` run countersigns any unconsented pivot endorsing the current
+signer — the wreckage of a crashed rotate completes instead of stranding.
+What rotation does **not** prove: that either key was or stayed
+uncompromised. A compromise discovered after the fact is a revocation
+problem; rotation is the continuity story, not the rescue.
 
 Two paths need an **external anchor** to be provable: truncating the journal
 before the earliest pin, and wholesale replacement of store + receipts + key

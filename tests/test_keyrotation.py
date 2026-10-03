@@ -116,6 +116,47 @@ def test_forged_rotation_endorsement_never_pivots(engine, store, household, sche
     assert ledger._rotation_hop(store.receipts() + [forged], old_key) is None
 
 
+def test_orphaned_rotation_is_inert_not_fatal(engine, store, household, schedule, t0):
+    """Crash between `key_rotation` and `key_adoption` (the successor never
+    persisted): the rotation must be inert history — the chain stays under
+    the retiring key, later receipts still verify, and a retry can pivot."""
+    _closed_visit(engine, household, t0)
+    old_key = engine.signer.public_key_b64
+    orphan = engine.issue_key_rotation(Signer.ephemeral().public_key_b64, "crashed")
+    site = store.sites()[0]
+    # the engine still holds the OLD signer — post-orphan receipts sign under it
+    engine.issue_coverage_attestation(site, t0 - timedelta(hours=1), t0 + timedelta(hours=2))
+    ok, why = ledger.verify_chain(store.receipts())
+    assert ok, why
+    assert {r.public_key for r in store.receipts()} == {old_key}
+    # a retried rotation (with adoption this time) still pivots the chain
+    _rotate(engine)
+    ok, why = ledger.verify_chain(store.receipts())
+    assert ok, why
+    assert {orphan.public_key, engine.signer.public_key_b64} <= {r.public_key for r in store.receipts()}
+
+
+def test_resume_pending_adoptions_consummates_a_crashed_rotate(engine, store, household, schedule, t0):
+    """rotate-key wrote the successor PEM and died before adoption: the next
+    boot's engine holds that successor — resume_pending_adoptions finds the
+    unconsented pivot endorsing it and countersigns, activating the pivot."""
+    _closed_visit(engine, household, t0)
+    successor = Signer.ephemeral()
+    engine.issue_key_rotation(successor.public_key_b64, "crashed")
+    # crash point: successor persisted (here: swapped in as signer), adoption never signed
+    engine.signer = successor
+    site = store.sites()[0]
+    engine.issue_coverage_attestation(site, t0 - timedelta(hours=1), t0 + timedelta(hours=2))
+    # before resume the orphan is inert — post-"crash" receipts don't verify
+    assert not ledger.verify_chain(store.receipts())[0]
+    resumed = engine.resume_pending_adoptions()
+    assert len(resumed) == 1
+    ok, why = ledger.verify_chain(store.receipts())
+    assert ok, why
+    # idempotent: a second resume is a no-op
+    assert engine.resume_pending_adoptions() == []
+
+
 def test_review_bundle_spans_rotation(engine, store, household, schedule, t0):
     """A review appended after the rotation signs under the successor — the
     bundle verifies through the signed pivot, not despite it."""

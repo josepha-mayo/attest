@@ -208,6 +208,15 @@ def create_app(
 
         worker_task = asyncio.create_task(webhook_worker())
         tasks = []
+        # A rotation that crashed between persist and adoption left the pivot
+        # unconsented — the current signer completes it now, before any new
+        # issuance can be mistaken for the missing consent.
+        try:
+            resumed = await asyncio.to_thread(engine.resume_pending_adoptions)
+            for r in resumed:
+                log.info("completed pending key_adoption %s at boot", r.id)
+        except Exception:  # noqa: BLE001
+            log.exception("pending-adoption sweep failed at boot")
         if sweep_interval_s > 0 and not s.replay_mode:
             tasks.append(asyncio.create_task(sweeper()))
         if s.poll_history_seconds > 0:
@@ -1480,32 +1489,44 @@ def create_app(
         old_key = signer.public_key_b64
         sk = Ed25519PrivateKey.generate()
         new_key = Signer(sk).public_key_b64
-        rotation = await asyncio.to_thread(engine.issue_key_rotation, new_key, reason)
         pem = sk.private_bytes(
             serialization.Encoding.PEM,
             serialization.PrivateFormat.PKCS8,
             serialization.NoEncryption(),
         )
-        await asyncio.to_thread(
-            persist_signer_key,
-            s.key_path,
-            pem,
-            custody=s.key_custody,
-            kms_key_id=s.kms_key_id,
-            aws_region=s.aws_region,
-        )
-        # Reload from the custody layer rather than trusting the PEM just
-        # written — a KMS-mode deployment must never adopt a signer KMS
-        # couldn't wrap.
-        signer = await asyncio.to_thread(
-            load_or_create_signer,
-            s.key_path,
-            custody=s.key_custody,
-            kms_key_id=s.kms_key_id,
-            aws_region=s.aws_region,
-        )
-        engine.signer = reviews.signer = app.state.signer = signer
-        adoption = await asyncio.to_thread(engine.issue_key_adoption, old_key, rotation)
+
+        def _rotate() -> tuple[Signer, Receipt, Receipt]:
+            # One worker thread across the whole sequence: the barrier holds
+            # the store's write lock so no @atomic issuance can sign under the
+            # retiring key between the pivot commit and the signer swap — a
+            # receipt landing in that window would be a retired-key signature
+            # post-pivot, and the chain would break for good. The lock is a
+            # thread-affine RLock, so persist/reload ride inside it too (the
+            # KMS round-trip stalls ingestion briefly — correct, vs a race).
+            with engine.signing_barrier():
+                rotation = engine.issue_key_rotation(new_key, reason)
+                persist_signer_key(
+                    s.key_path,
+                    pem,
+                    custody=s.key_custody,
+                    kms_key_id=s.kms_key_id,
+                    aws_region=s.aws_region,
+                )
+                # Reload from the custody layer rather than trusting the PEM
+                # just written — a KMS-mode deployment must never adopt a
+                # signer KMS couldn't wrap.
+                successor = load_or_create_signer(
+                    s.key_path,
+                    custody=s.key_custody,
+                    kms_key_id=s.kms_key_id,
+                    aws_region=s.aws_region,
+                )
+                engine.signer = successor
+                adoption = engine.issue_key_adoption(old_key, rotation)
+                return successor, rotation, adoption
+
+        signer, rotation, adoption = await asyncio.to_thread(_rotate)
+        reviews.signer = app.state.signer = signer
         return {
             "previous_key": old_key,
             "new_key": signer.public_key_b64,
@@ -1909,6 +1930,8 @@ def _verify_pack(data: bytes, public_key: str, known_rotations: list | None = No
             if name.endswith("/") or name in allowed or name.startswith("media/"):
                 continue
             return False, f"{name}: present but not in the signed manifest"
+        if isinstance(trusted, set) and len(trusted) > 1:
+            detail += f" ({len(trusted)} issuer keys linked via the signed rotation chain)"
         return True, detail
     except Exception as exc:  # noqa: BLE001
         return False, f"not a valid exported pack: {exc}"
@@ -2045,6 +2068,8 @@ def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -
         if len(parts) >= 4 and parts[0] == "visits" and parts[2] == "media" and parts[1] in visit_ids:
             continue  # digest-checked against the signed evidence above
         return False, f"{name}: present but not in the signed manifest"
+    if len(trusted) > 1:
+        manifest_note += f"; {len(trusted)} issuer keys linked via the signed rotation chain"
     return True, f"case pack verified — {total} visit record(s) intact ({manifest_note}): " + "; ".join(lines)
 
 
