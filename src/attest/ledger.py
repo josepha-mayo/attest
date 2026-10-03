@@ -379,3 +379,38 @@ def suspect_receipts(receipts: list[Receipt], revoked: dict[str, str] | None = N
         if after is not None and at is not None and at > after:
             out.append(r)
     return out
+
+
+def issuer_document(issuer_key: str, receipts: list[Receipt]) -> dict[str, Any]:
+    """The ``attest.issuer/1`` discovery document — a JWKS analogue served at
+    ``/.well-known/attest-issuer.json`` and exported by ``attest issuer``.
+
+    Carries the current issuer key plus every signed key-lifecycle receipt
+    (rotation/adoption/revocation) so a remote verifier can pin a pack to
+    THIS deployment and walk the lineage itself — the receipts are
+    self-verifying crypto that already travels in every exported pack. The
+    issuer_key's authenticity rides on the channel serving the document:
+    over the deployment's own HTTPS it is trust-on-first-use; for higher
+    assurance pin ``--key`` out of band instead."""
+    key_receipts = [
+        r.model_dump(mode="json")
+        for r in sorted(receipts, key=lambda x: x.sequence)
+        if r.visit_id.startswith("key:")
+    ]
+    tip = max(receipts, key=lambda r: r.sequence, default=None)
+    return {
+        "schema": "attest.issuer/1",
+        "issuer_key": issuer_key,
+        "key_receipts": key_receipts,
+        "chain_tip": (
+            {"receipt_id": tip.id, "sequence": tip.sequence, "payload_hash": tip.payload_hash}
+            if tip
+            else None
+        ),
+        "served_at": utcnow().isoformat(),
+        "boundary": (
+            "issuer_key's authenticity is only as strong as the channel that "
+            "served this document — over the deployment's own HTTPS it is "
+            "trust-on-first-use; pin --key for out-of-band assurance"
+        ),
+    }

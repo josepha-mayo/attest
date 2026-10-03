@@ -150,6 +150,7 @@ async function edVerify(sig,pk,msg){
 /* ---------- receipt + chain checks (mirrors ledger.verify_*) ---------- */
 async function checkReceipt(rNode){
   const r=toJS(rNode);
+  if(!r||typeof r!=="object")return{ok:false,why:"malformed receipt"};
   const canon=canonical(get(rNode,"payload"));
   const h=await sha256hex(enc(canon));
   if(h!==r.payload_hash)return{ok:false,why:"payload hash mismatch (payload was altered)"};
@@ -189,7 +190,7 @@ async function checkBundle(root,key){
   const outOf=k=>key instanceof Set?!key.has(k):(key&&k!==key);
   const oNode=get(root,"original");
   if(!oNode)return{ok:false,why:"no original receipt"};
-  const original=toJS(oNode);
+  const original=toJS(oNode)||{};
   if(outOf(original.public_key))
     return{ok:false,why:"original: signed by a key outside the trusted issuer chain"};
   const c0=await checkReceipt(oNode);
@@ -202,7 +203,7 @@ async function checkBundle(root,key){
     const e=toJS(entries[i]);
     const rNode=get(entries[i],"receipt");
     if(!rNode)return{ok:false,why:`review ${n}: entry has no receipt`};
-    const r=toJS(rNode);
+    const r=toJS(rNode)||{};
     if(outOf(r.public_key))
       return{ok:false,why:`review ${n}: signed by a key outside the trusted issuer chain`};
     const c=await checkReceipt(rNode);
@@ -307,7 +308,7 @@ async function checkManifestNode(mNode,key){
      which receipt hashes it carries, so a pack that drops or swaps a record
      fails here — not just on a missing file. Pre-signature packs report
      unsigned rather than failing. */
-  const m=toJS(mNode);
+  const m=toJS(mNode)||{};
   const sig=get(mNode,"signature_receipt");
   if(!sig)return{ok:true,why:"unsigned manifest (pre-signature pack)"};
   const c=await checkReceipt(sig);
@@ -331,9 +332,9 @@ async function adoptedBy(keyReceipts,rotation,newKey){
      newKey naming this exact rotation (id + payload hash). A retiring key's
      endorsement is self-serve — any key can claim any successor — so consent
      is what separates a real handoff from a grafted "predecessor". */
-  const rr=toJS(rotation),rp=rr.payload||{};
+  const rr=toJS(rotation)||{},rp=rr.payload||{};
   for(const an of keyReceipts){
-    const a=toJS(an),ap=a.payload||{},link=ap.rotation_receipt||{};
+    const a=toJS(an)||{},ap=a.payload||{},link=ap.rotation_receipt||{};
     if(ap.record_type==="key_adoption"&&link.id===rr.id&&link.hash===rr.payload_hash
       &&a.public_key===newKey){
       const c=await checkReceipt(an);
@@ -514,14 +515,14 @@ async function verifyFiles(files){
     const t=await text("bundle.json");
     if(!t)return"<div class='row bad'>no bundle.json or manifest.json in the selected files</div>";
     const root=parseKeep(t);
-    const vid=toJS(get(root,"original")||{t:"obj",v:[]}).visit_id||"visit";
+    const vid=(toJS(get(root,"original"))||{}).visit_id||"visit";
     bundles.push([vid,root]);
     /* key_rotations.json carries the signed pivot links — reviews appended
        after a rotation verify under the successor. Malformed content fails
        closed, mirroring verify_bundle.py. */
     const kt=await text("key_rotations.json");
     if(kt){
-      const oKey=toJS(get(root,"original")||{t:"obj",v:[]}).public_key;
+      const oKey=(toJS(get(root,"original"))||{}).public_key;
       const rn=get(parseKeep(kt),"rotations");
       if(!rn||rn.t!=="arr"){
         anyBad=true;say("bad","key_rotations.json: malformed");
@@ -540,7 +541,7 @@ async function verifyFiles(files){
     if(!key)key=toJS(get(oNode,"public_key"));
     const c=await checkBundle(root,trusted||key);
     if(!c.ok)anyBad=true;
-    const js=toJS(root);
+    const js=toJS(root)||{};
     /* Revocation is a trust overlay — never a FAIL: count bundle records
        signed by a revoked key inside its declared suspect window and warn. */
     const revN=get(root,"reviews");
@@ -1214,7 +1215,7 @@ async function renderIndex(){
   const revoked=await revokedKeys(rotNodes);let suspectTotal=0;
   for(const tag of document.querySelectorAll("script.bundle")){
     const root=parseKeep(d64(tag.textContent));
-    const js=toJS(root);
+    const js=toJS(root)||{};
     const oNode=get(root,"original");
     if(!key)key=toJS(get(oNode,"public_key"));
     const c=await checkBundle(root,trusted||key);

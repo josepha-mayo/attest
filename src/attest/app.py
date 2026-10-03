@@ -267,7 +267,7 @@ def create_app(
     basic = HTTPBasic(auto_error=False)
 
     async def authorize(request: Request):
-        if request.url.path in ("/webhooks/ring", "/healthz"):
+        if request.url.path in ("/webhooks/ring", "/healthz", "/.well-known/attest-issuer.json"):
             return
         if request.method not in ("GET", "HEAD", "OPTIONS"):
             origin = request.headers.get("origin")
@@ -318,8 +318,9 @@ def create_app(
             request._body = bytes(received)
         return await call_next(request)
 
-    # Outer-most middleware (registered last): refuse floods on the
-    # unauthenticated POST surfaces before a byte of the body is read.
+    # Second-outermost middleware (registered before privacy_headers, after
+    # body-limit): refuse floods on the unauthenticated POST surfaces before
+    # a byte of the body is read; the 429 still gets the no-store headers.
     _POST_BUDGETS = _TokenBuckets()
 
     @app.middleware("http")
@@ -846,6 +847,16 @@ def create_app(
             }
 
         return await asyncio.to_thread(gather)
+
+    @app.get("/.well-known/attest-issuer.json")
+    async def issuer_discovery():
+        """Issuer-key discovery — the JWKS analogue. Serves the current
+        issuer key plus every signed key-lifecycle receipt (rotation,
+        adoption, revocation) so a remote verifier can pin a pack to THIS
+        deployment over its own HTTPS endpoint instead of copying a
+        fingerprint out of band. Public by design: the material is public
+        verification crypto that travels in every exported pack anyway."""
+        return ledger.issuer_document(signer.public_key_b64, store.receipts())
 
     @app.get("/visits/{visit_id}", response_class=HTMLResponse)
     async def visit_page(request: Request, visit_id: str = PathParam(max_length=128)):

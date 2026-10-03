@@ -934,6 +934,67 @@ def _demo(args: argparse.Namespace) -> None:
         ring_sock.close()
 
 
+def _is_loopback(host: str) -> bool:
+    """127/8 and ::1 — not just the spelled-out 127.0.0.1 — plus the
+    localhost name. Non-IP hostnames are never loopback."""
+    import ipaddress
+
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _fetch_issuer_doc(url: str, client=None) -> dict:
+    """Fetch ``<url>/.well-known/attest-issuer.json`` — the remote pin for
+    verification. HTTPS only, loopback excepted (the document itself warns
+    that issuer authenticity rides on transport). Byte-capped and
+    schema-checked; anything else fails closed. A local file path loads a
+    document previously written by ``attest issuer --out`` instead."""
+    from pathlib import Path
+
+    if "://" not in url and Path(url).is_file():
+        try:
+            raw = Path(url).read_bytes()
+        except OSError as exc:
+            sys.exit(f"issuer document unreadable: {exc}")
+        if len(raw) > 4 * 1024 * 1024:
+            sys.exit("issuer document exceeds the 4 MB bound")
+        try:
+            doc = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            sys.exit(f"issuer document is not valid JSON: {exc}")
+        if doc.get("schema") != "attest.issuer/1" or not doc.get("issuer_key"):
+            sys.exit(f"{url} is not an attest.issuer/1 document")
+        return doc
+    base = urlsplit(url if "://" in url else f"https://{url}")
+    host = base.hostname or ""
+    if base.scheme != "https" and not _is_loopback(host):
+        sys.exit("issuer discovery requires HTTPS — loopback excepted for local verification")
+    endpoint = f"{base.scheme}://{base.netloc}/.well-known/attest-issuer.json"
+    stream_ctx = client.stream if client is not None else httpx.stream
+    try:
+        with stream_ctx("GET", endpoint, timeout=15) as r:
+            if r.status_code != 200:
+                sys.exit(f"issuer discovery failed: HTTP {r.status_code} from {endpoint}")
+            raw = bytearray()
+            for chunk in r.iter_bytes(1 << 16):
+                raw.extend(chunk)
+                if len(raw) > 4 * 1024 * 1024:
+                    sys.exit("issuer document exceeds the 4 MB bound")
+    except httpx.HTTPError as exc:
+        sys.exit(f"issuer discovery failed: {exc}")
+    try:
+        doc = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        sys.exit(f"issuer document is not valid JSON: {exc}")
+    if doc.get("schema") != "attest.issuer/1" or not doc.get("issuer_key"):
+        sys.exit(f"{endpoint} did not serve an attest.issuer/1 document")
+    return doc
+
+
 def _verify(args: argparse.Namespace) -> None:
     """Verify a downloaded artifact offline: review bundle, bare receipt, anchor,
     or a receipts.json export list."""
@@ -942,8 +1003,26 @@ def _verify(args: argparse.Namespace) -> None:
     from . import ledger, reviews
     from .models import Receipt, ReviewBundle
 
+    pinned_key = args.key
+    known_rotations: list | None = None
+    if getattr(args, "issuer_url", None):
+        doc = _fetch_issuer_doc(args.issuer_url)
+        pinned_key = doc["issuer_key"]
+        try:
+            known_rotations = [Receipt.model_validate(r) for r in doc.get("key_receipts") or []]
+        except Exception as exc:  # noqa: BLE001
+            sys.exit(f"issuer document carried malformed key receipts: {exc}")
+        print(
+            f"pinned to issuer key served by {args.issuer_url} "
+            f"({len(known_rotations)} lifecycle receipt(s)) — authenticity rides on transport"
+        )
+
     path = Path(args.bundle)
     remote = args.bundle.startswith(("http://", "https://"))
+    # --issuer-url pins the artifact to a DEPLOYMENT's discovery document
+    # rather than a raw key: issuer_key pins verification, key_receipts
+    # extend the trusted lineage in both directions (pre-rotation packs
+    # still verify against the deployment's current signer).
     if remote:
         # Verification is cryptographic — transport trust is not required —
         # but stream with a byte cap so a hostile endpoint can't buffer
@@ -964,7 +1043,7 @@ def _verify(args: argparse.Namespace) -> None:
     else:
         raw = path.read_bytes()
     if raw[:2] == b"PK":
-        _verify_zip(raw, args.key)
+        _verify_zip(raw, pinned_key, known_rotations)
         return
     try:
         data = json.loads(raw.decode("utf-8"))
@@ -972,16 +1051,16 @@ def _verify(args: argparse.Namespace) -> None:
         sys.exit(f"not a JSON artifact: {path.name}\n  a .zip pack verifies directly — pass the zip itself.")
     except json.JSONDecodeError as exc:
         sys.exit(f"not valid JSON: {exc}")
-    pinned = " (against the pinned issuer key)" if args.key else ""
+    pinned = " (against the pinned issuer key)" if pinned_key else ""
     trust_note = (
         "under that key"
-        if args.key
+        if pinned_key
         else "under the artifact's self-declared issuer key — pin a trusted key with --key"
     )
 
     if isinstance(data, list):
         receipts = [Receipt.model_validate(r) for r in data]
-        ok, reason = ledger.verify_chain(receipts, public_key=args.key)
+        ok, reason = ledger.verify_chain(receipts, public_key=pinned_key)
         if not ok:
             sys.exit(f"verification failed: {reason}")
         print(f"OK{pinned}: {reason}.")
@@ -990,7 +1069,7 @@ def _verify(args: argparse.Namespace) -> None:
 
     if isinstance(data, dict) and "payload" in data and "signature" in data:
         receipt = Receipt.model_validate(data)
-        ok, reason = ledger.verify_receipt(receipt, public_key=args.key)
+        ok, reason = ledger.verify_receipt(receipt, public_key=pinned_key)
         if not ok:
             sys.exit(f"verification failed: {reason}")
         kind = receipt.payload.get("record_type") or receipt.payload.get("schema")
@@ -1010,17 +1089,19 @@ def _verify(args: argparse.Namespace) -> None:
             f"not a reviewable artifact: {path.name}\n"
             "  expected a bundle.json, receipt, anchor, or receipts.json export list."
         )
-    key = args.key or bundle.original.public_key
+    key = pinned_key or bundle.original.public_key
     kr_path = path.parent / "key_rotations.json"
+    rotations = list(known_rotations or [])
     if kr_path.is_file():
         # Mirror the embedded verify_bundle.py: reviews appended after a key
         # rotation verify under the successor — legitimate only through the
         # signed rotation+adoption links the pack ships next to the bundle.
         try:
             rj = json.loads(kr_path.read_text(encoding="utf-8"))
-            rotations = [Receipt.model_validate(r) for r in rj.get("rotations") or []]
+            rotations += [Receipt.model_validate(r) for r in rj.get("rotations") or []]
         except Exception as exc:  # noqa: BLE001
             sys.exit(f"verification failed: key_rotations.json malformed ({exc})")
+    if rotations:
         trusted = ledger.trusted_issuer_keys(key, rotations) | ledger.descendant_issuer_keys(key, rotations)
         ok, reason = reviews.verify_bundle(bundle, trusted_keys=trusted)
     else:
@@ -1033,10 +1114,13 @@ def _verify(args: argparse.Namespace) -> None:
     print(f"Note: a valid signature proves record integrity {trust_note}, not physical truth.")
 
 
-def _verify_zip(raw: bytes, pinned_key: str | None) -> None:
+def _verify_zip(raw: bytes, pinned_key: str | None, known_rotations: list | None = None) -> None:
     """Verify a dispute pack or case pack zip in place — same checks as the
     embedded verify_case.py and the /verify page. Without --key the pack's own
-    declared issuer key is pinned (self-consistency); --key pins a deployment key."""
+    declared issuer key is pinned (self-consistency); --key pins a deployment key.
+    ``known_rotations`` (e.g. fetched via --issuer-url) extends trust forward
+    through the deployment's signed lifecycle — a pack exported before a
+    rotation still verifies under the current issuer."""
     import io
     import zipfile
 
@@ -1058,7 +1142,7 @@ def _verify_zip(raw: bytes, pinned_key: str | None) -> None:
     except Exception as exc:
         sys.exit(f"could not read pack issuer: {exc}")
     key = pinned_key or declared
-    ok, detail = _verify_pack(raw, key)
+    ok, detail = _verify_pack(raw, key, known_rotations=known_rotations)
     if not ok:
         sys.exit(f"verification failed: {detail}")
     print(f"OK: {detail}")
@@ -1467,6 +1551,43 @@ def _revoke_key(args: argparse.Namespace) -> None:
         )
     finally:
         store.close()
+
+
+def _issuer(args: argparse.Namespace) -> None:
+    """Write this deployment's issuer-discovery document — the same doc
+    ``/.well-known/attest-issuer.json`` serves — for out-of-band pinning
+    (`attest verify pack.zip --issuer-url issuer.json`) or audit exchange."""
+    import os
+    from pathlib import Path
+
+    from . import ledger
+    from .keycustody import load_or_create_signer
+    from .store import Store
+
+    db = settings.data_dir / "attest.sqlite3"
+    if not db.exists():
+        sys.exit(f"no store at {db}")
+    store = Store(db)
+    try:
+        signer = load_or_create_signer(
+            settings.key_path,
+            kms_key_id=settings.kms_key_id,
+            custody=settings.key_custody,
+            aws_region=settings.aws_region,
+        )
+        doc = ledger.issuer_document(signer.public_key_b64, store.receipts())
+    finally:
+        store.close()
+    text = json.dumps(doc, indent=2, ensure_ascii=False) + "\n"
+    if args.out:
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        tmp = out.with_name(out.name + ".tmp")
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, out)
+        print(f"wrote {out} — issuer {doc['issuer_key'][:16]}..., {len(doc['key_receipts'])} key receipt(s)")
+    else:
+        print(text, end="")
 
 
 def _digest(args: argparse.Namespace) -> None:
@@ -2526,7 +2647,17 @@ def main(argv: list[str] | None = None) -> None:
         "bundle",
         help="bundle.json, receipt, anchor, receipts.json, a pack .zip — or an http(s) URL to one",
     )
-    s.add_argument("--key", default=None, help="issuer public key (base64) to pin against")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--key", default=None, help="issuer public key (base64) to pin against")
+    g.add_argument(
+        "--issuer-url",
+        default=None,
+        metavar="URL_OR_FILE",
+        help="pin to the issuer key served by <url>/.well-known/attest-issuer.json "
+        "(HTTPS; loopback excepted) or an issuer document file written by "
+        "`attest issuer --out` — the deployment's signed lifecycle extends "
+        "trust to pre-rotation packs",
+    )
     s.set_defaults(fn=_verify)
 
     s = sub.add_parser(
@@ -2632,6 +2763,15 @@ def main(argv: list[str] | None = None) -> None:
     )
     s.add_argument("--reason", default="", help="incident note signed into the receipt")
     s.set_defaults(fn=_revoke_key)
+
+    s = sub.add_parser(
+        "issuer",
+        help="write the issuer-discovery document (same doc as "
+        "/.well-known/attest-issuer.json) — pin packs to this deployment "
+        "with `attest verify pack.zip --issuer-url <doc-or-url>`",
+    )
+    s.add_argument("--out", default=None, help="write the document here (default: stdout)")
+    s.set_defaults(fn=_issuer)
 
     s = sub.add_parser(
         "triage",

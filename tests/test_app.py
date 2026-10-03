@@ -1753,3 +1753,71 @@ def test_integrity_surfaces_the_suspect_window(api, household, t0):
     page = api.get("/integrity")
     assert "issuer key(s) revoked" in page.text
     assert "suspect windows" in page.text
+
+
+def test_issuer_discovery_and_remote_pin(api, household, t0):
+    """The well-known issuer doc is public key material; --issuer-url pins a
+    pack to it — including a pack exported BEFORE a rotation, verified
+    against the deployment's CURRENT key through the signed lifecycle."""
+    from attest.cli import _fetch_issuer_doc, _verify_zip
+
+    site, _, cam, _ = household
+    r = _post_hook(api, cam.id, "motion_detected", t0, "human")
+    assert r.status_code == 202
+    vid = api.attest_state.store.active_visit(site.id).id
+    assert api.post(f"/api/visits/{vid}/close").status_code == 200
+
+    doc = api.get("/.well-known/attest-issuer.json", auth=None)
+    assert doc.status_code == 200  # public crypto material — no admin token
+    body = doc.json()
+    assert body["schema"] == "attest.issuer/1"
+    assert body["issuer_key"] == api.attest_state.signer.public_key_b64
+    assert body["chain_tip"] is not None
+    assert "trust-on-first-use" in body["boundary"]  # honest TOFU caveat
+
+    # A pack exported under key A…
+    pack = api.get(f"/sites/{site.id}/pack.zip").content
+    # …then the deployment rotates to key B.
+    resp = api.post("/api/admin/rotate-key")
+    assert resp.status_code == 200, resp.text
+    rot = resp.json()
+
+    # Fetch the issuer doc through the same client transport the CLI uses.
+    fetched = _fetch_issuer_doc("http://127.0.0.1", client=api)
+    assert fetched["issuer_key"] == rot["new_key"]
+    kinds = {r["payload"]["record_type"] for r in fetched["key_receipts"]}
+    assert {"key_rotation", "key_adoption"} <= kinds
+
+    from attest.models import Receipt
+
+    known = [Receipt.model_validate(r) for r in fetched["key_receipts"]]
+    # The money shot: the pre-rotation pack verifies against the NEW issuer.
+    _verify_zip(pack, fetched["issuer_key"], known)
+
+
+def test_fetch_issuer_doc_enforces_https(capsys):
+    from attest.cli import _fetch_issuer_doc
+
+    with pytest.raises(SystemExit, match="HTTPS"):
+        _fetch_issuer_doc("http://example.com")
+
+
+def test_fetch_issuer_doc_rejects_foreign_json(capsys):
+    """A JSON endpoint that isn't attest.issuer/1 fails closed — a look-alike
+    URL must never substitute a pin."""
+    from attest.cli import _fetch_issuer_doc
+
+    def foreign(request):
+        return httpx.Response(200, json={"some": "other api"})
+
+    client = httpx.Client(transport=httpx.MockTransport(foreign))
+    with pytest.raises(SystemExit, match="attest.issuer/1"):
+        _fetch_issuer_doc("http://127.0.0.1", client=client)
+
+
+def test_fetch_issuer_doc_rejects_http_404(capsys):
+    from attest.cli import _fetch_issuer_doc
+
+    client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(404)))
+    with pytest.raises(SystemExit, match="HTTP 404"):
+        _fetch_issuer_doc("http://127.0.0.1", client=client)
