@@ -442,6 +442,8 @@ def main():
                 sys.exit(f"FAIL {p.name}/: directory not part of the pack format")
     redact_note = f", {held} withheld by redaction" if held else ""
     print(f"OK: {n} receipt(s) verified; {checked} media digests matched{redact_note}.")
+    if len(trusted) > 1:
+        print(f"    ({len(trusted)} issuer keys linked via the signed rotation chain)")
     print("Signature proves record integrity under the issuer key - not identity,")
     print("attendance, or absence.")
 
@@ -623,6 +625,10 @@ def main():
         sys.exit(f"{failed} record(s) failed verification")
     print(f"OK: {len(visits)} visit records verified under issuer key")
     print(f"    {key[:16]}...")
+    if len(trusted) > 1:
+        # The pack spans a signed key rotation — the lineage is the pivot, not
+        # a weaker check; say so plainly rather than hiding it behind one key.
+        print(f"    ({len(trusted)} issuer keys linked via the signed rotation chain)")
     if declared == key and "--key" not in sys.argv:
         print("    (issuer self-declared by the pack — pass --key to pin it)")
     print("Integrity only — not identity, attendance, or absence.")
