@@ -2229,7 +2229,7 @@ def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -
         manifest_note += f"; {len(trusted)} issuer keys linked via the signed rotation chain"
     if suspect_total:
         manifest_note += f"; {suspect_total} record(s) signed by a revoked issuer inside its suspect window"
-    pivots = len(ledger.suspect_receipts(rotations, revoked=revoked))
+    pivots = len(ledger.suspect_receipts(pool, revoked=revoked))
     if pivots:
         manifest_note += (
             f"; {pivots} key-lifecycle receipt(s) signed inside a suspect window — "
