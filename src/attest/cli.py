@@ -4,8 +4,9 @@ Most-used: ``attest demo`` (one-command seeded demo), ``attest serve``,
 ``attest replay`` (scenario driver), ``attest export`` (case pack),
 ``attest verify`` (offline artifact check), ``attest anchor`` (signed
 checkpoint), ``attest stamp`` (OpenTimestamps notarization),
-``attest status`` (runtime self-audit), ``attest attack-demo`` (tamper
-battery), ``attest diff`` (compare two exports).
+``attest status`` (runtime self-audit), ``attest doctor`` (deployment
+preflight), ``attest attack-demo`` (tamper battery), ``attest diff``
+(compare two exports).
 """
 
 from __future__ import annotations
@@ -1068,7 +1069,7 @@ def _anchor(args: argparse.Namespace) -> None:
     store = Store(db)
     try:
         signer = load_or_create_signer(
-            settings.data_dir / "attest-ed25519.key",
+            settings.key_path,
             kms_key_id=settings.kms_key_id,
             custody=settings.key_custody,
             aws_region=settings.aws_region,
@@ -1201,7 +1202,7 @@ def _triage(args: argparse.Namespace) -> None:
     store = Store(db)
     try:
         signer = load_or_create_signer(
-            settings.data_dir / "attest-ed25519.key",
+            settings.key_path,
             kms_key_id=settings.kms_key_id,
             custody=settings.key_custody,
             aws_region=settings.aws_region,
@@ -1264,7 +1265,7 @@ def _cli_engine(store):
         store,
         RingClient(settings.ring_access_token, base_url=base),
         load_or_create_signer(
-            settings.data_dir / "attest-ed25519.key",
+            settings.key_path,
             kms_key_id=settings.kms_key_id,
             custody=settings.key_custody,
             aws_region=settings.aws_region,
@@ -1347,19 +1348,27 @@ def _rotate_key(args: argparse.Namespace) -> None:
         new_signer = Signer(sk)
         new_key = new_signer.public_key_b64
 
-        rotation = engine.issue_key_rotation(new_key, args.reason or "")
-        key_path = settings.data_dir / "attest-ed25519.key"
-        persist_signer_key(
-            key_path,
-            pem,
-            kms_key_id=settings.kms_key_id,
-            custody=settings.key_custody,
-            aws_region=settings.aws_region,
-        )
-        # Adoption under the successor — the retiring key asserted the change,
-        # this proves the new key's holder executed it. Rebuilding the engine
-        # reloads the signer from disk under the same custody rules.
-        adopted = _cli_engine(store).issue_key_adoption(old_key, rotation)
+        with engine.signing_barrier():
+            # A previous rotate that died after persist but before adoption
+            # left a consent gap for the CURRENT signer — close it first so
+            # the chain's pivots are all consummated before the new one.
+            for r in engine.resume_pending_adoptions():
+                print(f"  resumed pending adoption {r.id}")
+            rotation = engine.issue_key_rotation(new_key, args.reason or "")
+            key_path = settings.key_path
+            persist_signer_key(
+                key_path,
+                pem,
+                kms_key_id=settings.kms_key_id,
+                custody=settings.key_custody,
+                aws_region=settings.aws_region,
+            )
+            # Adoption under the successor — the retiring key asserted the
+            # change, this proves the new key's holder executed it. Rebuilding
+            # the engine reloads the signer from disk under the same custody
+            # rules; the barrier is the store's shared RLock, so its nested
+            # @atomic calls re-enter on this thread.
+            adopted = _cli_engine(store).issue_key_adoption(old_key, rotation)
         print(f"key rotated: {old_key[:16]}... -> {new_key[:16]}...")
         print(f"  rotation receipt  {rotation.id}")
         print(f"  adoption receipt  {adopted.id}")
@@ -1529,6 +1538,11 @@ def _status(args: argparse.Namespace) -> None:
             custody = "plaintext PEM"
         else:
             custody = "no key yet"
+        # Issuer lineage from the signed chain itself: a rotated runtime still
+        # verifies (the key_rotation receipt is the pivot), so distinct keys in
+        # receipt order ARE the linked lineage when the chain is intact.
+        issuers = list(dict.fromkeys(r.public_key for r in store.receipts()))
+        issuer_count = len(issuers) if chain_ok else 0
         if getattr(args, "json", False):
             print(
                 json.dumps(
@@ -1542,6 +1556,7 @@ def _status(args: argparse.Namespace) -> None:
                         "queue": queue,
                         "webhook": posture or None,
                         "custody": custody,
+                        "issuer_keys": issuer_count,
                         "attestations": att_types,
                     },
                     default=str,
@@ -1579,12 +1594,186 @@ def _status(args: argparse.Namespace) -> None:
         print(f"reviews:  {stats['reviews']}, late events retained: {stats['late_events']}")
         print(f"inbox:    {queue if queue else 'empty'}")
         print(f"webhooks: {intake}")
-        print(f"key:      {custody}")
+        key_line = f"key:      {custody}"
+        if issuer_count > 1:
+            key_line += f" — {issuer_count} issuer keys linked via the signed rotation chain"
+        print(key_line)
         print(f"status:   {'healthy' if healthy else 'ATTENTION — integrity check failed'}")
         if not healthy:
             sys.exit(1)
     finally:
         store.close()
+
+
+def _doctor(args: argparse.Namespace) -> None:
+    """Deployment preflight for the *configuration*, not the store: `status`
+    audits journal and chain integrity; doctor checks the posture around it —
+    the things an operator verifies before real traffic, each with its
+    remediation. Exit 1 when any check fails, 0 with warnings."""
+    import os
+    import tempfile
+    from zoneinfo import ZoneInfo
+
+    from .instance import writer_held
+    from .keycustody import _check_custody_combo, _check_stray_custody_artifact
+
+    checks: list[tuple[str, str, str]] = []
+
+    def add(level: str, name: str, detail: str) -> None:
+        checks.append((level, name, detail))
+
+    # --- authentication surfaces -------------------------------------------
+    if settings.admin_token is None:
+        add(
+            "fail",
+            "admin token",
+            "unset — every private route returns 401. Set ATTEST_ADMIN_TOKEN (>=32 chars).",
+        )
+    else:
+        add("ok", "admin token", "set — private surfaces are authenticated")
+    if settings.ring_webhook_key:
+        add(
+            "ok",
+            "webhook intake",
+            f"armed — HMAC-verified, {settings.webhook_max_age_s}s freshness window",
+        )
+    elif settings.poll_history_seconds > 0:
+        add(
+            "warn",
+            "webhook intake",
+            "closed (no ATTEST_RING_WEBHOOK_KEY) — deliveries 503; ingestion relies "
+            f"on history polling every {settings.poll_history_seconds}s",
+        )
+    else:
+        add(
+            "warn",
+            "webhook intake",
+            "closed (no ATTEST_RING_WEBHOOK_KEY) and polling disabled — nothing "
+            "ingests. Set the key, or ATTEST_POLL_HISTORY_SECONDS for polling.",
+        )
+    # --- deployment posture -------------------------------------------------
+    if settings.replay_mode:
+        add(
+            "fail",
+            "replay mode",
+            "ATTEST_REPLAY_MODE=true is a coordinated-demo posture — it must never "
+            "reach a deployment; real events would record on a simulated clock.",
+        )
+    else:
+        add("ok", "replay mode", "off — wall clock")
+    try:
+        ZoneInfo(settings.timezone)
+        add("ok", "timezone", settings.timezone)
+    except Exception:
+        add("fail", "timezone", f"{settings.timezone!r} is not a valid IANA zone")
+    host = urlsplit(settings.public_base_url).hostname or ""
+    if urlsplit(settings.public_base_url).scheme != "https" and host not in (
+        "127.0.0.1",
+        "localhost",
+        "::1",
+    ):
+        add(
+            "warn",
+            "public base URL",
+            f"{settings.public_base_url} is plain HTTP on a routable host — "
+            "link URLs go out over the wire; terminate TLS in front.",
+        )
+    else:
+        add("ok", "public base URL", settings.public_base_url)
+    # --- signing-key custody -------------------------------------------------
+    key_path = settings.key_path
+    try:
+        _check_custody_combo(settings.kms_key_id, settings.key_custody)
+        _check_stray_custody_artifact(key_path, settings.kms_key_id, settings.key_custody)
+    except (ValueError, RuntimeError) as exc:
+        add("fail", "key custody", str(exc))
+    else:
+        kms_blob = key_path.parent / (key_path.name + ".kms.json")
+        dpapi_blob = key_path.parent / (key_path.name + ".dpapi")
+        if kms_blob.exists():
+            add("ok", "key custody", "AWS KMS envelope — unwrap needs a live Decrypt")
+        elif dpapi_blob.exists():
+            add("ok", "key custody", "Windows DPAPI — bound to this user and machine")
+        elif key_path.exists():
+            add(
+                "warn",
+                "key custody",
+                "plaintext PEM — set ATTEST_KMS_KEY_ID or ATTEST_KEY_CUSTODY=dpapi "
+                "to wrap the issuer key at rest (wraps in place; identity keeps).",
+            )
+        else:
+            add(
+                "info",
+                "key custody",
+                "no key yet — first boot mints one under the configured posture",
+            )
+        if settings.key_custody == "dpapi" and os.name != "nt":
+            add("fail", "key custody", "ATTEST_KEY_CUSTODY=dpapi requested on a non-Windows host")
+    # --- filesystem + runtime ------------------------------------------------
+    data_dir = settings.data_dir
+    if data_dir.exists():
+        try:
+            with tempfile.NamedTemporaryFile(dir=data_dir, prefix=".doctor-", delete=True):
+                pass
+            add("ok", "data dir", f"{data_dir} writable")
+        except OSError as exc:
+            add("fail", "data dir", f"{data_dir} is not writable: {exc}")
+    else:
+        add("info", "data dir", f"{data_dir} does not exist — created on first boot")
+    held, holder = writer_held(data_dir)
+    if held:
+        add(
+            "info",
+            "writer lock",
+            f"held{(' by pid ' + str(holder)) if holder else ''} — a live server or "
+            "writer command owns this runtime; offline writers will refuse, "
+            "read-only commands still work",
+        )
+    if not settings.ring_media_origins.strip():
+        add(
+            "warn",
+            "media origins",
+            "ATTEST_RING_MEDIA_ORIGINS empty — no origin may serve media bytes; "
+            "downloads fail closed until an allowlist is configured.",
+        )
+    db = data_dir / "attest.sqlite3"
+    add(
+        "info",
+        "runtime store",
+        "present — `attest status` audits journal + receipt chain"
+        if db.exists()
+        else "absent — first boot mints it",
+    )
+    if settings.summarizer == "bedrock":
+        add(
+            "info",
+            "summarizer",
+            f"Bedrock {settings.bedrock_model_id} in {settings.aws_region} — needs "
+            "credentials and on-demand quota at request time; falls back to template",
+        )
+
+    fails = sum(1 for level, _, _ in checks if level == "fail")
+    warns = sum(1 for level, _, _ in checks if level == "warn")
+    if getattr(args, "json", False):
+        print(
+            json.dumps(
+                {
+                    "ready": fails == 0,
+                    "checks": [
+                        {"level": level, "check": name, "detail": detail} for level, name, detail in checks
+                    ],
+                },
+                indent=2,
+            )
+        )
+    else:
+        mark = {"ok": " ok ", "info": "info", "warn": "WARN", "fail": "FAIL"}
+        for level, name, detail in checks:
+            print(f" {mark[level]} {name:<17} {detail}")
+        print()
+        print(f"deployment readiness: {fails} failed, {warns} warning(s)")
+    if fails:
+        sys.exit(1)
 
 
 def _export(args: argparse.Namespace) -> None:

@@ -8,6 +8,16 @@ import pytest
 from attest import instance
 
 
+@pytest.fixture(autouse=True)
+def _release_held_locks():
+    """_HELD is process-lifetime by design — tests must hand back what they
+    took so tmp dirs can be deleted (Windows won't unlink an open handle)."""
+    yield
+    for fd in instance._HELD.values():
+        os.close(fd)
+    instance._HELD.clear()
+
+
 def test_instance_lock_is_reentrant_in_process(tmp_path):
     path = instance.acquire_instance_lock(tmp_path)
     assert path.name == "attest.lock"

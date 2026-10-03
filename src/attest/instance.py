@@ -54,6 +54,32 @@ def acquire_instance_lock(data_dir: Path) -> Path:
     return path
 
 
+def writer_held(data_dir: Path) -> tuple[bool, int | None]:
+    """Probe without taking: ``(held, holder_pid_or_None)``.
+
+    Closes its probe fd immediately — never registers in ``_HELD`` — so it is
+    safe in read-only commands. Windows byte locks are mandatory, so a held
+    lock also blocks reading the recorded pid; the pid is best-effort.
+    """
+    path = data_dir / "attest.lock"
+    if not path.exists():
+        return False, None
+    fd = os.open(path, os.O_RDWR, 0o600)
+    try:
+        _lock_byte(fd)
+    except OSError:
+        holder = None
+        try:
+            os.lseek(fd, 0, os.SEEK_SET)
+            holder = int(os.read(fd, 64).decode(errors="replace").strip())
+        except (OSError, ValueError):
+            pass
+        return True, holder
+    finally:
+        os.close(fd)
+    return False, None
+
+
 def _lock_byte(fd: int) -> None:
     """Exclusive non-blocking lock on byte 0 of ``fd``. Empty-file safe."""
     if os.name == "nt":
