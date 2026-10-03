@@ -311,6 +311,7 @@ def persist_signer_key(
     the old key in place (rotation re-runs idempotently) but never a
     half-written key."""
     _check_custody_combo(kms_key_id, custody)
+    _check_stray_custody_artifact(path, kms_key_id, custody)
     path.parent.mkdir(parents=True, exist_ok=True)
     if custody == "dpapi":
         blob_path = _dpapi_path(path)
@@ -330,14 +331,6 @@ def persist_signer_key(
         os.replace(tmp, wrapped_path)
         path.unlink(missing_ok=True)  # no plaintext should remain under custody
     else:
-        # Writing plaintext while a custody artifact exists would leave a
-        # forked issuer identity — the artifact's owner must reconcile first.
-        for artifact in (path.with_suffix(path.suffix + ".kms.json"), _dpapi_path(path)):
-            if artifact.exists():
-                raise RuntimeError(
-                    f"{artifact.name} exists — refusing to write a plaintext key "
-                    "alongside a custody artifact; remove the artifact explicitly"
-                )
         tmp = path.with_suffix(path.suffix + ".tmp")
         tmp.write_bytes(pem)
         if os.name == "posix":

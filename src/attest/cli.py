@@ -51,9 +51,11 @@ def _serve(args: argparse.Namespace) -> None:
     import uvicorn
 
     from .app import create_app
+    from .instance import acquire_instance_lock
 
     if settings.admin_token is None:
         sys.exit("Set ATTEST_ADMIN_TOKEN to at least 32 random characters before starting Attest.")
+    acquire_instance_lock(settings.data_dir)
     db = settings.data_dir / "attest.sqlite3"
     if not db.exists():
         print("note: empty runtime — `attest demo` boots emulator + server + a scripted week")
@@ -596,6 +598,9 @@ def _demo(args: argparse.Namespace) -> None:
         data_dir.mkdir(parents=True, exist_ok=True)
     else:
         data_dir = Path(tempfile.mkdtemp(prefix="attest-demo-"))
+    from .instance import acquire_instance_lock
+
+    acquire_instance_lock(data_dir)
 
     token = secrets.token_urlsafe(32)
     # The demo owns this CLI process; point the replay driver at the token it minted.
@@ -826,13 +831,17 @@ def _demo(args: argparse.Namespace) -> None:
     print("  In another terminal, point at the demo's store first:", flush=True)
     print(f'    $env:ATTEST_DATA_DIR="{data_dir}"   (PowerShell)', flush=True)
     print(f"    ATTEST_DATA_DIR={data_dir} <cmd>      (POSIX)", flush=True)
-    print("  6. attest attack-demo  — the tamper battery, every attempt caught", flush=True)
-    print("     and rolled back", flush=True)
-    print("  7. attest status       — audits the whole runtime offline (--json for scripts)", flush=True)
-    print("  8. attest triage       — the week's brief (agent when AWS is reachable)", flush=True)
-    print("  9. attest verify <zip|url> — a pack verifies itself, even straight", flush=True)
+    print("  6. attest status       — audits the whole runtime offline (--json for scripts)", flush=True)
+    print("  7. attest triage       — the week's brief (agent when AWS is reachable)", flush=True)
+    print("  8. attest verify <zip|url> — a pack verifies itself, even straight", flush=True)
     print("     from https://josepha-mayo.github.io/attest/sample-pack.zip", flush=True)
-    print(" 10. attest explain <visit_or_receipt_id> — full provenance, in words", flush=True)
+    print("  9. attest explain <visit_or_receipt_id> — full provenance, in words", flush=True)
+    print("     (read-only commands run alongside the live demo; writer commands —", flush=True)
+    print("      export, coverage, digest, rotate-key, attack-demo — take the", flush=True)
+    print("      single-instance lock, so Ctrl+C the demo first. The dashboard's", flush=True)
+    print("      pack download and /api/admin/rotate-key are the live paths.)", flush=True)
+    print(" 10. attest attack-demo — the tamper battery, every attempt caught", flush=True)
+    print("     and rolled back (offline runtimes only — it holds the writer lock)", flush=True)
     print(" 11. rotate the signing key live — the pivot is a signed chain event", flush=True)
     print("     and receipts on both sides still verify:", flush=True)
     print(
@@ -1053,6 +1062,9 @@ def _anchor(args: argparse.Namespace) -> None:
     db = settings.data_dir / "attest.sqlite3"
     if not db.exists():
         sys.exit(f"no store at {db}")
+    from .instance import acquire_instance_lock
+
+    acquire_instance_lock(settings.data_dir)
     store = Store(db)
     try:
         signer = load_or_create_signer(
@@ -1239,6 +1251,8 @@ def _cli_engine(store):
     from .media import MediaStore
     from .summarize import TemplateSummarizer
 
+    # No writer lock here — explain uses this engine read-only. The mutating
+    # commands that call it (coverage/digest/export/rotate) acquire it first.
     # The store's persisted mode wins — a replay-runtime store must be read
     # with a replay clock even when ATTEST_REPLAY_MODE isn't set in this shell.
     mode = (store.setting("execution_mode") or {}).get("mode", "wall")
@@ -1271,6 +1285,9 @@ def _coverage_cert(args: argparse.Namespace) -> None:
     db = settings.data_dir / "attest.sqlite3"
     if not db.exists():
         sys.exit(f"no store at {db}")
+    from .instance import acquire_instance_lock
+
+    acquire_instance_lock(settings.data_dir)
     store = Store(db)
     try:
         site = store.site(args.site) if args.site else (store.sites()[0] if store.sites() else None)
@@ -1313,6 +1330,9 @@ def _rotate_key(args: argparse.Namespace) -> None:
     db = settings.data_dir / "attest.sqlite3"
     if not db.exists():
         sys.exit(f"no store at {db}")
+    from .instance import acquire_instance_lock
+
+    acquire_instance_lock(settings.data_dir)
     store = Store(db)
     try:
         engine = _cli_engine(store)
@@ -1365,6 +1385,9 @@ def _digest(args: argparse.Namespace) -> None:
     db = settings.data_dir / "attest.sqlite3"
     if not db.exists():
         sys.exit(f"no store at {db}")
+    from .instance import acquire_instance_lock
+
+    acquire_instance_lock(settings.data_dir)
     store = Store(db)
     try:
         site = store.site(args.site) if args.site else (store.sites()[0] if store.sites() else None)
@@ -1394,6 +1417,9 @@ def _digest(args: argparse.Namespace) -> None:
 def _tamper_demo(args: argparse.Namespace) -> None:
     """Non-destructive: forge one row inside a transaction, show the journal catching
     it, then roll back — the store is left exactly as it was."""
+    from .instance import acquire_instance_lock
+
+    acquire_instance_lock(settings.data_dir)
     store = _must_store()
     try:
         row = store._conn.execute("SELECT id, body FROM visits LIMIT 1").fetchone()
@@ -1432,6 +1458,9 @@ def _journal(args: argparse.Namespace) -> None:
     store = _must_store()
     try:
         if args.baseline:
+            from .instance import acquire_instance_lock
+
+            acquire_instance_lock(settings.data_dir)
             stamped = store.journal_baseline()
             print(f"stamped {stamped} existing rows as journal baseline")
         report = store.verify_journal()
@@ -1563,10 +1592,12 @@ def _export(args: argparse.Namespace) -> None:
     from pathlib import Path
 
     from .disputepack import build_case_pack
+    from .instance import acquire_instance_lock
     from .models import ReviewBundle
     from .reviews import countersign_status
 
     store = _must_store()
+    acquire_instance_lock(settings.data_dir)  # export signs a case_export receipt
     try:
         site = store.site(args.site) if args.site else (store.sites()[0] if store.sites() else None)
         if site is None:
@@ -1620,6 +1651,9 @@ def _attack_demo(args: argparse.Namespace) -> None:
     db = settings.data_dir / "attest.sqlite3"
     if not db.exists():
         sys.exit(f"no store at {db} — run `attest replay home_aide_visit` first")
+    from .instance import acquire_instance_lock
+
+    acquire_instance_lock(settings.data_dir)
     store = Store(db)
     # The webhook inbox is a separate database — the delivery-id conflict
     # attack needs it, and the refused write leaves nothing to roll back.
@@ -1679,6 +1713,11 @@ def _deliveries(args: argparse.Namespace) -> None:
     inbox = WebhookInbox(inbox_path)
     try:
         if args.requeue:
+            # Requeue mutates the durable inbox — hold the writer lock so a
+            # requeue can't race a live server's claim cycle.
+            from .instance import acquire_instance_lock
+
+            acquire_instance_lock(settings.data_dir)
             print(json.dumps({"requeued": inbox.requeue(), "queue": inbox.counts()}))
         else:
             print(json.dumps({"counts": inbox.counts(), "entries": inbox.entries()}, indent=2))
@@ -2042,6 +2081,11 @@ def _retention(args: argparse.Namespace) -> None:
     try:
         if args.apply:
             try:
+                # Purging rows is the one destructive write the CLI performs —
+                # never run it while a server might be mid-transaction.
+                from .instance import acquire_instance_lock
+
+                acquire_instance_lock(settings.data_dir)
                 result = retention.apply(store, inbox, media_dir, policy=policy, confirm=args.apply)
             except ValueError as exc:
                 sys.exit(f"retention refused: {exc}")
@@ -2077,6 +2121,9 @@ def _verify_live(args: argparse.Namespace) -> None:
         db = settings.data_dir / "attest.sqlite3"
         if not db.exists():
             sys.exit("--sign needs a runtime store — run `attest serve` once first")
+        from .instance import acquire_instance_lock
+
+        acquire_instance_lock(settings.data_dir)
         store = Store(db)
         try:
             receipt = _cli_engine(store).issue_verification_report(report)
