@@ -43,10 +43,19 @@ def test_instance_lock_contention_fails_loudly(tmp_path, monkeypatch):
             instance._lock_byte(fd)
     finally:
         os.close(fd)
-    # and a fresh acquirer — a different process — is told who holds it
+    # and a fresh acquirer — a different process — is told who holds it;
+    # the pid sits at byte 1+ so even a Windows contender (mandatory byte
+    # locks) can read it without touching the locked byte.
     monkeypatch.setattr(instance, "_HELD", {})
-    with pytest.raises(RuntimeError, match="writer lock"):
+    with pytest.raises(RuntimeError, match=f"pid {os.getpid()}"):
         instance.acquire_instance_lock(tmp_path)
+
+
+def test_writer_held_reports_the_holder_pid(tmp_path):
+    assert instance.writer_held(tmp_path) == (False, None)
+    instance.acquire_instance_lock(tmp_path)
+    held, pid = instance.writer_held(tmp_path)
+    assert held and pid == os.getpid()
 
 
 def test_instance_lock_released_after_holder_exits(tmp_path):
