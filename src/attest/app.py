@@ -681,6 +681,14 @@ def create_app(
                 "max_age_s": s.webhook_max_age_s,
             },
             issuer=signer.public_key_b64,
+            issuer_lineage=len(
+                {
+                    r.public_key
+                    for r in store.receipts()
+                    if r.payload.get("record_type") in ("key_rotation", "key_adoption")
+                }
+                | {signer.public_key_b64}
+            ),
             healthy=(
                 data["journal"]["intact"]
                 and data["chain"][0]
@@ -709,6 +717,14 @@ def create_app(
             return {
                 "healthy": journal["intact"] and chain_ok and journal.get("untracked_rows", 0) == 0,
                 "issuer": signer.public_key_b64,
+                "issuer_lineage": len(
+                    {
+                        r.public_key
+                        for r in receipts
+                        if r.payload.get("record_type") in ("key_rotation", "key_adoption")
+                    }
+                    | {signer.public_key_b64}
+                ),
                 "mode": (store.setting("execution_mode") or {}).get("mode", "wall"),
                 "journal": journal,
                 "chain": {"ok": chain_ok, "detail": chain_why},
@@ -1431,6 +1447,63 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
         return receipt.model_dump(mode="json")
+
+    @app.post("/api/admin/rotate-key")
+    async def rotate_key(request: Request):
+        """Rotate the deployment signing key as a signed chain event — the
+        ordering matches `attest rotate-key`: the retiring key signs the
+        key_rotation pivot first, the successor PEM is persisted under the
+        same custody posture only after that pivot is durable, then the
+        reloaded signer countersigns consent with key_adoption. A rotation
+        proves a signed trust transition, never that either key was
+        uncompromised."""
+        nonlocal signer
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+            Ed25519PrivateKey,
+        )
+
+        from .keycustody import load_or_create_signer, persist_signer_key
+
+        reason = ""
+        try:
+            body = await request.json()
+            reason = str(body.get("reason") or "")[:500]
+        except Exception:
+            pass
+        old_key = signer.public_key_b64
+        sk = Ed25519PrivateKey.generate()
+        new_key = Signer(sk).public_key_b64
+        rotation = await asyncio.to_thread(engine.issue_key_rotation, new_key, reason)
+        pem = sk.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+        await asyncio.to_thread(
+            persist_signer_key,
+            s.key_path,
+            pem,
+            kms_key_id=s.kms_key_id,
+            aws_region=s.aws_region,
+        )
+        # Reload from the custody layer rather than trusting the PEM just
+        # written — a KMS-mode deployment must never adopt a signer KMS
+        # couldn't wrap.
+        signer = await asyncio.to_thread(
+            load_or_create_signer,
+            s.key_path,
+            kms_key_id=s.kms_key_id,
+            aws_region=s.aws_region,
+        )
+        engine.signer = reviews.signer = app.state.signer = signer
+        adoption = await asyncio.to_thread(engine.issue_key_adoption, old_key, rotation)
+        return {
+            "previous_key": old_key,
+            "new_key": signer.public_key_b64,
+            "rotation_receipt": rotation.id,
+            "adoption_receipt": adoption.id,
+        }
 
     @app.post("/api/sites/{site_id}/liveview")
     async def liveview_open(request: Request, site_id: str = PathParam(max_length=128)):

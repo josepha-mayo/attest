@@ -164,6 +164,8 @@ def _replay(args: argparse.Namespace) -> None:
         )
     if args.days < 1:
         sys.exit("--days must be at least 1")
+    if getattr(args, "rotate_day", None) is not None and not 0 <= args.rotate_day < args.days:
+        sys.exit("--rotate-day must name a story day (0..days-1)")
     if args.scenario.endswith((".yml", ".yaml")) and not Path(args.scenario).exists():
         sys.exit(f"no scenario file at {args.scenario}")
     try:
@@ -279,6 +281,17 @@ def _replay(args: argparse.Namespace) -> None:
                 if patterns
                 else ("no_show" if day == args.no_show_day else "observed")
             )
+            if getattr(args, "rotate_day", None) == day:
+                r = api.post(
+                    "/api/admin/rotate-key", json={"reason": "scheduled key rotation"}
+                ).raise_for_status()
+                rj = r.json()
+                print(
+                    f"Day {day}: signing key rotated "
+                    f"({rj['previous_key'][:16]}... -> {rj['new_key'][:16]}...) — "
+                    "the signed pivot rides the chain",
+                    flush=True,
+                )
             schedule_id = None
             if day > 0:
                 schedule = Schedule(
@@ -619,6 +632,7 @@ def _demo(args: argparse.Namespace) -> None:
         days=args.days,
         story=args.story,
         no_show_day=None,
+        rotate_day=args.rotate_day,
         worker_review="dispute",
         auto_checkin=True,
         speed=args.speed,
@@ -2324,6 +2338,9 @@ def main(argv: list[str] | None = None) -> None:
         # the subcommand didn't phrase for a human.
         sys.exit(f"attest: {exc}")
 
+
+if __name__ == "__main__":
+    main()
 
 if __name__ == "__main__":
     main()

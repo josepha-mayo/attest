@@ -38,7 +38,8 @@ This page describes the evidence system's health, not whether any worker was hon
     <h2 style="margin-top:0;font-size:1.05rem">Signing key</h2>
     {{ custody }}
     <div class="muted small" style="margin-top:.5rem">
-      Issuer <code>{{ issuer[:16] }}…</code> · clock mode <code>{{ mode }}</code>
+      Issuer <code>{{ issuer[:16] }}…</code> · clock mode <code>{{ mode }}</code>{% if issuer_lineage and issuer_lineage > 1 %}<br>
+      Lineage {{ issuer_lineage }} keys — retired via signed key_rotation/adoption pivots{% endif %}
     </div>
   </div>
   <div class="card">
