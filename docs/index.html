@@ -30,10 +30,13 @@
   sample pack"</strong> — one click fetches a small simulated pack (media
   digests only) and runs every check in-page. Or
   <a href="sample-pack.zip">download it</a> and drop it on the verifier
-  yourself. Its story rotated the signing key mid-week — look for the
-  <code>key_rotation</code> and <code>key_adoption</code> attestations:
-  receipts on both sides of the pivot verify under one pin because the
-  retiring key signed the handoff.</p>
+  yourself. Its story rotated the signing key mid-week, then <em>revoked</em>
+  the retired key as compromised — look for the
+  <code>key_rotation</code>, <code>key_adoption</code>, and
+  <code>key_revocation</code> attestations: receipts on both sides of the
+  pivot still verify, the verifier annotates the suspect window, and it even
+  flags that the pivot itself was signed by the compromised key — the trust
+  handoff inherits the doubt.</p>
   <p>Or check our own claim: <a href="live-sweep-receipt.json">this signed
   receipt</a> is the <code>verify-live --sign</code> sweep run against the
   real <code>api.amazonvision.com</code> on 2026-09-30 — 5 pass, 3 fail

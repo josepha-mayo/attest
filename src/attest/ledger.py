@@ -360,18 +360,22 @@ def suspect_receipts(receipts: list[Receipt], revoked: dict[str, str] | None = N
         revoked = revoked_issuer_keys(receipts)
     if not revoked:
         return []
-    from datetime import datetime
+    from datetime import UTC, datetime
 
-    def _instant(s: str) -> datetime | None:
+    def _instant(s) -> datetime | None:
         try:
-            return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
-        except ValueError:
+            at = s if isinstance(s, datetime) else datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
             return None
+        # Naive spellings read as UTC: a forged or sloppy timestamp must not
+        # crash the comparison, only compare conservatively.
+        return at.replace(tzinfo=UTC) if at.tzinfo is None else at
 
     out = []
     for r in receipts:
         after = _instant(revoked.get(r.public_key) or "")
+        at = _instant(r.issued_at)
         # compare instants, not spellings — 'Z' and '+00:00' sort differently
-        if after is not None and r.issued_at > after:
+        if after is not None and at is not None and at > after:
             out.append(r)
     return out
