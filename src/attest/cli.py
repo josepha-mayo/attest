@@ -2385,6 +2385,14 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--json", action="store_true", help="emit the audit as a single JSON object")
     s.set_defaults(fn=_status)
 
+    s = sub.add_parser(
+        "doctor",
+        help="deployment preflight — grades configuration posture (auth, custody, "
+        "TLS, replay mode, writer lock) with remediation; exit 1 on any failure",
+    )
+    s.add_argument("--json", action="store_true", help="emit the checks as a single JSON object")
+    s.set_defaults(fn=_doctor)
+
     s = sub.add_parser("verify", help="verify a downloaded bundle.json offline")
     s.add_argument(
         "bundle",
