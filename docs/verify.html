@@ -607,7 +607,11 @@ async function verifyFiles(files){
   }
   say(anyBad?"bad":"ok",anyBad
     ?"FAILED — do not rely on this pack"
-    :"VERIFIED — chain intact under issuer key "+esc((key||"").slice(0,16))+"…");
+    :"VERIFIED — chain intact under issuer key "+esc((key||"").slice(0,16))+"…"
+      /* A pack that spans a key rotation verifies under more than one issuer —
+         say so: the lineage is the signed pivot, not a weaker check. */
+      +(trusted&&trusted.size>1
+        ?` · ${trusted.size} issuer keys via the signed rotation chain`:""));
   return out.join("");}
 /* ---------- minimal zip reader: stored + deflate via DecompressionStream ---------- */
 async function inflate(raw){
