@@ -8,7 +8,7 @@ import os
 
 import pytest
 
-from attest.keycustody import KmsBox, load_or_create_signer
+from attest.keycustody import KmsBox, load_or_create_signer, persist_signer_key
 from attest.ledger import Signer, verify_receipt
 
 
@@ -185,3 +185,21 @@ def test_kms_and_dpapi_custody_are_mutually_exclusive(tmp_path):
 def test_unknown_custody_fails_loudly(tmp_path):
     with pytest.raises(ValueError, match="unknown key custody"):
         load_or_create_signer(tmp_path / "k.pem", custody="tpm")
+
+
+def test_orphaned_custody_artifact_never_mints_plaintext(tmp_path):
+    """A `.kms.json`/`.dpapi` blob without its custody env is a dropped
+    setting, not a fresh deployment — minting a plaintext key would silently
+    rotate the issuer identity and strand the wrapped one. Fail loudly and
+    leave the operator to reconcile."""
+    path = tmp_path / "attest-ed25519.key"
+    for suffix, env in ((".kms.json", "ATTEST_KMS_KEY_ID"), (".dpapi", "ATTEST_KEY_CUSTODY")):
+        artifact = path.with_suffix(path.suffix + suffix)
+        artifact.write_bytes(b"blob")
+        with pytest.raises(RuntimeError, match=env):
+            load_or_create_signer(path)
+        assert not path.exists()  # no key was minted alongside the artifact
+        with pytest.raises(RuntimeError, match="custody artifact"):
+            persist_signer_key(path, b"pem")
+        assert not path.exists()
+        artifact.unlink()

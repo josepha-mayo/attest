@@ -174,6 +174,25 @@ def _check_custody_combo(kms_key_id: str | None, custody: str | None) -> None:
         raise ValueError(f"unknown key custody {custody!r} — supported: dpapi")
 
 
+def _check_stray_custody_artifact(path: Path, kms_key_id: str | None, custody: str | None) -> None:
+    """Refuse to proceed when a custody artifact doesn't match the configured
+    posture — a dropped or swapped setting means minting/persisting a fresh
+    key would silently rotate the issuer identity and strand the wrapped one.
+    Restore the artifact's env, or remove it for a deliberate unsigned pivot."""
+    configured = "dpapi" if custody == "dpapi" else ("kms" if kms_key_id else None)
+    for artifact, posture, env in (
+        (path.with_suffix(path.suffix + ".kms.json"), "kms", "ATTEST_KMS_KEY_ID"),
+        (_dpapi_path(path), "dpapi", "ATTEST_KEY_CUSTODY=dpapi"),
+    ):
+        if posture != configured and artifact.exists():
+            raise RuntimeError(
+                f"custody artifact {artifact.name} exists but custody is "
+                f"{configured or 'not configured'} — set {env} to keep the "
+                "issuer identity, or remove the artifact for a deliberate "
+                "unsigned pivot; refusing to silently strand it"
+            )
+
+
 def load_or_create_signer(
     path: Path,
     *,
@@ -192,6 +211,7 @@ def load_or_create_signer(
     downgrade the operator never asked for.
     """
     _check_custody_combo(kms_key_id, custody)
+    _check_stray_custody_artifact(path, kms_key_id, custody)
     if not kms_key_id and custody != "dpapi":
         return Signer.load_or_create(path)
 
@@ -310,6 +330,14 @@ def persist_signer_key(
         os.replace(tmp, wrapped_path)
         path.unlink(missing_ok=True)  # no plaintext should remain under custody
     else:
+        # Writing plaintext while a custody artifact exists would leave a
+        # forked issuer identity — the artifact's owner must reconcile first.
+        for artifact in (path.with_suffix(path.suffix + ".kms.json"), _dpapi_path(path)):
+            if artifact.exists():
+                raise RuntimeError(
+                    f"{artifact.name} exists — refusing to write a plaintext key "
+                    "alongside a custody artifact; remove the artifact explicitly"
+                )
         tmp = path.with_suffix(path.suffix + ".tmp")
         tmp.write_bytes(pem)
         if os.name == "posix":
