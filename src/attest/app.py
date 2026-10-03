@@ -2034,6 +2034,12 @@ def _verify_pack(data: bytes, public_key: str, known_rotations: list | None = No
                     f"; {len(suspect)} record(s) signed by a revoked issuer "
                     "inside its declared suspect window"
                 )
+            pivots = ledger.suspect_receipts(rotation_receipts, revoked=revoked)
+            if pivots:
+                detail += (
+                    f"; {len(pivots)} key-lifecycle receipt(s) signed inside a "
+                    "suspect window — the trust pivot itself is qualified"
+                )
         if not ok:
             return False, detail
         # Fail closed on files the pack format doesn't name (media members are
@@ -2198,6 +2204,12 @@ def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -
         manifest_note += f"; {len(trusted)} issuer keys linked via the signed rotation chain"
     if suspect_total:
         manifest_note += f"; {suspect_total} record(s) signed by a revoked issuer inside its suspect window"
+    pivots = len(ledger.suspect_receipts(rotations, revoked=revoked))
+    if pivots:
+        manifest_note += (
+            f"; {pivots} key-lifecycle receipt(s) signed inside a suspect window — "
+            "the trust pivot itself is qualified"
+        )
     return True, f"case pack verified — {total} visit record(s) intact ({manifest_note}): " + "; ".join(lines)
 
 

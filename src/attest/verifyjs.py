@@ -471,7 +471,7 @@ async function verifyFiles(files){
       return out.join("");
     }
   }
-  let trusted=null;let revoked={};let suspectTotal=0;
+  let trusted=null;let revoked={};let suspectTotal=0;let lifecycleNodes=[];
   if(mText){
     mNode=parseKeep(mText);
     manifest=toJS(mNode);
@@ -494,6 +494,7 @@ async function verifyFiles(files){
       const art=(toJS(aNode).payload||{}).record_type;
       if(art==="key_rotation"||art==="key_adoption"||art==="key_revocation")rotNodes.push(aNode);
     }
+    lifecycleNodes=rotNodes;
     trusted=await trustedKeys(manifest.issuer_key||"",rotNodes);
     revoked=await revokedKeys(rotNodes);
     for(const v of manifest.visits||[]){
@@ -519,6 +520,7 @@ async function verifyFiles(files){
       if(!rn||rn.t!=="arr"){
         anyBad=true;say("bad","key_rotations.json: malformed");
       }else{
+        lifecycleNodes=rn.v;
         trusted=new Set([
           ...(await trustedKeys(oKey,rn.v)),
           ...(await descendantKeys(oKey,rn.v)),
@@ -648,6 +650,12 @@ async function verifyFiles(files){
       anyBad=true;say("bad",`${esc(name)}: present but not in the signed manifest`);
     }
   }
+  /* A rotation signed by a key later declared suspect means the handoff
+     itself may be attacker-authored — the lineage carries the doubt. */
+  const pivotSuspect=suspectRecords(lifecycleNodes,revoked).length;
+  if(pivotSuspect)
+    say("warn",`${pivotSuspect} key-lifecycle receipt(s) signed inside a suspect `
+      +"window — the trust pivot itself is qualified");
   say(anyBad?"bad":"ok",anyBad
     ?"FAILED — do not rely on this pack"
     :"VERIFIED — chain intact under issuer key "+esc((key||"").slice(0,16))+"…"
@@ -1311,6 +1319,12 @@ async function renderIndex(){
      +(suspectTotal
        ?`<div class="row warn">${suspectTotal} record(s) signed by a revoked issuer `
         +"inside its suspect window</div>":"")
+     /* A rotation signed by a key later declared suspect means the handoff
+        itself may be attacker-authored — the lineage carries the doubt. */
+     +(suspectRecords(rotNodes,revoked).length
+       ?`<div class="row warn">${suspectRecords(rotNodes,revoked).length} `
+        +"key-lifecycle receipt(s) signed inside a suspect window — the trust "
+        +"pivot itself is qualified</div>":"")
      +`<small>${declared} declared media digest(s)`
      +(meta.media_redacted?" — media withheld by redaction; signed digests preserved":"")+"</small>";
 }

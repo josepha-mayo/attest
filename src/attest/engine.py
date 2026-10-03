@@ -24,7 +24,7 @@ import sqlite3
 import statistics
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import httpx
 from ring_sandbox import RingAPIError, RingClient, WebhookEvent
@@ -1370,10 +1370,19 @@ class VisitEngine:
                 "cannot revoke a key that never signed this chain — "
                 "revocation only has meaning inside this deployment's lineage"
             )
-        pseudo_id = f"key:revoked:{revoked_key[:12]}"
-        existing = self.store.receipt_for_visit(pseudo_id)
-        if existing:
-            return existing
+        if suspect_after.tzinfo is None:
+            # Both callers normalize, but the signed instant leaves here — a
+            # naive spelling would poison every suspect-window comparison
+            # downstream, so the engine insists on an instant, not a spelling.
+            suspect_after = suspect_after.replace(tzinfo=UTC)
+        # Idempotent per revoked key: the full key makes the pseudo visit_id
+        # collision-free (a 12-char prefix could alias a different key). The
+        # legacy prefix id is honored for revocations written by earlier builds.
+        pseudo_id = f"key:revoked:{revoked_key}"
+        for candidate in (pseudo_id, f"key:revoked:{revoked_key[:12]}"):
+            existing = self.store.receipt_for_visit(candidate)
+            if existing and existing.payload.get("revoked_key") == revoked_key:
+                return existing
         prev = self.store.latest_receipt()
         receipt = self.signer.issue(
             visit_id=pseudo_id,

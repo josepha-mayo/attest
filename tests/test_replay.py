@@ -69,6 +69,37 @@ def test_replay_rotate_day_names_a_story_day(monkeypatch):
         cli.main(["replay", "home_aide_visit", "--days", "2", "--rotate-day", "-1"])
 
 
+def test_replay_revoke_day_parses_on_demo_and_replay_but_not_seed(monkeypatch):
+    """--revoke-day K runs the compromise drill mid-story: rotate + revoke
+    the retired key so its output reports as a suspect window."""
+    from attest import cli
+
+    seen = {}
+    monkeypatch.setattr(cli, "_replay", lambda a: seen.update(day=a.revoke_day))
+    cli.main(["replay", "home_aide_visit", "--days", "3", "--revoke-day", "1"])
+    assert seen["day"] == 1
+
+    monkeypatch.setattr(cli, "_demo", lambda a: seen.update(day=a.revoke_day))
+    cli.main(["demo", "--days", "3", "--revoke-day", "1"])
+    assert seen["day"] == 1
+
+    with pytest.raises(SystemExit):
+        cli.main(["seed", "--revoke-day", "0"])
+
+
+def test_replay_revoke_day_names_a_story_day(monkeypatch):
+    from pydantic import SecretStr
+
+    from attest import cli
+
+    monkeypatch.setattr(cli.settings, "admin_token", SecretStr("t" * 32))
+    monkeypatch.setattr(cli.settings, "ring_webhook_key", "k")
+    with pytest.raises(SystemExit, match="--revoke-day must name a story day"):
+        cli.main(["replay", "home_aide_visit", "--days", "2", "--revoke-day", "2"])
+    with pytest.raises(SystemExit, match="--revoke-day must name a story day"):
+        cli.main(["replay", "home_aide_visit", "--days", "2", "--revoke-day", "-1"])
+
+
 def test_replay_checkin_uses_event_clock_but_grants_use_wall_clock(store, settings, ring_client, tmp_path):
     from attest.engine import VisitEngine
     from attest.ledger import Signer

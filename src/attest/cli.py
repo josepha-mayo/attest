@@ -169,6 +169,8 @@ def _replay(args: argparse.Namespace) -> None:
         sys.exit("--days must be at least 1")
     if getattr(args, "rotate_day", None) is not None and not 0 <= args.rotate_day < args.days:
         sys.exit("--rotate-day must name a story day (0..days-1)")
+    if getattr(args, "revoke_day", None) is not None and not 0 <= args.revoke_day < args.days:
+        sys.exit("--revoke-day must name a story day (0..days-1)")
     if args.scenario.endswith((".yml", ".yaml")) and not Path(args.scenario).exists():
         sys.exit(f"no scenario file at {args.scenario}")
     try:
@@ -293,6 +295,27 @@ def _replay(args: argparse.Namespace) -> None:
                     f"Day {day}: signing key rotated "
                     f"({rj['previous_key'][:16]}... -> {rj['new_key'][:16]}...) — "
                     "the signed pivot rides the chain",
+                    flush=True,
+                )
+            if getattr(args, "revoke_day", None) == day:
+                # In-story incident response: rotate away from the hot key,
+                # then the successor revokes it — its whole output becomes a
+                # signed suspect-window annotation, never an erasure.
+                rj = (
+                    api.post("/api/admin/rotate-key", json={"reason": "key compromise drill"})
+                    .raise_for_status()
+                    .json()
+                )
+                api.post(
+                    "/api/admin/revoke-key",
+                    json={
+                        "revoked_key": rj["previous_key"],
+                        "reason": "compromise drill — retired key declared suspect",
+                    },
+                ).raise_for_status()
+                print(
+                    f"Day {day}: compromise drill — retired key revoked; its "
+                    "records still verify, every verifier flags the suspect window",
                     flush=True,
                 )
             schedule_id = None
@@ -639,6 +662,7 @@ def _demo(args: argparse.Namespace) -> None:
         story=args.story,
         no_show_day=None,
         rotate_day=args.rotate_day,
+        revoke_day=args.revoke_day,
         worker_review="dispute",
         auto_checkin=True,
         speed=args.speed,
@@ -809,6 +833,13 @@ def _demo(args: argparse.Namespace) -> None:
             flush=True,
         )
         print("      on both sides verify through the signed key_rotation pivot.)", flush=True)
+    if getattr(args, "revoke_day", None) is not None:
+        print(
+            f"     (Compromise drill on story day {args.revoke_day}: the retired key is",
+            flush=True,
+        )
+        print("      revoked — 'attest status' and every pack verifier flag its", flush=True)
+        print("      output as a suspect window; nothing was erased.)", flush=True)
     print("  3. Download a pack, then 'Verify a pack in-browser' on the dashboard —", flush=True)
     print("     drop the .zip; it self-verifies, no install, no unzip. Site packs", flush=True)
     print("     carry the signed coverage cert: 'was anyone watching?' In the", flush=True)
@@ -1415,7 +1446,15 @@ def _revoke_key(args: argparse.Namespace) -> None:
             if when.tzinfo is None:
                 when = when.replace(tzinfo=UTC)
         else:
-            when = engine.clock.now()
+            # Default: the key's first signed receipt — when a compromise was
+            # discovered is knowable, when it started is not; the honest
+            # default declares the key's whole output suspect. An explicit
+            # --suspect-after narrows it when forensics justify a later bound.
+            # (Mirrors POST /api/admin/revoke-key.)
+            when = next(
+                (r.issued_at for r in store.receipts() if r.public_key == args.key),
+                engine.clock.now(),
+            )
         try:
             receipt = engine.issue_key_revocation(args.key, when, args.reason or "")
         except ValueError as exc:
@@ -2659,9 +2698,17 @@ def main(argv: list[str] | None = None) -> None:
                 type=int,
                 default=None,
                 metavar="K",
-                help="0-based story-day index at which to rotate the signing key mid-story — "
-                "later records sign under the successor and the chain pivots at the "
-                "key_rotation receipt (proves the ledger survives a live key retirement)",
+                help="on story day K rotate the signing key live via the admin "
+                "endpoint — receipts on both sides verify through the signed pivot",
+            )
+            s.add_argument(
+                "--revoke-day",
+                type=int,
+                default=None,
+                metavar="K",
+                help="on story day K run the compromise drill — rotate to a fresh key "
+                "and revoke the retired one, so its whole output reports suspect "
+                "while every record still verifies",
             )
         if name == "demo":
             s.add_argument(

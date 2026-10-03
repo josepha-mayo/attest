@@ -510,6 +510,12 @@ def main():
         [bundle["original"]] + [e["receipt"] for e in bundle.get("reviews", [])], revoked)
     if suspect:
         print(f"    ({len(suspect)} record(s) signed by a revoked issuer inside its suspect window)")
+    # A rotation signed by a key later declared suspect means the handoff
+    # itself may be attacker-authored — the lineage carries the doubt.
+    pivots = suspect_records(rotations, revoked)
+    if pivots:
+        print(f"    ({len(pivots)} key-lifecycle receipt(s) signed inside a suspect window —")
+        print("     the trust pivot itself inherits the doubt)")
     print("Signature proves record integrity under the issuer key - not identity,")
     print("attendance, or absence.")
 
@@ -701,6 +707,12 @@ def main():
         print(f"    ({len(trusted)} issuer keys linked via the signed rotation chain)")
     if suspect_n:
         print(f"    ({suspect_n} record(s) signed by a revoked issuer inside its suspect window)")
+    # A rotation/adoption signed by a key later declared suspect means the
+    # handoff itself may be attacker-authored — the lineage carries the doubt.
+    pivots = len(suspect_records(rotations, revoked))
+    if pivots:
+        print(f"    ({pivots} key-lifecycle receipt(s) signed inside a suspect window —")
+        print("     the trust pivot itself inherits the doubt)")
     if declared == key and "--key" not in sys.argv:
         print("    (issuer self-declared by the pack — pass --key to pin it)")
     print("Integrity only — not identity, attendance, or absence.")

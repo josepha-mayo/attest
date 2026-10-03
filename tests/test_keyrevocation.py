@@ -204,3 +204,36 @@ def test_revocation_annotates_pack_verification(engine, store, household, schedu
         ok, detail = _verify_case_pack(z, new_signer.public_key_b64)
     assert ok, detail
     assert "suspect window" in detail
+
+
+def test_suspect_pivot_qualifies_the_lineage(engine, store, household, schedule, t0, tmp_path):
+    """When the revoked key signed the ROTATION itself, the pivot is suspect
+    too — a compromised key could have rotated to an attacker. Verifiers say
+    so instead of silently blessing the handoff."""
+    v1 = _closed_visit(engine, household, t0)
+    old_key, new_signer, rotation, _ = _rotate(engine)
+    # compromise predates the rotation — the pivot receipt lands in the window
+    engine.issue_key_revocation(old_key, store.receipt_for_visit(v1.id).issued_at - timedelta(minutes=1))
+
+    receipts = store.receipts()
+    revoked = ledger.revoked_issuer_keys(receipts)
+    pivots = ledger.suspect_receipts(receipts, revoked=revoked)
+    assert rotation in pivots  # the handoff itself carries the doubt
+
+    service = ReviewService(store, new_signer, engine.clock)
+    site = store.sites()[0]
+    entries = [(v1, service.bundle(v1.id), countersign_status(service.bundle(v1.id)))]
+    data = build_case_pack(
+        store,
+        tmp_path / "media",
+        site,
+        entries,
+        manifest_signer=lambda m: engine.issue_export_manifest(site, m),
+        issuer_key=new_signer.public_key_b64,
+    )
+    from attest.app import _verify_case_pack
+
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        ok, detail = _verify_case_pack(z, new_signer.public_key_b64)
+    assert ok, detail
+    assert "trust pivot" in detail
