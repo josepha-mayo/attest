@@ -1686,3 +1686,43 @@ def test_worker_pages_carry_lang_toggle(api, store, household, schedule, t0):
     link = api.post(f"/api/visits/{visit.id}/review-link").json()["path"]
     es = api.get(link + "?lang=es", auth=None)
     assert 'href="?lang=en"' in es.text and "English" in es.text
+
+
+def test_rate_limit_caps_unauthenticated_posts(tmp_path, store, ring_client):
+    """A flood on the unauthenticated POST surfaces burns out fast — webhooks
+    and grant links have separate budgets so one can't starve the other."""
+    from attest.config import Settings
+
+    s = Settings(
+        data_dir=tmp_path,
+        admin_token="test-admin-token-only-" + "x" * 32,
+        ring_webhook_key="k",
+        summarizer="template",
+        timezone="UTC",
+        rate_limit_webhook_per_min=3,
+        rate_limit_grant_per_min=2,
+    )
+    app = create_app(s, store=store, ring=ring_client, signer=Signer.ephemeral(), sweep_interval_s=0)
+    with _client(app) as c:
+        c.auth = ("admin", s.admin_token.get_secret_value())
+
+        # webhook surface: budget exhausts, then 429 JSON + Retry-After
+        codes = [
+            c.post("/webhooks/ring", content=b"{}", headers={"Content-Type": "application/json"}).status_code
+            for _ in range(4)
+        ]
+        assert codes[:3] != [429, 429, 429] and codes[3] == 429
+        last = c.post("/webhooks/ring", content=b"{}", headers={"Content-Type": "application/json"})
+        assert last.status_code == 429 and last.headers["Retry-After"] == "60"
+        assert last.headers["X-Content-Type-Options"] == "nosniff"  # headers wrap 429s too
+
+        # grant surface: independent budget, styled 429 (never raw JSON)
+        assert c.post("/checkin/dead-token", auth=None).status_code != 429
+        assert c.post("/checkin/dead-token", auth=None).status_code != 429
+        limited = c.post("/checkin/dead-token", auth=None)
+        assert limited.status_code == 429 and "<html" in limited.text and "Too many requests" in limited.text
+
+        # GETs and authenticated admin POSTs are not rate-limited
+        assert c.get("/", auth=None).status_code != 429
+        assert c.post("/api/sites", json={"name": "x"}).status_code != 429
+    app.state.inbox.close()

@@ -1736,6 +1736,28 @@ def _doctor(args: argparse.Namespace) -> None:
             "ATTEST_RING_MEDIA_ORIGINS empty — no origin may serve media bytes; "
             "downloads fail closed until an allowlist is configured.",
         )
+    if settings.rate_limit_webhook_per_min == 0 and settings.rate_limit_grant_per_min == 0:
+        add(
+            "warn",
+            "rate limits",
+            "both buckets disabled — the unauthenticated POST surfaces are "
+            "unthrottled; an upstream limiter (nginx limit_req) must carry it.",
+        )
+    elif settings.rate_limit_webhook_per_min == 0 or settings.rate_limit_grant_per_min == 0:
+        add(
+            "info",
+            "rate limits",
+            f"webhook {settings.rate_limit_webhook_per_min}/min, grants "
+            f"{settings.rate_limit_grant_per_min}/min — one surface unthrottled; "
+            "cover it upstream or it accepts unlimited floods",
+        )
+    else:
+        add(
+            "ok",
+            "rate limits",
+            f"webhook {settings.rate_limit_webhook_per_min}/min, grants "
+            f"{settings.rate_limit_grant_per_min}/min per client IP",
+        )
     db = data_dir / "attest.sqlite3"
     add(
         "info",

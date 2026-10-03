@@ -9,6 +9,7 @@ import logging
 import secrets
 import sqlite3
 import statistics
+import threading
 import time
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -81,6 +82,38 @@ _register_template_helpers()
 _MAX_WEBHOOK_BYTES = 256 * 1024
 _MAX_VERIFY_BYTES = 32 * 1024 * 1024
 _MAX_BODY_BYTES = 1024 * 1024
+
+
+class _TokenBuckets:
+    """Per-client-IP token buckets for the unauthenticated POST surfaces.
+
+    In-process and per-worker: a multi-worker deployment needs a shared
+    limiter upstream (nginx limit_req, ALB rules). Buckets are keyed by
+    (surface class, client host) so a webhook flood can't exhaust a
+    household's grant budget or vice versa.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._buckets: dict[tuple[str, str], tuple[float, float]] = {}
+
+    def allow(self, surface: str, client: str, per_minute: int) -> bool:
+        now = time.monotonic()
+        cap = float(per_minute)
+        refill = per_minute / 60.0
+        key = (surface, client)
+        with self._lock:
+            tokens, ts = self._buckets.get(key, (cap, now))
+            tokens = min(cap, tokens + (now - ts) * refill)
+            # idle entries never expire on their own — bound the map when it
+            # grows so a spoofed-source flood can't leak memory
+            if len(self._buckets) > 10_000:
+                self._buckets = {k: v for k, v in self._buckets.items() if now - v[1] < 600}
+            if tokens < 1.0:
+                self._buckets[key] = (tokens, now)
+                return False
+            self._buckets[key] = (tokens - 1.0, now)
+            return True
 
 
 def create_app(
@@ -260,25 +293,6 @@ def create_app(
     app = FastAPI(title="Attest", version="0.1.0", lifespan=lifespan, dependencies=[Depends(authorize)])
 
     @app.middleware("http")
-    async def privacy_headers(request: Request, call_next):
-        response = await call_next(request)
-        response.headers["Cache-Control"] = "no-store"
-        response.headers["Referrer-Policy"] = "no-referrer"
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        # CSP: everything self-only — no external fonts/CDNs exist. Script and
-        # style are 'unsafe-inline' because the shipped templates use inline
-        # blocks and onclick handlers; the directive's job here is to keep an
-        # injected string from phoning home (connect-src 'self'), framing the
-        # console (frame-ancestors), or exfiltrating a form (form-action).
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
-            "img-src 'self' data:; connect-src 'self'; font-src 'self'; "
-            "form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
-        )
-        return response
-
-    @app.middleware("http")
     async def bound_request_body(request: Request, call_next):
         limit = (
             _MAX_WEBHOOK_BYTES
@@ -303,6 +317,66 @@ def create_app(
                     return JSONResponse({"error": "request body too large"}, status_code=413)
             request._body = bytes(received)
         return await call_next(request)
+
+    # Outer-most middleware (registered last): refuse floods on the
+    # unauthenticated POST surfaces before a byte of the body is read.
+    _POST_BUDGETS = _TokenBuckets()
+
+    @app.middleware("http")
+    async def rate_limit(request: Request, call_next):
+        if request.method != "POST":
+            return await call_next(request)
+        path = request.url.path
+        if path == "/webhooks/ring":
+            surface, per_min = "webhook", s.rate_limit_webhook_per_min
+        elif path.startswith(("/checkin/", "/review/", "/family/")):
+            surface, per_min = "grant", s.rate_limit_grant_per_min
+        else:
+            surface, per_min = "", 0
+        if not per_min or _POST_BUDGETS.allow(
+            surface, request.client.host if request.client else "-", per_min
+        ):
+            return await call_next(request)
+        if surface == "grant":
+            # A household hitting this is refreshing too fast — a styled page,
+            # never raw JSON on the surfaces families can reach.
+            resp = render(
+                request,
+                "link_expired.html",
+                title="Slow down",
+                heading="Too many requests",
+                detail=(
+                    "This link was used too many times in a short period. Wait a moment, then try again."
+                ),
+                mechanics="Nothing was recorded — rate limits protect the record, they don't change it.",
+                cta="Back",
+            )
+            resp.status_code = 429
+        else:
+            resp = JSONResponse({"error": "rate limit exceeded"}, status_code=429)
+        resp.headers["Retry-After"] = "60"
+        return resp
+
+    # Outer-most middleware (registered last): headers apply to *every*
+    # response, including the early 413/429/401 returns above.
+    @app.middleware("http")
+    async def privacy_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        # CSP: everything self-only — no external fonts/CDNs exist. Script and
+        # style are 'unsafe-inline' because the shipped templates use inline
+        # blocks and onclick handlers; the directive's job here is to keep an
+        # injected string from phoning home (connect-src 'self'), framing the
+        # console (frame-ancestors), or exfiltrating a form (form-action).
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+            "img-src 'self' data:; connect-src 'self'; font-src 'self'; "
+            "form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+        )
+        return response
 
     app.state.store, app.state.engine, app.state.ring, app.state.signer = (
         store,
@@ -1906,6 +1980,18 @@ def _verify_pack(data: bytes, public_key: str, known_rotations: list | None = No
                 public_key, rotation_receipts
             ) | ledger.descendant_issuer_keys(public_key, rotation_receipts)
         ok, detail = _check_pack_bundle(z, bundle, trusted, media_prefix="media/")
+        if ok:
+            # Revocation is an overlay, never a verdict flip — surface the
+            # suspect-window count so a compromised-key pack reads honestly.
+            revoked = ledger.revoked_issuer_keys(rotation_receipts)
+            suspect = ledger.suspect_receipts(
+                [bundle.original] + [e.receipt for e in bundle.reviews], revoked=revoked
+            )
+            if suspect:
+                detail += (
+                    f"; {len(suspect)} record(s) signed by a revoked issuer "
+                    "inside its declared suspect window"
+                )
         if not ok:
             return False, detail
         # Fail closed on files the pack format doesn't name (media members are

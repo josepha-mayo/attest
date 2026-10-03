@@ -71,6 +71,14 @@ class Settings(BaseSettings):
     # Nova Lite is a first-party multimodal model (no Anthropic use-case form needed).
     bedrock_model_id: str = "us.amazon.nova-lite-v1:0"
 
+    # Rate limits on the unauthenticated POST surfaces — per-client-IP token
+    # buckets enforced by middleware before the body is read. Webhooks get a
+    # generous ceiling (Ring retries burst); grant POSTs are interactive so a
+    # few per minute is far above any honest household. 0 disables. Per-worker
+    # by design: a multi-worker deployment needs a shared limiter upstream.
+    rate_limit_webhook_per_min: int = 300
+    rate_limit_grant_per_min: int = 30
+
     # Presentation
     public_base_url: str = "http://127.0.0.1:8000"
     timezone: str = "America/Los_Angeles"
