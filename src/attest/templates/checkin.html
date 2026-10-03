@@ -1,20 +1,20 @@
 {% extends "base.html" %}
-{% block title %}Check in — {{ worker.name }}{% endblock %}
-{% block chrome %}<header><div class="brand">Attest<span>.</span></div></header>{% endblock %}
+{% macro t(dt) %}{% if dt %}{% set _v = (dt|iso).astimezone(tz).strftime(s.time_fmt if s.time_fmt else "%I:%M %p") %}{{ _v[1:] if _v.startswith("0") and not s.time_fmt else _v }}{% else %}—{% endif %}{% endmacro %}
+{% block title %}{{ s.wk_checkin_brand }} — {{ worker.name }}{% endblock %}
+{% block chrome %}<header><div class="brand">Attest<span>.</span> · <a href="?lang={{ "es" if s.lang == "en" else "en" }}" style="letter-spacing:normal;text-transform:none">{{ s.lang_toggle }}</a></div></header>{% endblock %}
 {% block body %}
 <div style="max-width:480px;margin:40px auto">
   <div class="card" style="padding:26px">
-    <div class="muted small">Attest check-in</div>
-    <h1 style="margin-top:4px">Hi {{ worker.name.split(" ")[0] }}.</h1>
+    <div class="muted small">{{ s.wk_checkin_brand }}</div>
+    <h1 style="margin-top:4px">{{ s.wk_hi.format(name=worker.name.split(" ")[0]) }}</h1>
     {% if done %}
-      <p class="ok" style="font-size:18px">&#10003; You're checked in{% if visit and visit.checked_in_at %} at {{ visit.checked_in_at.astimezone(tz).strftime("%I:%M %p").lstrip("0") }}{% endif %}.</p>
-      <p class="muted">Your self-report has been recorded. This link is now used and cannot submit again. You can close this page.</p>
+      <p class="ok" style="font-size:18px">{{ s.wk_checked_in.format(at=(s.wk_checked_in_at.format(t=t(visit.checked_in_at)) if visit and visit.checked_in_at else "")) }}</p>
+      <p class="muted">{{ s.wk_checkin_done }}</p>
     {% elif visit %}
       {% if checkin_error %}<div class="flash err" role="alert">{{ checkin_error }}</div>{% endif %}
-      <p>Activity was observed at <b>{{ site.name }}</b> at
-        <b>{{ visit.arrived_at.astimezone(tz).strftime("%I:%M %p").lstrip("0") }}</b>. Are you there now?</p>
-      <p class="muted small">This records your self-report at the current time, not the time of the camera event. It does not independently verify identity or location. Submit only for yourself.</p>
-      <form method="post" action="/checkin/{{ token }}"><button class="btn" style="width:100%">Yes, I'm here</button></form>
+      <p>{{ s.wk_checkin_q.format(site=site.name, t=t(visit.arrived_at)) }}</p>
+      <p class="muted small">{{ s.wk_checkin_disclaimer }}</p>
+      <form method="post" action="/checkin/{{ token }}?lang={{ s.lang }}"><button class="btn" style="width:100%">{{ s.wk_checkin_yes }}</button></form>
     {% endif %}
   </div>
 </div>

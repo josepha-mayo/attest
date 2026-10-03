@@ -79,11 +79,25 @@ def timeline_strip(
     coverage: dict | None,
     late_events: list[Any] | None = None,
     bounds: tuple[datetime, datetime] | None = None,
+    tz: Any = None,
+    tr: dict | None = None,
 ) -> dict | None:
     """Return positioned elements (percent coords) for the strip, or None when
     there is nothing worth drawing (no window and no observations). ``bounds``
     pins the axis (e.g. midnight→midnight for a day row in a week strip);
-    without it the axis auto-fits the data."""
+    without it the axis auto-fits the data. ``tz`` is the DISPLAY timezone for
+    tick labels and the aria-label — every other timestamp on the page renders
+    through the local-tz path, so a UTC-labeled strip would mislabel the axis
+    next to them. ``tr`` localizes kind names, titles, and the aria-label via
+    the tl_* i18n keys. The SVG <title> tooltips keep full ISO+offset precision."""
+    tr = tr or {}
+
+    def _k(kind: str) -> str:
+        return tr.get("tl_kind_" + kind) or _KIND_LABEL.get(kind, kind.replace("_", " "))
+
+    def _t(key: str, default: str, **fmt: Any) -> str:
+        return tr.get(key, default).format(**fmt)
+
     checked_in_at = _iso(checked_in_at) if checked_in_at else None
     points: list[datetime] = []
     win_start = _iso(_get(schedule, "window_start")) if schedule else None
@@ -149,8 +163,12 @@ def timeline_strip(
                     {
                         "live": True,
                         "watched": False,
-                        "title": "live view — a stream was established "
-                        f"{opened.isoformat()} -> {closed.isoformat()}; viewership not shown",
+                        "title": _t(
+                            "tl_title_live_band",
+                            "live view — a stream was established {a} -> {b}; viewership not shown",
+                            a=opened.isoformat(),
+                            b=closed.isoformat(),
+                        ),
                         **b,
                     }
                 )
@@ -166,8 +184,8 @@ def timeline_strip(
             {
                 "x": x(at),
                 "kind": kind,
-                "label": _KIND_LABEL.get(kind, kind.replace("_", " ")),
-                "title": f"{_KIND_LABEL.get(kind, kind)} — {at.isoformat()}",
+                "label": _k(kind),
+                "title": f"{_k(kind)} — {at.isoformat()}",
             }
         )
     if checked_in_at and (not bounds or lo <= checked_in_at <= hi):
@@ -175,8 +193,8 @@ def timeline_strip(
             {
                 "x": x(checked_in_at),
                 "kind": "checkin",
-                "label": _KIND_LABEL["checkin"],
-                "title": f"worker check-in — {checked_in_at.isoformat()}",
+                "label": _k("checkin"),
+                "title": f"{_k('checkin')} — {checked_in_at.isoformat()}",
             }
         )
     for e in late_events or []:
@@ -186,8 +204,8 @@ def timeline_strip(
                 {
                     "x": x(_iso(at)),
                     "kind": "late",
-                    "label": _KIND_LABEL["late"],
-                    "title": f"late-arriving event — {_iso(at).isoformat()}",
+                    "label": _k("late"),
+                    "title": _t("tl_title_late", "late-arriving event — {at}", at=_iso(at).isoformat()),
                 }
             )
     for opened, closed in live:
@@ -196,40 +214,54 @@ def timeline_strip(
                 {
                     "x": x(opened),
                     "kind": "liveview",
-                    "label": _KIND_LABEL["liveview"],
-                    "title": f"live view opened {opened.isoformat()} — still open; "
-                    "attests a session, never viewership",
+                    "label": _k("liveview"),
+                    "title": _t(
+                        "tl_title_live_open",
+                        "live view opened {at} — still open; attests a session, never viewership",
+                        at=opened.isoformat(),
+                    ),
                 }
             )
+
+    def _hm(dt: datetime) -> str:
+        # Display-tz formatting — the page renders every other clock through
+        # the same path, so the axis agrees with the facts beside it. tr's
+        # time_fmt carries the locale's hour convention (24h for es) so the
+        # axis matches the times rendered next to it.
+        d = dt.astimezone(tz) if tz else dt
+        fmt = tr.get("time_fmt")
+        return d.strftime(fmt) if fmt else d.strftime("%I:%M%p").lstrip("0").lower()
 
     # 4–5 readable axis ticks
     ticks = []
     step = span / 4
     for i in range(5):
         dt = lo + timedelta(seconds=step * i)
-        ticks.append({"x": x(dt), "label": dt.strftime("%I:%M%p").lstrip("0").lower()})
-
-    # Prose equivalent for screen readers — the SVG is role="img", so the
-    # label must carry what sighted users read from the geometry.
-    def _hm(dt: datetime) -> str:
-        return dt.strftime("%I:%M%p").lstrip("0").lower()
+        ticks.append({"x": x(dt), "label": _hm(dt)})
 
     label_parts = []
     if win_start and win_end:
-        label_parts.append(f"scheduled {_hm(win_start)}–{_hm(win_end)}")
+        label_parts.append(_t("tl_aria_scheduled", "scheduled {a}–{b}", a=_hm(win_start), b=_hm(win_end)))
     watched = sum(1 for b in bands if b.get("watched"))
     gaps_n = sum(1 for b in bands if not b.get("watched") and not b.get("live"))
     live_bands = sum(1 for b in bands if b.get("live"))
     if watched or gaps_n:
-        label_parts.append(f"{watched} watched interval(s), {gaps_n} coverage gap(s)")
+        label_parts.append(
+            _t(
+                "tl_aria_coverage",
+                "{watched} watched interval(s), {gaps} coverage gap(s)",
+                watched=watched,
+                gaps=gaps_n,
+            )
+        )
     if live_bands:
-        label_parts.append(f"{live_bands} live-view session(s) (provenance only)")
+        label_parts.append(_t("tl_aria_live", "{n} live-view session(s) (provenance only)", n=live_bands))
     seen: dict[str, int] = {}
     for m in marks:
         seen[m["label"]] = seen.get(m["label"], 0) + 1
     if seen:
         label_parts.append(", ".join(f"{n} {lbl}" for lbl, n in seen.items()))
-    aria_label = "; ".join(label_parts) or "empty timeline"
+    aria_label = "; ".join(label_parts) or _t("tl_aria_empty", "empty timeline")
 
     return {
         "window": band(win_start, win_end) if win_start else None,
@@ -253,10 +285,13 @@ def day_strips(
     tz: Any,
     late_events: list[Any] | None = None,
     max_days: int = 10,
-) -> list[dict]:
+    tr: dict | None = None,
+) -> dict:
     """One strip per local day covering every record — shared 00:00–24:00 axis,
     newest first. Each row shows the scheduled window(s), poll coverage bands,
-    and observation marks so a week of service reads at a glance."""
+    and observation marks so a week of service reads at a glance. Returns
+    ``{"strips": [...], "hidden_days": n}`` — older days beyond ``max_days``
+    are dropped for readability but the count is reported, never hidden."""
     items: list[tuple[datetime, datetime, str, Any]] = []  # (start, end, kind, obj)
     for sch in schedules:
         ws, we = _iso(_get(sch, "window_start")), _iso(_get(sch, "window_end"))
@@ -279,7 +314,7 @@ def day_strips(
             closed = _iso(_get(s, "closed_at")) if _get(s, "closed_at") else opened
             items.append((opened, closed, "livesession", s))
     if not items:
-        return []
+        return {"strips": [], "hidden_days": 0}
 
     def days_between(a: datetime, b: datetime) -> list[datetime]:
         """Local midnights from a's day through b's day."""
@@ -325,9 +360,11 @@ def day_strips(
             coverage=cov_today if any(cov_today.values()) else None,
             late_events=late_today,
             bounds=(lo, hi),
+            tz=tz,
+            tr=tr,
         )
         # extra schedules/check-ins beyond the first fold into marks via evidence anyway;
         # second windows are rare — draw the first only for readability.
         if strip:
             strips.append({"label": day.strftime("%a %b %d"), "strip": strip})
-    return strips
+    return {"strips": strips, "hidden_days": len(touched) - len(strips)}

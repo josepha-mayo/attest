@@ -22,6 +22,35 @@ def pick(lang: str | None) -> str:
     return lang if lang in SUPPORTED else "en"
 
 
+def negotiate(lang_param: str | None, accept_language: str | None) -> str:
+    """Language for a public surface: an explicit ?lang= always wins; absent
+    that, the browser's Accept-Language picks Spanish only when it is strictly
+    preferred over English. A link texted to an aide or family opens in the
+    handset's language without anyone having to find the toggle."""
+    if lang_param is not None:
+        return pick(lang_param)
+    q_en = q_es = 0.0
+    for part in (accept_language or "").split(","):
+        bits = part.strip().split(";")
+        code = bits[0].strip().lower()
+        weight = 1.0
+        for b in bits[1:]:
+            b = b.strip()
+            if b.startswith("q="):
+                try:
+                    weight = float(b[2:])
+                except ValueError:
+                    pass
+        if code == "es" or code.startswith("es-"):
+            q_es = max(q_es, weight)
+        elif code == "en" or code.startswith("en-") or code == "*":
+            q_en = max(q_en, weight)
+        # Unrelated codes (fr, de, …) weigh on neither side — we cannot
+        # serve them, and counting them for English would beat a real
+        # secondary Spanish preference.
+    return "es" if q_es > q_en else "en"
+
+
 _EN = {
     "brand": "Attest · observation record",
     "page_title": "visit record",
@@ -90,6 +119,10 @@ _EN = {
     "tl_obs": "observation",
     "tl_checkin": "self-reported check-in",
     "tl_live": "live view — stream established, never viewership",
+    "tl_aria_prefix": "Timeline — ",
+    "tl_title_window": "scheduled window",
+    "tl_title_watched": "watched by polling",
+    "tl_title_gap": "coverage gap — not watched",
     "counter": {
         "acknowledged": "Agrees with this record",
         "contested": "Disputes this record",
@@ -123,6 +156,73 @@ _EN = {
     "dead_family_mechanics": "Family view links are visit-scoped and expire after 7 days — the link itself is the authorization to view that one record.",
     "dead_cta": "If you need a new link, ask the agency that issued it to send a fresh one.",
     "dead_gates_family": "Nothing about the underlying record changed: links gate reading the record, never the signed record itself.",
+    "dead_checkin_detail": "This check-in link is invalid, expired, or already used.",
+    "dead_review_detail": "This review link is invalid, expired, or already used.",
+    "dead_worker_mechanics": "Worker check-in and review links are visit-scoped, expire, and are single-use — a link that was already used or has expired cannot be reopened.",
+    "dead_gates_checkin": "Nothing about the underlying record changed: links gate checking in, never the signed record itself.",
+    "dead_gates_review": "Nothing about the underlying record changed: links gate adding a statement, never the signed record itself.",
+    # Timeline strip — SVG titles + the aria-label prose a screen reader speaks.
+    # Kind names stay neutral ('departure cue', never 'departure').
+    "tl_kind_arrival_motion": "motion",
+    "tl_kind_doorbell": "doorbell",
+    "tl_kind_door_opened": "door opened",
+    "tl_kind_door_closed": "door closed",
+    "tl_kind_activity": "activity",
+    "tl_kind_departure_motion": "departure cue",
+    "tl_kind_on_demand": "on-demand media",
+    "tl_kind_snapshot": "snapshot",
+    "tl_kind_checkin": "worker check-in",
+    "tl_kind_late": "late-arriving event",
+    "tl_kind_liveview": "live view",
+    "tl_aria_scheduled": "scheduled {a}–{b}",
+    "tl_aria_coverage": "{watched} watched interval(s), {gaps} coverage gap(s)",
+    "tl_aria_live": "{n} live-view session(s) (provenance only)",
+    "tl_aria_empty": "empty timeline",
+    "tl_title_live_band": "live view — a stream was established {a} -> {b}; viewership not shown",
+    "tl_title_live_open": "live view opened {at} — still open; attests a session, never viewership",
+    "tl_title_late": "late-arriving event — {at}",
+    # Worker surfaces — check-in and review links. The worker is the third
+    # audience that may not read English first; the signed words still render
+    # verbatim, only the chrome translates.
+    "wk_checkin_brand": "Attest check-in",
+    "wk_hi": "Hi {name}.",
+    "wk_checked_in": "✓ You're checked in{at}.",
+    "wk_checked_in_at": " at {t}",
+    "wk_checkin_done": "Your self-report has been recorded. This link is now used and cannot submit again. You can close this page.",
+    "wk_checkin_q": "Activity was observed at {site} at {t}. Are you there now?",
+    "wk_checkin_disclaimer": "This records your self-report at the current time, not the time of the camera event. It does not independently verify identity or location. Submit only for yourself.",
+    "wk_checkin_yes": "Yes, I'm here",
+    "wk_review_title": "Worker's account",
+    "wk_review_h": "Your account of the visit",
+    "wk_done_h": "Statement recorded",
+    "wk_done_p": "Your statement was appended and signed without changing the original observation record. This link has been consumed.",
+    "wk_issued": "This link was issued to {name} for the record at {site}. It expires 24 hours after issue and works once.",
+    "wk_first": "First observation",
+    "wk_last": "Last observation",
+    "wk_none": "None received",
+    "wk_honest": "A short observation interval does not mean you left or stopped working. You can explain missing context, dispute an interpretation, or report your own times.",
+    "wk_replay": "Local replay: event times use a simulated clock. This is not a live visit.",
+    "wk_submit": "Submit my statement once",
+    "wk_link_scope": "The link authorizes a statement for this record only. It does not independently verify the submitter's identity.",
+    "rf_assessment": "Assessment",
+    "rf_opt_inconclusive": "Inconclusive — more context needed",
+    "rf_opt_confirm_coord": "Confirm the recorded account",
+    "rf_opt_confirm_worker": "Confirm my account of the visit",
+    "rf_opt_dispute": "Dispute the interpretation",
+    "rf_opt_correction": "Add a correction or missing context",
+    "rf_reason": "Reason code",
+    "rf_reason_opt_coord": "optional — the coded explanation you are stating",
+    "rf_reason_opt_worker": "optional — what best explains the exception, in your view",
+    "rf_reason_never": "never a verified cause",
+    "rf_reason_none": "No coded reason — statement carries it",
+    "rf_statement": "Statement",
+    "rf_statement_ph": "Explain what you know and what should be corrected.",
+    "rf_start": "Reported start (optional, include UTC offset)",
+    "rf_end": "Reported end (optional, include UTC offset)",
+    "rf_times_note": "Supply both times or neither. These are reported times, not independently measured work duration. Original observations will not change.",
+    "wk_err_invalid": "Your statement didn't submit — check that it's not empty and that either both reported times or neither are filled, each with a UTC offset like 2026-09-15T09:00:00-07:00.",
+    "wk_err_full": "This record's review chain is full — no further statements can be appended. Ask the coordinator to export the case pack.",
+    "wk_err_precedes": "Your check-in didn't record — the record has no observation yet to check in against.",
 }
 
 _ES = {
@@ -193,6 +293,10 @@ _ES = {
     "tl_obs": "observación",
     "tl_checkin": "registro autodeclarado",
     "tl_live": "vista en vivo — transmisión establecida, nunca audiencia",
+    "tl_aria_prefix": "Línea de tiempo — ",
+    "tl_title_window": "ventana programada",
+    "tl_title_watched": "observada por sondeo",
+    "tl_title_gap": "brecha de cobertura — no observada",
     "counter": {
         "acknowledged": "Está de acuerdo con este registro",
         "contested": "Cuestiona este registro",
@@ -225,6 +329,72 @@ _ES = {
     "dead_family_mechanics": "Los enlaces familiares están limitados a una visita y caducan a los 7 días — el propio enlace es la autorización para ver ese registro.",
     "dead_cta": "Si necesita un enlace nuevo, pida a la agencia que lo emitió que envíe uno nuevo.",
     "dead_gates_family": "Nada del registro ha cambiado: los enlaces solo controlan la lectura, nunca el registro firmado.",
+    "dead_checkin_detail": "Este enlace de registro de llegada no es válido, caducó o ya se usó.",
+    "dead_review_detail": "Este enlace de revisión no es válido, caducó o ya se usó.",
+    "dead_worker_mechanics": "Los enlaces de registro y revisión están limitados a una visita, caducan y son de un solo uso — un enlace usado o caducado no se puede reabrir.",
+    "dead_gates_checkin": "Nada del registro ha cambiado: los enlaces solo controlan el registro de llegada, nunca el registro firmado.",
+    "dead_gates_review": "Nada del registro ha cambiado: los enlaces solo controlan añadir una declaración, nunca el registro firmado.",
+    # Timeline strip — títulos SVG y la prosa del aria-label.
+    "tl_kind_arrival_motion": "movimiento",
+    "tl_kind_doorbell": "timbre",
+    "tl_kind_door_opened": "puerta abierta",
+    "tl_kind_door_closed": "puerta cerrada",
+    "tl_kind_activity": "actividad",
+    "tl_kind_departure_motion": "señal de salida",
+    "tl_kind_on_demand": "contenido a pedido",
+    "tl_kind_snapshot": "captura",
+    "tl_kind_checkin": "registro del trabajador",
+    "tl_kind_late": "evento tardío",
+    "tl_kind_liveview": "vista en vivo",
+    "tl_aria_scheduled": "programado {a}–{b}",
+    "tl_aria_coverage": "{watched} intervalo(s) observado(s), {gaps} brecha(s) de cobertura",
+    "tl_aria_live": "{n} sesión(es) de vista en vivo (solo procedencia)",
+    "tl_aria_empty": "línea de tiempo vacía",
+    "tl_title_live_band": "vista en vivo — se estableció una transmisión {a} -> {b}; no se muestra quién la vio",
+    "tl_title_live_open": "vista en vivo abierta {at} — aún abierta; certifica una sesión, nunca la visualización",
+    "tl_title_late": "evento tardío — {at}",
+    # Worker surfaces — check-in and review links. El trabajador es la tercera
+    # audiencia que puede no leer inglés primero; las palabras firmadas siguen
+    # verbatim, solo se traduce la interfaz.
+    "wk_checkin_brand": "Registro de llegada · Attest",
+    "wk_hi": "Hola, {name}.",
+    "wk_checked_in": "✓ Llegada registrada{at}.",
+    "wk_checked_in_at": " a las {t}",
+    "wk_checkin_done": "Tu reporte quedó registrado. Este enlace ya se usó y no puede enviarse de nuevo. Puedes cerrar esta página.",
+    "wk_checkin_q": "Se observó actividad en {site} a las {t}. ¿Estás ahí ahora?",
+    "wk_checkin_disclaimer": "Esto registra tu propio reporte a la hora actual, no la hora del evento de la cámara. No verifica identidad ni ubicación. Úsalo solo para ti.",
+    "wk_checkin_yes": "Sí, estoy aquí",
+    "wk_review_title": "Versión del trabajador",
+    "wk_review_h": "Tu versión de la visita",
+    "wk_done_h": "Relato registrado",
+    "wk_done_p": "Tu relato se añadió y firmó sin cambiar el registro de observación original. Este enlace quedó consumido.",
+    "wk_issued": "Este enlace se emitió para {name} y el registro en {site}. Caduca 24 horas después de emitirse y funciona una sola vez.",
+    "wk_first": "Primera observación",
+    "wk_last": "Última observación",
+    "wk_none": "No se recibió ninguna",
+    "wk_honest": "Un intervalo de observación corto no significa que te hayas ido ni que hayas dejado de trabajar. Puedes explicar el contexto que falte, cuestionar una interpretación o reportar tus propios horarios.",
+    "wk_replay": "Repetición local: las horas de los eventos usan un reloj simulado. Esta no es una visita en vivo.",
+    "wk_submit": "Enviar mi relato una sola vez",
+    "wk_link_scope": "El enlace autoriza un relato solo para este registro. No verifica de forma independiente la identidad de quien lo envía.",
+    "rf_assessment": "Valoración",
+    "rf_opt_inconclusive": "No concluyente — hace falta más contexto",
+    "rf_opt_confirm_coord": "Confirmar la versión registrada",
+    "rf_opt_confirm_worker": "Confirmar mi versión de la visita",
+    "rf_opt_dispute": "Cuestionar la interpretación",
+    "rf_opt_correction": "Añadir una corrección o contexto que falta",
+    "rf_reason": "Código de motivo",
+    "rf_reason_opt_coord": "opcional — la explicación codificada que declaras",
+    "rf_reason_opt_worker": "opcional — qué explica mejor la excepción, según tu criterio",
+    "rf_reason_never": "nunca una causa verificada",
+    "rf_reason_none": "Sin código de motivo — el relato lo explica",
+    "rf_statement": "Relato",
+    "rf_statement_ph": "Explica lo que sabes y qué debe corregirse.",
+    "rf_start": "Hora declarada de inicio (opcional, incluye el huso UTC)",
+    "rf_end": "Hora declarada de fin (opcional, incluye el huso UTC)",
+    "rf_times_note": "Indica ambas horas o ninguna. Son horas declaradas, no una medición independiente del tiempo trabajado. Las observaciones originales no cambiarán.",
+    "wk_err_invalid": "Tu relato no se envió: comprueba que no esté vacío y que declares ambas horas o ninguna, cada una con huso UTC como 2026-09-15T09:00:00-07:00.",
+    "wk_err_full": "La cadena de revisiones de este registro está llena — no se pueden añadir más relatos. Pide al coordinador que exporte el paquete del caso.",
+    "wk_err_precedes": "Tu llegada no se registró: el registro aún no tiene ninguna observación con la que cotejarla.",
 }
 
 _WEEKDAYS = {

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import tempfile
 from pathlib import Path
 
 _EXT = {"image/jpeg": "jpg", "image/png": "png", "video/mp4": "mp4"}
@@ -12,6 +14,10 @@ class MediaStore:
     def __init__(self, root: Path):
         self.root = root.resolve()
         self.root.mkdir(parents=True, exist_ok=True)
+        try:  # evidence bytes are private-record content — tighten on POSIX
+            self.root.chmod(0o700)
+        except OSError:
+            pass
 
     def save(self, visit_id: str, label: str, content: bytes, content_type: str) -> tuple[str, Path]:
         if any(
@@ -30,7 +36,20 @@ class MediaStore:
         d.mkdir(parents=True, exist_ok=True)
         path = d / f"{label}.{sha[:12]}.{ext}"
         if not path.exists():
-            path.write_bytes(content)
+            # Atomic publish — a crash mid-write must never leave partial bytes
+            # that serve-time digest verification would then report as tamper.
+            fd, tmp = tempfile.mkstemp(dir=d, prefix=".part-")
+            try:
+                with os.fdopen(fd, "wb") as f:
+                    f.write(content)
+                try:
+                    os.chmod(tmp, 0o600)
+                except OSError:
+                    pass
+                os.replace(tmp, path)
+            except BaseException:
+                Path(tmp).unlink(missing_ok=True)
+                raise
         return sha, path
 
     def read(self, path: str | Path) -> bytes | None:

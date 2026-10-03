@@ -127,6 +127,7 @@ async function disconnectSource() {
     </div>
   </div>
   {% endfor %}
+  {% if hidden_days %}<p class="muted small" style="margin:8px 2px 0">… plus {{ hidden_days }} earlier day(s) not drawn — the records below remain complete.</p>{% endif %}
   <div class="row" style="gap:16px;font-size:11px;color:var(--muted);margin:10px 2px 0">
     <span><span aria-hidden="true" style="color:#8fa3c8">&#9632;</span> scheduled window</span>
     <span><span aria-hidden="true" style="color:#2f9e63">&#9632;</span> watched &nbsp;<span aria-hidden="true" style="color:#9aa3b2">&#9632;</span> gap</span>
@@ -136,6 +137,11 @@ async function disconnectSource() {
   </div>
   <p class="small muted" style="margin:8px 2px 0">Each row is one local day (midnight–midnight). Scheduled
   windows, poll coverage, and observations — observed intervals are not time worked; gaps are blind spots, not absence.</p>
+  {% if hidden_days %}
+  <p class="small muted" style="margin:4px 2px 0">Showing the {{ days|length }} most recent days —
+    {{ hidden_days }} older day{{ "s" if hidden_days != 1 }} with records are not drawn here; every record
+    remains in the list and the signed export.</p>
+  {% endif %}
 </div>
 {% endif %}
 

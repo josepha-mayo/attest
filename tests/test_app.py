@@ -83,6 +83,25 @@ def test_old_worker_tokens_no_longer_authenticate(api):
     assert api.post("/checkin/tok123", auth=None).status_code == 410  # dead link page
 
 
+def test_worker_dead_link_pages_localize(api):
+    """Check-in/review dead links are worker-facing failure surfaces — they
+    honor ?lang like the family view, never dead-ending a worker in English."""
+    r = api.get("/checkin/" + "x" * 40 + "?lang=es", auth=None)
+    assert r.status_code == 404
+    assert 'lang="es"' in r.text
+    assert "Este enlace ya no se puede usar" in r.text
+    assert "registro de llegada" in r.text  # check-in flavor, not family/review
+
+    r = api.get("/review/" + "x" * 40 + "?lang=es", auth=None)
+    assert r.status_code == 404
+    assert "enlace de revisión" in r.text
+    assert "registro de llegada" not in r.text
+
+    # English still defaults for unknown langs and missing ?lang
+    r = api.get("/checkin/" + "x" * 40, auth=None)
+    assert r.status_code == 404 and "check-in link" in r.text
+
+
 def test_rejects_bad_signature(api, household, t0):
     _, _, cam, _ = household
     r = _post_hook(api, cam.id, "button_press", t0, key="wrong")
@@ -1232,6 +1251,51 @@ def test_verify_pack_rejects_smuggled_top_level_and_media(api, household, t0):
     assert not ok and "not in the signed manifest" in detail
 
 
+def test_verify_pack_rejects_unsafe_and_duplicate_member_names(api, household, t0):
+    """Zip member names that dodge prefix whitelists (``..``, absolute paths,
+    drive-qualified) or appear twice — ambiguous across extractors — fail the
+    whole pack. Same rule as packdiff's check_member_names and the browser
+    verifier's readZipEntries."""
+    import io
+    import zipfile
+
+    site, _, cam, _ = household
+    r = _post_hook(api, cam.id, "motion_detected", t0, "human")
+    assert r.status_code == 202
+    vid = api.attest_state.store.active_visit(site.id).id
+    assert api.post(f"/api/visits/{vid}/close").status_code == 200
+    pack = api.get(f"/sites/{site.id}/pack.zip")
+    zin = zipfile.ZipFile(io.BytesIO(pack.content))
+
+    from attest.app import _verify_pack
+
+    key = api.attest_state.signer.public_key_b64
+
+    def repacked(*extra_names):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zout:
+            for n in zin.namelist():
+                zout.writestr(n, zin.read(n))
+            for n in extra_names:
+                zout.writestr(n, b"x")
+        return buf.getvalue()
+
+    for bad in (
+        f"visits/{vid}/media/../../escape.txt",
+        "media/../escape.txt",
+        "/abs/path.txt",
+        "C:/drive.txt",
+    ):
+        ok, detail = _verify_pack(repacked(bad), key)
+        assert not ok, f"{bad} slipped past member-name validation"
+        assert "unsafe member name" in detail
+
+    # A second bundle.json shadows the first for extractors that take the last
+    # entry — ambiguous, so the pack must fail rather than pick one.
+    ok, detail = _verify_pack(repacked("manifest.json"), key)
+    assert not ok and "duplicate member name" in detail
+
+
 def test_status_survives_untracked_journal_rows(tmp_path, monkeypatch):
     """A store with rows written outside the journal used to crash `attest
     status` with TypeError — it must print the untracked count and flag
@@ -1518,3 +1582,107 @@ def test_security_headers_on_every_response(api):
     assert "frame-ancestors 'none'" in csp
     assert "form-action 'self'" in csp
     assert "connect-src 'self'" in csp  # an injected string can't phone home
+
+
+def test_worker_pages_localize_spanish(api, store, household, schedule, t0):
+    """The worker is the third non-admin audience — check-in and review links
+    localize ?lang=es exactly like the family pages; signed words stay verbatim."""
+    _post_hook(api, household[2].id, "button_press", t0)
+    visit = store.active_visit(household[0].id)
+
+    # check-in page — the front line for an aide at the door
+    claim = api.post(f"/api/visits/{visit.id}/checkin-link").json()["path"]
+    en = api.get(claim, auth=None)
+    assert '<html lang="en">' in en.text and "Are you there now?" in en.text
+    es = api.get(claim + "?lang=es", auth=None)
+    assert es.status_code == 200 and '<html lang="es">' in es.text
+    assert "¿Estás ahí ahora?" in es.text
+    assert "?lang=es" in es.text  # POST preserves the language
+    assert "Yes, I'm here" not in es.text
+
+    # review page — self-report in the worker's first language
+    api.post(f"/api/visits/{visit.id}/close")
+    link = api.post(f"/api/visits/{visit.id}/review-link").json()["path"]
+    es = api.get(link + "?lang=es", auth=None)
+    assert '<html lang="es">' in es.text
+    assert "Tu versión de la visita" in es.text
+    assert "Enviar mi relato una sola vez" in es.text
+    # a malformed POST re-renders the error in the same language
+    bad = api.post(
+        link + "?lang=es",
+        auth=None,
+        data={"decision": "dispute", "statement": "", "reported_start": "nota-date"},
+    )
+    assert "Tu relato no se envió" in bad.text or "relato" in bad.text
+
+
+def test_i18n_string_tables_stay_in_parity():
+    """EN and ES ship exactly the same keys — a missing ES key silently falls
+    back to English and a stray ES key is a typo'd name that renders the
+    fallback forever."""
+    from attest.i18n import _EN, _ES
+
+    assert set(_EN) == set(_ES)
+
+
+def test_localized_template_keys_resolve():
+    """Every s.* / _s.* key the localized templates render must exist in the
+    string table — Jinja renders a missing key as an empty string, blanking
+    the label with no error."""
+    import re
+    from pathlib import Path
+
+    from attest.i18n import _EN
+
+    injected = {"lang", "time_fmt", "weekdays", "months"}  # strings() adds these
+    templates = Path(__file__).resolve().parents[1] / "src" / "attest" / "templates"
+    for name in ("checkin.html", "worker_review.html", "review_fields.html", "household.html"):
+        used = set(re.findall(r"\bs\.(\w+)", (templates / name).read_text(encoding="utf-8")))
+        missing = used - set(_EN) - injected
+        assert not missing, f"{name} references missing i18n keys: {sorted(missing)}"
+    legend = set(re.findall(r"_s\.(\w+)", (templates / "_timeline.html").read_text(encoding="utf-8")))
+    assert not (legend - set(_EN) - injected), "_timeline.html legend keys missing"
+
+
+def test_worker_links_negotiate_accept_language(api, store, household, schedule, t0):
+    """A link texted to an aide opens in the handset's language without
+    ?lang= — an explicit ?lang= still wins, and the spent/bogus link page
+    localizes like the live one."""
+    _post_hook(api, household[2].id, "button_press", t0)
+    visit = store.active_visit(household[0].id)
+    claim = api.post(f"/api/visits/{visit.id}/checkin-link").json()["path"]
+
+    es = api.get(claim, auth=None, headers={"accept-language": "es-MX,es;q=0.9,en;q=0.5"})
+    assert '<html lang="es">' in es.text and "¿Estás ahí ahora?" in es.text
+    assert es.headers.get("content-language") == "es"
+
+    en = api.get(claim, auth=None, headers={"accept-language": "en-US,en;q=0.9,es;q=0.5"})
+    assert '<html lang="en">' in en.text and "Are you there now?" in en.text
+    assert en.headers.get("content-language") == "en"
+
+    override = api.get(claim + "?lang=en", auth=None, headers={"accept-language": "es"})
+    assert '<html lang="en">' in override.text and "Are you there now?" in override.text
+
+    # a bogus token dead-ends in the requested language
+    dead = api.get("/checkin/not-a-real-token?lang=es", auth=None)
+    assert dead.status_code == 404 and '<html lang="es">' in dead.text
+    assert "no es válido" in dead.text
+    assert dead.headers.get("content-language") == "es"
+
+
+def test_worker_pages_carry_lang_toggle(api, store, household, schedule, t0):
+    """Worker surfaces carry the same ES/EN toggle the family page has — a
+    reader who landed in the wrong language switches without retyping."""
+    _post_hook(api, household[2].id, "button_press", t0)
+    visit = store.active_visit(household[0].id)
+
+    claim = api.post(f"/api/visits/{visit.id}/checkin-link").json()["path"]
+    en = api.get(claim, auth=None)
+    assert 'href="?lang=es"' in en.text and "Español" in en.text
+    es = api.get(claim + "?lang=es", auth=None)
+    assert 'href="?lang=en"' in es.text and "English" in es.text
+
+    api.post(f"/api/visits/{visit.id}/close")
+    link = api.post(f"/api/visits/{visit.id}/review-link").json()["path"]
+    es = api.get(link + "?lang=es", auth=None)
+    assert 'href="?lang=en"' in es.text and "English" in es.text

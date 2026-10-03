@@ -30,6 +30,7 @@ from .config import settings as default_settings
 from .corroborate import corroboration
 from .disputepack import build_case_pack, build_pack
 from .engine import NotYetAdmissible, VisitEngine
+from .i18n import negotiate
 from .i18n import pick as pick_lang
 from .i18n import strings as lang_strings
 from .inbox import WebhookInbox
@@ -303,7 +304,7 @@ def create_app(
     tz = ZoneInfo(s.timezone)
 
     def render(request: Request, name: str, **ctx) -> HTMLResponse:
-        return _TEMPLATES.TemplateResponse(
+        resp = _TEMPLATES.TemplateResponse(
             request,
             name,
             {
@@ -315,6 +316,18 @@ def create_app(
                 **ctx,
             },
         )
+        # A localized page declares its language in the header too — not just
+        # <html lang> — so caches, assistive tech, and proxies see it.
+        lang = ctx.get("html_lang") or (ctx.get("s") or {}).get("lang")
+        if lang:
+            resp.headers["Content-Language"] = lang
+        return resp
+
+    def _req_lang(request: Request) -> str:
+        """Public-surface language: explicit ?lang= beats Accept-Language.
+        Coordinator pages keep ?lang= only — honoring a browser header on a
+        half-localized console would mix languages inside one page."""
+        return negotiate(request.query_params.get("lang"), request.headers.get("accept-language"))
 
     # ------------------------------------------------------------------ Ring webhook
 
@@ -379,38 +392,32 @@ def create_app(
     # ------------------------------------------------------------------ worker check-in
 
     def _dead_link(request: Request, what: str, status_code: int = 404):
+        # Every dead-link surface a non-coordinator can hit honors ?lang —
+        # families and workers are both dead-ended in a language they chose
+        # (or their handset negotiated).
+        s = lang_strings(_req_lang(request))
         if what == "family view":
-            mechanics = (
-                "Family view links are visit-scoped and expire after 7 days — "
-                "the link itself is the authorization to view that one record."
+            detail, mechanics, gates_full = (
+                s["dead_family_detail"],
+                s["dead_family_mechanics"],
+                s["dead_gates_family"],
             )
-            gates = "reading the record"
         else:
-            mechanics = (
-                "Worker check-in and review links are visit-scoped, expire, and are "
-                "single-use — a link that was already used or has expired cannot be reopened."
+            detail, mechanics, gates_full = (
+                s["dead_checkin_detail"] if what == "check-in" else s["dead_review_detail"],
+                s["dead_worker_mechanics"],
+                s["dead_gates_checkin"] if what == "check-in" else s["dead_gates_review"],
             )
-            gates = "checking in" if what == "check-in" else "adding a statement"
-        tail = "invalid or expired." if what == "family view" else "invalid, expired, or already used."
         ctx = {
-            "detail": f"This {what} link is {tail}",
+            "html_lang": s["lang"],
+            "title": s["dead_title"],
+            "heading": s["dead_heading"],
+            "detail": detail,
             "mechanics": mechanics,
-            "gates": gates,
+            "cta": s["dead_cta"],
+            "gates_full": gates_full,
+            "gates": None,
         }
-        if what == "family view":
-            # The only failure page a family member can hit — honor ?lang so the
-            # household isn't dead-ended in a language they didn't choose.
-            s = lang_strings(pick_lang(request.query_params.get("lang")))
-            ctx.update(
-                html_lang=s["lang"],
-                title=s["dead_title"],
-                heading=s["dead_heading"],
-                detail=s["dead_family_detail"],
-                mechanics=s["dead_family_mechanics"],
-                cta=s["dead_cta"],
-                gates_full=s["dead_gates_family"],
-                gates=None,
-            )
         resp = render(request, "link_expired.html", **ctx)
         resp.status_code = status_code
         return resp
@@ -501,6 +508,7 @@ def create_app(
         if target is None:
             return _dead_link(request, "check-in")
         _, visit, worker = target
+        s = lang_strings(_req_lang(request))
         return render(
             request,
             "checkin.html",
@@ -509,6 +517,8 @@ def create_app(
             site=store.site(visit.site_id),
             token=token,
             done=False,
+            s=s,
+            html_lang=s["lang"],
         )
 
     @app.post("/checkin/{token}")
@@ -522,6 +532,8 @@ def create_app(
             if target is None:
                 return _dead_link(request, "check-in", status_code=410)
             _, v, w = target
+            lang = _req_lang(request)
+            s = lang_strings(lang)
             resp = render(
                 request,
                 "checkin.html",
@@ -530,12 +542,15 @@ def create_app(
                 site=store.site(v.site_id),
                 token=token,
                 done=False,
-                checkin_error=str(exc),
+                checkin_error=(s["wk_err_precedes"] if "precede first observation" in str(exc) else str(exc)),
+                s=s,
+                html_lang=lang,
             )
             resp.status_code = 409
             return resp
         if visit is None:
             return _dead_link(request, "check-in", status_code=410)
+        lang = _req_lang(request)
         return render(
             request,
             "checkin.html",
@@ -544,6 +559,8 @@ def create_app(
             site=store.site(visit.site_id),
             token=None,
             done=True,
+            s=lang_strings(lang),
+            html_lang=lang,
         )
 
     # ------------------------------------------------------------------ dashboard
@@ -738,12 +755,15 @@ def create_app(
                 cov = coverage_report(store, device, start, end, now=engine.clock.now(), site_id=site.id)
         cov = _coverage_local(cov)
         late = [r["body"] for r in store.late_event_rows() if r["site_id"] == v.site_id]
+        s_visit = lang_strings(pick_lang(request.query_params.get("lang")))
         strip = timeline_strip(
             schedule=schedule,
             evidence=evidence,
             checked_in_at=v.checked_in_at,
             coverage=cov,
             late_events=late,
+            tz=tz,
+            tr=s_visit,
         )
         return render(
             request,
@@ -766,10 +786,12 @@ def create_app(
             reason_options=[
                 (code, taxonomy.REASON_CODES[code]) for code in taxonomy.suggest(f.code for f in v.flags)
             ],
+            # s carries the legend strings for _timeline.html AND the shared
+            # review_fields include — ?lang= localizes both together.
+            s=s_visit,
             family_link_active=any(
                 g.id == visit_id and g.expires_at > utcnow() for g in store.family_grants()
             ),
-            s=lang_strings("en"),  # _timeline.html legend strings default to English
         )
 
     def _coverage_local(cov: dict | None) -> dict | None:
@@ -793,7 +815,7 @@ def create_app(
                 srow["closed_at"] = datetime.fromisoformat(srow["closed_at"])
         return out
 
-    def _record_context(v: Visit) -> dict:
+    def _record_context(v: Visit, lang: str = "en") -> dict:
         """Everything a human-facing record view needs — the coordinator's
         household page, the scoped family link, and the printable brief share
         this gather so the three surfaces can never disagree."""
@@ -818,6 +840,8 @@ def create_app(
             checked_in_at=v.checked_in_at,
             coverage=cov,
             late_events=[],
+            tz=tz,
+            tr=lang_strings(lang),
         )
         # "Scheduled worker" means the schedule's worker — the signed
         # receipt names the same person under payload.scheduled_worker.
@@ -861,7 +885,7 @@ def create_app(
         return render(
             request,
             "household.html",
-            **_record_context(v),
+            **_record_context(v, lang=lang),
             media_base=media_base,
             via_link=via_link,
             s=lang_strings(lang),
@@ -903,9 +927,7 @@ def create_app(
         v = store.visit(visit_id)
         if v is None:
             return _not_found(request, "visit record")
-        return _household_render(
-            request, v, f"/visits/{v.id}", lang=pick_lang(request.query_params.get("lang"))
-        )
+        return _household_render(request, v, f"/visits/{v.id}", lang=_req_lang(request))
 
     @app.post("/api/visits/{visit_id}/family-link")
     async def issue_family_link(visit_id: str = PathParam(max_length=128)):
@@ -936,7 +958,7 @@ def create_app(
             visit,
             f"/family/{token}",
             via_link=True,
-            lang=pick_lang(request.query_params.get("lang")),
+            lang=_req_lang(request),
         )
 
     @app.post("/family/{token}/statement", response_class=HTMLResponse)
@@ -946,7 +968,7 @@ def create_app(
         visit = await action(engine.family_target, token)
         if visit is None:
             return _dead_link(request, "family view")
-        lang = pick_lang(request.query_params.get("lang"))
+        lang = _req_lang(request)
         s = lang_strings(lang)
         try:
             data = HouseholdStatementInput.model_validate(dict(await request.form()))
@@ -1262,6 +1284,7 @@ def create_app(
             tz=tz,
             late_events=[r["body"] for r in store.late_event_rows() if r["site_id"] == site.id],
         )
+        days, hidden_days = days["strips"], days["hidden_days"]
         return render(
             request,
             "site.html",
@@ -1281,6 +1304,7 @@ def create_app(
             exports=exports,
             coverage_certs=coverage_certs,
             days=days,
+            hidden_days=hidden_days,
         )
 
     @app.get("/sites/{site_id}/schedule.ics")
@@ -1478,7 +1502,7 @@ def create_app(
         token = await action(reviews.issue_worker_link, visit_id)
         return {"path": f"/review/{token}", "expires_in_seconds": 86400}
 
-    async def _worker_ctx(token: str):
+    async def _worker_ctx(token: str, lang: str = "en"):
         """The worker-facing render context — the timeline is built from the
         signed payload itself, so the strip is exactly what they countersign."""
         target = await action(reviews.worker_target, token)
@@ -1487,9 +1511,12 @@ def create_app(
         _, bundle = target
         from .timeline import timeline_strip
 
+        s = lang_strings(lang)
         p = bundle.original.payload
         return {
             "original": p,
+            "s": s,
+            "html_lang": s["lang"],
             "token": token,
             "done": False,
             "reason_options": [
@@ -1501,12 +1528,14 @@ def create_app(
                 evidence=p.get("evidence") or [],
                 checked_in_at=p.get("checked_in_at"),
                 coverage=p.get("history_poll_coverage"),
+                tz=tz,
+                tr=s,
             ),
         }
 
     @app.get("/review/{token}", response_class=HTMLResponse)
     async def worker_review_page(request: Request, token: str = PathParam(max_length=128)):
-        ctx = await _worker_ctx(token)
+        ctx = await _worker_ctx(token, _req_lang(request))
         if ctx is None:
             return _dead_link(request, "review")
         return render(request, "worker_review.html", **ctx)
@@ -1515,12 +1544,13 @@ def create_app(
     async def worker_review_submit(
         request: Request,
         token: str = PathParam(max_length=128),
-        decision: str = Form(...),
-        statement: str = Form(...),
+        decision: str = Form(""),
+        statement: str = Form(""),
         reported_start: str = Form(""),
         reported_end: str = Form(""),
         reason_code: str = Form(""),
     ):
+        lang = _req_lang(request)
         try:
             body = ReviewInput(
                 decision=decision,
@@ -1530,18 +1560,14 @@ def create_app(
                 reason_code=reason_code or None,
             )
         except ValueError:
-            ctx = await _worker_ctx(token)
+            ctx = await _worker_ctx(token, lang)
             if ctx is None:
                 return _dead_link(request, "review")
             resp = render(
                 request,
                 "worker_review.html",
                 **ctx,
-                form_error=(
-                    "Your statement didn't submit — check that it's not empty and that "
-                    "either both reported times or neither are filled, each with a UTC "
-                    "offset like 2026-09-15T09:00:00-07:00."
-                ),
+                form_error=lang_strings(lang)["wk_err_invalid"],
                 form={
                     "decision": decision,
                     "statement": statement,
@@ -1558,17 +1584,14 @@ def create_app(
             if exc.status_code == 409 and "review link" in str(exc.detail):
                 return _dead_link(request, "review", status_code=410)
             if exc.status_code == 409 and "review limit reached" in str(exc.detail):
-                ctx = await _worker_ctx(token)
+                ctx = await _worker_ctx(token, lang)
                 if ctx is None:
                     return _dead_link(request, "review")
                 resp = render(
                     request,
                     "worker_review.html",
                     **ctx,
-                    form_error=(
-                        "This record's review chain is full — no further statements "
-                        "can be appended. Ask the coordinator to export the case pack."
-                    ),
+                    form_error=lang_strings(lang)["wk_err_full"],
                     form={
                         "decision": decision,
                         "statement": statement,
@@ -1580,7 +1603,15 @@ def create_app(
                 resp.status_code = 409
                 return resp
             raise
-        return render(request, "worker_review.html", original=None, token=None, done=True)
+        return render(
+            request,
+            "worker_review.html",
+            original=None,
+            token=None,
+            done=True,
+            s=lang_strings(lang),
+            html_lang=lang,
+        )
 
     @app.get("/api/clock")
     async def clock_status():
@@ -1722,8 +1753,11 @@ def _verify_pack(data: bytes, public_key: str) -> tuple[bool, str]:
         # Bound total decompressed size — a small zip can expand unboundedly.
         if sum(i.file_size for i in z.infolist()) > 256 * 1024 * 1024:
             return False, "pack expands beyond the 256 MB verification bound"
-        from .packdiff import BoundedZip
+        from .packdiff import BoundedZip, check_member_names
 
+        bad_name = check_member_names(z.namelist())
+        if bad_name:
+            return False, bad_name
         z = BoundedZip(z)
         names = set(z.namelist())
         if "manifest.json" in names:

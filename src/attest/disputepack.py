@@ -309,6 +309,20 @@ def main():
         if str(bad).startswith("smuggled:"):
             sys.exit(f"FAIL media file not named by the signed evidence: {bad[9:]}")
         sys.exit(f"FAIL media digest not found in pack: {bad[:16]}...")
+    # Fail closed on files the pack format doesn't name — but only when the
+    # directory looks like an extracted pack (README/media/pack pages present).
+    # A bare bundle.json shared alone has no pack around it to smuggle into.
+    pack_dir = Path(args[0]).resolve().parent
+    allowed_top = {
+        "bundle.json", "README.txt", "verify_bundle.py", "verify.html", "index.html", "redaction.json",
+    }
+    markers = ("README.txt", "media", "verify.html", "index.html")
+    if any((pack_dir / m).exists() for m in markers):
+        for p in sorted(pack_dir.iterdir()):
+            if p.is_file() and p.name not in allowed_top:
+                sys.exit(f"FAIL {p.name}: present but not part of the pack format")
+            if p.is_dir() and p.name != "media":
+                sys.exit(f"FAIL {p.name}/: directory not part of the pack format")
     redact_note = f", {held} withheld by redaction" if held else ""
     print(f"OK: {n} receipt(s) verified; {checked} media digests matched{redact_note}.")
     print("Signature proves record integrity under the issuer key - not identity,")
@@ -316,7 +330,13 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception as exc:
+        # Never die with a traceback — the vocabulary of this tool is OK/FAIL.
+        sys.exit(f"FAIL verifier error: {exc}")
 """
 
 _VERIFIER = _VERIFIER_LIB + _BUNDLE_MAIN
@@ -465,7 +485,13 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception as exc:
+        # Never die with a traceback — the vocabulary of this tool is OK/FAIL.
+        sys.exit(f"FAIL verifier error: {exc}")
 """
 
 _CASE_VERIFIER = _VERIFIER_LIB + _CASE_MAIN

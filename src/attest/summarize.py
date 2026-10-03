@@ -142,8 +142,14 @@ class BedrockSummarizer:
         content: list[dict] = [{"text": "Visit facts (JSON):\n" + json.dumps(facts, indent=2)}]
         for e in evidence:
             if e.kind == EvidenceKind.SNAPSHOT and e.media_path:
-                data = media.read(e.media_path)
-                if not data or not media.verify(e.media_path, e.media_sha256 or ""):
+                try:
+                    # Vanishing/corrupt media must not abort receipt issuance —
+                    # the summary just skips the frame.
+                    data = media.read(e.media_path)
+                    verified = bool(data) and media.verify(e.media_path, e.media_sha256 or "")
+                except OSError:
+                    continue
+                if not verified:
                     continue
                 fmt = "png" if data.startswith(b"\x89PNG") else "jpeg"
                 content.append({"text": f"Door camera snapshot at {e.note}:"})

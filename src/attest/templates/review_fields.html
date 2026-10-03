@@ -1,21 +1,21 @@
-<label>Assessment
+<label>{{ s.rf_assessment }}
 <select name="decision" required>
 {% for val, label in [
-    ("inconclusive", "Inconclusive — more context needed"),
-    ("confirm", "Confirm the recorded account" if review_voice == "coordinator" else "Confirm my account of the visit"),
-    ("dispute", "Dispute the interpretation"),
-    ("correction", "Add a correction or missing context")] %}
+    ("inconclusive", s.rf_opt_inconclusive),
+    ("confirm", s.rf_opt_confirm_coord if review_voice == "coordinator" else s.rf_opt_confirm_worker),
+    ("dispute", s.rf_opt_dispute),
+    ("correction", s.rf_opt_correction)] %}
 <option value="{{ val }}" {% if form and form.decision == val %}selected{% endif %}>{{ label }}</option>
 {% endfor %}
 </select></label>
-<label>Reason code <span class="muted">(optional — {{ "the coded explanation you are stating" if review_voice == "coordinator" else "what best explains the exception, in your view" }}; never a verified cause)</span>
+<label>{{ s.rf_reason }} <span class="muted">({{ s.rf_reason_opt_coord if review_voice == "coordinator" else s.rf_reason_opt_worker }}; {{ s.rf_reason_never }})</span>
 <select name="reason_code">
-<option value="">No coded reason — statement carries it</option>
+<option value="">{{ s.rf_reason_none }}</option>
 {% for code, label in reason_options or [] %}<option value="{{ code }}" {% if form and form.reason_code == code %}selected{% endif %}>{{ code }} — {{ label }}</option>{% endfor %}
 </select></label>
-<label>Statement <textarea name="statement" rows="4" maxlength="2000" required placeholder="Explain what you know and what should be corrected.">{{ form.statement if form }}</textarea></label>
+<label>{{ s.rf_statement }} <textarea name="statement" rows="4" maxlength="2000" required placeholder="{{ s.rf_statement_ph }}">{{ form.statement if form }}</textarea></label>
 <div class="row">
-<label>Reported start (optional, include UTC offset)<input name="reported_start" value="{{ form.reported_start if form }}" placeholder="2026-09-15T09:00:00-07:00"></label>
-<label>Reported end (optional, include UTC offset)<input name="reported_end" value="{{ form.reported_end if form }}" placeholder="2026-09-15T10:30:00-07:00"></label>
+<label>{{ s.rf_start }}<input name="reported_start" value="{{ form.reported_start if form }}" placeholder="2026-09-15T09:00:00-07:00"></label>
+<label>{{ s.rf_end }}<input name="reported_end" value="{{ form.reported_end if form }}" placeholder="2026-09-15T10:30:00-07:00"></label>
 </div>
-<p class="muted small">Supply both times or neither. These are reported times, not independently measured work duration. Original observations will not change.</p>
+<p class="muted small">{{ s.rf_times_note }}</p>

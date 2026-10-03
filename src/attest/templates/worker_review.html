@@ -1,28 +1,28 @@
 {% extends "base.html" %}
-{% block title %}Worker's account — Attest{% endblock %}
-{% block chrome %}<header><div class="brand">Attest<span>.</span></div></header>{% endblock %}
+{% block title %}{{ s.wk_review_title }} — Attest{% endblock %}
+{% block chrome %}<header><div class="brand">Attest<span>.</span> · <a href="?lang={{ "es" if s.lang == "en" else "en" }}" style="letter-spacing:normal;text-transform:none">{{ s.lang_toggle }}</a></div></header>{% endblock %}
 {% block body %}
-{% macro t(dt) %}{{ (dt|iso).astimezone(tz).strftime("%I:%M %p").lstrip("0") if dt else "—" }}{% endmacro %}
+{% macro t(dt) %}{% if dt %}{% set _v = (dt|iso).astimezone(tz).strftime(s.time_fmt if s.time_fmt else "%I:%M %p") %}{{ _v[1:] if _v.startswith("0") and not s.time_fmt else _v }}{% else %}—{% endif %}{% endmacro %}
 <div style="max-width:720px;margin:auto">
-<h1>Your account of the visit</h1>
+<h1>{{ s.wk_review_h }}</h1>
 {% if done %}
-<div class="card"><h2>Statement recorded</h2><p>Your statement was appended and signed without changing the original observation record. This link has been consumed.</p></div>
+<div class="card"><h2>{{ s.wk_done_h }}</h2><p>{{ s.wk_done_p }}</p></div>
 {% else %}
 <div class="card">
-<p>This link was issued to <b>{{ original.scheduled_worker.name }}</b> for the record at <b>{{ original.site.name }}</b>. It expires 24 hours after issue and works once.</p>
-<p>First observation: {{ t(original.first_observed_at) if original.first_observed_at else "None received" }}<br>Last observation: {{ t(original.last_observed_at) if original.last_observed_at else "None received" }}</p>
+<p>{{ s.wk_issued.format(name=original.scheduled_worker.name, site=original.site.name) }}</p>
+<p>{{ s.wk_first }}: {{ t(original.first_observed_at) if original.first_observed_at else s.wk_none }}<br>{{ s.wk_last }}: {{ t(original.last_observed_at) if original.last_observed_at else s.wk_none }}</p>
 {% if timeline %}<div style="margin:10px 0;padding:8px 4px;background:#11131a;border-radius:8px">
 {% include "_timeline.html" %}
 </div>{% endif %}
-<p class="muted">A short observation interval does not mean you left or stopped working. You can explain missing context, dispute an interpretation, or report your own times.</p>
-{% if original.clock and original.clock.mode == "replay" %}<p class="flag warn">Local replay: event times use a simulated clock. This is not a live visit.</p>{% endif %}
+<p class="muted">{{ s.wk_honest }}</p>
+{% if original.clock and original.clock.mode == "replay" %}<p class="flag warn">{{ s.wk_replay }}</p>{% endif %}
 </div>
 {% if form_error %}<div class="flash err" role="alert">{{ form_error }}</div>{% endif %}
-<form class="card" method="post" action="/review/{{ token }}" style="margin-top:16px">
+<form class="card" method="post" action="/review/{{ token }}?lang={{ s.lang }}" style="margin-top:16px">
 {% include "review_fields.html" %}
-<button class="btn">Submit my statement once</button>
+<button class="btn">{{ s.wk_submit }}</button>
 </form>
-<p class="muted small">The link authorizes a statement for this record only. It does not independently verify the submitter's identity.</p>
+<p class="muted small">{{ s.wk_link_scope }}</p>
 {% endif %}
 </div>
 {% endblock %}

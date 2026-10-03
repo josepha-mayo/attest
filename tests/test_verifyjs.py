@@ -140,6 +140,54 @@ eval(src + `
 
 
 @pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_js_zip_reader_enforces_member_name_rules(tmp_path):
+    """readZipEntries mirrors packdiff.check_member_names — duplicates and
+    ../absolute/drive-qualified names reject the whole pack. The backslash
+    traversal case guards the JS regex escaping (the source lives inside a
+    Python string, one escape layer deep)."""
+    (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
+    driver = """
+const fs=require('fs');
+let src=fs.readFileSync(process.argv[2],'utf8').replace(/const dz=[\\s\\S]*$/,'');
+eval(src + `
+(async()=>{
+  const b=fs.readFileSync(process.argv[3]);
+  const f={arrayBuffer:async()=>b.buffer.slice(b.byteOffset,b.byteOffset+b.byteLength)};
+  try{const files=await readZipEntries(f);console.log('OK:'+files.length)}
+  catch(e){console.log('FAIL:'+e.message)}
+})();`);
+"""
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+
+    def run(names):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:
+            for n in names:
+                z.writestr(n, b"x")
+        (tmp_path / "p.zip").write_bytes(buf.getvalue())
+        proc = subprocess.run(
+            [NODE, "drive.js", "verify.js", "p.zip"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert proc.returncode == 0, proc.stderr
+        return proc.stdout
+
+    from attest.packdiff import check_member_names
+
+    assert "OK:" in run(["bundle.json"]) and check_member_names(["bundle.json"]) is None
+    for bad in ("../evil.txt", "media\\..\\evil.txt", "C:\\evil.txt", "/abs.txt"):
+        out = run(["bundle.json", bad])
+        assert "unsafe member name" in out, (bad, out)
+        assert check_member_names(["bundle.json", bad]) is not None  # Python parity
+    out = run(["bundle.json", "bundle.json"])
+    assert "duplicate member name" in out
+    assert check_member_names(["bundle.json", "bundle.json"]) is not None
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
 def test_js_timeline_renders_marks_and_escapes_titles(tmp_path):
     """The pack's embedded verifier draws the record's timeline from the signed
     payload — and escapes payload text inside SVG titles (packs are untrusted)."""

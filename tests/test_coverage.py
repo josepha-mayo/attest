@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import timedelta
 
 from attest.coverage import coverage_report
@@ -402,6 +403,114 @@ def test_timeline_strip_positions_window_bands_and_marks(store, household, t0):
     assert timeline_strip(schedule=None, evidence=[], checked_in_at=None, coverage=None) is None
 
 
+def test_timeline_strip_localizes_for_spanish_readers(store, household, t0):
+    """With an es string table the strip's kind labels, tooltips, axis ticks
+    (24-hour via time_fmt), and the screen-reader aria-label all come from the
+    same table — a localized legend never sits beside English SVG text."""
+    from attest.i18n import strings as lang_strings
+    from attest.timeline import timeline_strip
+
+    site, worker, _cam, _sensor = household
+    sch = Schedule(
+        site_id=site.id,
+        worker_id=worker.id,
+        window_start=t0,
+        window_end=t0 + timedelta(hours=1),
+        expected_minutes=60,
+        service="x",
+    )
+
+    class _E:
+        pass
+
+    e = _E()
+    e.at = t0 + timedelta(minutes=10)
+    e.kind = "arrival_motion"
+    cov = {
+        "covered": [{"start": t0.isoformat(), "end": (t0 + timedelta(minutes=40)).isoformat()}],
+        "gaps": [
+            {"start": (t0 + timedelta(minutes=40)).isoformat(), "end": (t0 + timedelta(hours=1)).isoformat()}
+        ],
+    }
+    strip = timeline_strip(
+        schedule=sch,
+        evidence=[e],
+        checked_in_at=None,
+        coverage=cov,
+        tr=lang_strings("es"),
+    )
+    assert "programado" in strip["aria_label"]
+    assert "intervalo(s) observado(s)" in strip["aria_label"]
+    assert "movimiento" in strip["aria_label"]
+    assert strip["marks"][0]["label"] == "movimiento"
+    assert strip["marks"][0]["title"].startswith("movimiento")
+    # 24-hour tick labels under es — the axis matches the page's t() macro
+    assert all(re.fullmatch(r"\d{2}:\d{2}", t["label"]) for t in strip["ticks"])
+
+
+def test_timeline_strip_ticks_render_in_display_timezone(store, household, t0):
+    """Every other timestamp on the page renders through the deployment's local
+    timezone — a UTC-labeled axis beside local facts would silently disagree.
+    ``tz`` converts the ticks and aria times; SVG titles keep ISO+offset."""
+    from zoneinfo import ZoneInfo
+
+    from attest.timeline import timeline_strip
+
+    site, worker, _cam, _sensor = household
+    eastern = ZoneInfo("America/New_York")  # UTC-4/-5 at any t0
+    sch = Schedule(
+        site_id=site.id,
+        worker_id=worker.id,
+        window_start=t0,
+        window_end=t0 + timedelta(hours=1),
+        expected_minutes=60,
+        service="x",
+    )
+    # Pin the axis so tick 0 is exactly the window start.
+    utc_strip = timeline_strip(
+        schedule=sch, evidence=[], checked_in_at=None, coverage=None, bounds=(t0, t0 + timedelta(hours=1))
+    )
+    local_strip = timeline_strip(
+        schedule=sch,
+        evidence=[],
+        checked_in_at=None,
+        coverage=None,
+        bounds=(t0, t0 + timedelta(hours=1)),
+        tz=eastern,
+    )
+    assert utc_strip["ticks"] != local_strip["ticks"]
+    expect = t0.astimezone(eastern).strftime("%I:%M%p").lstrip("0").lower()
+    assert local_strip["ticks"][0]["label"] == expect
+    assert local_strip["aria_label"].startswith(f"scheduled {expect}")
+    # bounds stay in their own zone — only the *labels* converted
+    assert local_strip["start"] == utc_strip["start"]
+
+
+def test_day_strips_reports_hidden_days_beyond_cap(store, household, t0):
+    """A month of records drawn at 10 days used to silently drop the rest —
+    hidden_days now reports the omission instead of hiding it."""
+    from attest.timeline import day_strips
+
+    site, worker, _cam, _sensor = household
+    # 10:00 local anchors — a 1h window can never straddle midnight, so each
+    # schedule touches exactly one day regardless of when the suite runs.
+    day0 = t0.replace(hour=10, minute=0, second=0, microsecond=0)
+    schs = [
+        Schedule(
+            site_id=site.id,
+            worker_id=worker.id,
+            window_start=day0 - timedelta(days=d),
+            window_end=day0 - timedelta(days=d) + timedelta(hours=1),
+            expected_minutes=60,
+            service="x",
+        )
+        for d in range(14)
+    ]
+    out = day_strips(visits=[], evidence_by_visit={}, schedules=schs, coverage_by_visit={}, tz=t0.tzinfo)
+    assert len(out["strips"]) == 10
+    assert out["hidden_days"] == 4
+
+
 def test_day_strips_share_a_midnight_to_midnight_axis(store, household, t0):
     """The site week view: one strip per local day on a fixed 24h axis, newest
     first — schedules, evidence, check-ins, and coverage land on their own day."""
@@ -454,14 +563,15 @@ def test_day_strips_share_a_midnight_to_midnight_axis(store, household, t0):
             ],
         }
     }
-    strips = day_strips(
+    result = day_strips(
         visits=[v1, v2],
         evidence_by_visit={"v1": [e1], "v2": [e2]},
         schedules=[sch1, sch2],
         coverage_by_visit=cov,
         tz=UTC,
     )
-    assert len(strips) == 2
+    strips = result["strips"]
+    assert len(strips) == 2 and result["hidden_days"] == 0
     newest, oldest = strips
     assert newest["label"] == day2.strftime("%a %b %d")
     # fixed 24h axis: bounds exactly midnight→midnight
@@ -482,6 +592,39 @@ def test_day_strips_share_a_midnight_to_midnight_axis(store, household, t0):
     for s in strips:
         assert all(0 <= m["x"] <= 100 for m in s["strip"]["marks"])
         assert all(0 <= b["x"] and b["x"] + b["w"] <= 100.5 for b in s["strip"]["bands"])
+
+
+def test_day_strips_reports_days_beyond_the_cap(store, household, t0):
+    """Days older than max_days are dropped for readability but their count is
+    returned — the site page can say 'N older days not shown' instead of the
+    strip silently ending."""
+    from datetime import UTC
+
+    from attest.timeline import day_strips
+
+    site, worker, _cam, _sensor = household
+    mid = t0.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    schedules = [
+        Schedule(
+            site_id=site.id,
+            worker_id=worker.id,
+            window_start=mid - timedelta(days=i) + timedelta(hours=9),
+            window_end=mid - timedelta(days=i) + timedelta(hours=17),
+            expected_minutes=480,
+            service="x",
+        )
+        for i in range(12)
+    ]
+    result = day_strips(
+        visits=[],
+        evidence_by_visit={},
+        schedules=schedules,
+        coverage_by_visit={},
+        tz=UTC,
+        max_days=10,
+    )
+    assert len(result["strips"]) == 10
+    assert result["hidden_days"] == 2
 
 
 def test_publish_anchor_uploads_with_sha_metadata(tmp_path, monkeypatch):

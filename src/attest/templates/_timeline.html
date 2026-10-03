@@ -1,14 +1,15 @@
 {% if timeline %}
+{% set _s = s|default({}, true) %}
 <svg viewBox="0 0 100 34" preserveAspectRatio="none" style="width:100%;height:{{ timeline_h|default(96) }}px;display:block" role="img"
-     aria-label="Timeline — {{ timeline.aria_label }}">
+     aria-label="{{ _s.tl_aria_prefix|default('Timeline — ') }}{{ timeline.aria_label }}">
   {% if timeline.window %}
   <rect x="{{ timeline.window.x }}" y="4" width="{{ timeline.window.w }}" height="20" rx="1.5"
-        fill="#3b4a63" opacity="0.55"><title>scheduled window</title></rect>
+        fill="#3b4a63" opacity="0.55"><title>{{ _s.tl_title_window|default('scheduled window') }}</title></rect>
   {% endif %}
   {% for b in timeline.bands %}
   <rect x="{{ b.x }}" y="{{ 21 if b.live else 25 }}" width="{{ b.w }}" height="3.2"
         fill="{{ '#22b8cf' if b.live else ('#2f9e63' if b.watched else '#9aa3b2') }}" opacity="0.9">
-    <title>{{ b.title if b.live else ('watched by polling' if b.watched else 'coverage gap — not watched') }}</title>
+    <title>{{ b.title if b.live else (_s.tl_title_watched|default('watched by polling') if b.watched else _s.tl_title_gap|default('coverage gap — not watched')) }}</title>
   </rect>
   {% endfor %}
   {% for m in timeline.marks %}
@@ -27,7 +28,6 @@
   {% for tk in timeline.ticks %}<span>{{ tk.label }}</span>{% endfor %}
 </div>
 <div class="row" style="gap:16px;font-size:11px;color:var(--muted);margin:6px 2px 4px">
-  {% set _s = s|default({}, true) %}
   {% if timeline.window %}<span><span style="color:#8fa3c8">&#9632;</span> {{ _s.tl_window|default("scheduled window") }}</span>{% endif %}
   {% if timeline.has_coverage %}<span><span style="color:#2f9e63">&#9632;</span> {{ _s.tl_watched|default("watched") }} &nbsp;<span style="color:#9aa3b2">&#9632;</span> {{ _s.tl_gap|default("gap") }}</span>{% endif %}
   <span><span style="color:#5aa2e8">&#9679;</span> {{ _s.tl_obs|default("observation") }} &nbsp;<span style="color:#e8b93e">&#9679;</span> {{ _s.tl_checkin|default("self-reported check-in") }}</span>

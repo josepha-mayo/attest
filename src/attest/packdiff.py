@@ -37,6 +37,27 @@ class BoundedZip:
         return b"".join(chunks)
 
 
+def check_member_names(names: list) -> str | None:
+    """Fail closed on hostile or ambiguous zip member names.
+
+    Duplicate names are ambiguous — different extractors pick different
+    entries, so a pack can carry a benign member that verifies while a
+    same-named hostile member overwrites it on unzip. ``..`` and absolute
+    path segments slip past prefix/whitelist sweeps (``media/../x`` still
+    starts with ``media/``) and escape the pack root on extraction. Neither
+    is legitimate pack output — both fail the pack, not just the member.
+    """
+    seen: set = set()
+    for name in names:
+        if name in seen:
+            return f"duplicate member name: {name}"
+        seen.add(name)
+        parts = name.replace("\\", "/").split("/")
+        if ".." in parts or name.startswith(("/", "\\")) or ":" in name:
+            return f"unsafe member name: {name}"
+    return None
+
+
 def _verify_artifact_bundles(visits_bundles: dict, issuer: str | None) -> list[str]:
     """Independently verify each bundle in an artifact before trusting its
     contents — a diff over unverified receipts is meaningless."""
@@ -164,6 +185,9 @@ def load_artifact(path: str | Path, key: str | None = None) -> dict:
     notes: list[str] = []
     if zipfile.is_zipfile(path):
         with zipfile.ZipFile(path) as raw:
+            bad_name = check_member_names(raw.namelist())
+            if bad_name:
+                raise ValueError(f"{path}: {bad_name}")
             z = BoundedZip(raw)
             names = set(z.namelist())
             if "manifest.json" in names:

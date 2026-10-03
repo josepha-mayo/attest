@@ -40,6 +40,10 @@ class WebhookInbox:
                 "SELECT raw_body, signature FROM deliveries WHERE id=?", (request_id,)
             ).fetchone()
             if existing:
+                # HMAC is deterministic over identical bytes under one key —
+                # a same-id retry legitimately re-sends the SAME signature.
+                # A different signature (or different body) under a reused id
+                # is always anomalous: key drift upstream, or a replay probe.
                 if existing["raw_body"] != raw_body or existing["signature"] != signature:
                     raise ValueError("request id reused with different content")
                 return False
