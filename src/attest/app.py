@@ -1228,9 +1228,7 @@ def create_app(
                 ok, why = ledger.verify_chain(
                     [Receipt.model_validate(d) for d in data],
                     public_key=pk,
-                    extra_key_receipts=[
-                        r for r in store.receipts() if r.visit_id.startswith("key:")
-                    ],
+                    extra_key_receipts=[r for r in store.receipts() if r.visit_id.startswith("key:")],
                 )
             elif isinstance(data, dict) and data.get("kind") == "attest.review_bundle/1":
                 ok, why = verify_bundle(
@@ -2148,9 +2146,15 @@ def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -
     # deployment ledger's, or an --issuer document's) form ONE lineage —
     # the embedded and browser verifiers walk the same union, so a link
     # split across the two sources bridges identically on every surface.
+    # Membership (bundles, attestations, the manifest signature) trusts only
+    # the manifest issuer plus its ancestors — a key NEWER than the pack's
+    # own declared issuer can never honestly sign its content. Descendants
+    # count only for the pin's reachability check, the same split
+    # verify_case.py and the browser verifier apply.
     pool = rotations + list(known_rotations or [])
-    trusted = ledger.trusted_issuer_keys(issuer, pool) | ledger.descendant_issuer_keys(issuer, pool)
-    if public_key not in trusted:
+    trusted = ledger.trusted_issuer_keys(issuer, pool)
+    reach = trusted | ledger.descendant_issuer_keys(issuer, pool)
+    if public_key not in reach:
         return (
             False,
             "case pack was not issued under this deployment's key "

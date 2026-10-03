@@ -85,6 +85,32 @@ def _trusted_set(issuer: str | None, key_pool: list) -> set | None:
     return trusted_issuer_keys(issuer, key_pool) | descendant_issuer_keys(issuer, key_pool)
 
 
+def _ancestor_set(issuer: str | None, key_pool: list) -> set | None:
+    """The declared issuer plus its consented ancestors — the membership set
+    for case-pack content. A key NEWER than the manifest's own issuer can
+    never honestly sign a member of that pack: descendants belong only to
+    the pin's reachability check, mirroring _verify_case_pack and the
+    embedded/browser verifiers."""
+    if not issuer:
+        return None
+    from .ledger import trusted_issuer_keys
+
+    return trusted_issuer_keys(issuer, key_pool)
+
+
+def _pin_linked(key: str | None, declared: str | None, key_pool: list) -> bool:
+    """Whether the pinned key shares one signed lineage with the pack's
+    declared issuer — either direction (a newer doc pins a pre-rotation
+    pack; an older doc still verifies a rotated deployment's packs)."""
+    if key is None:
+        return True
+    if not declared:
+        return False
+    from .ledger import descendant_issuer_keys, trusted_issuer_keys
+
+    return key in (trusted_issuer_keys(declared, key_pool) | descendant_issuer_keys(declared, key_pool))
+
+
 def _verify_artifact_bundles(
     visits_bundles: dict, issuer: str | None, trusted: set | None = None
 ) -> list[str]:
@@ -238,7 +264,8 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                 manifest = json.loads(z.read("manifest.json"))
                 if not isinstance(manifest, dict):
                     raise ValueError(f"{path}: manifest.json is not an object")
-                issuer = key or manifest.get("issuer_key")
+                declared = manifest.get("issuer_key")
+                issuer = key or declared
                 attestations = {}
                 for a in manifest.get("attestations", []):
                     if not isinstance(a, dict) or not a.get("receipt_id"):
@@ -268,7 +295,16 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                         bundles.pop(vid, None)
                 failures += _manifest_consistency(manifest, bundles, notes)
                 pool = _key_pool(z, attestations) + list(extra_key_receipts or [])
-                trusted = _trusted_set(issuer, pool)
+                # Membership trusts the declared issuer plus its ancestors —
+                # a forward-linked descendant can never honestly sign pack
+                # content. The pin links through the pooled lifecycle in
+                # either direction, like _verify_case_pack.
+                trusted = _ancestor_set(declared, pool)
+                if not _pin_linked(key, declared, pool):
+                    failures.append(
+                        "pinned issuer has no signed lifecycle link to the "
+                        "pack's declared issuer — wrong deployment?"
+                    )
                 failures += _verify_artifact_bundles(bundles, issuer, trusted)
                 failures += _verify_attestation_files(z, attestations, issuer, trusted)
                 # Fail closed on ANY member the signed manifest does not name —
@@ -371,8 +407,16 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
             "notes": notes,
         }
     if "visits" in data:  # a bare manifest without its bundles
-        issuer = key or data.get("issuer_key")
-        mfail = _verify_manifest_signature(data, issuer)
+        declared = data.get("issuer_key")
+        issuer = key or declared
+        bare_pool = list(extra_key_receipts or [])
+        bare_trusted = _ancestor_set(declared, bare_pool)
+        if not _pin_linked(key, declared, bare_pool):
+            failures.append(
+                "pinned issuer has no signed lifecycle link to the "
+                "manifest's declared issuer — wrong deployment?"
+            )
+        mfail = _verify_manifest_signature(data, issuer, bare_trusted)
         if mfail:
             failures.append(mfail)
         else:
@@ -517,7 +561,7 @@ def _diff_events(old: dict, new: dict, key: str | None, old_path: str, new_path:
                 vid,
                 f"{vid}: signed original changed ({a['payload_hash'][:12]} -> "
                 f"{b['payload_hash'][:12]}) — a signed record cannot change; one export is inauthentic",
-                "!!",
+                "!! ",
             )
             anomalies += 1
             continue

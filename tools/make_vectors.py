@@ -34,7 +34,7 @@ from ring_sandbox.world import DeviceKind, default_world  # noqa: E402
 from attest.config import Settings  # noqa: E402
 from attest.disputepack import build_case_pack, build_pack  # noqa: E402
 from attest.engine import VisitEngine  # noqa: E402
-from attest.ledger import Signer  # noqa: E402
+from attest.ledger import Signer, issuer_document  # noqa: E402
 from attest.media import MediaStore  # noqa: E402
 from attest.models import Role, Schedule, Site, Worker  # noqa: E402
 from attest.reviews import ReviewService, countersign_status  # noqa: E402
@@ -143,13 +143,15 @@ def _rewrite_zip(data: bytes, transform) -> bytes:
     return out.getvalue()
 
 
-def _write_vector(name: str, pack: bytes, expected: dict) -> None:
+def _write_vector(name: str, pack: bytes, expected: dict, extras: dict[str, bytes] | None = None) -> None:
     d = VECTORS / name
     if d.exists():
         shutil.rmtree(d)
     d.mkdir(parents=True)
     (d / "pack.zip").write_bytes(pack)
     (d / "expected.json").write_text(json.dumps(expected, indent=2) + "\n", encoding="utf-8")
+    for fname, body in (extras or {}).items():
+        (d / fname).write_bytes(body)
     print(f"  {name}: {expected['note']}")
 
 
@@ -192,6 +194,11 @@ def main() -> None:
         },
     )
 
+    # The pre-rotation export: every record signed under KEY_A and no
+    # lifecycle attestations aboard — the issuer-doc vectors pin it through
+    # the discovery document alone.
+    pre_rotation_pack = _case_pack(store, engine, site, [v1], tmp / "d1")
+
     first_signed = store.receipt_for_visit(v1.id).issued_at
     rotation = engine.issue_key_rotation(KEY_B.public_key_b64, "planned rotation")
     engine.signer = KEY_B
@@ -228,6 +235,108 @@ def main() -> None:
             "js": {"bundle_ok": True, "trusted_count": 2, "suspect_count": 1, "lifecycle_suspect_count": 1},
             "note": "revocation annotates: records + the pivot receipt itself sit in the suspect window",
         },
+    )
+
+    # --- issuer-document pinning: the discovery doc's signed lifecycle is
+    # the only bridge between a pre-rotation export and the current key ---
+    issuer_doc_now = issuer_document(KEY_B.public_key_b64, store.receipts())
+    _write_vector(
+        "ok-issuer-doc-pin",
+        pre_rotation_pack,
+        {
+            "kind": "case",
+            "issuer_doc": "issuer.json",
+            "verdict": "ok",
+            "detail_contains": ["suspect window"],
+            "js": {
+                "bundle_ok": True,
+                "trusted_count": 1,
+                "pin_linked": True,
+                "suspect_count": 1,
+                "lifecycle_suspect_count": 1,
+            },
+            "note": "pre-rotation pack pinned to the deployment's CURRENT issuer "
+            "through the discovery document — and the doc's revocation still "
+            "annotates the retired key's window",
+        },
+        extras={"issuer.json": json.dumps(issuer_doc_now, indent=2).encode()},
+    )
+
+    _write_vector(
+        "ok-issuer-doc-older",
+        rotated_pack,
+        {
+            "kind": "case",
+            "issuer_doc": "issuer.json",
+            "verdict": "ok",
+            "detail_contains": ["issuer keys linked"],
+            "js": {
+                "bundle_ok": True,
+                "trusted_count": 2,
+                "pin_linked": True,
+                "suspect_count": 0,
+                "lifecycle_suspect_count": 0,
+            },
+            "note": "an OLDER document still verifies the rotated deployment's "
+            "newer packs — the link runs the other direction through the pack's "
+            "own lifecycle attestations",
+        },
+        extras={
+            "issuer.json": json.dumps(
+                {
+                    "schema": "attest.issuer/1",
+                    "issuer_key": KEY_A.public_key_b64,
+                    "key_receipts": [],
+                },
+                indent=2,
+            ).encode()
+        },
+    )
+
+    # A foreign deployment's document: real signed lifecycle receipts, just
+    # the wrong lineage — the pin has no signed link to this pack.
+    attacker_successor = Signer(Ed25519PrivateKey.from_private_bytes(b"\x77" * 32))
+    foreign_rotation = ATTACKER.issue(
+        visit_id="key:rot",
+        sequence=1,
+        prev_hash=None,
+        facts={
+            "record_type": "key_rotation",
+            "previous_key": ATTACKER.public_key_b64,
+            "new_key": attacker_successor.public_key_b64,
+        },
+    )
+    foreign_adoption = attacker_successor.issue(
+        visit_id="key:adopt",
+        sequence=2,
+        prev_hash=foreign_rotation.payload_hash,
+        facts={
+            "record_type": "key_adoption",
+            "previous_key": ATTACKER.public_key_b64,
+            "rotation_receipt": {"id": foreign_rotation.id, "hash": foreign_rotation.payload_hash},
+        },
+    )
+    foreign_doc = {
+        "schema": "attest.issuer/1",
+        "issuer_key": ATTACKER.public_key_b64,
+        "key_receipts": [
+            foreign_rotation.model_dump(mode="json"),
+            foreign_adoption.model_dump(mode="json"),
+        ],
+    }
+    _write_vector(
+        "fail-foreign-issuer-doc",
+        pre_rotation_pack,
+        {
+            "kind": "case",
+            "issuer_doc": "issuer.json",
+            "verdict": "fail",
+            "detail_contains": ["issuer"],
+            "js": {"bundle_ok": True, "pin_linked": False},
+            "note": "a foreign deployment's document cannot pin this pack — "
+            "the pin must reach the issuer through signed lifecycle",
+        },
+        extras={"issuer.json": json.dumps(foreign_doc, indent=2).encode()},
     )
 
     # --- deployment two: orphaned rotation (pivot without countersign) ---
@@ -376,11 +485,15 @@ the same discipline Wycheproof vectors bring to crypto implementations.
 - `pin`: `"declared"` (self-consistency under the pack's own issuer) or an
   explicit base64 Ed25519 public key — pinning the retired key exercises
   the rotation lineage
+- `issuer_doc`: an attest.issuer/1 document file in the vector dir — its
+  issuer_key pins verification and its key_receipts supply the lineage
+  pool on every surface (`--issuer`, `known_rotations`, the browser drop)
 - `verdict`: `ok` or `fail` — integrity verdicts are identical everywhere
 - `detail_contains`: fragments the human-readable detail must carry
 - `js`: browser-lib expectations when the check is algorithm-level —
   `bundle_ok`, `trusted_count` (issuer lineage width), `suspect_count`
-  (records inside a revoked key's suspect window)
+  (records inside a revoked key's suspect window), `pin_linked` (whether
+  the issuer document's key is reachable through the signed lifecycle)
 
 Regenerate with `tools/make_vectors.py` when the pack format changes —
 never hand-edit the zips. The vectors are the contract: a verifier that

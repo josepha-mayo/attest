@@ -1283,9 +1283,7 @@ def test_js_issuer_doc_pins_across_rotation(engine, store, household, schedule, 
     from attest.reviews import ReviewService
 
     event = WebhookEvent.model_validate(
-        webhooks.build_event(
-            event_type="button_press", device_id=household[2].id, occurred_at=t0
-        )
+        webhooks.build_event(event_type="button_press", device_id=household[2].id, occurred_at=t0)
     )
     visit = engine.ingest(event).visit
     engine.close_for_review(visit.id)
@@ -1305,18 +1303,19 @@ def test_js_issuer_doc_pins_across_rotation(engine, store, household, schedule, 
     (tmp_path / "b.json").write_text(bundle_text, encoding="utf-8")
     driver = """
 const fs=require('fs');
-let src=fs.readFileSync(process.argv[2],'utf8').replace(/const dz=[\s\S]*$/,'');
+let src=fs.readFileSync(process.argv[2],'utf8').replace(/const dz=[\\s\\S]*$/,'');
 const doc=fs.readFileSync(process.argv[3],'utf8');
 const b=fs.readFileSync(process.argv[4],'utf8');
 eval(src + `
-const fileOf=t=>({name:'bundle.json',text:()=>Promise.resolve(t),arrayBuffer:()=>Promise.resolve(new TextEncoder().encode(t).buffer)});
+const fileOf=t=>({name:'bundle.json',text:()=>Promise.resolve(t),
+  arrayBuffer:()=>Promise.resolve(new TextEncoder().encode(t).buffer)});
+const arm=dt=>{const dn=parseKeep(dt),d=toJS(dn)||{},kn=get(dn,'key_receipts');
+  return{issuer_key:d.issuer_key,nodes:kn&&kn.t==='arr'?kn.v:[]};};
 (async()=>{
-  issuerDoc=JSON.parse(doc);
-  console.log('armed receipts:',(issuerDoc.key_receipts||[]).length);
+  issuerDoc=arm(doc);
   const html=await verifyFiles([fileOf(b)]);
-  console.log('HTML:',html);
   console.log('pinned:',/VERIFIED/.test(html),/pinned to the issuer document/.test(html));
-  issuerDoc={schema:'attest.issuer/1',issuer_key:'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',key_receipts:[]};
+  issuerDoc={issuer_key:'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',nodes:[]};
   const bad=await verifyFiles([fileOf(b)]);
   console.log('wrongdoc:',/FAILED/.test(bad),/no signed link/.test(bad));
   issuerDoc=null;

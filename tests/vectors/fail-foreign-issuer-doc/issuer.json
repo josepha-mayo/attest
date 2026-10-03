@@ -1,0 +1,51 @@
+{
+  "schema": "attest.issuer/1",
+  "issuer_key": "NLTZBDFWy23PC+sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y=",
+  "key_receipts": [
+    {
+      "id": "rcpt_af78bb360ef44bf5aa3f517ae91bf465",
+      "visit_id": "key:rot",
+      "sequence": 1,
+      "prev_hash": null,
+      "payload": {
+        "record_type": "key_rotation",
+        "previous_key": "NLTZBDFWy23PC+sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y=",
+        "new_key": "yFOtDwzSthmuqSzuxP1Wok1kmdWEznklfkXP2BObYKc=",
+        "schema": "attest.receipt/2",
+        "sequence": 1,
+        "prev_hash": null,
+        "visit_id": "key:rot",
+        "receipt_id": "rcpt_af78bb360ef44bf5aa3f517ae91bf465",
+        "issued_at": "2026-10-03T22:10:44.701171+00:00"
+      },
+      "payload_hash": "3eb11f501e2c8d9c116629c897be0466242796dda4dc9caceaa7d9cdb45e591c",
+      "signature": "SQkGJOCjnw87EFzyxpDkgLgRhk2d+2VMlPK0bU2ZqZEbHnEhKBiurKredbyJm9go7ZqWNsfuttilvWJfYLpvCA==",
+      "public_key": "NLTZBDFWy23PC+sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y=",
+      "issued_at": "2026-10-03T22:10:44.701171Z"
+    },
+    {
+      "id": "rcpt_55ae8020d0dd4795b168355aa08b2269",
+      "visit_id": "key:adopt",
+      "sequence": 2,
+      "prev_hash": "3eb11f501e2c8d9c116629c897be0466242796dda4dc9caceaa7d9cdb45e591c",
+      "payload": {
+        "record_type": "key_adoption",
+        "previous_key": "NLTZBDFWy23PC+sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y=",
+        "rotation_receipt": {
+          "id": "rcpt_af78bb360ef44bf5aa3f517ae91bf465",
+          "hash": "3eb11f501e2c8d9c116629c897be0466242796dda4dc9caceaa7d9cdb45e591c"
+        },
+        "schema": "attest.receipt/2",
+        "sequence": 2,
+        "prev_hash": "3eb11f501e2c8d9c116629c897be0466242796dda4dc9caceaa7d9cdb45e591c",
+        "visit_id": "key:adopt",
+        "receipt_id": "rcpt_55ae8020d0dd4795b168355aa08b2269",
+        "issued_at": "2026-10-03T22:10:44.701308+00:00"
+      },
+      "payload_hash": "99f2d4ee43852f1434cbf45f94260ab6931a5339601af0e94218efb885db9ffc",
+      "signature": "N6vFrkeubtXYuRQeJcSTsAxDgI0p4U/SYoOi4VYivsXZMgZsfVmYF8CFwibMTRZm6hGycTlVVGQ7/KIPshw+Ag==",
+      "public_key": "yFOtDwzSthmuqSzuxP1Wok1kmdWEznklfkXP2BObYKc=",
+      "issued_at": "2026-10-03T22:10:44.701308Z"
+    }
+  ]
+}

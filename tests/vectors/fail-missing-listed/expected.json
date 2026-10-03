@@ -3,7 +3,7 @@
   "pin": "declared",
   "verdict": "fail",
   "detail_contains": [
-    "vis_a37e71587a8b"
+    "vis_3ae4ea653b90"
   ],
   "js": null,
   "note": "a bundle the signed manifest lists but the zip lacks fails"

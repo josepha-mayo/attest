@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from attest.app import _verify_pack
+from attest.models import Receipt
 from attest.verifyjs import VERIFY_HTML
 
 VECTORS = Path(__file__).parent / "vectors"
@@ -46,11 +47,27 @@ def _resolve_pin(data: bytes, spec: dict) -> str:
         return json.loads(z.read("bundle.json"))["original"]["public_key"]
 
 
+def _issuer_doc(vec: Path, spec: dict) -> dict | None:
+    """A vector may ship an attest.issuer/1 document beside the pack — its
+    issuer_key becomes the pin and its signed lifecycle receipts the lineage
+    pool, on every verifier surface."""
+    name = spec.get("issuer_doc")
+    if not name:
+        return None
+    return json.loads((vec / name).read_text(encoding="utf-8"))
+
+
 @pytest.mark.parametrize("vec", _vectors(), ids=lambda d: d.name)
 def test_server_verifier_matches_oracle(vec: Path):
     spec = _spec(vec)
     data = (vec / "pack.zip").read_bytes()
-    ok, detail = _verify_pack(data, _resolve_pin(data, spec))
+    doc = _issuer_doc(vec, spec)
+    if doc is not None:
+        pin = doc["issuer_key"]
+        known = [Receipt.model_validate(r) for r in doc.get("key_receipts") or []]
+    else:
+        pin, known = _resolve_pin(data, spec), None
+    ok, detail = _verify_pack(data, pin, known_rotations=known)
     assert ok == (spec["verdict"] == "ok"), f"{vec.name}: {detail}"
     for frag in spec.get("detail_contains", []):
         assert frag in detail, f"{vec.name}: missing {frag!r} in {detail!r}"
@@ -59,15 +76,25 @@ def test_server_verifier_matches_oracle(vec: Path):
 @pytest.mark.parametrize("vec", _vectors(), ids=lambda d: d.name)
 def test_embedded_verifier_matches_oracle(vec: Path, tmp_path: Path):
     spec = _spec(vec)
+    # The pack extracts into pack/ — an issuer document lands one level up
+    # (its provenance is a different channel); inside the pack dir it would
+    # be smuggled content and correctly fail the member check.
+    pack_dir = tmp_path / "pack"
+    pack_dir.mkdir()
     with zipfile.ZipFile(vec / "pack.zip") as z:
-        z.extractall(tmp_path)
-    pin = spec.get("pin", "declared")
-    key_args = [] if pin == "declared" else ["--key", pin]
+        z.extractall(pack_dir)
+    doc = _issuer_doc(vec, spec)
+    if doc is not None:
+        (tmp_path / spec["issuer_doc"]).write_text(json.dumps(doc, indent=2), encoding="utf-8")
+        key_args = ["--issuer", str(tmp_path / spec["issuer_doc"])]
+    else:
+        pin = spec.get("pin", "declared")
+        key_args = [] if pin == "declared" else ["--key", pin]
     if spec["kind"] == "case":
         cmd = [PY, "verify_case.py", ".", *key_args]
     else:
         cmd = [PY, "verify_bundle.py", "bundle.json", *key_args]
-    proc = subprocess.run(cmd, cwd=tmp_path, capture_output=True, text=True, timeout=120)
+    proc = subprocess.run(cmd, cwd=pack_dir, capture_output=True, text=True, timeout=120)
     out = proc.stdout + proc.stderr
     if spec["verdict"] == "ok":
         assert proc.returncode == 0, f"{vec.name}: {out}"
@@ -94,7 +121,15 @@ eval(src + `
 (async()=>{
   const read=p=>fs.readFileSync(dir+p,'utf8');
   let rotNodes=[];
-  if(job.rotations_file){rotNodes=get(parseKeep(await read(job.rotations_file)),'rotations').v;}
+  let issuerKey=null;
+  if(job.issuer_doc){
+    const dn=parseKeep(await read(job.issuer_doc)),d=toJS(dn)||{};
+    const kn=get(dn,'key_receipts');
+    issuerKey=d.issuer_key;
+    rotNodes=rotNodes.concat(kn&&kn.t==='arr'?kn.v:[]);
+  }
+  if(job.rotations_file){rotNodes=rotNodes.concat(
+    get(parseKeep(await read(job.rotations_file)),'rotations').v);}
   if(job.attestation_files){
     for(const f of job.attestation_files){
       const n=parseKeep(await read(f));
@@ -104,9 +139,11 @@ eval(src + `
   }
   const revoked=await revokedKeys(rotNodes);
   let trusted=null;
+  let manifestIssuer=null;
   if(job.manifest){
     const m=toJS(parseKeep(await read(job.manifest)));
-    trusted=await trustedKeys(m.issuer_key||'',rotNodes);
+    manifestIssuer=m.issuer_key||'';
+    trusted=await trustedKeys(manifestIssuer,rotNodes);
   }
   const results=[];
   for(const b of job.bundles){
@@ -129,20 +166,36 @@ eval(src + `
       [get(node,'original')].concat((get(node,'reviews')||{v:[]}).v.map(e=>get(e,'receipt'))),
       revoked).length;
   }
+  // Pin linkage mirrors verifyFiles: the doc's issuer must be reachable from
+  // the pack's issuer through the signed lifecycle — either direction.
+  let pinLinked=null;
+  if(issuerKey!==null){
+    if(manifestIssuer!==null){
+      const reach=new Set([manifestIssuer,...trusted,
+        ...(await descendantKeys(manifestIssuer,rotNodes))]);
+      pinLinked=reach.has(issuerKey);
+    }else{
+      pinLinked=trusted!==null&&trusted.has(issuerKey);
+    }
+  }
   console.log(JSON.stringify({
     bundles_ok:results.every(Boolean),
     trusted_count:trusted?trusted.size:0,
     suspect_count:suspect,
     lifecycle_suspect_count:suspectRecords(rotNodes,revoked).length,
+    pin_linked:pinLinked,
   }));
 })();`);
 """
 
 
-def _js_job(zf: zipfile.ZipFile, tmp: Path, spec: dict) -> dict:
+def _js_job(zf: zipfile.ZipFile, tmp: Path, spec: dict, vec: Path) -> dict:
     """Extract the members the JS driver needs and describe the job."""
     names = zf.namelist()
     job: dict = {"bundles": [], "attestation_files": []}
+    if spec.get("issuer_doc"):
+        job["issuer_doc"] = spec["issuer_doc"]
+        (tmp / spec["issuer_doc"]).write_bytes((vec / spec["issuer_doc"]).read_bytes())
     if spec["kind"] == "case":
         job["manifest"] = "manifest.json"
         (tmp / "manifest.json").write_bytes(zf.read("manifest.json"))
@@ -174,7 +227,7 @@ def test_browser_lib_matches_oracle(vec: Path, tmp_path: Path):
     (tmp_path / "verify.js").write_text(m.group(1), encoding="utf-8")
     (tmp_path / "drive.js").write_text(_js_driver(), encoding="utf-8")
     with zipfile.ZipFile(vec / "pack.zip") as z:
-        job = _js_job(z, tmp_path, spec)
+        job = _js_job(z, tmp_path, spec, vec)
     (tmp_path / "job.json").write_text(json.dumps(job), encoding="utf-8")
     proc = subprocess.run(
         [NODE, "drive.js", "verify.js", str(tmp_path), "job.json"],
@@ -193,3 +246,5 @@ def test_browser_lib_matches_oracle(vec: Path, tmp_path: Path):
         assert got["suspect_count"] == want["suspect_count"], f"{vec.name}: {got}"
     if "lifecycle_suspect_count" in want:
         assert got["lifecycle_suspect_count"] == want["lifecycle_suspect_count"], f"{vec.name}: {got}"
+    if "pin_linked" in want:
+        assert got["pin_linked"] == want["pin_linked"], f"{vec.name}: {got}"

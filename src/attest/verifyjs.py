@@ -457,8 +457,11 @@ async function verifyFiles(files){
   const mText=await text("manifest.json");
   if(issuerDoc&&!issuerDoc.nodes){
     /* Callers that assign the parsed doc directly (tests, tooling) skip the
-       drop path's parseKeep — derive the nodes here so either arming route
-       feeds the lineage walks identically. */
+       drop path's parseKeep — derive nodes here so either route arms. One
+       caveat a file drop doesn't have: the parse→stringify round-trip
+       respells floats (34.0→34), so a float-carrying lifecycle receipt's
+       payload hash won't match and its link silently drops — fail closed.
+       Dropping the doc FILE preserves canonical spellings and never respells. */
     issuerDoc={issuer_key:issuerDoc.issuer_key,
       nodes:(issuerDoc.key_receipts||[]).map(r=>parseKeep(JSON.stringify(r)))};
   }
@@ -809,8 +812,11 @@ async function go(fileList){
     for(const f of files){
       /* An attest.issuer/1 document among the drops pins verification to the
          deployment it came from — remove it from the pack's member list so it
-         can't be mistaken for smuggled content. */
-      if(/\\.json$/i.test(f.name||"")){
+         can't be mistaken for smuggled content. Only a LOOSE drop counts:
+         inside a folder pick (webkitRelativePath is set for every member) a
+         doc is pack content — verify_case.py fails it as an unlisted member,
+         so the browser must too rather than silently arming the pin. */
+      if(/\\.json$/i.test(f.name||"")&&!f.webkitRelativePath){
         try{
           const dn=parseKeep(await f.text()),d=toJS(dn);
           if(d&&d.schema==="attest.issuer/1"&&d.issuer_key){

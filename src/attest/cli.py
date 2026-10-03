@@ -969,6 +969,8 @@ def _fetch_issuer_doc(url: str, client=None) -> dict:
         if doc.get("schema") != "attest.issuer/1" or not doc.get("issuer_key"):
             sys.exit(f"{url} is not an attest.issuer/1 document")
         return doc
+    if "://" not in url and Path(url).suffix.lower() == ".json":
+        sys.exit(f"issuer document not found: {url}")
     base = urlsplit(url if "://" in url else f"https://{url}")
     host = base.hostname or ""
     if base.scheme != "https" and not _is_loopback(host):
@@ -1060,9 +1062,7 @@ def _verify(args: argparse.Namespace) -> None:
 
     if isinstance(data, list):
         receipts = [Receipt.model_validate(r) for r in data]
-        ok, reason = ledger.verify_chain(
-            receipts, public_key=pinned_key, extra_key_receipts=known_rotations
-        )
+        ok, reason = ledger.verify_chain(receipts, public_key=pinned_key, extra_key_receipts=known_rotations)
         if not ok:
             sys.exit(f"verification failed: {reason}")
         print(f"OK{pinned}: {reason}.")
@@ -1076,9 +1076,9 @@ def _verify(args: argparse.Namespace) -> None:
             # The issuer document's signed lifecycle names every key the
             # deployment ever signed under — a receipt written before the
             # rotation verifies under the pin too, and a foreign key fails.
-            lineage = ledger.trusted_issuer_keys(
+            lineage = ledger.trusted_issuer_keys(pinned_key, known_rotations) | ledger.descendant_issuer_keys(
                 pinned_key, known_rotations
-            ) | ledger.descendant_issuer_keys(pinned_key, known_rotations)
+            )
             if receipt.public_key not in lineage:
                 sys.exit(
                     "verification failed: receipt signed by a key outside the "
@@ -1090,6 +1090,15 @@ def _verify(args: argparse.Namespace) -> None:
             sys.exit(f"verification failed: {reason}")
         kind = receipt.payload.get("record_type") or receipt.payload.get("schema")
         print(f"OK{pinned}: {kind} {receipt.id} — {reason}.")
+        if known_rotations:
+            # The issuer doc's revocations are a trust overlay too — the
+            # browser verifier warns on suspect-window signings; match it.
+            revoked = ledger.revoked_issuer_keys(known_rotations)
+            if ledger.suspect_receipts([receipt], revoked=revoked):
+                print(
+                    "WARNING: signed inside its issuer's declared suspect window — "
+                    "integrity intact, trust qualified."
+                )
         print(f"Note: a valid signature proves record integrity {trust_note}, not physical truth.")
         # The sibling-.ots check only makes sense for a local file — for a URL
         # artifact the basename would match some unrelated CWD file (or crash
@@ -2149,9 +2158,12 @@ def _diff(args: argparse.Namespace) -> None:
             extra = [Receipt.model_validate(r) for r in doc.get("key_receipts") or []]
         except Exception as exc:  # noqa: BLE001
             sys.exit(f"issuer document carried malformed key receipts: {exc}")
+        # The pin note rides on stderr — with --json, stdout must carry only
+        # the machine-readable report a pipeline parses.
         print(
             f"pinned to issuer key served by {args.issuer_url} "
-            f"({len(extra)} lifecycle receipt(s)) — authenticity rides on transport"
+            f"({len(extra)} lifecycle receipt(s)) — authenticity rides on transport",
+            file=sys.stderr,
         )
 
     try:
@@ -2161,6 +2173,11 @@ def _diff(args: argparse.Namespace) -> None:
             from .packdiff import diff_report
 
             report = diff_report(args.old, args.new, key=key, extra_key_receipts=extra)
+            if key:
+                report["pin"] = {"issuer_key": key}
+                if getattr(args, "issuer_url", None):
+                    report["pin"]["issuer_url"] = args.issuer_url
+                    report["pin"]["lifecycle_receipts"] = len(extra)
             print(_json.dumps(report, indent=2))
             sys.exit(0 if report["clean"] else 1)
         lines, anomalies = diff(args.old, args.new, key=key, extra_key_receipts=extra)

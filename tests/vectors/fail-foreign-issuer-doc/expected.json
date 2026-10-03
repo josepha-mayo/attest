@@ -1,0 +1,13 @@
+{
+  "kind": "case",
+  "issuer_doc": "issuer.json",
+  "verdict": "fail",
+  "detail_contains": [
+    "issuer"
+  ],
+  "js": {
+    "bundle_ok": true,
+    "pin_linked": false
+  },
+  "note": "a foreign deployment's document cannot pin this pack \u2014 the pin must reach the issuer through signed lifecycle"
+}

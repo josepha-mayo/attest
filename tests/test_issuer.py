@@ -213,6 +213,54 @@ def test_issuer_doc_over_loopback_http(tmp_path, settings, store, ring_client, h
     app.state.inbox.close()
 
 
+def test_embedded_verifier_issuer_flag_bridges_rotation(engine, store, household, schedule, t0, tmp_path):
+    """`verify_case.py --issuer doc.json` — the pack's own embedded verifier,
+    stdlib-only — pins a pre-rotation export to the deployment's CURRENT
+    issuer the same way the server path does."""
+    import subprocess
+    import sys
+
+    v1 = _closed_visit(engine, household, t0)
+    service = ReviewService(store, engine.signer, engine.clock)
+    site = store.sites()[0]
+    entries = [(v1, service.bundle(v1.id), countersign_status(service.bundle(v1.id)))]
+    pack = build_case_pack(
+        store,
+        tmp_path / "media",
+        site,
+        entries,
+        manifest_signer=lambda m: engine.issue_export_manifest(site, m),
+        issuer_key=engine.signer.public_key_b64,
+    )
+    _, new_signer, _, _ = _rotate(engine)
+    doc = ledger.issuer_document(new_signer.public_key_b64, store.receipts())
+    docfile = tmp_path / "issuer.json"
+    docfile.write_text(json.dumps(doc))
+
+    pack_dir = tmp_path / "pack"
+    with zipfile.ZipFile(io.BytesIO(pack)) as z:
+        z.extractall(pack_dir)
+    proc = subprocess.run(
+        [sys.executable, str(pack_dir / "verify_case.py"), str(pack_dir), "--issuer", str(docfile)],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "pinned to the deployment" in proc.stdout
+    # A forged doc naming an unrelated issuer must fail closed.
+    bad = tmp_path / "bad-issuer.json"
+    bad.write_text(
+        json.dumps({"schema": "attest.issuer/1", "issuer_key": "A" * 43 + "=", "key_receipts": []})
+    )
+    proc = subprocess.run(
+        [sys.executable, str(pack_dir / "verify_case.py"), str(pack_dir), "--issuer", str(bad)],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode != 0
+    assert "FAIL" in proc.stdout + proc.stderr
+
+
 def test_issuer_file_roundtrip(tmp_path):
     """--issuer-url accepts a local doc file written by `attest issuer --out`."""
     vec = zipfile.ZipFile("tests/vectors/ok-rotated-case/pack.zip")
