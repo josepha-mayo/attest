@@ -75,6 +75,19 @@ def test_doctor_reports_a_held_writer_lock(doctor_env, capsys):
     os.close(fd)
 
 
+def test_all_handlers_are_registered_subcommands():
+    """A handler with no add_parser is dead code — a registration lost in a
+    parser-section edit has already bitten once; --help must name every
+    documented command."""
+    import subprocess
+    import sys
+
+    r = subprocess.run([sys.executable, "-m", "attest.cli", "--help"], capture_output=True, text=True)
+    assert r.returncode == 0
+    for cmd in ("doctor", "status", "rotate-key", "attack-demo", "verify", "export"):
+        assert cmd in r.stdout, f"{cmd} missing from attest --help"
+
+
 def test_doctor_json_is_machine_readable(doctor_env, capsys):
     assert _run(args_json=True) == 0
     payload = json.loads(capsys.readouterr().out)
