@@ -311,3 +311,58 @@ def verify_chain(receipts: list[Receipt], *, public_key: str | None = None) -> t
     if pivots:
         detail += f" across {pivots} signed key rotation{'s' if pivots > 1 else ''}"
     return True, detail
+
+
+def revoked_issuer_keys(receipts: list[Receipt]) -> dict[str, str]:
+    """Keys declared suspect by a ``key_revocation`` receipt → suspect_after ISO.
+
+    Only the chain's TIP issuer can revoke: a retired key revoking its
+    successor would let a compromised key smear the healthy one, so
+    revocations signed by anything but the final in-effect key are ignored
+    (not errors — they simply carry no authority). Revocation is a trust
+    overlay on top of integrity — records still verify; the flag is for
+    humans and tools to weight them."""
+    ordered = sorted(receipts, key=lambda x: x.sequence)
+    if not ordered:
+        return {}
+    tip = ordered[-1].public_key
+    revoked: dict[str, str] = {}
+    for r in ordered:
+        p = r.payload
+        if (
+            p.get("record_type") == "key_revocation"
+            and p.get("revoked_key")
+            and r.public_key == tip
+            and verify_receipt(r, public_key=tip)[0]
+        ):
+            revoked[p["revoked_key"]] = p.get("suspect_after") or ""
+    return revoked
+
+
+def suspect_receipts(
+    receipts: list[Receipt], revoked: dict[str, str] | None = None
+) -> list[Receipt]:
+    """Receipts signed by a revoked key INSIDE its suspect window —
+    cryptographically valid, declared untrustworthy. Integrity verdicts
+    never depend on this; it's the annotation surfaces report. Pass a
+    precomputed ``revoked_issuer_keys`` map when the revocation receipts
+    live in a separate pool (packs carry them beside the bundles)."""
+    if revoked is None:
+        revoked = revoked_issuer_keys(receipts)
+    if not revoked:
+        return []
+    from datetime import datetime
+
+    def _instant(s: str) -> datetime | None:
+        try:
+            return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
+    out = []
+    for r in receipts:
+        after = _instant(revoked.get(r.public_key) or "")
+        # compare instants, not spellings — 'Z' and '+00:00' sort differently
+        if after is not None and r.issued_at > after:
+            out.append(r)
+    return out

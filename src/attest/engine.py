@@ -1346,6 +1346,62 @@ class VisitEngine:
             return rotation, adoption
 
     @atomic
+    def issue_key_revocation(
+        self, revoked_key: str, suspect_after: datetime, reason: str = ""
+    ) -> Receipt:
+        """Sign, under the CURRENT issuer key, that ``revoked_key``'s
+        signatures are suspect for anything timestamped after
+        ``suspect_after`` — the incident-response counterpart to rotation.
+
+        Revocation annotates trust, it never erases: revoked-key records
+        still verify cryptographically, and verifiers report them as
+        suspect-window signatures rather than failures. Only the current
+        issuer can revoke — a retired key revoking its successor would let
+        a compromised key smear the healthy one, and the current key
+        revoking itself would strand the deployment (rotate away first,
+        then revoke the hot key)."""
+        current = self.signer.public_key_b64
+        if revoked_key == current:
+            raise ValueError(
+                "the active key cannot revoke itself — rotate to a fresh "
+                "key first, then revoke the compromised one"
+            )
+        history = {r.public_key for r in self.store.receipts()}
+        if revoked_key not in history:
+            raise ValueError(
+                "cannot revoke a key that never signed this chain — "
+                "revocation only has meaning inside this deployment's lineage"
+            )
+        pseudo_id = f"key:revoked:{revoked_key[:12]}"
+        existing = self.store.receipt_for_visit(pseudo_id)
+        if existing:
+            return existing
+        prev = self.store.latest_receipt()
+        receipt = self.signer.issue(
+            visit_id=pseudo_id,
+            sequence=prev.sequence + 1 if prev else 1,
+            prev_hash=prev.payload_hash if prev else None,
+            facts={
+                "record_type": "key_revocation",
+                "revoked_key": revoked_key,
+                "suspect_after": suspect_after.isoformat(),
+                "reason": reason or None,
+                "boundary": (
+                    "A signed statement that the issuer declares the named "
+                    "key's signatures suspect for records timestamped after "
+                    "the given instant — a trust annotation, never proof the "
+                    "records are false, and it never erases them."
+                ),
+                "journal_head": self.store.journal_head(),
+            },
+        )
+        try:
+            self.store.put_receipt(receipt)
+        except sqlite3.IntegrityError:
+            return self.store.receipt_for_visit(pseudo_id)
+        return receipt
+
+    @atomic
     def disconnect_site(self, site: Site, reason: str = "") -> Receipt:
         """Revoke a site's Ring source binding: tombstone the site and sign a
         ``source_disconnected`` receipt naming exactly what was unbound. The
