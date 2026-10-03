@@ -496,3 +496,49 @@ def test_lambda_handler_verifies_single_pack(engine, store, household, schedule,
     body = _invoke(mod, b"not a zip at all")
     assert body["ok"] is False
     assert "not a zip" in body["error"]
+
+
+def test_case_pack_verifier_pins_an_issuer_document(engine, store, household, schedule, t0, tmp_path):
+    """The stdlib-only verifier accepts the deployment's issuer document —
+    a pre-rotation pack verifies under the CURRENT key on a stock Python
+    install, with no Attest dependency and no out-of-band fingerprint."""
+    from attest import ledger
+    from attest.ledger import Signer
+
+    service = ReviewService(store, engine.signer, engine.clock)
+    event = WebhookEvent.model_validate(
+        webhooks.build_event(event_type="button_press", device_id=household[2].id, occurred_at=t0)
+    )
+    visit = engine.ingest(event).visit
+    engine.close_for_review(visit.id)
+    bundle = service.bundle(visit.id)
+    site = store.sites()[0]
+    data = build_case_pack(store, tmp_path / "media", site, [(visit, bundle, countersign_status(bundle))])
+    pack_dir = tmp_path / "case-pre-rotation"
+    zipfile.ZipFile(io.BytesIO(data)).extractall(pack_dir)
+
+    # Rotate AFTER the export — the pack declares the retired key.
+    old_key = engine.signer.public_key_b64
+    new_signer = Signer.ephemeral()
+    rotation = engine.issue_key_rotation(new_signer.public_key_b64, "")
+    engine.signer = new_signer
+    engine.issue_key_adoption(old_key, rotation)
+
+    # Pinning the current key alone fails — the pack carries no link.
+    result = _run_case(pack_dir, "--key", new_signer.public_key_b64)
+    assert result.returncode != 0
+    assert "disagrees with the pinned" in result.stderr
+
+    # The issuer document bridges the lineage — verified.
+    doc = ledger.issuer_document(new_signer.public_key_b64, store.receipts())
+    (tmp_path / "issuer.json").write_text(json.dumps(doc), encoding="utf-8")
+    result = _run_case(pack_dir, "--issuer", str(tmp_path / "issuer.json"))
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "issuer document" in result.stdout
+
+    # A forged document (wrong issuer key) still fails closed.
+    bad = dict(doc, issuer_key=old_key.replace(old_key[0], "A" if old_key[0] != "A" else "B"))
+    (tmp_path / "bad.json").write_text(json.dumps(bad), encoding="utf-8")
+    result = _run_case(pack_dir, "--issuer", str(tmp_path / "bad.json"))
+    assert result.returncode != 0
+    assert "disagrees with the pinned" in result.stderr

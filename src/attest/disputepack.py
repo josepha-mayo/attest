@@ -443,6 +443,26 @@ def suspect_records(receipts, revoked):
         if after is not None and at is not None and at > after:
             out.append(r)
     return out
+
+
+def load_issuer_doc(path):
+    """Load an attest.issuer/1 discovery document — the file written by
+    `attest issuer --out` or fetched from /.well-known/attest-issuer.json.
+    Returns (issuer_key, key_receipts); anything else fails closed. The doc
+    pins verification to a DEPLOYMENT rather than a key fingerprint, and its
+    signed lifecycle receipts extend trust to packs exported before a
+    rotation. Its authenticity is only as strong as how you got the file —
+    --key remains the out-of-band pin."""
+    try:
+        doc = json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception as exc:
+        sys.exit(f"FAIL issuer document unreadable: {exc}")
+    if not isinstance(doc, dict) or doc.get("schema") != "attest.issuer/1" or not doc.get("issuer_key"):
+        sys.exit("FAIL issuer document is not attest.issuer/1")
+    receipts = doc.get("key_receipts") or []
+    if not isinstance(receipts, list):
+        sys.exit("FAIL issuer document: key_receipts is not a list")
+    return doc["issuer_key"], receipts
 '''
 
 # verify_bundle.py — verifies one pack's bundle.json (and media/ next to it).
@@ -450,30 +470,43 @@ _BUNDLE_MAIN = """\
 def main():
     args = sys.argv[1:]
     key = None
+    issuer_receipts = []
     if "--key" in args:
         i = args.index("--key")
         if i + 1 >= len(args):
             sys.exit("FAIL --key requires a base64 public key value")
         key = args[i + 1]
         del args[i : i + 2]
+    if "--issuer" in args:
+        i = args.index("--issuer")
+        if i + 1 >= len(args):
+            sys.exit("FAIL --issuer requires an issuer-document path")
+        if key is not None:
+            sys.exit("FAIL pass --key or --issuer, not both")
+        key, issuer_receipts = load_issuer_doc(args[i + 1])
+        del args[i : i + 2]
     bundle = json.loads(Path(args[0]).read_text(encoding="utf-8"))
     pack_dir = Path(args[0]).resolve().parent
     key = key or bundle["original"]["public_key"]
     # Reviews appended after a key rotation verify under the successor —
-    # legitimate only through the signed rotation links in key_rotations.json.
+    # legitimate only through the signed rotation links in key_rotations.json
+    # (or an --issuer document's own lifecycle receipts: they pin this bundle
+    # to a DEPLOYMENT and bridge exports made before a rotation).
     # Revocation receipts ride the same file: the overlay annotates suspect
     # windows without touching the integrity verdict.
     trusted = {key}
-    rotations = []
+    rotations = list(issuer_receipts)
     rot_path = pack_dir / "key_rotations.json"
     if rot_path.is_file():
         try:
             rj = json.loads(rot_path.read_text(encoding="utf-8"))
-            rotations = rj.get("rotations") if isinstance(rj, dict) else None
+            extra = rj.get("rotations") if isinstance(rj, dict) else None
         except Exception:
-            rotations = None
-        if not isinstance(rotations, list):
+            extra = None
+        if not isinstance(extra, list):
             sys.exit("FAIL key_rotations.json: malformed")
+        rotations += extra
+    if rotations:
         trusted = trusted_keys(key, rotations) | descendant_keys(key, rotations)
     revoked = revoked_keys(rotations)
     ok, why, n = check_bundle(bundle, trusted)
@@ -521,6 +554,9 @@ def main():
     if pivots:
         print(f"    ({len(pivots)} key-lifecycle receipt(s) signed inside a suspect window —")
         print("     the trust pivot itself inherits the doubt)")
+    if issuer_receipts:
+        print(f"    (pinned via a deployment issuer document — {len(issuer_receipts)} "
+              "lifecycle receipt(s); its authenticity rides on how it reached you)")
     print("Signature proves record integrity under the issuer key - not identity,")
     print("attendance, or absence.")
 
@@ -543,11 +579,20 @@ _CASE_MAIN = """\
 def main():
     args = sys.argv[1:]
     key = None
+    issuer_receipts = []
     if "--key" in args:
         i = args.index("--key")
         if i + 1 >= len(args):
             sys.exit("FAIL --key requires a base64 public key value")
         key = args[i + 1]
+        del args[i : i + 2]
+    if "--issuer" in args:
+        i = args.index("--issuer")
+        if i + 1 >= len(args):
+            sys.exit("FAIL --issuer requires an issuer-document path")
+        if key is not None:
+            sys.exit("FAIL pass --key or --issuer, not both")
+        key, issuer_receipts = load_issuer_doc(args[i + 1])
         del args[i : i + 2]
     root = Path(args[0]) if args else Path(".")
     try:
@@ -561,7 +606,7 @@ def main():
     # pack's signed key_rotation receipts endorse — post-rotation packs mix
     # keys legitimately. Rotation receipts that don't parse or don't verify
     # are ignored here and fail in the attestation loop below.
-    rotations = []
+    rotations = list(issuer_receipts)
     for a in manifest.get("attestations", []):
         rid = a.get("receipt_id")
         if not isinstance(rid, str) or "/" in rid or chr(92) in rid or ".." in rid:
@@ -575,9 +620,9 @@ def main():
     trusted = trusted_keys(declared, rotations)
     revoked = revoked_keys(rotations)
     suspect_n = 0
-    if key is not None and key not in trusted:
+    if key is not None and key not in trusted and key not in descendant_keys(declared, rotations):
         sys.exit(
-            "FAIL manifest: issuer_key disagrees with the pinned --key "
+            "FAIL manifest: issuer_key disagrees with the pinned --key/--issuer "
             "(no signed key_rotation links them)"
         )
     # Without --key the issuer is self-declared by the pack — the signatures
@@ -718,7 +763,11 @@ def main():
     if pivots:
         print(f"    ({pivots} key-lifecycle receipt(s) signed inside a suspect window —")
         print("     the trust pivot itself inherits the doubt)")
-    if declared == key and "--key" not in sys.argv:
+    if issuer_receipts:
+        print(f"    (pinned to the deployment's issuer document — {len(issuer_receipts)} "
+              "lifecycle receipt(s) extended the lineage; the pin's authenticity")
+        print("     rides on how that document reached you)")
+    elif declared == key and "--key" not in sys.argv:
         print("    (issuer self-declared by the pack — pass --key to pin it)")
     print("Integrity only — not identity, attendance, or absence.")
 

@@ -444,6 +444,10 @@ function deriveStance(js){
 """
 
 _VERIFY_DRIVER = """/* ---------- pack driver ---------- */
+/* A dropped attest.issuer/1 document is a PIN, not pack content — it pins
+   verification to the deployment's current issuer and supplies the signed
+   lifecycle receipts that extend trust across rotations. */
+let issuerDoc=null;
 async function verifyFiles(files){
   const byName={};for(const f of files)byName[f.name]=f;
   const out=[];const say=(c,m)=>out.push(`<div class="row ${c}">${m}</div>`);
@@ -479,9 +483,24 @@ async function verifyFiles(files){
     }
   }
   let trusted=null;let revoked={};let suspectTotal=0;let lifecycleNodes=[];
+  /* Issuer-doc pin: the doc's lifecycle receipts merge into the lineage pools
+     and the doc's issuer_key becomes the pinned key — reachability through
+     the signed rotation walk is enforced below (a doc naming an unrelated
+     issuer fails closed rather than silently downgrading the pin). */
+  let issuerNodes=[];
+  if(issuerDoc){
+    /* The doc's lifecycle receipts arrive as parseKeep nodes — canonical
+       spellings preserved (a JSON.parse→stringify round-trip would respell
+       34.0 as 34 and silently break the receipts' own payload hashes). */
+    issuerNodes=issuerDoc.nodes||[];
+    key=issuerDoc.issuer_key;
+    say("warn",`pinned to the issuer document's deployment key ${esc(String(key).slice(0,16))}… `
+      +`(${issuerNodes.length} lifecycle receipt(s)) — the pin's authenticity rides on how that `
+      +"document reached you");
+  }
   if(mText){
     mNode=parseKeep(mText);
-    manifest=toJS(mNode);
+    manifest=toJS(mNode)||{};
     /* Structural claims on the manifest itself — unsigned manifests have no
        hash-cover over these fields, so check them explicitly (the server-side
        verifier requires both). */
@@ -493,16 +512,28 @@ async function verifyFiles(files){
     /* Rotation receipts travel as manifest-listed attestations — collect them
        before the bundle loop so the trusted issuer set spans the signed
        rotation chain (a pack exported after rotation mixes keys). */
-    const rotNodes=[];
+    const rotNodes=[...issuerNodes];
     for(const a of manifest.attestations||[]){
       const at=await text(`attestations/${a.receipt_id}.json`);
       if(!at)continue;
       const aNode=parseKeep(at);
-      const art=(toJS(aNode).payload||{}).record_type;
+      const art=((toJS(aNode)||{}).payload||{}).record_type;
       if(art==="key_rotation"||art==="key_adoption"||art==="key_revocation")rotNodes.push(aNode);
     }
     lifecycleNodes=rotNodes;
     trusted=await trustedKeys(manifest.issuer_key||"",rotNodes);
+    if(issuerDoc){
+      /* Pin enforcement: the doc's issuer must be reachable from the pack's
+         declared issuer through the signed lifecycle — either direction
+         (a newer doc pins a pre-rotation pack; an older doc still verifies a
+         rotated deployment's newer packs). */
+      const reach=new Set([manifest.issuer_key,...trusted,
+        ...(await descendantKeys(manifest.issuer_key||"",rotNodes))]);
+      if(!reach.has(issuerDoc.issuer_key)){
+        anyBad=true;
+        say("bad","issuer document pin has no signed link to this pack — wrong deployment?");
+      }
+    }
     revoked=await revokedKeys(rotNodes);
     for(const v of manifest.visits||[]){
       const t=await text(`visits/${v.visit_id}/bundle.json`);
@@ -520,20 +551,29 @@ async function verifyFiles(files){
     /* key_rotations.json carries the signed pivot links — reviews appended
        after a rotation verify under the successor. Malformed content fails
        closed, mirroring verify_bundle.py. */
+    const oKey=(toJS(get(root,"original"))||{}).public_key;
     const kt=await text("key_rotations.json");
+    const rnV=[...issuerNodes];
     if(kt){
-      const oKey=(toJS(get(root,"original"))||{}).public_key;
       const rn=get(parseKeep(kt),"rotations");
       if(!rn||rn.t!=="arr"){
         anyBad=true;say("bad","key_rotations.json: malformed");
-      }else{
-        lifecycleNodes=rn.v;
-        trusted=new Set([
-          ...(await trustedKeys(oKey,rn.v)),
-          ...(await descendantKeys(oKey,rn.v)),
-        ]);
-        revoked=await revokedKeys(rn.v);
+      }else rnV.push(...rn.v);
+    }
+    if(rnV.length){
+      lifecycleNodes=rnV;
+      trusted=new Set([
+        ...(await trustedKeys(oKey,rnV)),
+        ...(await descendantKeys(oKey,rnV)),
+      ]);
+      revoked=await revokedKeys(rnV);
+      if(issuerDoc&&!trusted.has(issuerDoc.issuer_key)){
+        anyBad=true;
+        say("bad","issuer document pin has no signed link to this bundle — wrong deployment?");
       }
+    }else if(issuerDoc&&issuerDoc.issuer_key!==oKey){
+      anyBad=true;
+      say("bad","issuer document pin has no signed link to this bundle — wrong deployment?");
     }
   }
   for(const[vid,root]of bundles){
@@ -737,6 +777,32 @@ async function go(fileList){
   const out=document.getElementById("out");
   try{
     let files=[...fileList];if(!files.length)return;
+    /* A fresh doc replaces the armed pin; the pin persists across drops so a
+       reviewer can arm it once and check several packs. */
+    let freshDoc=null;
+    const rest=[];
+    for(const f of files){
+      /* An attest.issuer/1 document among the drops pins verification to the
+         deployment it came from — remove it from the pack's member list so it
+         can't be mistaken for smuggled content. */
+      if(/\\.json$/i.test(f.name||"")){
+        try{
+          const dn=parseKeep(await f.text()),d=toJS(dn);
+          if(d&&d.schema==="attest.issuer/1"&&d.issuer_key){
+            const kn=get(dn,"key_receipts");
+            freshDoc={issuer_key:d.issuer_key,nodes:kn&&kn.t==="arr"?kn.v:[]};
+            continue;}
+        }catch(e){/* ordinary pack JSON — stays in the verify set */}
+      }
+      rest.push(f);
+    }
+    if(freshDoc)issuerDoc=freshDoc;
+    files=rest;
+    if(issuerDoc&&!files.length){
+      out.innerHTML="<div class='row warn'>issuer document armed — the pin now applies to the "
+        +"next pack you drop. Its authenticity rides on how the document reached you.</div>";
+      return;
+    }
     if(files.length===1&&/\\.zip$/i.test(files[0].name))files=await readZipEntries(files[0]);
     else files=files.map(f=>{
       /* A folder pick (webkitdirectory) yields webkitRelativePath like
@@ -784,7 +850,11 @@ single-visit pack, or a signed receipt JSON (e.g. a <code>verify-live --sign</co
 <div class="drop" id="drop">Drop the pack .zip or a signed receipt .json here, or
 pick files: <input type="file" id="pick" multiple accept=".zip,.json" aria-label="Choose pack files">
 or the extracted folder: <input type="file" id="pickdir" webkitdirectory
-aria-label="Choose the extracted pack folder"></div>
+aria-label="Choose the extracted pack folder"><br>
+<small>To pin the pack to a deployment, drop its <code>attest.issuer/1</code>
+document too (from <code>/.well-known/attest-issuer.json</code> or
+<code>attest issuer --out</code>) — the pin arms for the pack, and the doc's
+signed lifecycle bridges pre-rotation exports.</small></div>
 <p id="trysample-wrap" hidden><button id="trysample" type="button">Verify the bundled
 sample pack — one click, fetched from this site</button></p>
 <div id="out" role="status" aria-live="polite"></div>
