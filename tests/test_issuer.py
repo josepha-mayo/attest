@@ -273,3 +273,167 @@ def test_issuer_file_roundtrip(tmp_path):
     docfile = tmp_path / "issuer.json"
     docfile.write_text(json.dumps(doc))
     assert cli._fetch_issuer_doc(str(docfile))["issuer_key"] == manifest["issuer_key"]
+
+
+def test_issuer_missing_file_reports_local_error(tmp_path):
+    """A --issuer-url argument that looks like a missing local .json path
+    reports as a file problem, not a network one."""
+    import pytest
+
+    with pytest.raises(SystemExit, match="not found"):
+        cli._fetch_issuer_doc(str(tmp_path / "missing.json"))
+
+
+def _forward_signed_pack(tmp_path):
+    """A case pack whose manifest declares K1 but lists an attestation signed
+    by forward-linked K2 — the keys are lineage-linked via a consented
+    rotation carried in the issuer document."""
+    import json as _json
+
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from attest.ledger import Signer
+
+    k1 = Signer(Ed25519PrivateKey.from_private_bytes(b"\x11" * 32))
+    k2 = Signer(Ed25519PrivateKey.from_private_bytes(b"\x22" * 32))
+    rot = k1.issue(
+        visit_id="key:rot",
+        sequence=1,
+        prev_hash=None,
+        facts={
+            "record_type": "key_rotation",
+            "previous_key": k1.public_key_b64,
+            "new_key": k2.public_key_b64,
+        },
+    )
+    adopt = k2.issue(
+        visit_id="key:adopt",
+        sequence=2,
+        prev_hash=rot.payload_hash,
+        facts={
+            "record_type": "key_adoption",
+            "previous_key": k1.public_key_b64,
+            "rotation_receipt": {"id": rot.id, "hash": rot.payload_hash},
+        },
+    )
+    att = k2.issue(
+        visit_id="site:att",
+        sequence=3,
+        prev_hash=adopt.payload_hash,
+        facts={"record_type": "coverage_certificate"},
+    )
+    manifest = {
+        "schema": "attest.case-pack/1",
+        "issuer_key": k1.public_key_b64,
+        "visits": [],
+        "attestations": [
+            {
+                "receipt_id": att.id,
+                "visit_id": att.visit_id,
+                "payload_hash": att.payload_hash,
+                "record_type": "coverage_certificate",
+            }
+        ],
+    }
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, "w") as z:
+        z.writestr("manifest.json", _json.dumps(manifest))
+        z.writestr(f"attestations/{att.id}.json", _json.dumps(att.model_dump(mode="json")))
+    doc = ledger.issuer_document(k2.public_key_b64, [rot, adopt])
+    return data.getvalue(), doc
+
+
+def test_forward_signed_member_fails_on_every_surface(tmp_path):
+    """Parity guard: a pack member signed by a consented DESCENDANT of the
+    declared issuer must fail on the server and embedded verifiers alike —
+    membership is ancestors-of-declared; descendants only bridge the pin."""
+    import subprocess
+    import sys
+
+    from attest.app import _verify_case_pack
+    from attest.disputepack import _CASE_VERIFIER
+    from attest.models import Receipt
+
+    pack_bytes, doc = _forward_signed_pack(tmp_path)
+    known = [Receipt.model_validate(r) for r in doc["key_receipts"]]
+
+    # Server surface: pin links (K2 is the doc's issuer) but the member fails.
+    with zipfile.ZipFile(io.BytesIO(pack_bytes)) as z:
+        ok, detail = _verify_case_pack(z, doc["issuer_key"], known_rotations=known)
+    assert not ok
+    assert "outside the rotation chain" in detail
+
+    # Embedded surface: identical verdict on identical bytes.
+    pack_dir = tmp_path / "pack"
+    with zipfile.ZipFile(io.BytesIO(pack_bytes)) as z:
+        z.extractall(pack_dir)
+    (pack_dir / "verify_case.py").write_text(_CASE_VERIFIER, encoding="utf-8")
+    docfile = tmp_path / "issuer.json"
+    docfile.write_text(json.dumps(doc))
+    proc = subprocess.run(
+        [sys.executable, str(pack_dir / "verify_case.py"), str(pack_dir), "--issuer", str(docfile)],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode != 0
+    assert "outside the rotation chain" in proc.stdout + proc.stderr
+
+
+def test_verify_single_receipt_annotates_suspect_window(tmp_path, capsys):
+    """Under --issuer-url a lone receipt signed inside a revocation's suspect
+    window stays VERIFIED but prints the same WARN the pack verifiers do."""
+    import argparse
+
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    k1 = Signer(Ed25519PrivateKey.from_private_bytes(b"\x33" * 32))
+    k2 = Signer(Ed25519PrivateKey.from_private_bytes(b"\x44" * 32))
+    rot = k1.issue(
+        visit_id="key:rot",
+        sequence=1,
+        prev_hash=None,
+        facts={
+            "record_type": "key_rotation",
+            "previous_key": k1.public_key_b64,
+            "new_key": k2.public_key_b64,
+        },
+    )
+    adopt = k2.issue(
+        visit_id="key:adopt",
+        sequence=2,
+        prev_hash=rot.payload_hash,
+        facts={
+            "record_type": "key_adoption",
+            "previous_key": k1.public_key_b64,
+            "rotation_receipt": {"id": rot.id, "hash": rot.payload_hash},
+        },
+    )
+    rev = k2.issue(
+        visit_id="key:rev",
+        sequence=3,
+        prev_hash=adopt.payload_hash,
+        facts={
+            "record_type": "key_revocation",
+            "revoked_key": k1.public_key_b64,
+            "suspect_after": "2020-01-01T00:00:00+00:00",
+        },
+    )
+    doc = ledger.issuer_document(k2.public_key_b64, [rot, adopt, rev])
+    docfile = tmp_path / "issuer.json"
+    docfile.write_text(json.dumps(doc))
+
+    receipt = k1.issue(
+        visit_id="vis_1",
+        sequence=1,
+        prev_hash=None,
+        facts={"record_type": "visit", "state": "closed"},
+    )
+    receipt_file = tmp_path / "receipt.json"
+    receipt_file.write_text(json.dumps(receipt.model_dump(mode="json")))
+
+    cli._verify(
+        argparse.Namespace(bundle=str(receipt_file), key=None, issuer_url=str(docfile))
+    )
+    out = capsys.readouterr().out
+    assert "OK" in out
+    assert "suspect window" in out

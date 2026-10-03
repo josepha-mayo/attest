@@ -1332,3 +1332,142 @@ const arm=dt=>{const dn=parseKeep(dt),d=toJS(dn)||{},kn=get(dn,'key_receipts');
     assert proc.returncode == 0, proc.stderr
     assert "pinned: true true" in proc.stdout, proc.stdout
     assert "wrongdoc: true true" in proc.stdout, proc.stdout
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_verify_html_folder_drop_keeps_issuer_doc_as_member(tmp_path):
+    """Inside a folder pick every file carries webkitRelativePath — an
+    attest.issuer/1 document there is pack CONTENT, not a pin: verify_case.py
+    fails it as an unlisted member and the browser must too. Only a doc
+    dropped loose alongside the pack arms the pin."""
+    manifest = json.dumps(
+        {
+            "schema": "attest.case-pack/1",
+            "issuer_key": "K" * 43 + "=",
+            "visits": [],
+            "attestations": [],
+        }
+    )
+    doc = json.dumps(
+        {"schema": "attest.issuer/1", "issuer_key": "K" * 43 + "=", "key_receipts": []}
+    )
+    (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
+    driver = """
+const fs=require('fs');
+let src=fs.readFileSync(process.argv[2],'utf8').replace(/const dz=[\s\S]*$/,'');
+const manifest=%s, doc=%s;
+eval(src + `
+const out={innerHTML:''};
+global.document={getElementById:()=>out};
+const F=(n,t,p)=>{const f={name:n,text:async()=>t};if(p)f.webkitRelativePath=p;return f;};
+(async()=>{
+  await go([F('manifest.json',manifest),F('issuer.json',doc)]);
+  console.log('loose:',/VERIFIED/.test(out.innerHTML),/FAILED/.test(out.innerHTML));
+  out.innerHTML='';
+  await go([F('pack/manifest.json',manifest,'pack/manifest.json'),
+            F('pack/issuer.json',doc,'pack/issuer.json')]);
+  console.log('folder:',/FAILED/.test(out.innerHTML),
+    /not in the signed manifest/.test(out.innerHTML));
+})();`);
+""" % (json.dumps(manifest), json.dumps(doc))
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "verify.js"], cwd=tmp_path, capture_output=True, text=True, timeout=60
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "loose: true false" in proc.stdout, proc.stdout
+    assert "folder: true true" in proc.stdout, proc.stdout
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_verify_html_rejects_forward_signed_member(tmp_path):
+    """Parity guard: manifest declares K1 but an attestation is signed by
+    forward-linked K2 — the browser must FAIL it as outside the trusted
+    chain. Descendants only bridge the issuer pin, never pack membership."""
+    k1 = Signer(Ed25519PrivateKey.from_private_bytes(b"\x11" * 32))
+    k2 = Signer(Ed25519PrivateKey.from_private_bytes(b"\x22" * 32))
+    rot = k1.issue(
+        visit_id="key:rot",
+        sequence=1,
+        prev_hash=None,
+        facts={
+            "record_type": "key_rotation",
+            "previous_key": k1.public_key_b64,
+            "new_key": k2.public_key_b64,
+        },
+    )
+    adopt = k2.issue(
+        visit_id="key:adopt",
+        sequence=2,
+        prev_hash=rot.payload_hash,
+        facts={
+            "record_type": "key_adoption",
+            "previous_key": k1.public_key_b64,
+            "rotation_receipt": {"id": rot.id, "hash": rot.payload_hash},
+        },
+    )
+    att = k2.issue(
+        visit_id="site:att",
+        sequence=3,
+        prev_hash=adopt.payload_hash,
+        facts={"record_type": "coverage_certificate"},
+    )
+    manifest = json.dumps(
+        {
+            "schema": "attest.case-pack/1",
+            "issuer_key": k1.public_key_b64,
+            "visits": [],
+            "attestations": [
+                {
+                    "receipt_id": att.id,
+                    "visit_id": att.visit_id,
+                    "payload_hash": att.payload_hash,
+                    "record_type": "coverage_certificate",
+                }
+            ],
+        }
+    )
+    doc = json.dumps(
+        {
+            "schema": "attest.issuer/1",
+            "issuer_key": k2.public_key_b64,
+            "key_receipts": [
+                rot.model_dump(mode="json"),
+                adopt.model_dump(mode="json"),
+            ],
+        }
+    )
+    (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
+    (tmp_path / "manifest.json").write_text(manifest, encoding="utf-8")
+    (tmp_path / "att.json").write_text(
+        json.dumps(att.model_dump(mode="json")), encoding="utf-8"
+    )
+    (tmp_path / "doc.json").write_text(doc, encoding="utf-8")
+    driver = """
+const fs=require('fs');
+let src=fs.readFileSync(process.argv[2],'utf8').replace(/const dz=[\s\S]*$/,'');
+const m=fs.readFileSync(process.argv[3],'utf8');
+const a=fs.readFileSync(process.argv[4],'utf8');
+const d=fs.readFileSync(process.argv[5],'utf8');
+eval(src + `
+const F=(n,t)=>({name:n,text:async()=>t});
+const arm=dt=>{const dn=parseKeep(dt),o=toJS(dn)||{},kn=get(dn,'key_receipts');
+  return{issuer_key:o.issuer_key,nodes:kn&&kn.t==='arr'?kn.v:[]};};
+(async()=>{
+  issuerDoc=arm(d);
+  const html=await verifyFiles([F('manifest.json',m),F('attestations/x.json',a)]);
+  console.log('forward:',/FAILED/.test(html),
+    /outside the trusted issuer chain/.test(html),
+    /pinned to the issuer document/.test(html));
+})();`);
+"""
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "verify.js", "manifest.json", "att.json", "doc.json"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "forward: true true true" in proc.stdout, proc.stdout

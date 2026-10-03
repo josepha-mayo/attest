@@ -855,8 +855,25 @@ def create_app(
         adoption, revocation) so a remote verifier can pin a pack to THIS
         deployment over its own HTTPS endpoint instead of copying a
         fingerprint out of band. Public by design: the material is public
-        verification crypto that travels in every exported pack anyway."""
-        return ledger.issuer_document(signer.public_key_b64, store.receipts())
+        verification crypto that travels in every exported pack anyway.
+
+        The doc rebuilds only when the chain tip or issuer key moves — this
+        route is unauthenticated, so a full receipts scan per request would
+        be a self-imposed DoS amplifier on a busy deployment."""
+        def gather():
+            tip = store.latest_receipt()
+            cache_key = (signer.public_key_b64, tip.id if tip else None)
+            cached = getattr(app.state, "issuer_doc", None)
+            if getattr(app.state, "issuer_doc_key", None) == cache_key and cached is not None:
+                doc = cached
+            else:
+                doc = ledger.issuer_document(signer.public_key_b64, store.receipts())
+                app.state.issuer_doc, app.state.issuer_doc_key = doc, cache_key
+            # served_at reports when the document left the server, not when the
+            # lineage last changed — keep it honest on cached hits.
+            return dict(doc, served_at=utcnow().isoformat())
+
+        return await asyncio.to_thread(gather)
 
     @app.get("/visits/{visit_id}", response_class=HTMLResponse)
     async def visit_page(request: Request, visit_id: str = PathParam(max_length=128)):

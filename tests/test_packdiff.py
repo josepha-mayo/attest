@@ -270,3 +270,98 @@ def test_diff_json_report_is_structured_and_consistent(exports, tmp_path, capsys
     out = _json.loads(capsys.readouterr().out)
     assert out["clean"] is False and out["anomalies"] >= 1
     assert any(e["severity"] == "anomaly" and e.get("target") == v2 for e in out["events"])
+
+
+def test_diff_json_with_issuer_url_keeps_stdout_parseable(exports, tmp_path, capsys):
+    """--json + --issuer-url: the human pin note must ride on stderr — a CI
+    gate piping stdout into a JSON parser gets the report, not prose."""
+    import argparse
+    import json as _json
+
+    from attest import cli
+
+    first, second, _v1, _v2 = exports
+    issuer = _json.loads(zipfile.ZipFile(first).read("manifest.json"))["issuer_key"]
+    doc = tmp_path / "issuer.json"
+    doc.write_text(_json.dumps({"schema": "attest.issuer/1", "issuer_key": issuer, "key_receipts": []}))
+    with pytest.raises(SystemExit) as se:
+        cli._diff(
+            argparse.Namespace(old=str(first), new=str(second), key=None, issuer_url=str(doc), json=True)
+        )
+    assert se.value.code == 0
+    captured = capsys.readouterr()
+    report = _json.loads(captured.out)  # any prose on stdout raises here
+    assert report["clean"] is True
+    assert report["pin"] == {
+        "issuer_key": issuer,
+        "issuer_url": str(doc),
+        "lifecycle_receipts": 0,
+    }
+    assert "pinned to issuer key" in captured.err
+
+
+def test_diff_rejects_forward_signed_member(tmp_path):
+    """Parity guard: a case pack whose manifest declares K1 but lists a
+    forward-linked K2 attestation must fail — membership is ancestors-of-
+    declared on every surface; descendants only bridge the pin itself."""
+    import json as _json
+
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from attest.ledger import Signer, issuer_document
+    from attest.models import Receipt
+    from attest.packdiff import load_artifact
+
+    k1 = Signer(Ed25519PrivateKey.from_private_bytes(b"\x11" * 32))
+    k2 = Signer(Ed25519PrivateKey.from_private_bytes(b"\x22" * 32))
+    rot = k1.issue(
+        visit_id="key:rot",
+        sequence=1,
+        prev_hash=None,
+        facts={
+            "record_type": "key_rotation",
+            "previous_key": k1.public_key_b64,
+            "new_key": k2.public_key_b64,
+        },
+    )
+    adopt = k2.issue(
+        visit_id="key:adopt",
+        sequence=2,
+        prev_hash=rot.payload_hash,
+        facts={
+            "record_type": "key_adoption",
+            "previous_key": k1.public_key_b64,
+            "rotation_receipt": {"id": rot.id, "hash": rot.payload_hash},
+        },
+    )
+    att = k2.issue(
+        visit_id="site:att",
+        sequence=3,
+        prev_hash=adopt.payload_hash,
+        facts={"record_type": "coverage_certificate"},
+    )
+    manifest = {
+        "schema": "attest.case-pack/1",
+        "issuer_key": k1.public_key_b64,
+        "visits": [],
+        "attestations": [
+            {
+                "receipt_id": att.id,
+                "visit_id": att.visit_id,
+                "payload_hash": att.payload_hash,
+                "record_type": "coverage_certificate",
+            }
+        ],
+    }
+    pack = tmp_path / "crafted.zip"
+    with zipfile.ZipFile(pack, "w") as z:
+        z.writestr("manifest.json", _json.dumps(manifest))
+        z.writestr(f"attestations/{att.id}.json", _json.dumps(att.model_dump(mode="json")))
+    doc = issuer_document(k2.public_key_b64, [rot, adopt])
+    known = [Receipt.model_validate(r) for r in doc["key_receipts"]]
+
+    art = load_artifact(pack, key=doc["issuer_key"], extra_key_receipts=known)
+    # The pin itself links (K2 IS the doc's issuer) — the failure is
+    # membership: K2 is a descendant of the declared issuer, not an ancestor.
+    assert not any("lifecycle link" in f for f in art["verify_failures"])
+    assert any("outside the rotation chain" in f for f in art["verify_failures"])
