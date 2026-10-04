@@ -88,10 +88,11 @@ def _log_pin_check(z, names, trusted, member_ids, failures, notes):
     if err:
         failures.append(err)
     elif res:
-        proven, size = res
-        notes.append(
-            f"{proven} receipt(s) proven inside the deployment transparency log at checkpoint size {size}"
-        )
+        proven, size, cosigs = res
+        note = f"{proven} receipt(s) proven inside the deployment transparency log at checkpoint size {size}"
+        if cosigs:
+            note += f" — cosigned by {cosigs} witness(es)"
+        notes.append(note)
 
 
 def _bundle_receipt_ids(bundle) -> list[tuple[str, str, str]]:
@@ -253,7 +254,13 @@ def check_log_pin(
                 f"log_checkpoint.json: inclusion proof for receipt {rid} does not reach the signed tree head"
             )
         proven += 1
-    return (proven, size), None
+    # Witness counter-signatures ride the checkpoint document: verified
+    # under each cosig's own key + subject binding, reported as auxiliary
+    # attestation — never the gate the issuer's own checkpoint is.
+    from .logmonitor import check_cosignatures
+
+    cosigs, _ = check_cosignatures(doc, cp.id, size, root_hex)
+    return (proven, size, cosigs), None
 
 
 def _key_pool(z, attestations: dict) -> list:

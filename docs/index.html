@@ -49,7 +49,10 @@
   checkpoints carry that bridge in their own signatures, and
   <code>attest verify --issuer-url</code> cross-checks a pack's head
   against the deployment's live log, so a fork served to one auditor
-  alone can't stand.</p>
+  alone can't stand. Every deployment is also a cosigning witness —
+  <code>attest export --witness</code> collects independent
+  counter-signatures into this very pack's checkpoint, and a forked log
+  can never honestly collect them.</p>
   <p>Or check our own claim: <a href="live-sweep-receipt.json">this signed
   receipt</a> is the <code>verify-live --sign</code> sweep run against the
   real <code>api.amazonvision.com</code> on 2026-09-30 — 5 pass, 3 fail

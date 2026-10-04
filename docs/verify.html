@@ -570,8 +570,21 @@ async function checkLog(byName,trustedSet,refs,bad,ok){
         +"does not reach the signed tree head");continue;}
     proven++;
   }
+  /* witness counter-signatures ride the checkpoint doc — verify each under
+     its own signer's key and count only those whose subject binds THIS head;
+     auxiliary attestation, never the gate. Mirrors _cosig_count. */
+  let cosigs=0;
+  const cosec=get(dn,"cosignatures"),coNodes=cosec&&cosec.t==="arr"?cosec.v:[];
+  for(let i=0;i<(doc.cosignatures||[]).length;i++){
+    const cp2=doc.cosignatures[i]&&doc.cosignatures[i].payload;
+    if(!cp2||cp2.record_type!=="witness_cosignature")continue;
+    if(cp2.subject_checkpoint!==cp.id||cp2.subject_tree_size!==size
+      ||cp2.subject_root_sha256!==rootHex)continue;
+    const rc=await checkReceipt(coNodes[i]);
+    if(rc.ok)cosigs++;
+  }
   if(proven)ok(`${proven} receipt(s) proven inside the deployment transparency `
-    +`log at checkpoint size ${size}`);
+    +`log at checkpoint size ${size}${cosigs?` — cosigned by ${cosigs} witness(es)`:""}`);
 }
 async function verifyFiles(files){
   const byName={};for(const f of files)byName[f.name]=f;

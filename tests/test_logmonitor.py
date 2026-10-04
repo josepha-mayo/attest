@@ -575,3 +575,155 @@ def test_live_check_fast_paths_on_the_embedded_bridge(engine, store, household, 
         pack_cp.model_dump(mode="json"), _head(engine, live_cp), unreachable, trusted
     )
     assert verdict is True and "own signed bridge" in line
+
+
+def _witness_deployment():
+    """A second Attest deployment acting as the cosigning witness — its own
+    store and signer, completely independent of the issuer under test."""
+    from attest.ledger import Signer
+    from attest.store import Store
+
+    return Store(":memory:"), Signer.ephemeral()
+
+
+def test_witness_cosigns_only_extending_heads(engine, store, household, schedule, t0):
+    """The witness pins each issuer's head and signs only what it can prove
+    extends that pin — first contact pins + signs, a grown head bridges via
+    its own embedded extends, a fork/regression is refused with the pin."""
+    from attest import logmonitor
+
+    w_store, w_signer = _witness_deployment()
+    doc = _doc_for(engine)
+
+    _seed(engine, household[0], t0)
+    cp1 = engine.issue_log_checkpoint()
+    status, out = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": doc, "checkpoint": cp1.model_dump(mode="json")}
+    )
+    assert status == 200
+    assert out["cosignature"]["payload"]["record_type"] == "witness_cosignature"
+    assert out["cosignature"]["payload"]["subject_root_sha256"] == cp1.payload["root_sha256"]
+    assert out["pinned"]["tree_size"] == cp1.payload["tree_size"]
+
+    # The witness's own ledger carries the attestation — auditable.
+    assert any(r.payload.get("record_type") == "witness_cosignature" for r in w_store.receipts())
+
+    # Grown log: the new checkpoint's embedded extends closes the bridge —
+    # no consistency document needed.
+    _seed(engine, household[0], t0 - timedelta(hours=5), n=1)
+    cp2 = engine.issue_log_checkpoint()
+    status, out = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": doc, "checkpoint": cp2.model_dump(mode="json")}
+    )
+    assert status == 200 and out["pinned"]["tree_size"] == cp2.payload["tree_size"]
+
+    # A same-size different-root head is a fork — refused, pin intact.
+    fork = engine.signer.issue(
+        visit_id="log:witness-fork",
+        sequence=999,
+        prev_hash=None,
+        facts={
+            "record_type": "log_checkpoint",
+            "tree_size": cp2.payload["tree_size"],
+            "root_sha256": "00" * 32,
+        },
+    )
+    status, out = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": doc, "checkpoint": fork.model_dump(mode="json")}
+    )
+    assert status == 409 and out["pinned"]["tree_size"] == cp2.payload["tree_size"]
+
+    # A REGRESSED head is refused too.
+    status, out = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": doc, "checkpoint": cp1.model_dump(mode="json")}
+    )
+    assert status == 409
+
+    # Malformed input never reaches the ledger.
+    status, _ = logmonitor.witness_cosign(w_store, w_signer, {"issuer_doc": {}})
+    assert status == 422
+    assert len([r for r in w_store.receipts() if r.payload.get("record_type") == "witness_cosignature"]) == 2
+
+
+def test_witness_bridges_a_multi_checkpoint_gap(engine, store, household, schedule, t0):
+    """The witness pinned cp1; the requester's checkpoint is cp3 — the
+    embedded extends only reaches cp2, so the exchange needs the retry
+    with a served consistency proof from the pinned size."""
+    from attest import logmonitor
+
+    w_store, w_signer = _witness_deployment()
+    doc = _doc_for(engine)
+
+    _seed(engine, household[0], t0)
+    cp1 = engine.issue_log_checkpoint()
+    status, _ = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": doc, "checkpoint": cp1.model_dump(mode="json")}
+    )
+    assert status == 200
+
+    _seed(engine, household[0], t0 - timedelta(hours=5), n=1)
+    engine.issue_log_checkpoint()  # cp2 — the witness never sees it
+    _seed(engine, household[0], t0 - timedelta(hours=6), n=1)
+    cp3 = engine.issue_log_checkpoint()
+    assert cp3.payload["extends"]["first"] != cp1.payload["tree_size"]  # gap exists
+
+    # First attempt: the embedded bridge doesn't apply → 409 + the pin.
+    status, out = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": doc, "checkpoint": cp3.model_dump(mode="json")}
+    )
+    assert status == 409 and out["pinned"]["tree_size"] == cp1.payload["tree_size"]
+
+    # Retry with the consistency proof from the pinned size — cosigned.
+    status, out = logmonitor.witness_cosign(
+        w_store,
+        w_signer,
+        {
+            "issuer_doc": doc,
+            "checkpoint": cp3.model_dump(mode="json"),
+            "consistency": engine.consistency_proof(cp1.payload["tree_size"], cp3.payload["tree_size"]),
+        },
+    )
+    assert status == 200
+
+
+def test_check_cosignatures_counts_subject_bound_sigs(engine, store, household, schedule, t0):
+    """Cosigns verify under their own signers' keys and only count when the
+    subject binds THIS head — a cosig of another root, a wrong record type,
+    or a foreign-signed entry is reported absent, never counted."""
+    from attest import logmonitor
+
+    w_store, w_signer = _witness_deployment()
+    _seed(engine, household[0], t0)
+    cp = engine.issue_log_checkpoint()
+    status, out = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": _doc_for(engine), "checkpoint": cp.model_dump(mode="json")}
+    )
+    assert status == 200
+    cpj = cp.model_dump(mode="json")
+
+    doc = {"checkpoint": cpj, "cosignatures": [out["cosignature"]]}
+    n, keys = logmonitor.check_cosignatures(doc, cp.id, cp.payload["tree_size"], cp.payload["root_sha256"])
+    assert n == 1 and keys == [w_signer.public_key_b64]
+
+    # A cosig naming a different root is not a cosig of THIS head.
+    other = dict(out["cosignature"])
+    other["payload"] = dict(other["payload"], subject_root_sha256="00" * 32)
+    n, _ = logmonitor.check_cosignatures(
+        {"cosignatures": [other]}, cp.id, cp.payload["tree_size"], cp.payload["root_sha256"]
+    )
+    assert n == 0
+
+    # A random receipt is not a cosig at all.
+    n, _ = logmonitor.check_cosignatures(
+        {"cosignatures": [cpj]}, cp.id, cp.payload["tree_size"], cp.payload["root_sha256"]
+    )
+    assert n == 0
+
+    # Garbage entries don't taint the count — reported absent, not fatal.
+    n, _ = logmonitor.check_cosignatures(
+        {"cosignatures": [{"not": "a receipt"}, None, "x"]},
+        cp.id,
+        cp.payload["tree_size"],
+        cp.payload["root_sha256"],
+    )
+    assert n == 0

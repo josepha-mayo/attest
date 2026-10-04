@@ -388,7 +388,31 @@ def check_log(pack_dir, trusted, receipts):
                 f"{r.get('id') or ph[:16]} does not reach the signed tree head"
             )
         proven += 1
-    return proven, size
+    cosigs, _ = _cosig_count(doc, cp, size, root_hex)
+    return proven, size, cosigs
+
+
+def _cosig_count(doc, cp, size, root_hex):
+    """Count the checkpoint document's witness counter-signatures whose
+    subject binds THIS head — each verified under its own signer's key;
+    a cosig about a different head or one that fails its signature counts
+    as absent, never as a verdict against the checkpoint."""
+    n, keys = 0, []
+    for raw in doc.get("cosignatures") or []:
+        p = raw.get("payload") if isinstance(raw, dict) else None
+        if not isinstance(p, dict) or p.get("record_type") != "witness_cosignature":
+            continue
+        if (
+            p.get("subject_checkpoint") != cp.get("id")
+            or p.get("subject_tree_size") != size
+            or p.get("subject_root_sha256") != root_hex
+        ):
+            continue
+        ok, _why = check_receipt(raw, raw.get("public_key"))
+        if ok:
+            n += 1
+            keys.append(raw.get("public_key"))
+    return n, keys
 
 
 def check_media(bundle, media_dir, withheld=None):
@@ -789,8 +813,9 @@ def main():
         print(f"    ({pinned_tools} verifier tool(s) pinned by issuer-signed manifest — "
               "the pack's own scripts are proven unmodified)")
     if logged:
+        w = f" · cosigned by {logged[2]} witness(es)" if logged[2] else ""
         print(f"    ({logged[0]} receipt(s) proven inside the deployment's transparency"
-              f" log at checkpoint size {logged[1]})")
+              f" log at checkpoint size {logged[1]}{w})")
     print("Signature proves record integrity under the issuer key - not identity,")
     print("attendance, or absence.")
 
@@ -1021,8 +1046,9 @@ def main():
         print(f"    ({pinned_tools} verifier tool(s) pinned by issuer-signed manifest — "
               "the pack's own scripts are proven unmodified)")
     if logged:
+        w = f" · cosigned by {logged[2]} witness(es)" if logged[2] else ""
         print(f"    ({logged[0]} receipt(s) proven inside the deployment's transparency"
-              f" log at checkpoint size {logged[1]})")
+              f" log at checkpoint size {logged[1]}{w})")
     if len(trusted) > 1:
         # The pack spans a signed key rotation — the lineage is the pivot, not
         # a weaker check; say so plainly rather than hiding it behind one key.
@@ -1411,7 +1437,7 @@ def build_case_pack(
     return buf.getvalue()
 
 
-def log_member(engine, receipts) -> dict:
+def log_member(engine, receipts, cosign_fn=None) -> dict:
     """Build ``log_checkpoint.json`` for an export: a signed Merkle Tree Head
     over the deployment's whole receipt log plus an RFC 6962 inclusion path
     for every receipt this pack carries. Issuing the checkpoint must run
@@ -1420,7 +1446,10 @@ def log_member(engine, receipts) -> dict:
     and by definition postdates it — the one member that carries no proof.
     Proofs are computed against the tree AT the checkpoint's size — the
     checkpoint's own append grows the tree past its STH, so paths against
-    the grown tree would not reach the signed root."""
+    the grown tree would not reach the signed root. ``cosign_fn`` is called
+    with the fresh checkpoint to collect witness counter-signatures — the
+    pack then proves its head was observed and vouched for by deployments
+    outside the issuer's control."""
     cp = engine.issue_log_checkpoint()
     n = cp.payload["tree_size"]
     # One leaf-list build for every proof — per-receipt log_leaves() calls
@@ -1438,11 +1467,16 @@ def log_member(engine, receipts) -> dict:
             "leaf_index": idx,
             "path": [p.hex() for p in inclusion_path(leaves, idx)],
         }
-    return {
+    doc = {
         "schema": "attest.log-checkpoint/1",
         "checkpoint": cp.model_dump(mode="json"),
         "proofs": proofs,
     }
+    if cosign_fn:
+        cosigs = cosign_fn(cp)
+        if cosigs:
+            doc["cosignatures"] = cosigs
+    return doc
 
 
 def write_verifiers(directory) -> tuple[Path, Path]:

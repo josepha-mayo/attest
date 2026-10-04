@@ -1834,3 +1834,30 @@ def test_fetch_issuer_doc_rejects_http_404(capsys):
     client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(404)))
     with pytest.raises(SystemExit, match="HTTP 404"):
         _fetch_issuer_doc("http://127.0.0.1", client=client)
+
+
+def test_witness_endpoint_over_http(api, household, t0):
+    """The live route: a deployment cosigns another issuer's checkpoint and
+    repins — the same exchange `attest checkpoint --witness` drives."""
+    import json as _json
+
+    site, _, cam, _ = household
+    r = _post_hook(api, cam.id, "motion_detected", t0, "human")
+    assert r.status_code == 202
+    vid = api.attest_state.store.active_visit(site.id).id
+    assert api.post(f"/api/visits/{vid}/close").status_code == 200
+    st = api.attest_state
+    cp = st.engine.issue_log_checkpoint()
+
+    doc = api.get("/.well-known/attest-issuer.json").json()
+    resp = api.post(
+        "/api/witness/cosign",
+        content=_json.dumps({"issuer_doc": doc, "checkpoint": cp.model_dump(mode="json")}),
+        headers={"content-type": "application/json"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["cosignature"]["payload"]["record_type"] == "witness_cosignature"
+    assert body["pinned"]["tree_size"] == cp.payload["tree_size"]
+    # The cosignature receipt lives on THIS ledger — auditable like any other.
+    assert any(x.payload.get("record_type") == "witness_cosignature" for x in st.store.receipts())

@@ -1397,6 +1397,17 @@ def _verify_log_doc(
                 f" — embedded bridge extends checkpoint "
                 f"{str(e.get('checkpoint_id'))[:16]}… from size {e['first']}"
             )
+        # Witness counter-signatures: auxiliary attestations — verified and
+        # reported, never the gate. A third party holding this doc sees WHO
+        # countersigned this head, not just that the issuer signed it.
+        from . import logmonitor as _lm
+
+        n_cosig, cosigners = _lm.check_cosignatures(data, cp.id, size, cp.payload["root_sha256"])
+        if n_cosig:
+            detail += (
+                f" — cosigned by {n_cosig} witness(es) "
+                f"({', '.join(k[:12] + '…' for k in cosigners[:3])})"
+            )
         # --against pins the earlier head: the checkpoint must bridge FROM
         # that exact signed head, offline, no consistency endpoint needed.
         if getattr(args, "against", None):
@@ -2086,6 +2097,31 @@ def _checkpoint(args: argparse.Namespace) -> None:
             "checkpoint": receipt.model_dump(mode="json"),
             "boundary": p.get("boundary"),
         }
+        witnesses = getattr(args, "witness", None) or []
+        if witnesses:
+            out["cosignatures"] = []
+            from . import ledger, logmonitor
+
+            issuer_doc = ledger.issuer_document(engine.signer.public_key_b64, store.receipts())
+            for url in witnesses:
+                base = url.rstrip("/")
+                try:
+                    cosig, line = logmonitor.cosign_at(
+                        base,
+                        issuer_doc,
+                        out["checkpoint"],
+                        lambda pinned_size: engine.consistency_proof(
+                            pinned_size, int(p["tree_size"])
+                        ),
+                    )
+                except ValueError as exc:
+                    print(f"witness {base}: unreachable ({exc}) — checkpoint unsigned by it", file=sys.stderr)
+                    continue
+                if cosig:
+                    out["cosignatures"].append(cosig)
+                    print(f"witness {base}: {line}")
+                else:
+                    print(f"witness {base}: {line}", file=sys.stderr)
         if getattr(args, "timestamp", False) and not args.out:
             sys.exit("--timestamp needs --out — the notarized proof rides next to the checkpoint file")
         if args.out:
@@ -2697,6 +2733,34 @@ def _export(args: argparse.Namespace) -> None:
         if not entries:
             sys.exit(f"no signed records for {site.name} yet")
         engine = _cli_engine(store)
+        cosign_fn = None
+        witnesses = getattr(args, "witness", None) or []
+        if witnesses:
+            from . import ledger, logmonitor
+
+            issuer_doc = ledger.issuer_document(engine.signer.public_key_b64, store.receipts())
+
+            def cosign_fn(cp):
+                cosigs = []
+                for url in witnesses:
+                    base = url.rstrip("/")
+                    try:
+                        cosig, line = logmonitor.cosign_at(
+                            base,
+                            issuer_doc,
+                            cp.model_dump(mode="json"),
+                            lambda pinned: engine.consistency_proof(pinned, int(cp.payload["tree_size"])),
+                        )
+                    except ValueError as exc:
+                        print(f"witness {base}: unreachable ({exc})", file=sys.stderr)
+                        continue
+                    if cosig:
+                        cosigs.append(cosig)
+                        print(f"witness {base}: {line}")
+                    else:
+                        print(f"witness {base}: {line}", file=sys.stderr)
+                return cosigs
+
         data = build_case_pack(
             store,
             settings.data_dir / "media",
@@ -2706,7 +2770,7 @@ def _export(args: argparse.Namespace) -> None:
             manifest_signer=lambda m: engine.issue_export_manifest(site, m),
             issuer_key=engine.signer.public_key_b64,
             tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"site:{site.id}", t),
-            log_fn=lambda rs: log_member(engine, rs),
+            log_fn=lambda rs: log_member(engine, rs, cosign_fn=cosign_fn),
         )
         out = Path(args.out or f"case-{site.id}.zip")
         out.write_bytes(data)
@@ -3390,6 +3454,14 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="withhold media bytes; signed digests are preserved and the verifier reports them withheld",
     )
+    s.add_argument(
+        "--witness",
+        action="append",
+        default=[],
+        metavar="URL",
+        help="stamp witness counter-signatures into the pack's log checkpoint — "
+        "repeatable; each witness only signs a head it proves extends its pin",
+    )
     s.set_defaults(fn=_export)
 
     s = sub.add_parser(
@@ -3519,6 +3591,15 @@ def main(argv: list[str] | None = None) -> None:
         "--timestamp",
         action="store_true",
         help="notarize the checkpoint file on public OpenTimestamps calendars (requires --out)",
+    )
+    s.add_argument(
+        "--witness",
+        action="append",
+        default=[],
+        metavar="URL",
+        help="ask a cosigning witness (another Attest deployment's base URL) to "
+        "counter-sign the checkpoint — repeatable; the witness only signs a "
+        "head it can prove extends its own pin, so a forked log can't collect",
     )
     s.set_defaults(fn=_checkpoint)
 

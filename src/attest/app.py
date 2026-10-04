@@ -281,7 +281,11 @@ def create_app(
         # Transparency-log reads are public verification material — proof
         # nodes are bare hashes and the head is a commitment to public
         # receipts, so they carry no secret beyond what a pack already ships.
-        if request.url.path.startswith("/api/log/"):
+        # The witness endpoint is the same class: the requester ships its own
+        # issuer doc + checkpoint (public crypto material), and the witness's
+        # only privilege spent is its own signature — a public cosigning
+        # service by design, like a CT witness.
+        if request.url.path.startswith("/api/log/") or request.url.path == "/api/witness/cosign":
             return
         if request.method not in ("GET", "HEAD", "OPTIONS"):
             origin = request.headers.get("origin")
@@ -344,6 +348,11 @@ def create_app(
         path = request.url.path
         if path == "/webhooks/ring":
             surface, per_min = "webhook", s.rate_limit_webhook_per_min
+        elif path == "/api/witness/cosign":
+            # Every cosign writes a signed receipt into this ledger —
+            # unauthenticated flooding is write amplification, so the
+            # witness endpoint shares the grant budget.
+            surface, per_min = "witness", s.rate_limit_grant_per_min
         elif path.startswith(("/checkin/", "/review/", "/family/")):
             surface, per_min = "grant", s.rate_limit_grant_per_min
         else:
@@ -743,9 +752,7 @@ def create_app(
                         slot["latest"], slot["rid"] = r.issued_at, r.id
             revoked = ledger.revoked_issuer_keys(receipts)
             tsize, troot = engine.log_head()
-            checkpoints = [
-                r for r in receipts if r.payload.get("record_type") == "log_checkpoint"
-            ]
+            checkpoints = [r for r in receipts if r.payload.get("record_type") == "log_checkpoint"]
             cp_size = int(checkpoints[-1].payload["tree_size"]) if checkpoints else None
             return {
                 "transparency": {
@@ -834,9 +841,7 @@ def create_app(
             journal = store.verify_journal()
             chain_ok, chain_why = ledger.verify_chain(receipts, public_key=signer.public_key_b64)
             tsize, troot = engine.log_head()
-            checkpoints = [
-                r for r in receipts if r.payload.get("record_type") == "log_checkpoint"
-            ]
+            checkpoints = [r for r in receipts if r.payload.get("record_type") == "log_checkpoint"]
             cp_size = int(checkpoints[-1].payload["tree_size"]) if checkpoints else None
             return {
                 "healthy": journal["intact"] and chain_ok and journal.get("untracked_rows", 0) == 0,
@@ -968,6 +973,28 @@ def create_app(
         if proof is None:
             raise HTTPException(404, "no tree of that size is on record")
         return proof
+
+    @app.post("/api/witness/cosign")
+    async def witness_cosign(request: Request):
+        """Witness cosigning — this deployment countersigns ANOTHER issuer's
+        signed tree head, the sigsum/CT-ecosystem move that makes a log
+        publicly accountable: the witness pins each issuer's last-seen head
+        and signs only a checkpoint it can prove extends that pin, so a
+        forked or regressed log cannot collect counter-signatures. The
+        response is itself a signed `witness_cosignature` receipt on THIS
+        ledger — the witness's attestation is auditable too. A 409 carries
+        the pinned head so the requester can retry with the consistency
+        bridge — the proof a fork cannot produce."""
+        from . import logmonitor
+
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001
+            return JSONResponse({"error": "request body is not JSON"}, status_code=422)
+        status, out = await asyncio.to_thread(
+            logmonitor.witness_cosign, store, signer, body if isinstance(body, dict) else {}
+        )
+        return JSONResponse(out, status_code=status)
 
     @app.get("/visits/{visit_id}", response_class=HTMLResponse)
     async def visit_page(request: Request, visit_id: str = PathParam(max_length=128)):
@@ -2305,10 +2332,11 @@ def _verify_log_pin(z, trusted: set, member_ids: list[tuple[str, str, str]]) -> 
         return False, err
     if res is None:
         return True, ""
-    proven, size = res
-    return True, (
-        f"{proven} receipt(s) proven inside the deployment transparency log at checkpoint size {size}"
-    )
+    proven, size, cosigs = res
+    note = f"{proven} receipt(s) proven inside the deployment transparency log at checkpoint size {size}"
+    if cosigs:
+        note += f" — cosigned by {cosigs} witness(es)"
+    return True, note
 
 
 def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -> tuple[bool, str]:
