@@ -1086,7 +1086,10 @@ def _verify(args: argparse.Namespace) -> None:
             fail(f"fetch failed: {exc}")
         path = Path(args.bundle.rstrip("/").rsplit("/", 1)[-1] or "remote-artifact")
     else:
-        raw = path.read_bytes()
+        try:
+            raw = path.read_bytes()
+        except OSError as exc:
+            fail(f"cannot read artifact: {exc}")
     if raw[:2] == b"PK":
         _verify_zip(raw, pinned_key, known_rotations, json_mode=json_mode)
         return
@@ -1104,7 +1107,10 @@ def _verify(args: argparse.Namespace) -> None:
     )
 
     if isinstance(data, list):
-        receipts = [Receipt.model_validate(r) for r in data]
+        try:
+            receipts = [Receipt.model_validate(r) for r in data]
+        except Exception as exc:  # noqa: BLE001 — a malformed entry IS the verdict
+            fail(f"not a receipts.json list: {exc}", kind="receipt_chain")
         ok, reason = ledger.verify_chain(receipts, public_key=pinned_key, extra_key_receipts=known_rotations)
         if not ok:
             fail(f"verification failed: {reason}", kind="receipt_chain")
@@ -1126,7 +1132,10 @@ def _verify(args: argparse.Namespace) -> None:
         return
 
     if isinstance(data, dict) and "payload" in data and "signature" in data:
-        receipt = Receipt.model_validate(data)
+        try:
+            receipt = Receipt.model_validate(data)
+        except Exception as exc:  # noqa: BLE001 — receipt-shaped but malformed
+            fail(f"not a valid receipt: {exc}", kind="receipt")
         trusted_key = pinned_key
         if pinned_key and known_rotations is not None:
             # The issuer document's signed lifecycle names every key the
