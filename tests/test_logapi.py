@@ -175,6 +175,17 @@ def test_cli_checkpoint_and_prove(tmp_path, monkeypatch, ring_world, ring_client
         with contextlib.redirect_stdout(io.StringIO()):
             cli._prove(argparse.Namespace(receipt_id="rcpt_missing"))
 
+    # --timestamp notarizes the written doc — and refuses to fire without one.
+    stamped = []
+    monkeypatch.setattr(cli, "_stamp_file", lambda p: stamped.append(str(p)))
+    with pytest.raises(SystemExit):
+        with contextlib.redirect_stdout(io.StringIO()):
+            cli._checkpoint(argparse.Namespace(out=None, timestamp=True))
+    assert stamped == []
+    with contextlib.redirect_stdout(io.StringIO()):
+        cli._checkpoint(argparse.Namespace(out=str(tmp_path / "cp2.json"), timestamp=True))
+    assert stamped == [str(tmp_path / "cp2.json")]
+
 
 def test_status_reports_the_log_head(tmp_path, monkeypatch, ring_world, ring_client, settings, t0):
     """``attest status --json`` exposes the same tree commitment the API and

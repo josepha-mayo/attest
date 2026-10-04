@@ -1769,6 +1769,8 @@ def _checkpoint(args: argparse.Namespace) -> None:
             "checkpoint": receipt.model_dump(mode="json"),
             "boundary": p.get("boundary"),
         }
+        if getattr(args, "timestamp", False) and not args.out:
+            sys.exit("--timestamp needs --out — the notarized proof rides next to the checkpoint file")
         if args.out:
             from pathlib import Path
 
@@ -1778,6 +1780,10 @@ def _checkpoint(args: argparse.Namespace) -> None:
             f"checkpoint {receipt.id[:24]}… — tree size {p['tree_size']}, "
             f"root {p['root_sha256'][:24]}… (verify with `attest status`)"
         )
+        if getattr(args, "timestamp", False):
+            # Notarize the signed head itself — after the calendar commits,
+            # the deployment cannot re-date this root, let alone rewrite it.
+            _stamp_file(Path(args.out))
     finally:
         store.close()
 
@@ -3171,6 +3177,11 @@ def main(argv: list[str] | None = None) -> None:
         "receipt every pack's log_checkpoint.json proves inclusion against",
     )
     s.add_argument("--out", default=None, help="also write the checkpoint document here")
+    s.add_argument(
+        "--timestamp",
+        action="store_true",
+        help="notarize the checkpoint file on public OpenTimestamps calendars (requires --out)",
+    )
     s.set_defaults(fn=_checkpoint)
 
     s = sub.add_parser(

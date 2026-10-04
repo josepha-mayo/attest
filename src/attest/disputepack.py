@@ -1396,11 +1396,21 @@ def log_member(engine, receipts) -> dict:
     the grown tree would not reach the signed root."""
     cp = engine.issue_log_checkpoint()
     n = cp.payload["tree_size"]
+    # One leaf-list build for every proof — per-receipt log_leaves() calls
+    # would rescan the whole receipts table O(n²) times on a large export.
+    from .transparency import inclusion_path
+
+    leaves = engine.log_leaves()[:n]
     proofs = {}
     for r in receipts:
-        proof = engine.inclusion_proof(r, size=n)
-        if proof is not None:
-            proofs[r.payload_hash] = {"leaf_index": proof["leaf_index"], "path": proof["path"]}
+        try:
+            idx = leaves.index(bytes.fromhex(r.payload_hash))
+        except ValueError:
+            continue  # not inside the committed tree — the pack fails verification
+        proofs[r.payload_hash] = {
+            "leaf_index": idx,
+            "path": [p.hex() for p in inclusion_path(leaves, idx)],
+        }
     return {
         "schema": "attest.log-checkpoint/1",
         "checkpoint": cp.model_dump(mode="json"),
