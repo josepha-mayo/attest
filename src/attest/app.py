@@ -754,6 +754,9 @@ def create_app(
             tsize, troot = engine.log_head()
             checkpoints = [r for r in receipts if r.payload.get("record_type") == "log_checkpoint"]
             cp_size = int(checkpoints[-1].payload["tree_size"]) if checkpoints else None
+            from . import logmonitor
+
+            w_pins = logmonitor.witness_heads(store, signer.public_key_b64)["pins"]
             return {
                 "transparency": {
                     "tree_size": tsize,
@@ -763,6 +766,8 @@ def create_app(
                     "leaves_since_checkpoint": tsize - (cp_size or 0),
                     "latest": checkpoints[-1].id if checkpoints else None,
                     "latest_at": checkpoints[-1].issued_at if checkpoints else None,
+                    "witness_pins": len(w_pins),
+                    "witnessed_issuers": [p["issuer_key"][:16] for p in w_pins],
                 },
                 "stats": store.stats(),
                 "journal": store.verify_journal(),
@@ -843,6 +848,9 @@ def create_app(
             tsize, troot = engine.log_head()
             checkpoints = [r for r in receipts if r.payload.get("record_type") == "log_checkpoint"]
             cp_size = int(checkpoints[-1].payload["tree_size"]) if checkpoints else None
+            from . import logmonitor
+
+            w_pins = logmonitor.witness_heads(store, signer.public_key_b64)["pins"]
             return {
                 "healthy": journal["intact"] and chain_ok and journal.get("untracked_rows", 0) == 0,
                 "transparency": {
@@ -853,6 +861,8 @@ def create_app(
                     "leaves_since_checkpoint": tsize - (cp_size or 0),
                     "latest": checkpoints[-1].id if checkpoints else None,
                     "latest_at": checkpoints[-1].issued_at.isoformat() if checkpoints else None,
+                    "witness_pins": len(w_pins),
+                    "witnessed_issuers": [p["issuer_key"][:16] for p in w_pins],
                 },
                 "issuer": signer.public_key_b64,
                 "issuer_lineage": len(

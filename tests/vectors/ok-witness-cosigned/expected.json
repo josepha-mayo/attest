@@ -1,0 +1,13 @@
+{
+  "kind": "case",
+  "pin": "declared",
+  "verdict": "ok",
+  "detail_contains": [
+    "cosigned by 1 witness"
+  ],
+  "js": {
+    "bundle_ok": true,
+    "verdict": "ok"
+  },
+  "note": "an independent witness's counter-signature rides the checkpoint doc \u2014 verified under its own key, reported as an auxiliary attestation, never a gate"
+}

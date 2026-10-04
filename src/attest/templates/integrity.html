@@ -46,6 +46,7 @@ This page describes the evidence system's health, not whether any worker was hon
       {% if transparency.latest %}<br>latest checkpoint <code>{{ transparency.latest[:16] }}…</code>{% if transparency.latest_at %} · {{ t(transparency.latest_at) }}{% endif %}
         — covers {{ transparency.checkpoint_size }} leaves{% if transparency.leaves_since_checkpoint %}<br><span class="warn">{{ transparency.leaves_since_checkpoint }} receipt(s) not yet covered by a checkpoint</span> — <code>attest checkpoint</code> signs them in{% endif %}{% endif %}
       <br>Inclusion + consistency proofs at <code>/api/log/*</code> — <code>attest monitor</code> pins this head and catches a rewrite.
+      {% if transparency.witness_pins %}<br>This deployment cosigns {{ transparency.witness_pins }} issuer head(s) — published at <code>/api/witness/heads</code> for cross-view audits.{% else %}<br><span class="muted">No witness pins yet — another deployment can ask this one to cosign via <code>/api/witness/cosign</code>.</span>{% endif %}
     </div>
   </div>
   <div class="card">

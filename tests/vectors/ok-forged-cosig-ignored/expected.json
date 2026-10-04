@@ -1,0 +1,10 @@
+{
+  "kind": "case",
+  "pin": "declared",
+  "verdict": "ok",
+  "js": {
+    "bundle_ok": true,
+    "verdict": "ok"
+  },
+  "note": "a cosig attesting a DIFFERENT head (or one whose signature fails after the edit) counts as absent \u2014 the pack still verifies on its own proofs; auxiliary attestations report honestly, never gate"
+}

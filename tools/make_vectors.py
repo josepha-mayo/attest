@@ -794,6 +794,63 @@ def main() -> None:
         },
     )
 
+    # --- a cosigned checkpoint: the witness attestation riding the pack ---
+    def _attach_cosig(doc: dict) -> dict:
+        from attest.ledger import Signer
+
+        cp = doc["checkpoint"]
+        p = cp["payload"]
+        witness = Signer.ephemeral()
+        cosig = witness.issue(
+            visit_id=f"witness:{p.get('issuer', 'x')[:8]}:{cp['id']}",
+            sequence=1,
+            prev_hash=None,
+            facts={
+                "record_type": "witness_cosignature",
+                "subject_checkpoint": cp["id"],
+                "subject_tree_size": p["tree_size"],
+                "subject_root_sha256": p["root_sha256"],
+                "subject_issuer": cp["public_key"],
+            },
+        )
+        doc["cosignatures"] = [cosig.model_dump(mode="json")]
+        return doc
+
+    _write_vector(
+        "ok-witness-cosigned",
+        _log_edit(rotated_pack, _attach_cosig),
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "ok",
+            "detail_contains": ["cosigned by 1 witness"],
+            "js": {"bundle_ok": True, "verdict": "ok"},
+            "note": "an independent witness's counter-signature rides the "
+            "checkpoint doc — verified under its own key, reported as an "
+            "auxiliary attestation, never a gate",
+        },
+    )
+
+    def _mismatch_cosig(doc: dict) -> dict:
+        doc = _attach_cosig(doc)
+        doc["cosignatures"][0]["payload"]["subject_root_sha256"] = "00" * 32
+        return doc
+
+    _write_vector(
+        "ok-forged-cosig-ignored",
+        _log_edit(rotated_pack, _mismatch_cosig),
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "ok",
+            "js": {"bundle_ok": True, "verdict": "ok"},
+            "note": "a cosig attesting a DIFFERENT head (or one whose "
+            "signature fails after the edit) counts as absent — the pack "
+            "still verifies on its own proofs; auxiliary attestations "
+            "report honestly, never gate",
+        },
+    )
+
     _write_readme()
     print("done — commit tests/vectors/ and run tests/test_conformance.py")
 

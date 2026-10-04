@@ -2474,6 +2474,9 @@ def _status(args: argparse.Namespace) -> None:
         checkpoints = [r for r in all_receipts if r.payload.get("record_type") == "log_checkpoint"]
         last_cp = checkpoints[-1].payload if checkpoints else None
         uncommitted = len(content) - int(last_cp["tree_size"]) if last_cp else len(content)
+        from . import logmonitor as _lm
+
+        w_pins = _lm.witness_heads(store, "")["pins"]
         if getattr(args, "json", False):
             print(
                 json.dumps(
@@ -2496,6 +2499,7 @@ def _status(args: argparse.Namespace) -> None:
                             "root_sha256": tree_root,
                             "checkpoint_size": (last_cp or {}).get("tree_size"),
                             "leaves_since_checkpoint": uncommitted,
+                            "witness_pins": len(w_pins),
                         },
                     },
                     default=str,
@@ -2536,6 +2540,11 @@ def _status(args: argparse.Namespace) -> None:
             else "no checkpoint yet (`attest checkpoint` to sign one)"
         )
         print(f"log:      {len(content)} leaves — Merkle root {tree_root[:24]}…; {cp_note}")
+        if w_pins:
+            print(
+                f"witness:  this deployment cosigns {_pl(len(w_pins), 'issuer head')} "
+                "— published at /api/witness/heads"
+            )
         print(f"reviews:  {stats['reviews']}, late events retained: {stats['late_events']}")
         print(f"inbox:    {queue if queue else 'empty'}")
         print(f"webhooks: {intake}")
