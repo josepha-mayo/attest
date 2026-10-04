@@ -1102,6 +1102,7 @@ def _verify(args: argparse.Namespace) -> None:
             json_mode=json_mode,
             live_base=live_base,
             issuer_doc=issuer_doc,
+            required_witnesses=getattr(args, "witness_key", None),
         )
         return
     try:
@@ -1407,6 +1408,16 @@ def _verify_log_doc(
             detail += (
                 f" — cosigned by {n_cosig} witness(es) ({', '.join(k[:12] + '…' for k in cosigners[:3])})"
             )
+        required_witnesses = getattr(args, "witness_key", None) or []
+        if required_witnesses:
+            matched = [k for k in cosigners if k in required_witnesses]
+            if not matched:
+                fail(
+                    f"no counter-signature from a required witness — "
+                    f"{len(required_witnesses)} named key(s), {n_cosig} valid cosig(s) from none of them",
+                    kind="log_checkpoint",
+                )
+            detail += f" — vouched by required witness {matched[0][:12]}…"
         # --against pins the earlier head: the checkpoint must bridge FROM
         # that exact signed head, offline, no consistency endpoint needed.
         if getattr(args, "against", None):
@@ -1524,6 +1535,7 @@ def _verify_zip(
     json_mode: bool = False,
     live_base: str | None = None,
     issuer_doc: dict | None = None,
+    required_witnesses: list | None = None,
 ) -> None:
     """Verify a dispute pack or case pack zip in place — same checks as the
     embedded verify_case.py and the /verify page. Without --key the pack's own
@@ -1592,6 +1604,29 @@ def _verify_zip(
             live_report = {"checked": verdict is not None, "same_log": verdict, "detail": live_line}
             if verdict is False:
                 fail(f"live log cross-check: {live_line}", kind=kind)
+    if required_witnesses:
+        # Named-witness policy (sigsum-style): reporting a cosig count is one
+        # thing — a verifier that knows WHICH witness it trusts can require a
+        # counter-signature from that party specifically. A sock-puppet cosig
+        # from the issuer itself cannot satisfy a named-witness requirement.
+        from . import logmonitor
+
+        if "log_checkpoint.json" not in names:
+            fail(
+                "--witness-key requires a counter-signed transparency checkpoint — this pack carries none",
+                kind=kind,
+            )
+        cpdoc = json.loads(z.read("log_checkpoint.json"))
+        _cp, _p = cpdoc["checkpoint"], cpdoc["checkpoint"]["payload"]
+        _, signers = logmonitor.check_cosignatures(cpdoc, _cp["id"], int(_p["tree_size"]), _p["root_sha256"])
+        matched = [k for k in signers if k in required_witnesses]
+        if not matched:
+            fail(
+                f"no counter-signature from a required witness — "
+                f"{len(required_witnesses)} named key(s), {len(signers)} valid cosig(s) from none of them",
+                kind=kind,
+            )
+        detail += f" — vouched by required witness {matched[0][:12]}…"
     if json_mode:
         extra: dict = {}
         if "log_checkpoint.json" in names:
@@ -3477,6 +3512,15 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="emit the verdict as one JSON object ({ok, kind, detail, pinned, "
         "warnings}) — exit 1 on failure, so a CI gate needs no prose parsing",
+    )
+    s.add_argument(
+        "--witness-key",
+        action="append",
+        default=None,
+        metavar="KEY_B64",
+        help="require a counter-signature from at least one of these witness keys "
+        "(repeatable) — sigsum-style named-witness policy: 'cosigned by N witnesses' "
+        "counts anyone, this gates on the witnesses YOU trust",
     )
     s.add_argument(
         "--checkpoint",

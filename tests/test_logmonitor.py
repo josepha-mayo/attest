@@ -1013,3 +1013,84 @@ def test_monitor_witness_cross_view_cli(tmp_path, monkeypatch, capsys):
     # A malformed heads body fails the cycle honestly.
     code, out = run({"pins": "not-a-list"})
     assert code == 1 and "malformed" in out
+
+
+def test_verify_witness_key_gates_on_named_witnesses(
+    engine, store, household, schedule, t0, tmp_path, capsys
+):
+    """`attest verify pack.zip --witness-key K` is the sigsum-style named-
+    witness policy: a cosig from ANY key is reported, but only a cosig from
+    a REQUIRED key satisfies the gate — an issuer's own sock-puppet cosig
+    cannot vouch for itself under a pinned witness."""
+    import argparse
+    import contextlib
+    import io
+
+    from attest import cli, logmonitor
+    from attest.disputepack import build_case_pack, log_member
+    from attest.ledger import Signer
+    from attest.reviews import ReviewService, countersign_status
+    from tests.test_regressions import event
+
+    visit = engine.ingest(event(household[2], t0)).visit
+    engine.close_for_review(visit.id)
+    bundle = ReviewService(store, engine.signer, engine.clock).bundle(visit.id)
+    site = store.sites()[0]
+
+    w_store, w_signer = _witness_deployment()
+    issuer_doc = _doc_for(engine)
+
+    def log_with_cosig(rs):
+        doc = log_member(engine, rs)
+        status, out = logmonitor.witness_cosign(
+            w_store, w_signer, {"issuer_doc": issuer_doc, "checkpoint": doc["checkpoint"]}
+        )
+        assert status == 200
+        doc["cosignatures"] = [out["cosignature"]]
+        return doc
+
+    data = build_case_pack(
+        store,
+        tmp_path / "media",
+        site,
+        [(visit, bundle, countersign_status(bundle))],
+        manifest_signer=lambda m: engine.issue_export_manifest(site, m),
+        tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"site:{site.id}", t),
+        log_fn=log_with_cosig,
+    )
+    pack = tmp_path / "case.zip"
+    pack.write_bytes(data)
+
+    def run(witness_keys):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            cli._verify(
+                argparse.Namespace(
+                    bundle=str(pack),
+                    key=None,
+                    issuer_url=None,
+                    json=False,
+                    checkpoint=None,
+                    against=None,
+                    witness_key=witness_keys,
+                )
+            )
+        return buf.getvalue()
+
+    # Named witness present → verified AND vouched.
+    out = run([w_signer.public_key_b64])
+    assert "vouched by required witness" in out
+
+    # A different named key → the pack is valid but unvouched: hard fail.
+    other = Signer.ephemeral().public_key_b64
+    with pytest.raises(SystemExit) as e:
+        run([other])
+    assert "no counter-signature from a required witness" in str(e.value.code)
+
+    # k-of-n: the named witness among several required keys still satisfies.
+    out = run([other, w_signer.public_key_b64])
+    assert "vouched by required witness" in out
+
+    # No flag → the old behavior: reported, never gated.
+    out = run(None)
+    assert "cosigned by 1 witness" in out
