@@ -1202,6 +1202,105 @@ class VisitEngine:
             return self.store.receipt_for_visit(pseudo_id)
         return receipt
 
+    def log_leaves(self) -> list[bytes]:
+        """Ordered receipt payload hashes — the transparency-log leaves.
+
+        Sequence order is the log order: the same list every verifier can
+        rebuild from a complete export. ``log_checkpoint`` receipts are NOT
+        leaves: a checkpoint commits to the content log's head, and making
+        the checkpoint itself a leaf would grow the tree past the head it
+        just signed — self-reference that also breaks idempotent re-issue."""
+        return [
+            bytes.fromhex(r.payload_hash)
+            for r in self.store.receipts()
+            if r.payload.get("record_type") != "log_checkpoint"
+        ]
+
+    def log_head(self) -> tuple[int, bytes]:
+        """(tree_size, Merkle Tree Head) over every chained receipt."""
+        leaves = self.log_leaves()
+        from .transparency import root
+
+        return len(leaves), root(leaves)
+
+    @atomic
+    def issue_log_checkpoint(self) -> Receipt:
+        """Sign the current Merkle Tree Head — the transparency log's STH.
+
+        The receipt chain proves order and continuity; the tree head makes
+        *membership* and *extension* provable in O(log n): an exported pack
+        can carry per-receipt inclusion proofs, and two checkpoints can be
+        bridged by a consistency proof — 'append-only' becomes a checkable
+        claim, not an enumeration. Idempotent per tree state via a
+        ``log:`` pseudo visit_id: re-issuing an unchanged head returns the
+        existing checkpoint."""
+        leaves = self.log_leaves()
+        from .transparency import root
+
+        head = root(leaves)
+        pseudo_id = f"log:{len(leaves)}:{head.hex()[:16]}"
+        existing = self.store.receipt_for_visit(pseudo_id)
+        if existing:
+            return existing
+        prev = self.store.latest_receipt()
+        receipt = self.signer.issue(
+            visit_id=pseudo_id,
+            sequence=prev.sequence + 1 if prev else 1,
+            prev_hash=prev.payload_hash if prev else None,
+            facts={
+                "record_type": "log_checkpoint",
+                "tree_size": len(leaves),
+                "root_sha256": head.hex(),
+                "leaf_input": "receipt.payload_hash (raw bytes, sequence order)",
+                "boundary": (
+                    "A signed commitment that exactly these receipts, in this "
+                    "order, formed the log at this size — receipts in an export "
+                    "can prove inclusion, and a later checkpoint can prove it "
+                    "extends this one without rewriting history."
+                ),
+                "journal_head": self.store.journal_head(),
+            },
+        )
+        try:
+            self.store.put_receipt(receipt)
+        except sqlite3.IntegrityError:
+            return self.store.receipt_for_visit(pseudo_id)
+        return receipt
+
+    def inclusion_proof(self, receipt: Receipt, *, size: int | None = None) -> dict | None:
+        """Audit path proving ``receipt`` sits in the log at its sequence.
+
+        ``size`` bounds the proof to the tree a signed checkpoint committed
+        to — receipts appended after that head have no proof under it."""
+        from .transparency import inclusion_path
+
+        leaves = self.log_leaves()
+        size = len(leaves) if size is None else size
+        leaves = leaves[:size]
+        try:
+            index = leaves.index(bytes.fromhex(receipt.payload_hash))
+        except ValueError:
+            return None  # never committed (or a checkpoint — not a leaf)
+        return {
+            "tree_size": size,
+            "leaf_index": index,
+            "leaf": receipt.payload_hash,
+            "path": [p.hex() for p in inclusion_path(leaves, index)],
+        }
+
+    def consistency_proof(self, old_size: int) -> dict | None:
+        """Node list proving the current tree extends ``old_size`` leaves."""
+        from .transparency import consistency_nodes
+
+        leaves = self.log_leaves()
+        if not 0 < old_size <= len(leaves):
+            return None
+        return {
+            "tree_size": len(leaves),
+            "first": old_size,
+            "proof": [p.hex() for p in consistency_nodes(leaves, old_size)],
+        }
+
     @atomic
     def issue_verification_report(self, report: dict) -> Receipt:
         """Sign a verify-live sweep into the chain: 'this deployment ran the

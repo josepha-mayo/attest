@@ -4,7 +4,8 @@
   "verdict": "ok",
   "detail_contains": [
     "verified",
-    "media"
+    "media",
+    "transparency log"
   ],
   "detail_excludes": [
     "pinned by issuer-signed manifest"

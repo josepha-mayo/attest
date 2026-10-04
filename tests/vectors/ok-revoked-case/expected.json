@@ -5,7 +5,8 @@
   "detail_contains": [
     "suspect window",
     "trust pivot",
-    "pinned"
+    "pinned",
+    "transparency log"
   ],
   "js": {
     "bundle_ok": true,

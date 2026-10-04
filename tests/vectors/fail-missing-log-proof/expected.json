@@ -3,11 +3,11 @@
   "pin": "declared",
   "verdict": "fail",
   "detail_contains": [
-    "vis_1e14471b7ce0"
+    "no inclusion proof"
   ],
   "js": {
     "bundle_ok": true,
     "verdict": "fail"
   },
-  "note": "a bundle the signed manifest lists but the zip lacks fails"
+  "note": "a pack receipt silently dropped from log_proofs.json \u2014 the pack cannot claim log membership it does not prove"
 }

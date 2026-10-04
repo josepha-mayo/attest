@@ -512,6 +512,67 @@ async function checkTools(byName,trustedSet,scope,bad,ok){
     if(_TOOLNAMES.has(n)&&!(n in tools))
       bad(`${esc(n)}: verifier tooling present but not covered by the signed pin`);
 }
+/* RFC 6962 audit-path verification (transparency.py/check_log parity):
+   leaf = sha256(0x00||payload_hash bytes), interior = sha256(0x01||l||r). */
+async function _incOk(leafHex,size,index,pathHex,rootHex){
+  if(!Number.isInteger(size)||!Number.isInteger(index)||index<0||index>=size||size<1)return false;
+  const cat=(...a)=>{const n=a.reduce((t,x)=>t+x.length,0);const o=new Uint8Array(n);let p=0;
+    for(const x of a){o.set(x,p);p+=x.length;}return o;};
+  let r=await sha256hex(cat(new Uint8Array([0]),hex2b(leafHex)));
+  if(size===1)return(!pathHex||!pathHex.length)&&r===rootHex;
+  let fn=index,sn=size-1;
+  for(const ph of pathHex||[]){
+    if(!/^[0-9a-f]{64}$/i.test(ph)||sn===0)return false;
+    if((fn&1)||fn===sn){
+      r=await sha256hex(cat(new Uint8Array([1]),hex2b(ph),hex2b(r)));
+      while(fn&&!(fn&1)){fn>>=1;sn>>=1;}
+    }else r=await sha256hex(cat(new Uint8Array([1]),hex2b(r),hex2b(ph)));
+    fn>>=1;sn>>=1;
+  }
+  return sn===0&&r===rootHex;
+}
+async function checkLog(byName,trustedSet,refs,bad,ok){
+  /* log_checkpoint.json turns 'each receipt verifies' into 'each receipt was
+     committed to the deployment's published log' — a signed tree head plus an
+     inclusion path per member. Absent → a pre-checkpoint pack, reported not
+     failed; present → every receipt must carry a working proof, so a receipt
+     never committed to the log fails closed. Mirrors check_log/check_log_pin. */
+  if(!byName["log_checkpoint.json"])return;
+  let dn=null;
+  try{dn=parseKeep(await byName["log_checkpoint.json"].text());}catch(e){}
+  if(!dn){bad("log_checkpoint.json: not readable JSON");return;}
+  const doc=toJS(dn)||{};const cp=doc.checkpoint,proofs=doc.proofs;
+  if(!cp||typeof cp!=="object"||!proofs||typeof proofs!=="object"||Array.isArray(proofs)){
+    bad("log_checkpoint.json: malformed checkpoint document");return;}
+  const p=cp.payload||{};
+  if(p.record_type!=="log_checkpoint"){bad("log_checkpoint.json: not a log_checkpoint receipt");return;}
+  if(!trustedSet||!trustedSet.has(cp.public_key)){
+    bad("log_checkpoint.json: signed outside the trusted issuer chain");return;}
+  const cpNode=get(dn,"checkpoint");
+  const rc=await checkReceipt(cpNode);
+  if(!rc.ok){bad(`log_checkpoint.json: ${esc(rc.why)}`);return;}
+  const size=p.tree_size,rootHex=p.root_sha256;
+  if(!Number.isInteger(size)||size<1||typeof rootHex!=="string"||!/^[0-9a-f]{64}$/i.test(rootHex)){
+    bad("log_checkpoint.json: malformed tree head");return;}
+  let proven=0;
+  for(const ref of refs||[]){
+    if(!ref||!ref.payload_hash)continue;
+    /* only issuer-lineage receipts owe proofs — a foreign pool entry is
+       inert and never claimed log membership */
+    if(!trustedSet.has(ref.public_key))continue;
+    if(ref.payload_hash===cp.payload_hash)continue;  /* the STH anchors itself */
+    const pr=proofs[ref.payload_hash];
+    if(!pr||typeof pr!=="object"){
+      bad(`log_checkpoint.json: receipt ${esc(String(ref.id||"?"))} has no inclusion `
+        +"proof — never committed to the deployment log");continue;}
+    if(!await _incOk(ref.payload_hash,size,pr.leaf_index,pr.path,rootHex)){
+      bad(`log_checkpoint.json: inclusion proof for receipt ${esc(String(ref.id||"?"))} `
+        +"does not reach the signed tree head");continue;}
+    proven++;
+  }
+  if(proven)ok(`${proven} receipt(s) proven inside the deployment transparency `
+    +`log at checkpoint size ${size}`);
+}
 async function verifyFiles(files){
   const byName={};for(const f of files)byName[f.name]=f;
   const out=[];const say=(c,m)=>out.push(`<div class="row ${c}">${m}</div>`);
@@ -575,6 +636,7 @@ async function verifyFiles(files){
     }
   }
   let trusted=null;let revoked={};let suspectTotal=0;let lifecycleNodes=[];
+  const logRefs=[];  /* pack-member receipts the transparency checkpoint must prove */
   /* Issuer-doc pin: the doc's lifecycle receipts merge into the lineage pools
      and the doc's issuer_key becomes the pinned key — reachability through
      the signed rotation walk is enforced below (a doc naming an unrelated
@@ -650,7 +712,15 @@ async function verifyFiles(files){
       const rn=get(parseKeep(kt),"rotations");
       if(!rn||rn.t!=="arr"){
         anyBad=true;say("bad","key_rotations.json: malformed");
-      }else rnV.push(...rn.v);
+      }else{
+        rnV.push(...rn.v);
+        /* Pack-member lifecycle receipts owe inclusion proofs; the issuer
+           doc's external pin receipts do not — they never were members. */
+        for(const rnN of rn.v){
+          const rjs=toJS(rnN)||{};
+          if(rjs.payload_hash)logRefs.push({id:rjs.id,payload_hash:rjs.payload_hash,public_key:rjs.public_key});
+        }
+      }
     }
     if(rnV.length){
       lifecycleNodes=rnV;
@@ -674,6 +744,10 @@ async function verifyFiles(files){
     const c=await checkBundle(root,trusted||key);
     if(!c.ok)anyBad=true;
     const js=toJS(root)||{};
+    /* Log leaves are the receipts-table chain — review entries anchor to the
+       original's hash (verified by checkBundle), not to the log itself. */
+    if(js.original&&js.original.payload_hash)
+      logRefs.push({id:js.original.id,payload_hash:js.original.payload_hash,public_key:js.original.public_key});
     /* Revocation is a trust overlay — never a FAIL: count bundle records
        signed by a revoked key inside its declared suspect window and warn. */
     const revN=get(root,"reviews");
@@ -765,13 +839,14 @@ async function verifyFiles(files){
       if(rjs.payload_hash!==a.payload_hash||rjs.visit_id!==a.visit_id){
         anyBad=true;say("bad",`attestation ${esc(a.receipt_id)}: disagrees with signed manifest`);continue;}
       say("ok",`attestation ${esc(a.record_type||"record")}: signed and intact`);
+      logRefs.push({id:rjs.id,payload_hash:rjs.payload_hash,public_key:rjs.public_key});
     }
     /* Fail closed on ANY file the signed manifest does not name — a smuggled
        top-level file or an extra member inside a listed visit dir would ride
        inside a VERIFIED pack. Media members are digest-checked per visit. */
     const vids=new Set((manifest.visits||[]).map(v=>v.visit_id));
     const allowed=new Set(["manifest.json","README.txt","verify_case.py","verify.html","index.html",
-      "verifier_manifest.json"]);
+      "verifier_manifest.json","log_checkpoint.json"]);
     for(const a of manifest.attestations||[])allowed.add(`attestations/${a.receipt_id}.json`);
     for(const v of vids){allowed.add(`visits/${v}/bundle.json`);allowed.add(`visits/${v}/redaction.json`);}
     for(const name of Object.keys(byName)){
@@ -783,18 +858,32 @@ async function verifyFiles(files){
     await checkTools(byName,trusted||new Set([manifest.issuer_key||""]),
       `site:${(manifest.site||{}).id||""}`,
       m=>{anyBad=true;say("bad",m);},m=>say("ok",m));
+    const sigR=(manifest.signature_receipt||{});
+    if(sigR.payload_hash)logRefs.push({id:sigR.id,payload_hash:sigR.payload_hash,public_key:sigR.public_key});
+    if(byName["verifier_manifest.json"]){
+      const vmj=toJS(parseKeep(await byName["verifier_manifest.json"].text()))||{};
+      if(vmj.payload_hash)logRefs.push({id:vmj.id,payload_hash:vmj.payload_hash,public_key:vmj.public_key});
+    }
+    await checkLog(byName,trusted||new Set([manifest.issuer_key||""]),logRefs,
+      m=>{anyBad=true;say("bad",m);},m=>say("ok",m));
   }else{
     /* Single-visit dispute pack — the format names a fixed top-level set plus
        media/* (digest-checked above). */
     const allowed=new Set([
       "bundle.json","README.txt","verify_bundle.py","verify.html","index.html","redaction.json",
-      "key_rotations.json","verifier_manifest.json"]);
+      "key_rotations.json","verifier_manifest.json","log_checkpoint.json"]);
     for(const name of Object.keys(byName)){
       if(name.endsWith("/")||allowed.has(name)||name.startsWith("media/"))continue;
       anyBad=true;say("bad",`${esc(name)}: present but not in the signed manifest`);
     }
     await checkTools(byName,trusted||new Set([key||""]),
       `visit:${bundles.length?bundles[0][0]:""}`,
+      m=>{anyBad=true;say("bad",m);},m=>say("ok",m));
+    if(byName["verifier_manifest.json"]){
+      const vmj=toJS(parseKeep(await byName["verifier_manifest.json"].text()))||{};
+      if(vmj.payload_hash)logRefs.push({id:vmj.id,payload_hash:vmj.payload_hash,public_key:vmj.public_key});
+    }
+    await checkLog(byName,trusted||new Set([key||""]),logRefs,
       m=>{anyBad=true;say("bad",m);},m=>say("ok",m));
   }
   /* A rotation signed by a key later declared suspect means the handoff

@@ -15,7 +15,7 @@ import json
 import zipfile
 from pathlib import Path
 
-from .models import ReviewBundle, Site, Visit
+from .models import Receipt, ReviewBundle, Site, Visit
 from .store import Store
 
 _README = """\
@@ -279,6 +279,101 @@ def check_tools(pack_dir, trusted, scope):
         if fp.is_file() and fp.name in _VERIFIER_TOOLS and fp.name not in tools:
             sys.exit(f"FAIL {fp.name}: verifier tooling present but not covered by the signed pin")
     return len(tools)
+
+
+def _merkle_inclusion(leaf_hex, size, index, path_hex, root_hex):
+    """RFC 6962 audit-path verification, stdlib-only (see transparency.py)."""
+    try:
+        leaf = bytes.fromhex(leaf_hex)
+        root_b = bytes.fromhex(root_hex)
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(size, int) or not isinstance(index, int):
+        return False
+    if index < 0 or index >= size or size < 1:
+        return False
+    r = hashlib.sha256(b"\\x00" + leaf).digest()
+    if size == 1:
+        return not path_hex and r == root_b
+    fn, sn = index, size - 1
+    for ph in path_hex:
+        try:
+            p = bytes.fromhex(ph)
+        except (TypeError, ValueError):
+            return False
+        if len(p) != 32 or sn == 0:
+            return False
+        if (fn & 1) or fn == sn:
+            r = hashlib.sha256(b"\\x01" + p + r).digest()
+            while fn and not (fn & 1):
+                fn >>= 1
+                sn >>= 1
+        else:
+            r = hashlib.sha256(b"\\x01" + r + p).digest()
+        fn >>= 1
+        sn >>= 1
+    return sn == 0 and r == root_b
+
+
+def check_log(pack_dir, trusted, receipts):
+    """Verify the pack's transparency checkpoint: ``log_checkpoint.json``
+    carries a signed Merkle Tree Head (a ``log_checkpoint`` receipt) plus an
+    RFC 6962 inclusion path for every receipts-table member the pack holds —
+    'this receipt was in the deployment's published log' becomes provable in
+    O(log n) instead of trusting enumeration. Review-chain entries are not
+    leaves: they anchor to the original's hash (verified by check_bundle), so
+    the proven original transitively commits them. Absent → a pre-checkpoint
+    pack, reported not failed; present → every listed receipt must carry a
+    working proof, so a receipt never committed to the log fails closed.
+    Returns (proven_count, tree_size) or None."""
+    cp_path = Path(pack_dir) / "log_checkpoint.json"
+    if not cp_path.is_file():
+        return None
+    try:
+        doc = json.loads(cp_path.read_text(encoding="utf-8"))
+    except Exception:
+        sys.exit("FAIL log_checkpoint.json: not readable JSON")
+    cp = doc.get("checkpoint") if isinstance(doc, dict) else None
+    proofs = doc.get("proofs") if isinstance(doc, dict) else None
+    if not isinstance(cp, dict) or not isinstance(proofs, dict):
+        sys.exit("FAIL log_checkpoint.json: malformed checkpoint document")
+    payload = cp.get("payload")
+    if not isinstance(payload, dict) or payload.get("record_type") != "log_checkpoint":
+        sys.exit("FAIL log_checkpoint.json: not a log_checkpoint receipt")
+    if cp.get("public_key") not in trusted:
+        sys.exit("FAIL log_checkpoint.json: signed outside the trusted issuer chain")
+    ok, why = check_receipt(cp, cp["public_key"])
+    if not ok:
+        sys.exit(f"FAIL log_checkpoint.json: {why}")
+    size = payload.get("tree_size")
+    root_hex = payload.get("root_sha256")
+    if not isinstance(size, int) or size < 1 or not isinstance(root_hex, str):
+        sys.exit("FAIL log_checkpoint.json: malformed tree head")
+    proven = 0
+    for r in receipts:
+        ph = r.get("payload_hash") if isinstance(r, dict) else None
+        # Only issuer-lineage receipts owe proofs: a foreign-signed pool
+        # entry is inert (it can't join the trust walk) and never claimed
+        # log membership — requiring its proof would let a graft kill packs.
+        if not ph or r.get("public_key") not in trusted:
+            continue
+        # The checkpoint receipt IS the signed tree head — it cannot sit
+        # inside its own tree, and needs no proof.
+        if ph == cp.get("payload_hash"):
+            continue
+        p = proofs.get(ph)
+        if not isinstance(p, dict):
+            sys.exit(
+                f"FAIL log_checkpoint.json: receipt {r.get('id') or ph[:16]} has no "
+                "inclusion proof — never committed to the deployment log"
+            )
+        if not _merkle_inclusion(ph, size, p.get("leaf_index", -1), p.get("path") or [], root_hex):
+            sys.exit(
+                f"FAIL log_checkpoint.json: inclusion proof for receipt "
+                f"{r.get('id') or ph[:16]} does not reach the signed tree head"
+            )
+        proven += 1
+    return proven, size
 
 
 def check_media(bundle, media_dir, withheld=None):
@@ -597,6 +692,7 @@ def main():
     # windows without touching the integrity verdict.
     trusted = {key}
     rotations = list(issuer_receipts)
+    pack_lifecycle = []
     rot_path = pack_dir / "key_rotations.json"
     if rot_path.is_file():
         try:
@@ -607,6 +703,7 @@ def main():
         if not isinstance(extra, list):
             sys.exit("FAIL key_rotations.json: malformed")
         rotations += extra
+        pack_lifecycle = extra
     if rotations:
         trusted = trusted_keys(key, rotations) | descendant_keys(key, rotations)
     revoked = revoked_keys(rotations, key)
@@ -634,6 +731,7 @@ def main():
         "redaction.json",
         "key_rotations.json",
         "verifier_manifest.json",
+        "log_checkpoint.json",
     }
     markers = ("README.txt", "media", "verify.html", "index.html")
     if any((pack_dir / m).exists() for m in markers):
@@ -643,6 +741,18 @@ def main():
             if p.is_dir() and p.name != "media":
                 sys.exit(f"FAIL {p.name}/: directory not part of the pack format")
     pinned_tools = check_tools(pack_dir, trusted, f'visit:{bundle["original"]["visit_id"]}')
+    # Transparency checkpoint: the log's leaves are the receipts-table chain
+    # — originals, lifecycle, manifests. Review-chain entries anchor to the
+    # original's hash (verified above) instead of sitting in the log, so the
+    # proven original transitively commits them.
+    logged = check_log(
+        pack_dir,
+        trusted,
+        [bundle["original"]]
+        + pack_lifecycle
+        + ([json.loads((pack_dir / "verifier_manifest.json").read_text(encoding="utf-8"))]
+           if (pack_dir / "verifier_manifest.json").is_file() else []),
+    )
     redact_note = f", {held} withheld by redaction" if held else ""
     print(f"OK: {n} receipt(s) verified; {checked} media digests matched{redact_note}.")
     if len(trusted) > 1:
@@ -663,6 +773,9 @@ def main():
     if pinned_tools:
         print(f"    ({pinned_tools} verifier tool(s) pinned by issuer-signed manifest — "
               "the pack's own scripts are proven unmodified)")
+    if logged:
+        print(f"    ({logged[0]} receipt(s) proven inside the deployment's transparency"
+              f" log at checkpoint size {logged[1]})")
     print("Signature proves record integrity under the issuer key - not identity,")
     print("attendance, or absence.")
 
@@ -742,6 +855,9 @@ def main():
         sys.exit("FAIL manifest: visits is missing or not a list")
     failed = 0
     listed_vids = set()
+    # Every receipt the pack carries — the transparency checkpoint must prove
+    # each one sat in the deployment's log, not merely verify its signature.
+    log_receipts = []
     for v in visits:
         vid = v.get("visit_id") if isinstance(v, dict) else None
         if not isinstance(vid, str) or not vid or "/" in vid or chr(92) in vid or ".." in vid:
@@ -763,6 +879,7 @@ def main():
             print(f"FAIL {vid}: {why}")
             failed += 1
             continue
+        log_receipts.append(bundle["original"])
         suspect_n += len(suspect_records(
             [bundle["original"]] + [e["receipt"] for e in bundle.get("reviews", [])], revoked))
         if bundle["original"]["payload_hash"] != v.get("payload_hash"):
@@ -822,6 +939,7 @@ def main():
             failed += 1
         else:
             print(f"OK   attestation {a.get('record_type') or 'record'} ({rid[:20]}...)")
+            log_receipts.append(ar)
     adir = root / "attestations"
     if adir.exists():
         listed = {f"{a.get('receipt_id')}.json" for a in manifest.get("attestations", [])}
@@ -846,6 +964,7 @@ def main():
         "verify.html",
         "index.html",
         "verifier_manifest.json",
+        "log_checkpoint.json",
     }
     for p in sorted(root.iterdir()):
         if p.is_file() and p.name not in allowed_top:
@@ -869,6 +988,16 @@ def main():
         failed += 1
     site_id = (manifest.get("site") or {}).get("id") or ""
     pinned_tools = check_tools(root, trusted, f"site:{site_id}")
+    sr = manifest.get("signature_receipt")
+    if isinstance(sr, dict):
+        log_receipts.append(sr)
+    if (root / "verifier_manifest.json").is_file():
+        try:
+            log_receipts.append(
+                json.loads((root / "verifier_manifest.json").read_text(encoding="utf-8")))
+        except Exception:
+            pass  # a malformed pin already failed in check_tools
+    logged = check_log(root, trusted, log_receipts)
     if failed:
         sys.exit(f"{failed} record(s) failed verification")
     print(f"OK: {len(visits)} visit records verified under issuer key")
@@ -876,6 +1005,9 @@ def main():
     if pinned_tools:
         print(f"    ({pinned_tools} verifier tool(s) pinned by issuer-signed manifest — "
               "the pack's own scripts are proven unmodified)")
+    if logged:
+        print(f"    ({logged[0]} receipt(s) proven inside the deployment's transparency"
+              f" log at checkpoint size {logged[1]})")
     if len(trusted) > 1:
         # The pack spans a signed key rotation — the lineage is the pivot, not
         # a weaker check; say so plainly rather than hiding it behind one key.
@@ -1003,6 +1135,7 @@ def build_pack(
     include_media: bool = True,
     redact_media: bool = False,
     tools_receipt_fn=None,
+    log_fn=None,
 ) -> bytes:
     """Assemble the zip. Media is matched to evidence digests, not filenames.
     With ``redact_media`` the bytes are withheld and a redaction.json marker is
@@ -1038,6 +1171,7 @@ def build_pack(
         z.writestr("verify_bundle.py", _VERIFIER)
         z.writestr("verify.html", VERIFY_HTML)
         z.writestr("index.html", index_html)
+        vm_receipt = None
         if tools_receipt_fn is not None:
             tools = {
                 name: hashlib.sha256(body.encode()).hexdigest()
@@ -1048,9 +1182,14 @@ def build_pack(
                     "README.txt": _README,
                 }.items()
             }
-            receipt = tools_receipt_fn(tools)
-            if receipt is not None:
-                z.writestr("verifier_manifest.json", receipt.model_dump_json(indent=2))
+            vm_receipt = tools_receipt_fn(tools)
+            if vm_receipt is not None:
+                z.writestr("verifier_manifest.json", vm_receipt.model_dump_json(indent=2))
+        if log_fn is not None:
+            rot_receipts = [r for r in store.receipts() if r.visit_id.startswith("key:")]
+            doc = log_fn([bundle.original] + rot_receipts + ([vm_receipt] if vm_receipt is not None else []))
+            if doc is not None:
+                z.writestr("log_checkpoint.json", json.dumps(doc, indent=2, ensure_ascii=False))
         if rotations:
             z.writestr(
                 "key_rotations.json",
@@ -1098,6 +1237,7 @@ def build_case_pack(
     manifest_signer=None,
     issuer_key: str | None = None,
     tools_receipt_fn=None,
+    log_fn=None,
 ) -> bytes:
     """A whole-site export: every visit's signed bundle + media, one manifest of
     receipt hashes and worker stances, and a stdlib-only verifier that checks
@@ -1208,6 +1348,18 @@ def build_case_pack(
             }.items()
         }
         vm = tools_receipt_fn(tools)
+    # The transparency checkpoint is issued LAST among signed members: its
+    # tree must already contain the export manifest and the tool pin for
+    # their inclusion proofs to exist.
+    log_doc = None
+    if log_fn is not None:
+        mrcpt = manifest.get("signature_receipt")
+        log_doc = log_fn(
+            list(attestations)
+            + [b.original for _, b, _ in entries]
+            + ([Receipt.model_validate(mrcpt)] if isinstance(mrcpt, dict) else [])
+            + ([vm] if vm is not None else [])
+        )
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("manifest.json", manifest_text)
@@ -1217,6 +1369,8 @@ def build_case_pack(
         z.writestr("index.html", index_html)
         if vm is not None:
             z.writestr("verifier_manifest.json", vm.model_dump_json(indent=2))
+        if log_doc is not None:
+            z.writestr("log_checkpoint.json", json.dumps(log_doc, indent=2, ensure_ascii=False))
         for r in attestations:
             z.writestr(f"attestations/{r.id}.json", r.model_dump_json(indent=2))
         for (vid, text), (visit, bundle, _) in zip(bundle_texts, entries, strict=True):
@@ -1228,6 +1382,30 @@ def build_case_pack(
                 for p, rel in _media_files(store, media_root, visit.id):
                     z.write(p, f"{base}/media/{rel}")
     return buf.getvalue()
+
+
+def log_member(engine, receipts) -> dict:
+    """Build ``log_checkpoint.json`` for an export: a signed Merkle Tree Head
+    over the deployment's whole receipt log plus an RFC 6962 inclusion path
+    for every receipt this pack carries. Issuing the checkpoint must run
+    *after* the pack's other signed members (export manifest, tool pin) so
+    they are inside the tree; the checkpoint receipt itself is the tree head
+    and by definition postdates it — the one member that carries no proof.
+    Proofs are computed against the tree AT the checkpoint's size — the
+    checkpoint's own append grows the tree past its STH, so paths against
+    the grown tree would not reach the signed root."""
+    cp = engine.issue_log_checkpoint()
+    n = cp.payload["tree_size"]
+    proofs = {}
+    for r in receipts:
+        proof = engine.inclusion_proof(r, size=n)
+        if proof is not None:
+            proofs[r.payload_hash] = {"leaf_index": proof["leaf_index"], "path": proof["path"]}
+    return {
+        "schema": "attest.log-checkpoint/1",
+        "checkpoint": cp.model_dump(mode="json"),
+        "proofs": proofs,
+    }
 
 
 def write_verifiers(directory) -> tuple[Path, Path]:

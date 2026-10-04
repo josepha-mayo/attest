@@ -4,7 +4,8 @@
   "verdict": "ok",
   "detail_contains": [
     "issuer keys linked via the signed rotation chain",
-    "pinned"
+    "pinned",
+    "transparency log"
   ],
   "js": {
     "bundle_ok": true,

@@ -32,7 +32,7 @@ from ring_sandbox.pytest_plugin import _SyncASGITransport  # noqa: E402
 from ring_sandbox.world import DeviceKind, default_world  # noqa: E402
 
 from attest.config import Settings  # noqa: E402
-from attest.disputepack import build_case_pack, build_pack  # noqa: E402
+from attest.disputepack import build_case_pack, build_pack, log_member  # noqa: E402
 from attest.engine import VisitEngine  # noqa: E402
 from attest.ledger import Signer, issuer_document  # noqa: E402
 from attest.media import MediaStore  # noqa: E402
@@ -127,6 +127,7 @@ def _case_pack(store, engine, site, visits, tmp: Path, *, redact=False) -> bytes
         manifest_signer=lambda m: engine.issue_export_manifest(site, m),
         issuer_key=engine.signer.public_key_b64,
         tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"site:{site.id}", t),
+        log_fn=lambda rs: log_member(engine, rs),
     )
 
 
@@ -139,6 +140,7 @@ def _dispute_pack(store, engine, media_root, bundle, **kw) -> bytes:
         media_root,
         bundle,
         tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"visit:{vid}", t),
+        log_fn=lambda rs: log_member(engine, rs),
         **kw,
     )
 
@@ -190,7 +192,7 @@ def main() -> None:
             "kind": "bundle",
             "pin": "declared",
             "verdict": "ok",
-            "detail_contains": ["verified", "media", "pinned"],
+            "detail_contains": ["verified", "media", "pinned", "transparency log"],
             "js": {
                 "bundle_ok": True,
                 "trusted_count": 1,
@@ -210,7 +212,7 @@ def main() -> None:
             "kind": "bundle",
             "pin": "declared",
             "verdict": "ok",
-            "detail_contains": ["withheld", "pinned"],
+            "detail_contains": ["withheld", "pinned", "transparency log"],
             "js": {
                 "bundle_ok": True,
                 "trusted_count": 1,
@@ -241,7 +243,11 @@ def main() -> None:
             "kind": "case",
             "pin": KEY_A.public_key_b64,  # pinning the RETIRED key still verifies
             "verdict": "ok",
-            "detail_contains": ["issuer keys linked via the signed rotation chain", "pinned"],
+            "detail_contains": [
+                "issuer keys linked via the signed rotation chain",
+                "pinned",
+                "transparency log",
+            ],
             "js": {
                 "bundle_ok": True,
                 "trusted_count": 2,
@@ -284,7 +290,7 @@ def main() -> None:
             "kind": "bundle",
             "pin": "declared",
             "verdict": "ok",
-            "detail_contains": ["verified", "pinned"],
+            "detail_contains": ["verified", "pinned", "transparency log"],
             "detail_excludes": ["suspect window"],
             "js": {
                 "bundle_ok": True,
@@ -293,8 +299,10 @@ def main() -> None:
                 "lifecycle_suspect_count": 0,
                 "verdict": "ok",
             },
-            "note": "a self-signed key_revocation grafted at sequence 0 cannot "
-            "make itself the revocation root — the smear is inert",
+            "note": "a self-signed key_revocation grafted into key_rotations.json "
+            "is inert twice over — it can't join the signed trust walk, and "
+            "foreign-signed receipts owe no log proof so the graft can't "
+            "kill the pack either",
         },
     )
 
@@ -310,7 +318,7 @@ def main() -> None:
             "kind": "case",
             "pin": "declared",
             "verdict": "ok",
-            "detail_contains": ["suspect window", "trust pivot", "pinned"],
+            "detail_contains": ["suspect window", "trust pivot", "pinned", "transparency log"],
             "js": {
                 "bundle_ok": True,
                 "trusted_count": 2,
@@ -332,7 +340,7 @@ def main() -> None:
             "kind": "case",
             "issuer_doc": "issuer.json",
             "verdict": "ok",
-            "detail_contains": ["suspect window", "pinned"],
+            "detail_contains": ["suspect window", "pinned", "transparency log"],
             "js": {
                 "bundle_ok": True,
                 "trusted_count": 1,
@@ -363,7 +371,7 @@ def main() -> None:
             "kind": "case",
             "issuer_doc": "issuer.json",
             "verdict": "ok",
-            "detail_contains": ["suspect window", "pinned"],
+            "detail_contains": ["suspect window", "pinned", "transparency log"],
             "js": {
                 "bundle_ok": True,
                 "trusted_count": 2,
@@ -387,7 +395,7 @@ def main() -> None:
             "kind": "case",
             "issuer_doc": "issuer.json",
             "verdict": "ok",
-            "detail_contains": ["issuer keys linked", "pinned"],
+            "detail_contains": ["issuer keys linked", "pinned", "transparency log"],
             "js": {
                 "bundle_ok": True,
                 "trusted_count": 2,
@@ -624,7 +632,7 @@ def main() -> None:
             "kind": "bundle",
             "pin": "declared",
             "verdict": "ok",
-            "detail_contains": ["verified", "media"],
+            "detail_contains": ["verified", "media", "transparency log"],
             "detail_excludes": ["pinned by issuer-signed manifest"],
             "js": {
                 "bundle_ok": True,
@@ -734,6 +742,55 @@ def main() -> None:
             "js": {"bundle_ok": True, "verdict": "fail"},
             "note": "a valid pin receipt under an untrusted key — signature "
             "integrity is not issuer authority",
+        },
+    )
+
+    # --- transparency grafts: the log member is as attackable as the pack ---
+    def _log_edit(pack: bytes, fn) -> bytes:
+        return _rewrite_zip(
+            pack,
+            lambda name, body: (
+                json.dumps(fn(json.loads(body)), indent=2).encode() if name == "log_checkpoint.json" else body
+            ),
+        )
+
+    def _drop_first_proof(doc: dict) -> dict:
+        doc["proofs"].pop(sorted(doc["proofs"])[0])
+        return doc
+
+    _write_vector(
+        "fail-missing-log-proof",
+        _log_edit(rotated_pack, _drop_first_proof),
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "fail",
+            "detail_contains": ["no inclusion proof"],
+            "js": {"bundle_ok": True, "verdict": "fail"},
+            "note": "a pack receipt silently dropped from log_proofs.json — "
+            "the pack cannot claim log membership it does not prove",
+        },
+    )
+
+    def _swap_first_two_proofs(doc: dict) -> dict:
+        keys = sorted(doc["proofs"])
+        doc["proofs"][keys[0]], doc["proofs"][keys[1]] = (
+            doc["proofs"][keys[1]],
+            doc["proofs"][keys[0]],
+        )
+        return doc
+
+    _write_vector(
+        "fail-grafted-log-proof",
+        _log_edit(rotated_pack, _swap_first_two_proofs),
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "fail",
+            "detail_contains": ["does not reach the signed tree head"],
+            "js": {"bundle_ok": True, "verdict": "fail"},
+            "note": "another receipt's audit path grafted on — the Merkle "
+            "math catches what a presence check never would",
         },
     )
 

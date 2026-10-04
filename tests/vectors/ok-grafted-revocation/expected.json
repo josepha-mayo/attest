@@ -4,7 +4,8 @@
   "verdict": "ok",
   "detail_contains": [
     "verified",
-    "pinned"
+    "pinned",
+    "transparency log"
   ],
   "detail_excludes": [
     "suspect window"
@@ -16,5 +17,5 @@
     "lifecycle_suspect_count": 0,
     "verdict": "ok"
   },
-  "note": "a self-signed key_revocation grafted at sequence 0 cannot make itself the revocation root \u2014 the smear is inert"
+  "note": "a self-signed key_revocation grafted into key_rotations.json is inert twice over \u2014 it can't join the signed trust walk, and foreign-signed receipts owe no log proof so the graft can't kill the pack either"
 }

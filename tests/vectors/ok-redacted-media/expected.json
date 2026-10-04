@@ -4,7 +4,8 @@
   "verdict": "ok",
   "detail_contains": [
     "withheld",
-    "pinned"
+    "pinned",
+    "transparency log"
   ],
   "js": {
     "bundle_ok": true,

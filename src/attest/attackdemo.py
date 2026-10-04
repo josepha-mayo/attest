@@ -348,7 +348,7 @@ def run(store: Store, media_root: Path | None = None, inbox=None, engine=None) -
         if not sites:
             return None, "no site to export"
         site = sites[0]
-        from .disputepack import build_case_pack
+        from .disputepack import build_case_pack, log_member
         from .models import ReviewBundle
         from .reviews import countersign_status
 
@@ -370,6 +370,7 @@ def run(store: Store, media_root: Path | None = None, inbox=None, engine=None) -
             manifest_signer=lambda m: engine.issue_export_manifest(site, m),
             issuer_key=engine.signer.public_key_b64,
             tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"site:{site.id}", t),
+            log_fn=lambda rs: log_member(engine, rs),
         )
         with zipfile.ZipFile(io.BytesIO(data)) as z:
             items = [(n, z.read(n)) for n in z.namelist()]
@@ -403,6 +404,85 @@ def run(store: Store, media_root: Path | None = None, inbox=None, engine=None) -
             store,
             "ship a forged always-green verifier inside a genuine pack",
             forge_verifier_tool,
+        )
+    )
+
+    def graft_unlogged_receipt() -> tuple[bool, str]:
+        """The graft only the transparency log can catch: a receipt the
+        deployment's own key really signed, minted off-chain and never
+        committed to the receipts table — signature verifies, signer is
+        trusted, and before Merkle proofs nothing could ask 'was it ever
+        logged?'. key_rotations.json is unsigned pool content, so it is the
+        one member an attacker can extend; the checkpoint's inclusion proofs
+        must name every trusted-signed entry or the pack fails closed."""
+        if engine is None:
+            return None, "no signing engine — cannot mint a pack to attack"
+        visit = next(iter(store.visits(limit=1)), None)
+        if visit is None or store.receipt_for_visit(visit.id) is None:
+            return None, "no signed records to export"
+        from .disputepack import build_pack, log_member
+        from .reviews import ReviewService
+
+        service = ReviewService(store, engine.signer, engine.clock)
+        bundle = service.bundle(visit.id)
+        data = build_pack(
+            store,
+            media_root or Path("media"),
+            bundle,
+            tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"visit:{visit.id}", t),
+            log_fn=lambda rs: log_member(engine, rs),
+        )
+        ghost = engine.signer.issue(
+            visit_id="key:ghost-never-logged",
+            sequence=0,
+            prev_hash=None,
+            facts={
+                "record_type": "key_revocation",
+                "revoked_key": "not-a-lineage-key",
+                "suspect_after": "2000-01-01T00:00:00+00:00",
+                "reason": "genuinely signed, never committed to the log",
+            },
+        )
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            items = [(n, z.read(n)) for n in z.namelist()]
+        forged = io.BytesIO()
+        have_kr = any(n == "key_rotations.json" for n, _ in items)
+        with zipfile.ZipFile(forged, "w") as z:
+            for name, body in items:
+                if name == "key_rotations.json":
+                    rj = json.loads(body)
+                    rj["rotations"].append(ghost.model_dump(mode="json"))
+                    body = json.dumps(rj).encode()
+                z.writestr(name, body)
+            if not have_kr:
+                z.writestr(
+                    "key_rotations.json",
+                    json.dumps(
+                        {
+                            "schema": "attest.key-rotations/1",
+                            "rotations": [ghost.model_dump(mode="json")],
+                        }
+                    ).encode(),
+                )
+        fd, tmp = tempfile.mkstemp(suffix=".zip", prefix="attest-attack-")
+        try:
+            with open(fd, "wb") as raw:
+                raw.write(forged.getvalue())
+            from .packdiff import load_artifact
+
+            out = load_artifact(tmp)
+            hits = [f for f in out["verify_failures"] if "inclusion proof" in f]
+            return bool(hits), (
+                hits[0] if hits else f"unlogged-but-signed graft accepted: {out['verify_failures']}"
+            )
+        finally:
+            Path(tmp).unlink(missing_ok=True)
+
+    results.append(
+        _attempt(
+            store,
+            "graft a genuinely-signed receipt the deployment never logged",
+            graft_unlogged_receipt,
         )
     )
 

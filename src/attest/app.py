@@ -17,7 +17,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import httpx
-from fastapi import Depends, FastAPI, Form, HTTPException, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi import Path as PathParam
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.security import HTTPBasic
@@ -29,7 +29,7 @@ from . import ledger, retention, taxonomy
 from .config import Settings
 from .config import settings as default_settings
 from .corroborate import corroboration
-from .disputepack import build_case_pack, build_pack
+from .disputepack import build_case_pack, build_pack, log_member
 from .engine import NotYetAdmissible, VisitEngine
 from .i18n import negotiate
 from .i18n import pick as pick_lang
@@ -277,6 +277,11 @@ def create_app(
 
     async def authorize(request: Request):
         if request.url.path in ("/webhooks/ring", "/healthz", "/.well-known/attest-issuer.json"):
+            return
+        # Transparency-log reads are public verification material — proof
+        # nodes are bare hashes and the head is a commitment to public
+        # receipts, so they carry no secret beyond what a pack already ships.
+        if request.url.path.startswith("/api/log/"):
             return
         if request.method not in ("GET", "HEAD", "OPTIONS"):
             origin = request.headers.get("origin")
@@ -885,6 +890,55 @@ def create_app(
 
         return await asyncio.to_thread(gather)
 
+    @app.get("/api/log/head")
+    async def log_head():
+        """The transparency log's current signed tree head — tree size, Merkle
+        root, and the latest checkpoint receipt. Pair with
+        ``/api/log/proof/{receipt_id}`` (inclusion) and
+        ``/api/log/consistency?first=N`` (extension) — the CT-style read API
+        that turns 'append-only' into an O(log n) proof instead of a
+        full enumeration. Public: roots and hash paths are verification
+        material, not secrets."""
+
+        def gather():
+            size, head = engine.log_head()
+            checkpoints = [r for r in store.receipts() if r.payload.get("record_type") == "log_checkpoint"]
+            return {
+                "tree_size": size,
+                "root_sha256": head.hex(),
+                "checkpoint": (checkpoints[-1].model_dump(mode="json") if checkpoints else None),
+                "boundary": (
+                    "The root commits to the first tree_size receipt payload "
+                    "hashes in sequence order. Checkpoint receipts are not "
+                    "leaves — each signs the content log's head, never itself."
+                ),
+            }
+
+        return await asyncio.to_thread(gather)
+
+    @app.get("/api/log/proof/{receipt_id}")
+    async def log_proof(receipt_id: str = PathParam(max_length=128)):
+        """RFC 6962 inclusion proof for one receipt against the current head —
+        the proof a verifier needs to assert 'this receipt was committed to
+        the published log' without downloading the chain."""
+        receipt = store.receipt(receipt_id)
+        if receipt is None:
+            raise HTTPException(404, "unknown receipt")
+        proof = await asyncio.to_thread(engine.inclusion_proof, receipt)
+        if proof is None:
+            raise HTTPException(409, "receipt is not in the log's committed order")
+        return proof
+
+    @app.get("/api/log/consistency")
+    async def log_consistency(first: int = Query(ge=1)):
+        """RFC 6962 consistency proof: the current head extends the tree of
+        ``first`` leaves — 'nothing was rewritten or dropped' as a compact
+        proof between two signed tree heads."""
+        proof = await asyncio.to_thread(engine.consistency_proof, first)
+        if proof is None:
+            raise HTTPException(404, "no tree of that size is on record")
+        return proof
+
     @app.get("/visits/{visit_id}", response_class=HTMLResponse)
     async def visit_page(request: Request, visit_id: str = PathParam(max_length=128)):
         v = store.visit(visit_id)
@@ -1427,6 +1481,7 @@ def create_app(
             bundle,
             redact_media=redact_media,
             tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"visit:{visit_id}", t),
+            log_fn=lambda rs: log_member(engine, rs),
         )
         return Response(
             data,
@@ -1768,6 +1823,7 @@ def create_app(
                 manifest_signer=lambda m: engine.issue_export_manifest(site, m),
                 issuer_key=engine.signer.public_key_b64,
                 tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"site:{site.id}", t),
+                log_fn=lambda rs: log_member(engine, rs),
             )
 
         data = await asyncio.to_thread(build)
@@ -2060,15 +2116,17 @@ def _verify_pack(data: bytes, public_key: str, known_rotations: list | None = No
         # Reviews appended after a key rotation verify under the successor —
         # legitimate only through the signed links in key_rotations.json.
         rotation_receipts = list(known_rotations or [])
+        pack_rotations = []
         if "key_rotations.json" in names:
             rj = json.loads(z.read("key_rotations.json"))
             rotations = rj.get("rotations") if isinstance(rj, dict) else None
             if not isinstance(rotations, list):
                 return False, "key_rotations.json: malformed"
             try:
-                rotation_receipts += [Receipt.model_validate(r) for r in rotations]
+                pack_rotations = [Receipt.model_validate(r) for r in rotations]
             except Exception as exc:  # noqa: BLE001
                 return False, f"key_rotations.json: malformed ({exc})"
+            rotation_receipts += pack_rotations
         trusted: str | set = public_key
         if rotation_receipts:
             trusted = ledger.trusted_issuer_keys(
@@ -2106,6 +2164,7 @@ def _verify_pack(data: bytes, public_key: str, known_rotations: list | None = No
             "redaction.json",
             "key_rotations.json",
             "verifier_manifest.json",
+            "log_checkpoint.json",
         }
         for name in names:
             if name.endswith("/") or name in allowed or name.startswith("media/"):
@@ -2115,10 +2174,31 @@ def _verify_pack(data: bytes, public_key: str, known_rotations: list | None = No
         tok, tnote = _verify_tools_pin(z, trusted_set, f"visit:{bundle.original.visit_id}")
         if not tok:
             return False, tnote
+        # Log leaves are the receipts-table chain — review entries anchor to
+        # the original's hash (verified above), so the proven original
+        # transitively commits them; they are not leaves themselves.
+        member_ids = [(bundle.original.id, bundle.original.payload_hash, bundle.original.public_key)]
+        # Only the pack's own key_rotations.json members need inclusion proofs
+        # — --issuer doc receipts are external pin material, not members.
+        if "key_rotations.json" in names:
+            for r in rotations:
+                if isinstance(r, dict) and r.get("id") and r.get("payload_hash"):
+                    member_ids.append((r["id"], r["payload_hash"], r.get("public_key")))
+        if "verifier_manifest.json" in names:
+            try:
+                vm = json.loads(z.read("verifier_manifest.json"))
+                if vm.get("id") and vm.get("payload_hash"):
+                    member_ids.append((vm["id"], vm["payload_hash"], vm.get("public_key")))
+            except Exception:  # noqa: BLE001 — malformed already failed above
+                pass
+        lok, lnote = _verify_log_pin(z, trusted_set, member_ids)
+        if not lok:
+            return False, lnote
         if isinstance(trusted, set) and len(trusted) > 1:
             detail += f" ({len(trusted)} issuer keys linked via the signed rotation chain)"
-        if tnote:
-            detail += f" ({tnote})"
+        for note in (tnote, lnote):
+            if note:
+                detail += f" ({note})"
         return True, detail
     except Exception as exc:  # noqa: BLE001
         return False, f"not a valid exported pack: {exc}"
@@ -2179,6 +2259,28 @@ def _verify_tools_pin(z, trusted: set, scope: str) -> tuple[bool, str]:
     return True, (f"{pinned} verifier tool(s) pinned by issuer-signed manifest" if pinned else "")
 
 
+def _verify_log_pin(z, trusted: set, member_ids: list[tuple[str, str, str]]) -> tuple[bool, str]:
+    """Enforce the signed transparency checkpoint — ``log_checkpoint.json``
+    carries a signed Merkle Tree Head plus an RFC 6962 inclusion path per
+    pack receipt: 'this receipt was committed to the deployment's published
+    log' is provable in O(log n), and a validly-signed receipt never
+    committed fails closed. Older packs without the member pass with no
+    note. Shared rule: packdiff.check_log_pin (the embedded verifier and
+    browser keep their own ports)."""
+    from .packdiff import check_log_pin
+
+    names = set(z.namelist())
+    res, err = check_log_pin(lambda n: z.read(n) if n in names else None, member_ids, trusted)
+    if err:
+        return False, err
+    if res is None:
+        return True, ""
+    proven, size = res
+    return True, (
+        f"{proven} receipt(s) proven inside the deployment transparency log at checkpoint size {size}"
+    )
+
+
 def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -> tuple[bool, str]:
     """Verify every visit bundle in a case pack plus the manifest's hash list."""
     manifest = json.loads(z.read("manifest.json"))
@@ -2220,12 +2322,14 @@ def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -
     revoked = ledger.revoked_issuer_keys(pool, issuer_key=issuer)
     suspect_total = 0
     lines = []
+    member_ids = []  # receipts the transparency checkpoint must prove
     for v in manifest.get("visits", []):
         vid = v.get("visit_id", "?")
         try:
             bundle = ReviewBundle.model_validate(json.loads(z.read(f"visits/{vid}/bundle.json")))
         except Exception as exc:  # noqa: BLE001
             return False, f"{vid}: missing or invalid bundle ({exc})"
+        member_ids.append((bundle.original.id, bundle.original.payload_hash, bundle.original.public_key))
         ok, detail = _check_pack_bundle(z, bundle, trusted, media_prefix=f"visits/{vid}/media/")
         suspect_total += len(
             ledger.suspect_receipts([bundle.original] + [e.receipt for e in bundle.reviews], revoked=revoked)
@@ -2276,6 +2380,7 @@ def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -
             return False, f"attestation {rid}: {why}"
         if att.visit_id != a.get("visit_id") or att.payload_hash != a.get("payload_hash"):
             return False, f"attestation {rid}: does not match the manifest's signed entry"
+        member_ids.append((att.id, att.payload_hash, att.public_key))
     # Fail closed on ANY file the signed manifest doesn't name — a smuggled
     # top-level file or an extra member inside a listed visit directory would
     # otherwise ride inside a "VERIFIED" pack. Media members are digest-checked
@@ -2288,6 +2393,7 @@ def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -
         "verify.html",
         "index.html",
         "verifier_manifest.json",
+        "log_checkpoint.json",
     }
     allowed |= {f"attestations/{a.get('receipt_id')}.json" for a in manifest.get("attestations", [])}
     for vid in visit_ids:
@@ -2304,6 +2410,20 @@ def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -
         return False, tnote
     if tnote:
         manifest_note += f"; {tnote}"
+    if sig is not None:
+        member_ids.append((sig.get("id"), sig.get("payload_hash"), sig.get("public_key")))
+    if "verifier_manifest.json" in z.namelist():
+        try:
+            vm = json.loads(z.read("verifier_manifest.json"))
+            if vm.get("id") and vm.get("payload_hash"):
+                member_ids.append((vm["id"], vm["payload_hash"], vm.get("public_key")))
+        except Exception:  # noqa: BLE001 — malformed already failed above
+            pass
+    lok, lnote = _verify_log_pin(z, trusted, member_ids)
+    if not lok:
+        return False, lnote
+    if lnote:
+        manifest_note += f"; {lnote}"
     if len(trusted) > 1:
         manifest_note += f"; {len(trusted)} issuer keys linked via the signed rotation chain"
     if suspect_total:

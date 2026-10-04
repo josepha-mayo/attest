@@ -1748,6 +1748,82 @@ def _issuer(args: argparse.Namespace) -> None:
         print(text, end="")
 
 
+def _checkpoint(args: argparse.Namespace) -> None:
+    """Sign the transparency log's current Merkle Tree Head — an STH receipt
+    committing to exactly the receipts chained so far. Two checkpoints can be
+    bridged by a consistency proof and any receipt can carry an inclusion
+    proof — 'append-only' becomes checkable without enumerating the chain."""
+    from .instance import acquire_instance_lock
+    from .store import Store
+
+    db = settings.data_dir / "attest.sqlite3"
+    if not db.exists():
+        sys.exit(f"no store at {db}")
+    acquire_instance_lock(settings.data_dir)
+    store = Store(db)
+    try:
+        engine = _cli_engine(store)
+        receipt = engine.issue_log_checkpoint()
+        p = receipt.payload
+        out = {
+            "checkpoint": receipt.model_dump(mode="json"),
+            "boundary": p.get("boundary"),
+        }
+        if args.out:
+            from pathlib import Path
+
+            Path(args.out).write_text(json.dumps(out, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            print(f"wrote {args.out}")
+        print(
+            f"checkpoint {receipt.id[:24]}… — tree size {p['tree_size']}, "
+            f"root {p['root_sha256'][:24]}… (verify with `attest status`)"
+        )
+    finally:
+        store.close()
+
+
+def _prove(args: argparse.Namespace) -> None:
+    """Emit the RFC 6962 inclusion proof for one receipt — the compact
+    answer to 'was this receipt in the deployment's published log?'."""
+    from .store import Store
+
+    db = settings.data_dir / "attest.sqlite3"
+    if not db.exists():
+        sys.exit(f"no store at {db}")
+    store = Store(db)
+    try:
+        receipt = store.receipt(args.receipt_id)
+        if receipt is None:
+            sys.exit(f"unknown receipt {args.receipt_id}")
+        engine = _cli_engine(store)
+        proof = engine.inclusion_proof(receipt)
+        if proof is None:
+            sys.exit(f"receipt {receipt.id} is not in the log's committed order")
+        print(json.dumps(proof, indent=2, ensure_ascii=False))
+    finally:
+        store.close()
+
+
+def _consistency(args: argparse.Namespace) -> None:
+    """Emit the RFC 6962 consistency proof bridging an earlier signed tree
+    head to the current one — 'the log only appended since' in O(log n),
+    verifiable offline against the checkpoint the auditor already holds."""
+    from .store import Store
+
+    db = settings.data_dir / "attest.sqlite3"
+    if not db.exists():
+        sys.exit(f"no store at {db}")
+    store = Store(db)
+    try:
+        engine = _cli_engine(store)
+        proof = engine.consistency_proof(args.first)
+        if proof is None:
+            sys.exit(f"cannot prove consistency from size {args.first}")
+        print(json.dumps(proof, indent=2, ensure_ascii=False))
+    finally:
+        store.close()
+
+
 def _digest(args: argparse.Namespace) -> None:
     """Sign a digest of the records written for an interval — counts by outcome,
     review counts by stance, and the exact receipt set summarized."""
@@ -1912,6 +1988,18 @@ def _status(args: argparse.Namespace) -> None:
         # receipt order ARE the linked lineage when the chain is intact.
         issuers = list(dict.fromkeys(r.public_key for r in store.receipts()))
         issuer_count = len(issuers) if chain_ok else 0
+        # Transparency head: the Merkle root over the receipt chain — one
+        # commitment to the whole log. The latest signed checkpoint and how
+        # many leaves postdate it show how stale the proofs are. Checkpoint
+        # receipts are not leaves (engine.log_leaves) — counting them would
+        # report a different log than the checkpoints and /api/log/head serve.
+        from .transparency import root as _mth
+
+        content = [r for r in all_receipts if r.payload.get("record_type") != "log_checkpoint"]
+        tree_root = _mth([bytes.fromhex(r.payload_hash) for r in content]).hex()
+        checkpoints = [r for r in all_receipts if r.payload.get("record_type") == "log_checkpoint"]
+        last_cp = checkpoints[-1].payload if checkpoints else None
+        uncommitted = len(content) - int(last_cp["tree_size"]) if last_cp else len(content)
         if getattr(args, "json", False):
             print(
                 json.dumps(
@@ -1929,6 +2017,12 @@ def _status(args: argparse.Namespace) -> None:
                         "revoked_issuers": revoked,
                         "suspect_receipts": suspect_n,
                         "attestations": att_types,
+                        "transparency": {
+                            "tree_size": len(content),
+                            "root_sha256": tree_root,
+                            "checkpoint_size": (last_cp or {}).get("tree_size"),
+                            "leaves_since_checkpoint": uncommitted,
+                        },
                     },
                     default=str,
                 )
@@ -1962,6 +2056,12 @@ def _status(args: argparse.Namespace) -> None:
         if att_types:
             detail = ", ".join(f"{n} {t}" for t, n in sorted(att_types.items()))
             print(f"attestations: {detail}")
+        cp_note = (
+            f"checkpoint at size {last_cp['tree_size']} ({uncommitted} newer leaf/leaves)"
+            if last_cp
+            else "no checkpoint yet (`attest checkpoint` to sign one)"
+        )
+        print(f"log:      {len(content)} leaves — Merkle root {tree_root[:24]}…; {cp_note}")
         print(f"reviews:  {stats['reviews']}, late events retained: {stats['late_events']}")
         print(f"inbox:    {queue if queue else 'empty'}")
         print(f"webhooks: {intake}")
@@ -2178,7 +2278,7 @@ def _export(args: argparse.Namespace) -> None:
     """Write a case pack for a site straight from the store — no server needed."""
     from pathlib import Path
 
-    from .disputepack import build_case_pack
+    from .disputepack import build_case_pack, log_member
     from .instance import acquire_instance_lock
     from .models import ReviewBundle
     from .reviews import countersign_status
@@ -2208,6 +2308,7 @@ def _export(args: argparse.Namespace) -> None:
             manifest_signer=lambda m: engine.issue_export_manifest(site, m),
             issuer_key=engine.signer.public_key_b64,
             tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"site:{site.id}", t),
+            log_fn=lambda rs: log_member(engine, rs),
         )
         out = Path(args.out or f"case-{site.id}.zip")
         out.write_bytes(data)
@@ -2255,7 +2356,14 @@ def _attack_demo(args: argparse.Namespace) -> None:
         # The engine lets the battery mint a real signed pack, so the
         # forged-verifier attack exercises the issuer pin end to end —
         # its receipts roll back with the attempt like everything else.
-        out = run(store, settings.data_dir / "media", inbox=inbox, engine=_cli_engine(store))
+        # When no signer can load (unreachable KMS, keyless store) the rest
+        # of the battery still runs — the attack just reports SKIPPED.
+        try:
+            engine = _cli_engine(store)
+        except Exception as exc:  # noqa: BLE001
+            print(f"note: no signer available ({exc}) — pack-minting attacks will skip")
+            engine = None
+        out = run(store, settings.data_dir / "media", inbox=inbox, engine=engine)
         if out.get("baseline_note"):
             print(out["baseline_note"])
         caught = skipped = 0
@@ -2987,6 +3095,29 @@ def main(argv: list[str] | None = None) -> None:
     )
     s.add_argument("--out", default=None, help="write the document here (default: stdout)")
     s.set_defaults(fn=_issuer)
+
+    s = sub.add_parser(
+        "checkpoint",
+        help="sign the transparency log's Merkle tree head — the checkpoint "
+        "receipt every pack's log_checkpoint.json proves inclusion against",
+    )
+    s.add_argument("--out", default=None, help="also write the checkpoint document here")
+    s.set_defaults(fn=_checkpoint)
+
+    s = sub.add_parser(
+        "prove",
+        help="print the RFC 6962 inclusion proof for one receipt id",
+    )
+    s.add_argument("receipt_id", help="receipt id (rcpt_…) to prove inclusion for")
+    s.set_defaults(fn=_prove)
+
+    s = sub.add_parser(
+        "consistency",
+        help="prove the log extended a checkpoint: RFC 6962 consistency proof "
+        "from an earlier tree size to the current head",
+    )
+    s.add_argument("first", type=int, help="earlier tree size to prove extension from")
+    s.set_defaults(fn=_consistency)
 
     s = sub.add_parser(
         "triage",

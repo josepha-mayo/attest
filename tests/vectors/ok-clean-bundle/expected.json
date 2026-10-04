@@ -5,7 +5,8 @@
   "detail_contains": [
     "verified",
     "media",
-    "pinned"
+    "pinned",
+    "transparency log"
   ],
   "js": {
     "bundle_ok": true,

@@ -75,6 +75,37 @@ def _tools_pin_check(z, names, trusted, scope, failures, notes):
         notes.append(f"{pinned} verifier tool(s) pinned by issuer-signed manifest")
 
 
+def _log_pin_check(z, names, trusted, member_ids, failures, notes):
+    """``log_checkpoint.json`` turns 'the pack's receipts verify' into 'the
+    pack's receipts were committed to the deployment's published log' —
+    an RFC 6962 inclusion proof each, checked against a signed tree head.
+    A validly-signed receipt never committed to the log now fails."""
+    res, err = check_log_pin(
+        lambda n: z.read(n) if n in names else None,
+        member_ids,
+        trusted or set(),
+    )
+    if err:
+        failures.append(err)
+    elif res:
+        proven, size = res
+        notes.append(
+            f"{proven} receipt(s) proven inside the deployment transparency log at checkpoint size {size}"
+        )
+
+
+def _bundle_receipt_ids(bundle) -> list[tuple[str, str, str]]:
+    """(receipt_id, payload_hash, public_key) for the bundle's log-member
+    receipts — the original. Review entries anchor to its hash inside the
+    review chain (verified separately); they are not leaves of the
+    receipts-table log."""
+    try:
+        o = bundle["original"]
+        return [(o["id"], o["payload_hash"], o["public_key"])]
+    except (KeyError, TypeError):
+        return []  # malformed bundles already fail in the verify loop
+
+
 _TOOLS_PIN_NAME = "verifier_manifest.json"
 _VERIFIER_TOOL_NAMES = frozenset(
     {"verify_case.py", "verify_bundle.py", "verify.html", "index.html", "README.txt"}
@@ -138,6 +169,87 @@ def check_tools_pin(read_member, names, trusted: set, scope: str) -> tuple[int |
         if "/" not in name and name in _VERIFIER_TOOL_NAMES and name not in tools:
             return None, f"{name}: verifier tooling present but not covered by the signed pin"
     return len(tools), None
+
+
+_LOG_MEMBER = "log_checkpoint.json"
+
+
+def check_log_pin(
+    read_member, receipt_ids: list[tuple[str, str, str]], trusted: set
+) -> tuple[tuple[int, int] | None, str | None]:
+    """Validate ``log_checkpoint.json``: a signed Merkle Tree Head plus an
+    RFC 6962 inclusion path proving every receipt in the pack sat inside the
+    deployment's published log — 'valid signature' alone no longer implies
+    'was ever logged'. ``receipt_ids`` is ``(receipt_id, payload_hash,
+    public_key)`` for every receipts-table member the pack holds (bundle
+    originals, attestations, manifests, lifecycle receipts — review entries
+    anchor to the original's hash instead of sitting in the log). Absent is a
+    pre-checkpoint pack — reported,
+    not failed; present-and-incomplete fails closed. The checkpoint receipt
+    itself anchors the tree and carries no proof (its own leaf postdates its
+    head). Returns ((proven, tree_size), None), (None, None) when absent, or
+    (None, error)."""
+    raw = read_member(_LOG_MEMBER)
+    if raw is None:
+        return None, None
+    from .ledger import verify_receipt
+    from .models import Receipt
+    from .transparency import verify_inclusion
+
+    try:
+        doc = json.loads(raw)
+    except Exception:  # noqa: BLE001
+        return None, "log_checkpoint.json: not readable JSON"
+    cp_raw = doc.get("checkpoint") if isinstance(doc, dict) else None
+    proofs = doc.get("proofs") if isinstance(doc, dict) else None
+    if not isinstance(cp_raw, dict) or not isinstance(proofs, dict):
+        return None, "log_checkpoint.json: malformed checkpoint document"
+    try:
+        cp = Receipt.model_validate(cp_raw)
+    except Exception as exc:  # noqa: BLE001
+        return None, f"log_checkpoint.json: checkpoint is not a receipt ({exc})"
+    payload = cp.payload
+    if payload.get("record_type") != "log_checkpoint":
+        return None, "log_checkpoint.json: not a log_checkpoint receipt"
+    if cp.public_key not in trusted:
+        return None, "log_checkpoint.json: signed outside the trusted issuer chain"
+    ok, why = verify_receipt(cp, public_key=cp.public_key)
+    if not ok:
+        return None, f"log_checkpoint.json: {why}"
+    size = payload.get("tree_size")
+    root_hex = payload.get("root_sha256")
+    if not isinstance(size, int) or size < 1 or not isinstance(root_hex, str):
+        return None, "log_checkpoint.json: malformed tree head"
+    try:
+        root_b = bytes.fromhex(root_hex)
+    except ValueError:
+        return None, "log_checkpoint.json: malformed tree head"
+    proven = 0
+    for rid, ph, pub in receipt_ids:
+        # Only issuer-lineage receipts owe proofs: a foreign-signed pool
+        # entry is inert (it can't join the trust walk) and never claimed
+        # log membership — requiring its proof would let a graft kill packs.
+        if pub not in trusted:
+            continue
+        if ph == cp.payload_hash:
+            continue
+        p = proofs.get(ph)
+        if not isinstance(p, dict):
+            return None, (
+                f"log_checkpoint.json: receipt {rid} has no inclusion proof — "
+                "never committed to the deployment log"
+            )
+        try:
+            path = [bytes.fromhex(h) for h in p.get("path") or []]
+        except (TypeError, ValueError):
+            return None, f"log_checkpoint.json: malformed proof for receipt {rid}"
+        idx = p.get("leaf_index")
+        if not isinstance(idx, int) or not verify_inclusion(bytes.fromhex(ph), size, idx, path, root_b):
+            return None, (
+                f"log_checkpoint.json: inclusion proof for receipt {rid} does not reach the signed tree head"
+            )
+        proven += 1
+    return (proven, size), None
 
 
 def _key_pool(z, attestations: dict) -> list:
@@ -442,6 +554,7 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                     "verify.html",
                     "index.html",
                     "verifier_manifest.json",
+                    "log_checkpoint.json",
                 }
                 allowed |= {f"attestations/{rid}.json" for rid in attestations}
                 for vid in entries:
@@ -469,6 +582,27 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                     failures,
                     notes,
                 )
+                member_ids = []
+                for b in bundles.values():
+                    member_ids += _bundle_receipt_ids(b)
+                for rid in attestations:
+                    try:
+                        att = json.loads(z.read(f"attestations/{rid}.json"))
+                        if att.get("id") and att.get("payload_hash"):
+                            member_ids.append((att["id"], att["payload_hash"], att.get("public_key")))
+                    except Exception:  # noqa: BLE001 — flagged in the verify loop
+                        continue
+                sr = manifest.get("signature_receipt") or {}
+                if sr.get("id") and sr.get("payload_hash"):
+                    member_ids.append((sr["id"], sr["payload_hash"], sr.get("public_key")))
+                if "verifier_manifest.json" in names:
+                    try:
+                        vm = json.loads(z.read("verifier_manifest.json"))
+                        if vm.get("id") and vm.get("payload_hash"):
+                            member_ids.append((vm["id"], vm["payload_hash"], vm.get("public_key")))
+                    except Exception:  # noqa: BLE001 — flagged by check_tools_pin
+                        pass
+                _log_pin_check(z, names, trusted, member_ids, failures, notes)
                 mfail = _verify_manifest_signature(manifest, issuer, trusted)
                 if mfail:
                     failures.append(mfail)
@@ -488,12 +622,14 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                 issuer = key or original.get("public_key")
                 visits[original["visit_id"]] = _visit_summary(bundle)
                 kr_pool = []
+                kr_member = []
                 if "key_rotations.json" in names:
                     from .models import Receipt
 
                     try:
                         kr = json.loads(z.read("key_rotations.json"))
-                        kr_pool = [Receipt.model_validate(r) for r in kr.get("rotations") or []]
+                        kr_member = [Receipt.model_validate(r) for r in kr.get("rotations") or []]
+                        kr_pool = list(kr_member)
                     except Exception as exc:  # noqa: BLE001
                         failures.append(f"key_rotations.json: malformed ({exc})")
                 kr_pool += list(extra_key_receipts or [])
@@ -529,6 +665,7 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                     "redaction.json",
                     "key_rotations.json",
                     "verifier_manifest.json",
+                    "log_checkpoint.json",
                 }
                 for name in names:
                     if name.endswith("/") or name in allowed or name.startswith("media/"):
@@ -539,6 +676,25 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                     names,
                     _trusted_set(issuer, kr_pool) or {issuer},
                     f"visit:{original['visit_id']}",
+                    failures,
+                    notes,
+                )
+                member_ids = _bundle_receipt_ids(bundle)
+                # Only the pack's own key_rotations.json members need proofs —
+                # --issuer doc receipts are external pin material, not members.
+                member_ids += [(r.id, r.payload_hash, r.public_key) for r in kr_member]
+                if "verifier_manifest.json" in names:
+                    try:
+                        vm = json.loads(z.read("verifier_manifest.json"))
+                        if vm.get("id") and vm.get("payload_hash"):
+                            member_ids.append((vm["id"], vm["payload_hash"], vm.get("public_key")))
+                    except Exception:  # noqa: BLE001 — flagged by check_tools_pin
+                        pass
+                _log_pin_check(
+                    z,
+                    names,
+                    _trusted_set(issuer, kr_pool) or {issuer},
+                    member_ids,
                     failures,
                     notes,
                 )
