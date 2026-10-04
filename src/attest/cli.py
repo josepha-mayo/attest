@@ -1405,8 +1405,7 @@ def _verify_log_doc(
         n_cosig, cosigners = _lm.check_cosignatures(data, cp.id, size, cp.payload["root_sha256"])
         if n_cosig:
             detail += (
-                f" — cosigned by {n_cosig} witness(es) "
-                f"({', '.join(k[:12] + '…' for k in cosigners[:3])})"
+                f" — cosigned by {n_cosig} witness(es) ({', '.join(k[:12] + '…' for k in cosigners[:3])})"
             )
         # --against pins the earlier head: the checkpoint must bridge FROM
         # that exact signed head, offline, no consistency endpoint needed.
@@ -2110,9 +2109,7 @@ def _checkpoint(args: argparse.Namespace) -> None:
                         base,
                         issuer_doc,
                         out["checkpoint"],
-                        lambda pinned_size: engine.consistency_proof(
-                            pinned_size, int(p["tree_size"])
-                        ),
+                        lambda pinned_size: engine.consistency_proof(pinned_size, int(p["tree_size"])),
                     )
                 except ValueError as exc:
                     print(f"witness {base}: unreachable ({exc}) — checkpoint unsigned by it", file=sys.stderr)
@@ -2189,6 +2186,20 @@ def _consistency(args: argparse.Namespace) -> None:
         store.close()
 
 
+def _https_base(url: str, role: str) -> str:
+    """Normalize a deployment URL to a scheme://netloc base under the
+    remote-trust policy: HTTPS everywhere except loopback, where a
+    schemeless host means a plain-HTTP dev server."""
+    if "://" in url:
+        base = urlsplit(url)
+    else:
+        probe = urlsplit(f"https://{url}")
+        base = urlsplit(f"{'http' if _is_loopback(probe.hostname or '') else 'https'}://{url}")
+    if base.scheme != "https" and not _is_loopback(base.hostname or ""):
+        sys.exit(f"{role} requires HTTPS — loopback excepted")
+    return f"{base.scheme}://{base.netloc}"
+
+
 def _monitor(args: argparse.Namespace) -> None:
     """Watch a deployment's transparency log like a Certificate-Transparency
     monitor watches a CT log: pin the signed tree head, then require every
@@ -2201,15 +2212,7 @@ def _monitor(args: argparse.Namespace) -> None:
 
     from . import logmonitor
 
-    url = args.url
-    if "://" in url:
-        base_parts = urlsplit(url)
-    else:
-        probe = urlsplit(f"https://{url}")
-        base_parts = urlsplit(f"{'http' if _is_loopback(probe.hostname or '') else 'https'}://{url}")
-    if base_parts.scheme != "https" and not _is_loopback(base_parts.hostname or ""):
-        sys.exit("monitoring a remote deployment requires HTTPS — loopback excepted")
-    base = f"{base_parts.scheme}://{base_parts.netloc}"
+    base = _https_base(args.url, "monitoring a remote deployment")
     import hashlib
 
     state_path = args.state or f"attest-monitor-{hashlib.sha256(base.encode()).hexdigest()[:12]}.json"
@@ -2235,6 +2238,35 @@ def _monitor(args: argparse.Namespace) -> None:
         new_state, ok, lines = logmonitor.check(
             state, doc, head, fetch_consistency, datetime.now(tz=UTC).isoformat()
         )
+        # Cross-view: compare what THIS monitor pinned against what an
+        # independent witness deployment attests — two signed views of the
+        # same issuer's log that either agree or expose a fork visible to
+        # only one observer. Only compared after a successful check cycle:
+        # a failed pin is no trustworthy view to compare from.
+        if ok and new_state is not None and getattr(args, "witness", None):
+            wbase = _https_base(args.witness, "witness")
+            try:
+                heads = logmonitor.fetch_json(f"{wbase}/api/witness/heads")
+            except ValueError as exc:
+                ok = False
+                lines.append(f"witness view unreachable: {exc}")
+            else:
+                if not isinstance(heads, dict) or not isinstance(heads.get("pins"), list):
+                    ok = False
+                    lines.append("witness heads response is malformed — cannot compare views")
+                else:
+                    pin = next(
+                        (
+                            p
+                            for p in heads["pins"]
+                            if isinstance(p, dict) and p.get("issuer_key") == doc["issuer_key"]
+                        ),
+                        None,
+                    )
+                    verdict, line = logmonitor.compare_views(new_state, pin)
+                    lines.append(f"witness cross-view [{verdict}]: {line}")
+                    if verdict == "diverged":
+                        ok = False
         return ok, lines, new_state
 
     while True:
@@ -3640,6 +3672,16 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--interval", type=int, default=60, help="seconds between checks (default: 60)")
     s.add_argument("--once", action="store_true", help="run one check and exit — the CI-gate mode")
     s.add_argument("--json", action="store_true", help="emit each cycle's verdict as one JSON object")
+    s.add_argument(
+        "--witness",
+        default=None,
+        metavar="URL",
+        help=(
+            "an independent witness deployment to cross-view against — after each "
+            "cycle, compare my pinned head with the head this witness attests "
+            "(/api/witness/heads); a same-size different-root divergence fails"
+        ),
+    )
     s.set_defaults(fn=_monitor)
 
     s = sub.add_parser(

@@ -375,9 +375,7 @@ def witness_cosign(store, signer, body: dict) -> tuple[int, dict]:
                 },
             }
         if size != int(old_size):
-            bridge = verify_extends(
-                payload, first=int(old_size), first_root=bytes.fromhex(old_root)
-            )
+            bridge = verify_extends(payload, first=int(old_size), first_root=bytes.fromhex(old_root))
             if bridge is None:
                 cons = body.get("consistency")
                 try:
@@ -436,9 +434,90 @@ def witness_cosign(store, signer, body: dict) -> tuple[int, dict]:
         "tree_size": size,
         "root_sha256": root_hex,
         "checkpoint_id": cp.id,
+        "cosignature_id": cosig.id,
     }
     store.put_setting(f"witness:{issuer_key}", new_state)
     return 200, {"cosignature": cosig.model_dump(mode="json"), "pinned": new_state}
+
+
+def witness_heads(store, issuer_key: str) -> dict:
+    """This deployment's published witness view — every issuer head it has
+    pinned by cosigning, transport-free and read-only. Served publicly so a
+    third party can compare what THIS witness attests against what the
+    issuer's deployment currently serves: two independently-signed views of
+    'the log' that either agree or expose a fork."""
+    pins = []
+    for _name, state in sorted(store.settings_by_prefix("witness:").items()):
+        if (
+            state.get("schema") == WITNESS_SCHEMA
+            and isinstance(state.get("issuer_key"), str)
+            and isinstance(state.get("tree_size"), int)
+            and isinstance(state.get("root_sha256"), str)
+        ):
+            pins.append(
+                {
+                    "issuer_key": state["issuer_key"],
+                    "tree_size": state["tree_size"],
+                    "root_sha256": state["root_sha256"],
+                    "checkpoint_id": state.get("checkpoint_id"),
+                    "cosignature_id": state.get("cosignature_id"),
+                }
+            )
+    return {
+        "schema": "attest.witness-heads/1",
+        "witness_key": issuer_key,
+        "pins": pins,
+        "boundary": (
+            "These are heads this deployment counter-signed after verifying "
+            "each extended its previous pin — they attest what the witness "
+            "OBSERVED, not that the logged content is true."
+        ),
+    }
+
+
+def compare_views(mine: dict | None, theirs: dict | None) -> tuple[str, str]:
+    """Cross-check two independent pins of the same issuer's log — mine (the
+    monitor's last verified head) against a witness's published pin.
+
+    Two observers signing the same (size, root) is the strongest public-log
+    evidence available: it means a single log was served to both. Same size
+    with different roots is the unforgeable divergence — one of us was shown
+    a forked history and no bridge can reconcile equal-size distinct roots.
+    Different sizes stay honestly undecidable: cosign cadence lags behind
+    log growth, so ahead/behind alone never proves a fork — it only names
+    which observer saw further. Returns (verdict, human line)."""
+    if theirs is None:
+        return "unseen", "the witness has never cosigned this issuer — no second view exists"
+    if mine is None:
+        return "no_pin", "no local pin to compare — run a monitor cycle first"
+    my_size, my_root = int(mine["tree_size"]), str(mine["root_sha256"])
+    w_size, w_root = int(theirs["tree_size"]), str(theirs["root_sha256"])
+    w_id = str(theirs.get("cosignature_id") or "?")[:24]
+    if my_size == w_size and my_root == w_root:
+        return (
+            "agree",
+            f"witness attests the same head I see ({w_size} leaves, cosig {w_id}…) — "
+            "two independent observers, one log",
+        )
+    if my_size == w_size:
+        return (
+            "diverged",
+            f"DIVERGED: the witness pinned a DIFFERENT root at the same size {w_size} — "
+            "a forked log was served to exactly one of us and no consistency proof "
+            "can reconcile equal-size distinct roots",
+        )
+    if w_size < my_size:
+        return (
+            "witness_behind",
+            f"witness last attested size {w_size}, behind my pinned {my_size} — "
+            "undecidable without a bridge (cosign cadence honestly lags log growth)",
+        )
+    return (
+        "witness_ahead",
+        f"witness attests a NEWER head at size {w_size} than my pinned {my_size} — "
+        "undecidable without a bridge: my pin may be stale, or the witness saw a "
+        "head the log can no longer produce",
+    )
 
 
 def cosign_at(

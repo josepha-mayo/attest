@@ -1861,3 +1861,27 @@ def test_witness_endpoint_over_http(api, household, t0):
     assert body["pinned"]["tree_size"] == cp.payload["tree_size"]
     # The cosignature receipt lives on THIS ledger — auditable like any other.
     assert any(x.payload.get("record_type") == "witness_cosignature" for x in st.store.receipts())
+
+    # The published viewpoint: /api/witness/heads now lists the pin — and
+    # BOTH witness surfaces are unauthenticated public verification material,
+    # the cosign write and the heads read alike.
+    anon = httpx.Client(transport=api._transport, base_url="http://testserver")
+    try:
+        heads = anon.get("/api/witness/heads")
+        assert heads.status_code == 200
+        body = heads.json()
+        assert body["witness_key"] == st.signer.public_key_b64
+        assert [p["checkpoint_id"] for p in body["pins"]] == [cp.id]
+        assert body["pins"][0]["cosignature_id"] == resp.json()["cosignature"]["id"]
+        # An unauthenticated caller can even drive a cosign — it spends only
+        # the witness's own signature on public material.
+        again = anon.post(
+            "/api/witness/cosign",
+            content=_json.dumps({"issuer_doc": doc, "checkpoint": cp.model_dump(mode="json")}),
+            headers={"content-type": "application/json"},
+        )
+        assert again.status_code == 200
+        # Idempotent: the repeat returns the SAME cosig, no duplicate write.
+        assert again.json()["cosignature"]["id"] == resp.json()["cosignature"]["id"]
+    finally:
+        anon.close()

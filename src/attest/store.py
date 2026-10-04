@@ -257,6 +257,27 @@ class Store:
                 raise StoreCorrupt(f"settings row {name!r} is not a dict — the store is corrupt")
             return value
 
+    def settings_by_prefix(self, prefix: str) -> dict[str, dict]:
+        """Every settings row whose name starts with ``prefix`` — read-only,
+        same StoreCorrupt contract as ``setting``. The witness's per-issuer
+        pins (``witness:{issuer_key}``) are enumerated this way so the
+        public heads endpoint can publish every view it has attested."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT name, body FROM settings WHERE substr(name, 1, ?) = ?",
+                (len(prefix), prefix),
+            ).fetchall()
+        out: dict[str, dict] = {}
+        for name, body in rows:
+            try:
+                value = json.loads(body)
+            except Exception as exc:
+                raise StoreCorrupt(f"settings row {name!r} is not valid JSON") from exc
+            if not isinstance(value, dict):
+                raise StoreCorrupt(f"settings row {name!r} is not a dict — the store is corrupt")
+            out[name] = value
+        return out
+
     def put_setting(self, name: str, value: dict) -> None:
         with self.transaction():
             body = json.dumps(value)

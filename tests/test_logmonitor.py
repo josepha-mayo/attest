@@ -727,3 +727,156 @@ def test_check_cosignatures_counts_subject_bound_sigs(engine, store, household, 
         cp.payload["root_sha256"],
     )
     assert n == 0
+
+
+def test_witness_heads_publishes_pinned_views(engine, store, household, schedule, t0):
+    """witness_heads enumerates every issuer pin this deployment attested —
+    the published viewpoint a third party compares against the issuer's
+    own head. Malformed pin rows are dropped, not served."""
+    from attest import logmonitor
+
+    w_store, w_signer = _witness_deployment()
+    _seed(engine, household[0], t0)
+    cp = engine.issue_log_checkpoint()
+    status, out = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": _doc_for(engine), "checkpoint": cp.model_dump(mode="json")}
+    )
+    assert status == 200
+
+    heads = logmonitor.witness_heads(w_store, w_signer.public_key_b64)
+    assert heads["schema"] == "attest.witness-heads/1"
+    assert heads["witness_key"] == w_signer.public_key_b64
+    assert len(heads["pins"]) == 1
+    pin = heads["pins"][0]
+    assert pin["tree_size"] == cp.payload["tree_size"]
+    assert pin["root_sha256"] == cp.payload["root_sha256"]
+    assert pin["checkpoint_id"] == cp.id
+    assert pin["cosignature_id"] == out["cosignature"]["id"]
+
+    # A corrupt pin row is dropped from the published view, not served raw.
+    w_store.put_setting("witness:corrupt", {"schema": "bogus"})
+    w_store.put_setting("other", {"schema": logmonitor.WITNESS_SCHEMA})
+    heads = logmonitor.witness_heads(w_store, w_signer.public_key_b64)
+    assert len(heads["pins"]) == 1
+
+
+def test_compare_views_agree_diverge_lag():
+    """The cross-view verdict: same head = two observers agree; same size
+    different root = the unforgeable fork; different sizes = honestly
+    undecidable (cosign cadence lags growth)."""
+    from attest import logmonitor
+
+    mine = {"tree_size": 10, "root_sha256": "aa" * 32}
+    theirs = {"tree_size": 10, "root_sha256": "aa" * 32, "cosignature_id": "rcpt_x"}
+
+    verdict, line = logmonitor.compare_views(mine, theirs)
+    assert verdict == "agree" and "two independent observers" in line
+
+    verdict, line = logmonitor.compare_views(mine, None)
+    assert verdict == "unseen"
+
+    verdict, line = logmonitor.compare_views(None, theirs)
+    assert verdict == "no_pin"
+
+    fork = dict(theirs, root_sha256="bb" * 32)
+    verdict, line = logmonitor.compare_views(mine, fork)
+    assert verdict == "diverged" and "forked log" in line
+
+    verdict, line = logmonitor.compare_views(mine, dict(theirs, tree_size=7))
+    assert verdict == "witness_behind" and "undecidable" in line
+
+    verdict, line = logmonitor.compare_views(mine, dict(theirs, tree_size=14))
+    assert verdict == "witness_ahead" and "undecidable" in line
+
+
+def test_settings_by_prefix_reads_only_matching_rows(store):
+    """The witness pin enumeration helper: prefix-scoped, dict-only,
+    corrupt rows fail loudly like every other store read."""
+    import pytest
+
+    from attest.store import StoreCorrupt
+
+    store.put_setting("witness:aaa", {"n": 1})
+    store.put_setting("witness:bbb", {"n": 2})
+    store.put_setting("witnessed:ccc", {"n": 3})  # prefix must not bleed
+    store.put_setting("other", {"n": 4})
+    got = store.settings_by_prefix("witness:")
+    assert got == {"witness:aaa": {"n": 1}, "witness:bbb": {"n": 2}}
+
+    # A non-dict row under the prefix fails loudly, never silently skipped.
+    store._conn.execute("INSERT INTO settings (name, body) VALUES ('witness:bad', 'not json')")
+    with pytest.raises(StoreCorrupt):
+        store.settings_by_prefix("witness:")
+
+
+def test_monitor_witness_cross_view_cli(tmp_path, monkeypatch, capsys):
+    """`attest monitor --witness` compares the pinned head against the
+    witness's published pins — agreement extends the cycle's report, a
+    same-size different-root divergence fails the cycle without repinning."""
+    import argparse
+    import contextlib
+    import io
+
+    from attest import cli, logmonitor
+
+    state_file = tmp_path / "mon.json"
+    cp = {
+        "id": "rcpt_cp",
+        "visit_id": "log:7:ab",
+        "sequence": 7,
+        "payload_hash": "cd" * 32,
+        "signature": "s",
+        "public_key": "K" * 43,
+        "payload": {"record_type": "log_checkpoint", "tree_size": 7, "root_sha256": "ab" * 32},
+    }
+    doc = {"schema": "attest.issuer/1", "issuer_key": "K" * 43, "key_receipts": []}
+    head = {"tree_size": 7, "root_sha256": "ab" * 32, "checkpoint": cp}
+    monkeypatch.setattr(cli, "_fetch_issuer_doc", lambda url: doc)
+
+    state = {
+        "schema": logmonitor.STATE_SCHEMA,
+        "issuer_key": doc["issuer_key"],
+        "tree_size": 7,
+        "root_sha256": "ab" * 32,
+        "checkpoint_id": "rcpt_cp",
+    }
+    monkeypatch.setattr(logmonitor, "check", lambda *a, **k: (state, True, ["head unchanged"]))
+
+    ns = argparse.Namespace(
+        url="https://deploy.example",
+        issuer=None,
+        state=str(state_file),
+        interval=60,
+        once=True,
+        json=False,
+        witness="https://witness.example",
+    )
+
+    def run(heads):
+        monkeypatch.setattr(
+            logmonitor,
+            "fetch_json",
+            lambda url, client=None: heads if "witness" in url else head,
+        )
+        buf = io.StringIO()
+        with pytest.raises(SystemExit) as e:
+            with contextlib.redirect_stdout(buf):
+                cli._monitor(ns)
+        return e.value.code, buf.getvalue()
+
+    # Same pin as the witness attests → agree, exit 0.
+    code, out = run({"pins": [{"issuer_key": doc["issuer_key"], "tree_size": 7, "root_sha256": "ab" * 32}]})
+    assert code == 0 and "[agree]" in out
+
+    # Witness never cosigned this issuer → reported, still passes.
+    code, out = run({"pins": []})
+    assert code == 0 and "[unseen]" in out
+
+    # Same size, different root → the unforgeable divergence, exit 1.
+    code, out = run({"pins": [{"issuer_key": doc["issuer_key"], "tree_size": 7, "root_sha256": "ff" * 32}]})
+    assert code == 1 and "[diverged]" in out
+    assert not state_file.exists() or logmonitor.state_load(state_file)["root_sha256"] == "ab" * 32
+
+    # A malformed heads body fails the cycle honestly.
+    code, out = run({"pins": "not-a-list"})
+    assert code == 1 and "malformed" in out

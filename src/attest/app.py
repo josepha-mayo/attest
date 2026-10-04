@@ -285,7 +285,7 @@ def create_app(
         # issuer doc + checkpoint (public crypto material), and the witness's
         # only privilege spent is its own signature — a public cosigning
         # service by design, like a CT witness.
-        if request.url.path.startswith("/api/log/") or request.url.path == "/api/witness/cosign":
+        if request.url.path.startswith(("/api/log/", "/api/witness/")):
             return
         if request.method not in ("GET", "HEAD", "OPTIONS"):
             origin = request.headers.get("origin")
@@ -995,6 +995,19 @@ def create_app(
             logmonitor.witness_cosign, store, signer, body if isinstance(body, dict) else {}
         )
         return JSONResponse(out, status_code=status)
+
+    @app.get("/api/witness/heads")
+    async def witness_heads():
+        """The witness's published viewpoint — every issuer head this
+        deployment has pinned by cosigning. Without it the world can only
+        see the cosignatures an issuer chose to pack; with it, an auditor
+        compares 'what the witness attests' against 'what the issuer
+        serves' — two independently-signed views of the log that either
+        agree or expose the fork. Public verification material like the
+        log endpoints."""
+        from . import logmonitor
+
+        return await asyncio.to_thread(logmonitor.witness_heads, store, signer.public_key_b64)
 
     @app.get("/visits/{visit_id}", response_class=HTMLResponse)
     async def visit_page(request: Request, visit_id: str = PathParam(max_length=128)):
