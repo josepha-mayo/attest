@@ -533,6 +533,41 @@ def _pseudo_for(state: dict) -> str | None:
     return f"witness:{str(issuer_key)[:24]}:{cp_id}"
 
 
+def anchor_published_pins(store, engine, heads: dict) -> dict:
+    """Anchor each published pin inside the WITNESS's own transparency log.
+
+    A witness_cosignature is a leaf in this deployment's Merkle log like
+    every other receipt — so once a checkpoint covers it, "the witness
+    attested this head" is itself publicly anchored. A witness that served
+    one auditor cosig A and another auditor cosig B couldn't hide the
+    double-speak: both attestations sit in its own published log, and any
+    auditor can demand the inclusion proof. Pins whose cosig post-dates the
+    newest checkpoint stay unanchored — absence is honest, never a claim."""
+    from .models import Receipt
+
+    latest_cp = next(
+        (r for r in reversed(store.receipts()) if r.payload.get("record_type") == "log_checkpoint"),
+        None,
+    )
+    if latest_cp is None:
+        return heads
+    size = int(latest_cp.payload["tree_size"])
+    for pin in heads.get("pins") or []:
+        cosig = pin.get("cosignature")
+        if not isinstance(cosig, dict):
+            continue
+        try:
+            proof = engine.inclusion_proof(Receipt.model_validate(cosig), size=size)
+        except Exception:  # noqa: BLE001 — unanchorable cosigs stay unanchored
+            proof = None
+        if proof is not None:
+            pin["witness_anchor"] = {
+                "checkpoint": latest_cp.model_dump(mode="json"),
+                "proof": proof,
+            }
+    return heads
+
+
 def compare_views(
     mine: dict | None, theirs: dict | None, witness_trusted: set | None = None
 ) -> tuple[str, str]:
@@ -596,6 +631,50 @@ def compare_views(
             "the signed cosignature does not attest the pin's claimed head — "
             "the unsigned fields disagree with the receipt; the view is unusable",
         )
+    # The witness may also publish its own log anchor: the cosig is a leaf
+    # in the WITNESS's transparency log, and a checkpoint covering it means
+    # the attestation itself is publicly committed — the witness can't
+    # double-speak without forking its own log too. A served anchor that
+    # doesn't verify is a lie like any other served falsehood.
+    from .transparency import verify_inclusion
+
+    anchor = theirs.get("witness_anchor")
+    anchored_size: int | None = None
+    if isinstance(anchor, dict):
+        try:
+            acp = Receipt.model_validate(anchor.get("checkpoint"))
+            ap = acp.payload
+            aproof = anchor.get("proof") or {}
+            anchored = (
+                ap.get("record_type") == "log_checkpoint"
+                and (witness_trusted is None or acp.public_key in witness_trusted)
+                and verify_receipt(acp, public_key=acp.public_key)[0]
+                and isinstance(ap.get("tree_size"), int)
+                and isinstance(ap.get("root_sha256"), str)
+                and verify_inclusion(
+                    bytes.fromhex(cosig.payload_hash),
+                    int(ap["tree_size"]),
+                    int(aproof["leaf_index"]),
+                    [bytes.fromhex(h) for h in aproof["path"]],
+                    bytes.fromhex(ap["root_sha256"]),
+                )
+            )
+        except Exception:  # noqa: BLE001 — any malformed anchor is a lie, not None
+            anchored = False
+        if anchored:
+            anchored_size = int(ap["tree_size"])
+        else:
+            return (
+                "unverifiable",
+                "the pin's witness_anchor does not verify — the cosig does not "
+                "sit inside the witness's own published log as claimed",
+            )
+    anchor_note = (
+        f"; the cosig itself sits inside the witness's published log at size "
+        f"{anchored_size} — the attestation is publicly anchored"
+        if anchored_size is not None
+        else ""
+    )
     # From here the comparison runs on the SIGNED subject fields — the only
     # view the witness actually attested.
     my_size, my_root = int(mine["tree_size"]), str(mine["root_sha256"])
@@ -605,26 +684,27 @@ def compare_views(
         return (
             "agree",
             f"witness attests the same head I see ({w_size} leaves, cosig {w_id}…) — "
-            "two independent observers, one log",
+            f"two independent observers, one log{anchor_note}",
         )
     if my_size == w_size:
         return (
             "diverged",
             f"DIVERGED: the witness pinned a DIFFERENT root at the same size {w_size} — "
             "a forked log was served to exactly one of us and no consistency proof "
-            "can reconcile equal-size distinct roots",
+            f"can reconcile equal-size distinct roots{anchor_note}",
         )
     if w_size < my_size:
         return (
             "witness_behind",
             f"witness last attested size {w_size}, behind my pinned {my_size} — "
-            "undecidable without a bridge (cosign cadence honestly lags log growth)",
+            "undecidable without a bridge (cosign cadence honestly lags log growth)"
+            f"{anchor_note}",
         )
     return (
         "witness_ahead",
         f"witness attests a NEWER head at size {w_size} than my pinned {my_size} — "
         "undecidable without a bridge: my pin may be stale, or the witness saw a "
-        "head the log can no longer produce",
+        f"head the log can no longer produce{anchor_note}",
     )
 
 
@@ -649,7 +729,17 @@ def cosign_at(
     if resp.get("status") == 200:
         cosig = resp.get("cosignature")
         if isinstance(cosig, dict) and isinstance(cosig.get("id"), str):
-            return cosig, f"cosigned ({cosig['id'][:24]}…)"
+            anchor = resp.get("witness_anchor")
+            note = ""
+            if isinstance(anchor, dict):
+                try:
+                    note = (
+                        f" — attestation anchored in the witness's own log "
+                        f"at size {int(anchor['checkpoint']['payload']['tree_size'])}"
+                    )
+                except (KeyError, TypeError, ValueError):
+                    note = ""
+            return cosig, f"cosigned ({cosig['id'][:24]}…){note}"
         return None, f"refused — malformed cosignature in response: {cosig}"
     return None, f"refused — {resp.get('error') or resp}"
 

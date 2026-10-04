@@ -1012,6 +1012,25 @@ def create_app(
         status, out = await asyncio.to_thread(
             logmonitor.witness_cosign, store, signer, body if isinstance(body, dict) else {}
         )
+        if status == 200:
+            # Anchor the attestation inside the WITNESS's own log on the spot:
+            # checkpoint now and return the cosig's inclusion proof — 'the
+            # witness attested this' is publicly committed the moment it's
+            # served, and double-speak would fork our own published log too.
+            from .models import Receipt
+
+            cp = await asyncio.to_thread(engine.issue_log_checkpoint)
+            if cp is not None:
+                proof = await asyncio.to_thread(
+                    engine.inclusion_proof,
+                    Receipt.model_validate(out["cosignature"]),
+                    size=int(cp.payload["tree_size"]),
+                )
+                if proof is not None:
+                    out["witness_anchor"] = {
+                        "checkpoint": cp.model_dump(mode="json"),
+                        "proof": proof,
+                    }
         return JSONResponse(out, status_code=status)
 
     @app.get("/api/witness/heads")
@@ -1025,7 +1044,12 @@ def create_app(
         log endpoints."""
         from . import logmonitor
 
-        return await asyncio.to_thread(logmonitor.witness_heads, store, signer.public_key_b64)
+        heads = await asyncio.to_thread(logmonitor.witness_heads, store, signer.public_key_b64)
+        # Anchor each published view inside THIS deployment's own log where a
+        # checkpoint covers the cosig — the witness can't serve divergent
+        # attestations to different auditors without forking its own log too.
+        await asyncio.to_thread(logmonitor.anchor_published_pins, store, engine, heads)
+        return heads
 
     @app.get("/visits/{visit_id}", response_class=HTMLResponse)
     async def visit_page(request: Request, visit_id: str = PathParam(max_length=128)):

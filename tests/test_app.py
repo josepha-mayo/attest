@@ -1859,6 +1859,11 @@ def test_witness_endpoint_over_http(api, household, t0):
     body = resp.json()
     assert body["cosignature"]["payload"]["record_type"] == "witness_cosignature"
     assert body["pinned"]["tree_size"] == cp.payload["tree_size"]
+    # The attestation is anchored inside the WITNESS's own log on the spot —
+    # the response carries the covering checkpoint + inclusion proof.
+    anchor = body["witness_anchor"]
+    assert anchor["checkpoint"]["payload"]["record_type"] == "log_checkpoint"
+    assert anchor["proof"]["leaf"] == body["cosignature"]["payload_hash"]
     # The cosignature receipt lives on THIS ledger — auditable like any other.
     assert any(x.payload.get("record_type") == "witness_cosignature" for x in st.store.receipts())
 
@@ -1873,6 +1878,9 @@ def test_witness_endpoint_over_http(api, household, t0):
         assert body["witness_key"] == st.signer.public_key_b64
         assert [p["checkpoint_id"] for p in body["pins"]] == [cp.id]
         assert body["pins"][0]["cosignature_id"] == resp.json()["cosignature"]["id"]
+        # The published view carries the same anchor — double-speak would
+        # fork the witness's own published log.
+        assert body["pins"][0]["witness_anchor"]["checkpoint"]["id"] == anchor["checkpoint"]["id"]
         # An unauthenticated caller can even drive a cosign — it spends only
         # the witness's own signature on public material.
         again = anon.post(

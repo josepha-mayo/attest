@@ -1673,3 +1673,71 @@ def test_verify_witness_url_resolves_deployments_and_threshold(
                 )
             )
     assert "1 of 2 required" in str(e.value.code)
+
+
+def test_witness_heads_anchor_attestations_in_the_witness_log(engine, store, household, schedule, t0):
+    """Each published pin can carry the WITNESS's own log anchor: the cosig is
+    a leaf in the witness's tree, and a covering checkpoint + inclusion proof
+    makes 'the witness attested this' publicly anchored — the witness can't
+    double-speak across auditors without forking its own log too. An anchor
+    present but not verifying is served falsehood, so unverifiable."""
+    from attest import logmonitor
+    from attest.transparency import inclusion_proof, leaf_hashes, root
+
+    w_store, w_signer = _witness_deployment()
+    _seed(engine, household[0], t0)
+    cp = engine.issue_log_checkpoint()
+    status, out = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": _doc_for(engine), "checkpoint": cp.model_dump(mode="json")}
+    )
+    assert status == 200
+
+    class _Stub:
+        """The witness's proof engine — inclusion proofs only touch the store."""
+
+        def inclusion_proof(self, receipt, *, size=None):
+            return inclusion_proof(leaf_hashes(w_store.receipts()), receipt.payload_hash, size=size)
+
+    heads = logmonitor.witness_heads(w_store, w_signer.public_key_b64)
+    heads = logmonitor.anchor_published_pins(w_store, _Stub(), heads)
+    # The witness hasn't checkpointed its own log yet — no anchor is claimed.
+    assert "witness_anchor" not in heads["pins"][0]
+
+    # The witness checkpoints its own ledger — the cosig becomes anchored.
+    leaves = leaf_hashes(w_store.receipts())
+    w_cp = w_signer.issue(
+        visit_id="log:wcp",
+        sequence=99,
+        prev_hash=None,
+        facts={
+            "record_type": "log_checkpoint",
+            "tree_size": len(leaves),
+            "root_sha256": root(leaves).hex(),
+        },
+    )
+    w_store.put_receipt(w_cp)
+    heads = logmonitor.anchor_published_pins(w_store, _Stub(), heads)
+    pin = heads["pins"][0]
+    anchor = pin["witness_anchor"]
+    assert anchor["checkpoint"]["id"] == w_cp.id
+    assert anchor["proof"]["leaf"] == out["cosignature"]["payload_hash"]
+
+    # The cross-view verifies the anchor under the witness lineage and
+    # reports the attestation as publicly anchored.
+    issuer = _doc_for(engine)["issuer_key"]
+    mine = {
+        "issuer_key": issuer,
+        "tree_size": cp.payload["tree_size"],
+        "root_sha256": cp.payload["root_sha256"],
+    }
+    verdict, line = logmonitor.compare_views(mine, pin, {w_signer.public_key_b64})
+    assert verdict == "agree" and "publicly anchored" in line
+
+    # A tampered anchor is a served falsehood — unverifiable, not ignored.
+    forged = dict(pin)
+    forged["witness_anchor"] = {
+        **anchor,
+        "proof": {**anchor["proof"], "leaf_index": 99},
+    }
+    verdict, _ = logmonitor.compare_views(mine, forged, {w_signer.public_key_b64})
+    assert verdict == "unverifiable"
