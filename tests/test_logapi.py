@@ -160,7 +160,7 @@ def test_cli_checkpoint_and_prove(tmp_path, monkeypatch, ring_world, ring_client
     with contextlib.redirect_stdout(buf):
         cli._checkpoint(argparse.Namespace(out=str(tmp_path / "cp.json")))
     assert "tree size" in buf.getvalue()
-    doc = json.loads((tmp_path / "cp.json").read_text())
+    doc = json.loads((tmp_path / "cp.json").read_text(encoding="utf-8"))
     assert doc["checkpoint"]["payload"]["record_type"] == "log_checkpoint"
 
     buf = io.StringIO()
@@ -277,6 +277,90 @@ def test_cli_checkpoint_and_prove(tmp_path, monkeypatch, ring_world, ring_client
         )
     bounded = json.loads(buf.getvalue())
     assert bounded["tree_size"] == verdict["new_size"]  # closed ON cp3's tree, not the tip
+
+    # The checkpoint chain self-proves: cp3's embedded `extends` bridge
+    # closes --against continuity with no separate bridge document.
+    verdict = verify_doc(
+        bundle=str(tmp_path / "cp3.json"),
+        against=str(tmp_path / "cp2.json"),
+    )
+    assert verdict["ok"] and verdict["kind"] == "log_checkpoint"
+    assert "extends the --against head" in verdict["detail"]
+
+    # A checkpoint that does NOT extend the pinned head fails closed —
+    # --against is a continuity claim, not a suggestion.
+    with pytest.raises(SystemExit) as excinfo:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            cli._verify(
+                argparse.Namespace(
+                    bundle=str(tmp_path / "cp2.json"),
+                    key=None,
+                    issuer_url=None,
+                    json=True,
+                    checkpoint=None,
+                    against=str(tmp_path / "cp3.json"),
+                )
+            )
+    assert excinfo.value.code == 1
+    assert json.loads(buf.getvalue())["ok"] is False
+
+
+def test_anchor_pins_the_merkle_head(tmp_path, monkeypatch, ring_world, ring_client, settings, t0):
+    """``attest anchor`` is the external STH: the file a third party publishes
+    or notarizes must carry the Merkle root, or an auditor holding only the
+    anchor could verify a whole chain but never a compact inclusion proof."""
+    import argparse
+    import contextlib
+    import io
+
+    from ring_sandbox.world import DeviceKind
+
+    from attest import cli, transparency
+    from attest.engine import VisitEngine
+    from attest.ledger import Signer, verify_receipt
+    from attest.media import MediaStore
+    from attest.models import Receipt, Site
+    from attest.store import Store
+    from attest.summarize import TemplateSummarizer
+
+    disk_store = Store(tmp_path / "attest.sqlite3")
+    cam = next(d for d in ring_world.devices.values() if d.kind == DeviceKind.DOORBELL)
+    site = disk_store.put_site(
+        Site(name="Alvarez residence", ring_account_id=ring_world.account_id, door_camera_id=cam.id)
+    )
+    disk_engine = VisitEngine(
+        disk_store,
+        ring_client,
+        Signer.ephemeral(),
+        MediaStore(tmp_path / "media"),
+        TemplateSummarizer("UTC"),
+        settings,
+    )
+    for tag in ("a", "b"):
+        prev = disk_store.latest_receipt()
+        disk_store.put_receipt(
+            disk_engine.signer.issue(
+                visit_id=f"coverage:{site.id}:{tag}",
+                sequence=prev.sequence + 1 if prev else 1,
+                prev_hash=prev.payload_hash if prev else None,
+                facts={"record_type": "coverage_attestation"},
+            )
+        )
+    leaves = transparency.leaf_hashes(disk_store.receipts())
+    disk_store.close()
+
+    monkeypatch.setattr(cli.settings, "data_dir", tmp_path)
+    monkeypatch.setattr(cli.settings, "kms_key_id", None)
+    out = tmp_path / "anchor.json"
+    with contextlib.redirect_stdout(io.StringIO()):
+        cli._anchor(argparse.Namespace(out=str(out), publish=None, timestamp=False))
+    anchor = json.loads(out.read_text(encoding="utf-8"))
+    assert anchor["payload"]["log_tree_size"] == len(leaves)
+    assert anchor["payload"]["log_root_sha256"] == transparency.root(leaves).hex()
+    # The anchor verifies as a bare receipt under the deployment key.
+    ok, why = verify_receipt(Receipt.model_validate(anchor), public_key=anchor["public_key"])
+    assert ok, why
 
 
 def test_status_reports_the_log_head(tmp_path, monkeypatch, ring_world, ring_client, settings, t0):

@@ -357,3 +357,37 @@ def test_checkpoint_pack_fails_on_missing_or_bad_proof(engine, store, household,
     forged3 = rewrite(lambda n, b: json.dumps(foreign).encode() if n == "log_checkpoint.json" else b)
     ok, detail = _verify_pack(forged3, engine.signer.public_key_b64)
     assert not ok and "trusted issuer chain" in detail
+
+
+def test_verify_extends_applicability_and_expectations():
+    """The embedded-bridge verifier's three-valued contract: True only for
+    a bridge that verifies AND matches every supplied expectation; False
+    for a bridge that claims the caller's ancestry but fails; None for
+    absent, malformed, or differently-anchored bridges."""
+    from attest import transparency as tr
+
+    leaves = [bytes([i]) * 32 for i in range(7)]
+    nodes = tr.consistency_nodes(leaves, 4)
+    payload = {
+        "tree_size": 7,
+        "root_sha256": tr.root(leaves).hex(),
+        "extends": {
+            "first": 4,
+            "first_root_sha256": tr.root(leaves[:4]).hex(),
+            "checkpoint_id": "cp1",
+            "proof": [n.hex() for n in nodes],
+        },
+    }
+    assert tr.verify_extends(payload) is True
+    assert tr.verify_extends(payload, first=4, first_root=tr.root(leaves[:4])) is True
+    # Bridge doesn't apply to a different expected ancestry — not a verdict.
+    assert tr.verify_extends(payload, first=5) is None
+    # Claims our size from a different root — a signed self-contradiction.
+    assert tr.verify_extends(payload, first=4, first_root=b"\x00" * 32) is False
+    # Right ancestry, broken nodes — still a signed self-contradiction.
+    broken = {**payload, "extends": {**payload["extends"], "proof": ["00" * 32]}}
+    assert tr.verify_extends(broken) is False
+    # Absent and malformed bridges are simply not usable — never a verdict.
+    assert tr.verify_extends({}) is None
+    assert tr.verify_extends({"extends": "garbage"}) is None
+    assert tr.verify_extends({"extends": {"first": "x"}}) is None

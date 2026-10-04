@@ -268,7 +268,7 @@ def test_cli_verify_json_emits_a_gatable_verdict(tmp_path, engine, store, househ
     import zipfile
     from io import BytesIO
 
-    from attest.disputepack import build_case_pack
+    from attest.disputepack import build_case_pack, log_member
     from attest.reviews import ReviewService, countersign_status
 
     visit = engine.ingest(event(household[2], t0)).visit
@@ -282,6 +282,7 @@ def test_cli_verify_json_emits_a_gatable_verdict(tmp_path, engine, store, househ
         [(visit, bundle, countersign_status(bundle))],
         manifest_signer=lambda m: engine.issue_export_manifest(site, m),
         tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"site:{site.id}", t),
+        log_fn=lambda rs: log_member(engine, rs),
     )
     pack = tmp_path / "case.zip"
     pack.write_bytes(data)
@@ -295,6 +296,10 @@ def test_cli_verify_json_emits_a_gatable_verdict(tmp_path, engine, store, househ
     assert verdict["ok"] is True
     assert verdict["kind"] == "case-pack"
     assert "verifier tool(s) pinned" in verdict["detail"]
+    # The signed head rides the verdict as data — a CI can gate on the log
+    # growing between exports, not just on the pack being intact.
+    assert verdict["log"]["tree_size"] >= 1
+    assert verdict["log"]["proven"] >= 1
     # A forged always-green verifier inside the pack is the CI's whole point.
     with zipfile.ZipFile(BytesIO(data)) as z:
         items = [(n, z.read(n)) for n in z.namelist()]

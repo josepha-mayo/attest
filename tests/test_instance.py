@@ -95,6 +95,7 @@ def test_every_documented_writer_locks_and_readers_never_do():
         cli._journal,  # --baseline re-pins journal coverage
         cli._retention,  # --apply purges
         cli._deliveries,  # --requeue rewrites delivery state
+        cli._checkpoint,  # issues the signed log-checkpoint receipt
     ]
     readers = [
         cli._status,
@@ -104,8 +105,20 @@ def test_every_documented_writer_locks_and_readers_never_do():
         cli._diff,
         cli._triage,
         cli._doctor,
+        cli._prove,
+        cli._consistency,
+        cli._monitor,
         cli._cli_engine,  # shared loader — must stay lock-free (explain uses it)
     ]
+    for fn in (cli._prove, cli._consistency):
+        # Proof commands are read-only AND custody-free: they must not build
+        # the engine (which would mint a signing key, a media dir, and an
+        # execution_mode row into the runtime the auditor only came to read).
+        src = inspect.getsource(fn)
+        assert "_cli_engine" not in src and "VisitEngine" not in src, (
+            f"{fn.__name__} constructs the engine — proof commands must stay "
+            "signer-free or they mint state into the store they audit"
+        )
     for fn in writers:
         assert "acquire_instance_lock" in inspect.getsource(fn), (
             f"{fn.__name__} mutates but never acquires the writer lock"

@@ -39,7 +39,17 @@
   handoff inherits the doubt. The pack also carries
   <code>verifier_manifest.json</code> — an issuer-signed receipt pinning the
   sha256 of its own verifier tooling, so a forged always-green script can't
-  ride inside a genuine pack.</p>
+  ride inside a genuine pack — and <code>log_checkpoint.json</code>, a signed
+  Merkle tree head over the deployment's receipt log (RFC 6962-style, like
+  Certificate Transparency) with an inclusion proof per pack receipt: a
+  receipt with a valid signature the log never committed still fails.
+  <code>attest monitor</code> runs the auditor half against a live
+  deployment — pin a signed head, then every later checkpoint must prove it
+  extends the pinned one or the rewritten log is caught; chained
+  checkpoints carry that bridge in their own signatures, and
+  <code>attest verify --issuer-url</code> cross-checks a pack's head
+  against the deployment's live log, so a fork served to one auditor
+  alone can't stand.</p>
   <p>Or check our own claim: <a href="live-sweep-receipt.json">this signed
   receipt</a> is the <code>verify-live --sign</code> sweep run against the
   real <code>api.amazonvision.com</code> on 2026-09-30 — 5 pass, 3 fail

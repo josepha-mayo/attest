@@ -221,3 +221,43 @@ def consistency_proof(leaves: list[bytes], old_size: int, size: int | None = Non
         "first": old_size,
         "proof": [p.hex() for p in consistency_nodes(leaves[:size], old_size)],
     }
+
+
+def verify_extends(
+    payload: dict,
+    first: int | None = None,
+    first_root: bytes | None = None,
+) -> bool | None:
+    """Verify the ``extends`` bridge a checkpoint embeds in its signed
+    payload, if present — the issuer's own attestation that this head
+    provably extends the previous one it names.
+
+    Returns ``True``/``False`` when an applicable bridge resolves, ``None``
+    when no usable bridge applies — the payload carries none (a pre-
+    chaining checkpoint), the bridge is malformed, or it bridges a
+    different starting size than the caller asks about (``first`` given,
+    ``extends.first`` differs — that checkpoint bridges some other
+    ancestry and proves nothing about ours). ``first_root`` pins the
+    earlier head the bridge must start from: a checkpoint claiming to
+    bridge from the caller's expected root but starting elsewhere is a
+    ``False`` — the signed payload itself attests a different history.
+    Malformed bridge material counts as absent — the head itself still
+    authenticates; only the self-contained continuity claim is lost, and
+    callers fall back to the serving API's consistency endpoint.
+    """
+    ext = payload.get("extends")
+    if not isinstance(ext, dict):
+        return None
+    try:
+        ext_first = int(ext["first"])
+        ext_first_root = bytes.fromhex(ext["first_root_sha256"])
+        size = int(payload["tree_size"])
+        root = bytes.fromhex(payload["root_sha256"])
+        nodes = [bytes.fromhex(h) for h in ext["proof"]]
+    except (KeyError, TypeError, ValueError):
+        return None
+    if first is not None and ext_first != first:
+        return None
+    if first_root is not None and ext_first_root != first_root:
+        return False
+    return verify_consistency(ext_first_root, ext_first, root, size, nodes)

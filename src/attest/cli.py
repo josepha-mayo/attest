@@ -1047,11 +1047,13 @@ def _verify(args: argparse.Namespace) -> None:
 
     pinned_key = args.key
     known_rotations: list | None = None
+    issuer_doc: dict | None = None
+    live_base: str | None = None
     if getattr(args, "issuer_url", None):
-        doc = _fetch_issuer_doc(args.issuer_url)
-        pinned_key = doc["issuer_key"]
+        issuer_doc = _fetch_issuer_doc(args.issuer_url)
+        pinned_key = issuer_doc["issuer_key"]
         try:
-            known_rotations = [Receipt.model_validate(r) for r in doc.get("key_receipts") or []]
+            known_rotations = [Receipt.model_validate(r) for r in issuer_doc.get("key_receipts") or []]
         except Exception as exc:  # noqa: BLE001
             fail(f"issuer document carried malformed key receipts: {exc}")
         # The pin note rides stderr in --json mode — stdout carries only the
@@ -1061,6 +1063,8 @@ def _verify(args: argparse.Namespace) -> None:
             f"({len(known_rotations)} lifecycle receipt(s)) — authenticity rides on transport",
             file=sys.stderr if json_mode else sys.stdout,
         )
+        if args.issuer_url.startswith(("http://", "https://")):
+            live_base = urlsplit(args.issuer_url)._replace(path="", query="", fragment="").geturl()
 
     path = Path(args.bundle)
     remote = args.bundle.startswith(("http://", "https://"))
@@ -1091,7 +1095,14 @@ def _verify(args: argparse.Namespace) -> None:
         except OSError as exc:
             fail(f"cannot read artifact: {exc}")
     if raw[:2] == b"PK":
-        _verify_zip(raw, pinned_key, known_rotations, json_mode=json_mode)
+        _verify_zip(
+            raw,
+            pinned_key,
+            known_rotations,
+            json_mode=json_mode,
+            live_base=live_base,
+            issuer_doc=issuer_doc,
+        )
         return
     try:
         data = json.loads(raw.decode("utf-8"))
@@ -1369,6 +1380,48 @@ def _verify_log_doc(
         detail = f"signed transparency head: tree size {size}, root {cp.payload['root_sha256'][:16]}…"
         if proven is not None:
             detail += f" — {proven} packed inclusion proof(s) verified"
+        # The checkpoint's own signed continuity claim: verify_extends with
+        # no expectations just asks whether the embedded bridge internally
+        # verifies — a checkpoint that signs a broken bridge is lying about
+        # its own ancestry and fails like any other bad signature.
+        self_ext = transparency.verify_extends(cp.payload)
+        if self_ext is False:
+            fail(
+                "checkpoint's embedded `extends` bridge does not verify — "
+                "the signed head attests a history it cannot prove",
+                kind="log_checkpoint",
+            )
+        if self_ext is True:
+            e = cp.payload["extends"]
+            detail += (
+                f" — embedded bridge extends checkpoint "
+                f"{str(e.get('checkpoint_id'))[:16]}… from size {e['first']}"
+            )
+        # --against pins the earlier head: the checkpoint must bridge FROM
+        # that exact signed head, offline, no consistency endpoint needed.
+        if getattr(args, "against", None):
+            _ocp, old_size, old_root = head_doc(args.against, "against")
+            if _ocp.public_key != cp.public_key:
+                fail(
+                    "--against and checkpoint heads are signed by different issuers",
+                    kind="log_checkpoint",
+                )
+            br = transparency.verify_extends(cp.payload, first=old_size, first_root=old_root)
+            if br is True:
+                detail += f"; provably extends the --against head (size {old_size})"
+            elif br is False:
+                fail(
+                    f"checkpoint does not extend the --against head — its "
+                    f"embedded bridge cannot reach the pinned root at size {old_size}",
+                    kind="log_checkpoint",
+                )
+            else:
+                fail(
+                    "checkpoint carries no embedded bridge from the --against "
+                    "head — verify continuity with a `attest consistency` "
+                    "bridge document instead",
+                    kind="log_checkpoint",
+                )
         ots = (
             _sibling_ots_report(Path(args.bundle))
             if not args.bundle.startswith(("http://", "https://"))
@@ -1454,7 +1507,13 @@ def _verify_log_doc(
 
 
 def _verify_zip(
-    raw: bytes, pinned_key: str | None, known_rotations: list | None = None, *, json_mode: bool = False
+    raw: bytes,
+    pinned_key: str | None,
+    known_rotations: list | None = None,
+    *,
+    json_mode: bool = False,
+    live_base: str | None = None,
+    issuer_doc: dict | None = None,
 ) -> None:
     """Verify a dispute pack or case pack zip in place — same checks as the
     embedded verify_case.py and the /verify page. Without --key the pack's own
@@ -1496,15 +1555,59 @@ def _verify_zip(
     ok, detail = _verify_pack(raw, key, known_rotations=known_rotations)
     if not ok:
         fail(f"verification failed: {detail}", kind=kind)
+    live_report: dict | None = None
+    live_line: str | None = None
+    if live_base and issuer_doc is not None and "log_checkpoint.json" in names:
+        # The pack's checkpoint proves membership in A log; the live head
+        # answers WHICH log — a deployment that mints a consistent-but-forked
+        # log per victim must still bridge this head to the one it serves
+        # everyone else, or the pack's claimed history is provably not theirs.
+        from . import logmonitor
+
+        try:
+            cpdoc = json.loads(z.read("log_checkpoint.json"))
+            head = logmonitor.fetch_json(f"{live_base}/api/log/head")
+            trusted_set = logmonitor._trusted_set(issuer_doc)
+            verdict, live_line = logmonitor.live_check(
+                cpdoc.get("checkpoint") or {},
+                head,
+                lambda f_, s_: logmonitor.fetch_json(f"{live_base}/api/log/consistency?first={f_}&size={s_}"),
+                trusted_set,
+            )
+        except ValueError as exc:
+            # Transport failed — the pack's own verdict stands; say so plainly.
+            live_line = f"live log unreachable ({exc}) — pack verdict unaffected"
+            live_report = {"checked": False, "detail": live_line}
+        else:
+            live_report = {"checked": verdict is not None, "same_log": verdict, "detail": live_line}
+            if verdict is False:
+                fail(f"live log cross-check: {live_line}", kind=kind)
     if json_mode:
+        extra: dict = {}
+        if "log_checkpoint.json" in names:
+            # The pin check already verified the head and every proof — this
+            # just reports the commitment shape so a CI can gate on it too
+            # (e.g. require the log to have grown since a prior export).
+            try:
+                cp = json.loads(z.read("log_checkpoint.json"))
+                extra["log"] = {
+                    "tree_size": cp["checkpoint"]["payload"]["tree_size"],
+                    "proven": len(cp.get("proofs") or {}),
+                }
+            except Exception:  # noqa: BLE001 — verified pack; report what parses
+                pass
+        if live_report is not None:
+            extra["live_log"] = live_report
         print(
             json.dumps(
-                {"ok": True, "kind": kind, "detail": detail, "pinned": bool(pinned_key)},
+                {"ok": True, "kind": kind, "detail": detail, "pinned": bool(pinned_key), **extra},
                 indent=2,
             )
         )
         return
     print(f"OK: {detail}")
+    if live_line:
+        print(f"Live log: {live_line}")
     if pinned_key:
         print("Note: a valid pack proves record integrity under the pinned issuer key, not physical truth.")
     else:
@@ -1559,6 +1662,14 @@ def _anchor(args: argparse.Namespace) -> None:
         )
         prev = store.latest_receipt()
         entries = store._conn.execute("SELECT COUNT(*) FROM journal").fetchone()[0]
+        # The Merkle head too: receipt_head alone only proves the tail's hash —
+        # an auditor holding just this anchor could verify a chain, but not a
+        # compact inclusion proof. The tree head turns the anchor into an
+        # external STH: publish or notarize it and a retroactive log fork is
+        # provable without ever seeing the chain.
+        from . import transparency
+
+        leaves = transparency.leaf_hashes(store.receipts())
         anchor = signer.issue(
             visit_id="anchor",
             sequence=prev.sequence + 1 if prev else 1,
@@ -1569,10 +1680,14 @@ def _anchor(args: argparse.Namespace) -> None:
                 "journal_entries": entries,
                 "receipt_head": prev.payload_hash if prev else None,
                 "receipt_count": len(store.receipts()),
+                "log_tree_size": len(leaves),
+                "log_root_sha256": transparency.root(leaves).hex(),
                 "visit_count": store.stats()["visits"]["total"],
                 "boundary": (
                     "Anchors that a record state existed at issuance. Truncating the "
-                    "journal or removing receipts after this anchor is provable."
+                    "journal or removing receipts after this anchor is provable — and "
+                    "the pinned Merkle head lets a holder verify an inclusion proof "
+                    "for any receipt committed up to log_tree_size."
                 ),
             },
         )
@@ -1580,7 +1695,8 @@ def _anchor(args: argparse.Namespace) -> None:
         out.write_text(anchor.model_dump_json(indent=2), encoding="utf-8")
         print(
             f"wrote {out} — journal head {anchor.payload['journal_head'][:16]}…, "
-            f"{entries} entries, {anchor.payload['receipt_count']} receipts pinned"
+            f"{entries} entries, {anchor.payload['receipt_count']} receipts, "
+            f"log root {anchor.payload['log_root_sha256'][:16]}… ({len(leaves)} leaves) pinned"
         )
         if args.publish:
             _publish_anchor(args.publish, out, anchor.payload_hash, settings.aws_region)
@@ -3239,7 +3355,9 @@ def main(argv: list[str] | None = None) -> None:
         help="pin to the issuer key served by <url>/.well-known/attest-issuer.json "
         "(HTTPS; loopback excepted) or an issuer document file written by "
         "`attest issuer --out` — the deployment's signed lifecycle extends "
-        "trust to pre-rotation packs",
+        "trust to pre-rotation packs; a URL pin also cross-checks the pack's "
+        "signed log head against the deployment's LIVE /api/log/head, so a "
+        "forked history served only to this auditor fails",
     )
     s.add_argument(
         "--json",

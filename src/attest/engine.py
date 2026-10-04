@@ -1233,7 +1233,7 @@ class VisitEngine:
         ``log:`` pseudo visit_id: re-issuing an unchanged head returns the
         existing checkpoint."""
         leaves = self.log_leaves()
-        from .transparency import root
+        from .transparency import consistency_nodes, root
 
         head = root(leaves)
         pseudo_id = f"log:{len(leaves)}:{head.hex()[:16]}"
@@ -1241,23 +1241,50 @@ class VisitEngine:
         if existing:
             return existing
         prev = self.store.latest_receipt()
+        # Chain the heads: the newest earlier checkpoint names the history
+        # this one must extend, and the bridging nodes ride INSIDE the
+        # signed payload — the issuer attests to append-only, not just to a
+        # head. A rewritten log cannot produce the nodes, so a checkpoint
+        # chain self-proves its own continuity offline, no /api/consistency
+        # call needed when an auditor already holds the earlier head.
+        extends: dict | None = None
+        prev_cp = next(
+            (r for r in reversed(self.store.receipts()) if r.payload.get("record_type") == "log_checkpoint"),
+            None,
+        )
+        if prev_cp is not None:
+            try:
+                prev_size = int(prev_cp.payload["tree_size"])
+                prev_root = str(prev_cp.payload["root_sha256"])
+                if 0 < prev_size < len(leaves):
+                    extends = {
+                        "first": prev_size,
+                        "first_root_sha256": prev_root,
+                        "checkpoint_id": prev_cp.id,
+                        "proof": [n.hex() for n in consistency_nodes(leaves, prev_size)],
+                    }
+            except (KeyError, TypeError, ValueError):
+                extends = None  # a malformed earlier checkpoint just can't be bridged
+        facts = {
+            "record_type": "log_checkpoint",
+            "tree_size": len(leaves),
+            "root_sha256": head.hex(),
+            "leaf_input": "receipt.payload_hash (raw bytes, sequence order)",
+            "boundary": (
+                "A signed commitment that exactly these receipts, in this "
+                "order, formed the log at this size — receipts in an export "
+                "can prove inclusion, and a later checkpoint can prove it "
+                "extends this one without rewriting history."
+            ),
+            "journal_head": self.store.journal_head(),
+        }
+        if extends is not None:
+            facts["extends"] = extends
         receipt = self.signer.issue(
             visit_id=pseudo_id,
             sequence=prev.sequence + 1 if prev else 1,
             prev_hash=prev.payload_hash if prev else None,
-            facts={
-                "record_type": "log_checkpoint",
-                "tree_size": len(leaves),
-                "root_sha256": head.hex(),
-                "leaf_input": "receipt.payload_hash (raw bytes, sequence order)",
-                "boundary": (
-                    "A signed commitment that exactly these receipts, in this "
-                    "order, formed the log at this size — receipts in an export "
-                    "can prove inclusion, and a later checkpoint can prove it "
-                    "extends this one without rewriting history."
-                ),
-                "journal_head": self.store.journal_head(),
-            },
+            facts=facts,
         )
         try:
             self.store.put_receipt(receipt)

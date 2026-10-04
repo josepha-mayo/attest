@@ -84,7 +84,9 @@ def check(
     ``issuer_doc`` is the fetched attest.issuer/1 document; ``head`` is the
     fetched /api/log/head body; ``fetch_consistency(first, size) -> dict | None``
     pulls the consistency endpoint lazily — only called when the head
-    moved. ``size`` bounds the proof to the checkpoint's tree: the live
+    moved AND the new checkpoint carries no usable embedded `extends`
+    bridge (a chained checkpoint self-proves continuity, no fetch needed).
+    ``size`` bounds the proof to the checkpoint's tree: the live
     tip usually runs ahead of the newest signed head, so a proof to the
     tip can never bridge to the checkpoint the pin tracks. Returns
     (new_state, ok, human lines).
@@ -163,9 +165,33 @@ def check(
                 "different history than the one pinned"
             ],
         )
-    # Extension claim: the new STH must bridge from the pinned one. The
-    # proof is bounded at the CHECKPOINT's size — not the live tip, which
-    # is almost always ahead of the newest signed head on an active log.
+    # Extension claim: the new STH must bridge from the pinned one. Prefer
+    # the checkpoint's OWN embedded `extends` bridge — the issuer signed
+    # the bridging nodes at issuance, so they can't be tailored per
+    # request, and they work even when the deployment exposes no
+    # consistency endpoint. When it doesn't apply (legacy checkpoint, or
+    # a bridge from a different ancestor than our pin), fall back to a
+    # served proof bounded at the CHECKPOINT's size — not the live tip,
+    # which is almost always ahead of the newest signed head.
+    from .transparency import verify_consistency, verify_extends
+
+    embedded = verify_extends(payload, first=old_size, first_root=bytes.fromhex(old_root))
+    if embedded is True:
+        lines.append(
+            f"log extended {old_size} → {size} — the checkpoint's own signed "
+            "bridge verifies (embedded extends); nothing pinned was rewritten"
+        )
+        return new_state, True, lines
+    if embedded is False:
+        return (
+            None,
+            False,
+            [
+                f"ALERT: checkpoint at size {size} signs an `extends` bridge that "
+                f"cannot reach the pinned head at {old_size} — the deployment's "
+                "own signed material contradicts the pinned history"
+            ],
+        )
     proof = fetch_consistency(old_size, size)
     if proof is None or not isinstance(proof.get("proof"), list):
         return (
@@ -182,8 +208,6 @@ def check(
             False,
             ["ALERT: consistency proof is for different tree sizes than the head claims"],
         )
-    from .transparency import verify_consistency
-
     try:
         nodes = [bytes.fromhex(h) for h in proof["proof"]]
         bridges = verify_consistency(bytes.fromhex(old_root), old_size, bytes.fromhex(root_hex), size, nodes)
@@ -204,6 +228,95 @@ def check(
         f"({len(nodes)} node(s)); nothing pinned was rewritten"
     )
     return new_state, True, lines
+
+
+def live_check(
+    pack_cp_raw: dict,
+    head: dict,
+    fetch_consistency,
+    trusted: set,
+) -> tuple[bool | None, str]:
+    """Cross-check a pack's signed tree head against the deployment's LIVE
+    head — 'the log this pack proves membership in is a proven prefix of
+    the log the deployment still serves'.
+
+    The attack this closes: a hostile deployment can mint internally-
+    consistent logs per victim — the pack's checkpoint verifies, every
+    inclusion proof closes, and the auditor still holds a log nobody else
+    was shown. Against a live endpoint the fork collapses: the deployment
+    must produce a consistency bridge from the pack's head to the head it
+    serves everyone else, and a forked history cannot produce it.
+
+    ``fetch_consistency`` is reached only when the live checkpoint's own
+    signed `extends` bridge does not already name the pack's head — a
+    chained checkpoint self-proves the bridge, so the common case costs
+    no extra request. Returns (verdict, line): True = provably the same
+    log (identical head or a verified extension), False = a provable
+    contradiction, None = undecidable (deployment serves no checkpoint,
+    or the pack postdates the live head — say so rather than guess)."""
+    payload, err = _check_sth(pack_cp_raw, trusted)
+    if err:
+        return False, f"pack checkpoint: {err}"
+    pack_size, pack_root = int(payload["tree_size"]), payload["root_sha256"]
+    live_cp = _doc_checkpoint(head)
+    if live_cp is None:
+        return None, "deployment serves no signed head — cannot cross-check"
+    live_payload, err = _check_sth(live_cp, trusted)
+    if err:
+        return None, f"live checkpoint does not validate ({err}) — cannot cross-check"
+    live_size, live_root = int(live_payload["tree_size"]), live_payload["root_sha256"]
+    if pack_size == live_size:
+        if pack_root == live_root:
+            return True, f"pack's signed head is the live head — tree size {pack_size}"
+        return False, (
+            f"FORK: pack and live heads both sign tree size {pack_size} with "
+            "different roots — the deployment served this auditor a different log"
+        )
+    if pack_size < live_size:
+        # Fast path: when the live checkpoint's own signed bridge names the
+        # pack's head as its ancestor, no separate proof fetch is needed —
+        # and a bridge that claims our size but can't reach our root is a
+        # signed self-contradiction, a hard fork rather than a soft one.
+        from .transparency import verify_extends
+
+        embedded = verify_extends(live_payload, first=pack_size, first_root=bytes.fromhex(pack_root))
+        if embedded is True:
+            return True, (
+                f"live checkpoint's own signed bridge extends the pack's head "
+                f"({pack_size} → {live_size} leaves) — the pack's log is the one still served"
+            )
+        if embedded is False:
+            return False, (
+                "FORK: the live checkpoint signs a bridge claiming the pack's "
+                "tree size but starting from a different root — split-view log"
+            )
+        proof = fetch_consistency(pack_size, live_size)
+        if not isinstance(proof, dict) or not isinstance(proof.get("proof"), list):
+            return False, (
+                "live head cannot bridge from the pack's head — the deployment "
+                "cannot show the pack's log inside the one it serves now"
+            )
+        try:
+            nodes = [bytes.fromhex(h) for h in proof["proof"]]
+        except (TypeError, ValueError):
+            return False, "live consistency proof carries malformed nodes"
+        from .transparency import verify_consistency
+
+        if verify_consistency(
+            bytes.fromhex(pack_root), pack_size, bytes.fromhex(live_root), live_size, nodes
+        ):
+            return True, (
+                f"live log provably extends the pack's head ({pack_size} → "
+                f"{live_size} leaves) — the pack's log is the one still served"
+            )
+        return False, (
+            "FORK: the deployment's live log does not extend the head this "
+            "pack signed — the bridging consistency proof cannot be produced"
+        )
+    return None, (
+        f"pack's signed head (size {pack_size}) postdates the live head "
+        f"({live_size}) — the pack may come from a newer or different log instance"
+    )
 
 
 def state_load(path) -> dict | None:
