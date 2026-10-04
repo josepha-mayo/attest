@@ -258,6 +258,63 @@ def test_cli_verify_real_pack(tmp_path, engine, store, household, schedule, t0):
     assert "case pack verified" in rc.stdout
 
 
+def test_cli_verify_json_emits_a_gatable_verdict(tmp_path, engine, store, household, schedule, t0):
+    """`attest verify pack.zip --json` is the CI gate: stdout carries exactly
+    one object — {ok, kind, detail, pinned} — and a tampered pack is exit 1
+    with {"ok": false}."""
+    import json
+    import subprocess
+    import sys
+    import zipfile
+    from io import BytesIO
+
+    from attest.disputepack import build_case_pack
+    from attest.reviews import ReviewService, countersign_status
+
+    visit = engine.ingest(event(household[2], t0)).visit
+    engine.close_for_review(visit.id)
+    bundle = ReviewService(store, engine.signer, engine.clock).bundle(visit.id)
+    site = store.sites()[0]
+    data = build_case_pack(
+        store,
+        tmp_path / "media",
+        site,
+        [(visit, bundle, countersign_status(bundle))],
+        manifest_signer=lambda m: engine.issue_export_manifest(site, m),
+        tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"site:{site.id}", t),
+    )
+    pack = tmp_path / "case.zip"
+    pack.write_bytes(data)
+    rc = subprocess.run(
+        [sys.executable, "-m", "attest.cli", "verify", "--json", str(pack)],
+        capture_output=True,
+        text=True,
+    )
+    assert rc.returncode == 0, rc.stderr + rc.stdout
+    verdict = json.loads(rc.stdout)
+    assert verdict["ok"] is True
+    assert verdict["kind"] == "case-pack"
+    assert "verifier tool(s) pinned" in verdict["detail"]
+    # A forged always-green verifier inside the pack is the CI's whole point.
+    with zipfile.ZipFile(BytesIO(data)) as z:
+        items = [(n, z.read(n)) for n in z.namelist()]
+    forged = BytesIO()
+    with zipfile.ZipFile(forged, "w") as z:
+        for n, b in items:
+            z.writestr(n, b"<html>always green</html>" if n == "verify.html" else b)
+    bad = tmp_path / "forged.zip"
+    bad.write_bytes(forged.getvalue())
+    rc = subprocess.run(
+        [sys.executable, "-m", "attest.cli", "verify", "--json", str(bad)],
+        capture_output=True,
+        text=True,
+    )
+    assert rc.returncode == 1, rc.stderr + rc.stdout
+    verdict = json.loads(rc.stdout)
+    assert verdict["ok"] is False
+    assert "issuer-signed pin" in verdict["detail"]
+
+
 def test_cli_explain_narrates_a_record(tmp_path, monkeypatch, ring_world, ring_client, settings, t0):
     """`attest explain` renders source-by-source corroboration, the signed
     anchor, the review chain, and the derived stance for one record."""

@@ -1034,6 +1034,17 @@ def _verify(args: argparse.Namespace) -> None:
     from . import ledger, reviews
     from .models import Receipt, ReviewBundle
 
+    json_mode = getattr(args, "json", False)
+
+    def fail(detail: str, **kw) -> None:
+        """Every verification verdict exits the same way on both surfaces —
+        with --json stdout still carries exactly one object, so a pipeline
+        can gate on .ok without parsing prose."""
+        if json_mode:
+            print(json.dumps({"ok": False, "detail": detail, **kw}, indent=2))
+            sys.exit(1)
+        sys.exit(detail)
+
     pinned_key = args.key
     known_rotations: list | None = None
     if getattr(args, "issuer_url", None):
@@ -1042,10 +1053,13 @@ def _verify(args: argparse.Namespace) -> None:
         try:
             known_rotations = [Receipt.model_validate(r) for r in doc.get("key_receipts") or []]
         except Exception as exc:  # noqa: BLE001
-            sys.exit(f"issuer document carried malformed key receipts: {exc}")
+            fail(f"issuer document carried malformed key receipts: {exc}")
+        # The pin note rides stderr in --json mode — stdout carries only the
+        # machine-readable verdict (same discipline as `attest diff --json`).
         print(
             f"pinned to issuer key served by {args.issuer_url} "
-            f"({len(known_rotations)} lifecycle receipt(s)) — authenticity rides on transport"
+            f"({len(known_rotations)} lifecycle receipt(s)) — authenticity rides on transport",
+            file=sys.stderr if json_mode else sys.stdout,
         )
 
     path = Path(args.bundle)
@@ -1062,26 +1076,26 @@ def _verify(args: argparse.Namespace) -> None:
         try:
             with httpx.stream("GET", args.bundle, follow_redirects=True, timeout=30) as r:
                 if r.status_code != 200:
-                    sys.exit(f"fetch failed: HTTP {r.status_code} for {args.bundle}")
+                    fail(f"fetch failed: HTTP {r.status_code} for {args.bundle}")
                 for chunk in r.iter_bytes(1 << 20):
                     n += len(chunk)
                     if n > 256 * 1024 * 1024:
-                        sys.exit("artifact exceeds the 256 MB verification bound")
+                        fail("artifact exceeds the 256 MB verification bound")
                     raw.extend(chunk)
         except httpx.HTTPError as exc:
-            sys.exit(f"fetch failed: {exc}")
+            fail(f"fetch failed: {exc}")
         path = Path(args.bundle.rstrip("/").rsplit("/", 1)[-1] or "remote-artifact")
     else:
         raw = path.read_bytes()
     if raw[:2] == b"PK":
-        _verify_zip(raw, pinned_key, known_rotations)
+        _verify_zip(raw, pinned_key, known_rotations, json_mode=json_mode)
         return
     try:
         data = json.loads(raw.decode("utf-8"))
     except UnicodeDecodeError:
-        sys.exit(f"not a JSON artifact: {path.name}\n  a .zip pack verifies directly — pass the zip itself.")
+        fail(f"not a JSON artifact: {path.name}\n  a .zip pack verifies directly — pass the zip itself.")
     except json.JSONDecodeError as exc:
-        sys.exit(f"not valid JSON: {exc}")
+        fail(f"not valid JSON: {exc}")
     pinned = " (against the pinned issuer key)" if pinned_key else ""
     trust_note = (
         "under that key"
@@ -1093,9 +1107,22 @@ def _verify(args: argparse.Namespace) -> None:
         receipts = [Receipt.model_validate(r) for r in data]
         ok, reason = ledger.verify_chain(receipts, public_key=pinned_key, extra_key_receipts=known_rotations)
         if not ok:
-            sys.exit(f"verification failed: {reason}")
-        print(f"OK{pinned}: {reason}.")
-        print(f"Note: a valid chain proves record integrity {trust_note}, not physical truth.")
+            fail(f"verification failed: {reason}", kind="receipt_chain")
+        if json_mode:
+            print(
+                json.dumps(
+                    {
+                        "ok": True,
+                        "kind": "receipt_chain",
+                        "detail": reason,
+                        "pinned": bool(pinned_key),
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            print(f"OK{pinned}: {reason}.")
+            print(f"Note: a valid chain proves record integrity {trust_note}, not physical truth.")
         return
 
     if isinstance(data, dict) and "payload" in data and "signature" in data:
@@ -1109,16 +1136,17 @@ def _verify(args: argparse.Namespace) -> None:
                 pinned_key, known_rotations
             )
             if receipt.public_key not in lineage:
-                sys.exit(
+                fail(
                     "verification failed: receipt signed by a key outside the "
-                    "pinned issuer document's lineage"
+                    "pinned issuer document's lineage",
+                    kind="receipt",
                 )
             trusted_key = receipt.public_key
         ok, reason = ledger.verify_receipt(receipt, public_key=trusted_key)
         if not ok:
-            sys.exit(f"verification failed: {reason}")
+            fail(f"verification failed: {reason}", kind="receipt")
         kind = receipt.payload.get("record_type") or receipt.payload.get("schema")
-        print(f"OK{pinned}: {kind} {receipt.id} — {reason}.")
+        warnings = []
         if known_rotations:
             # The issuer doc's revocations are a trust overlay too — the
             # browser verifier warns on suspect-window signings; match it.
@@ -1126,22 +1154,39 @@ def _verify(args: argparse.Namespace) -> None:
             # so pool position must never confer revocation authority.
             revoked = ledger.revoked_issuer_keys(known_rotations, issuer_key=pinned_key or receipt.public_key)
             if ledger.suspect_receipts([receipt], revoked=revoked):
-                print(
-                    "WARNING: signed inside its issuer's declared suspect window — "
-                    "integrity intact, trust qualified."
+                warnings.append(
+                    "signed inside its issuer's declared suspect window — integrity intact, trust qualified"
                 )
-        print(f"Note: a valid signature proves record integrity {trust_note}, not physical truth.")
         # The sibling-.ots check only makes sense for a local file — for a URL
         # artifact the basename would match some unrelated CWD file (or crash
         # on a path that doesn't exist locally).
-        if not remote:
-            _report_sibling_ots(Path(args.bundle))
+        ots = _sibling_ots_report(Path(args.bundle)) if not remote else None
+        if json_mode:
+            out = {
+                "ok": True,
+                "kind": "receipt",
+                "record_type": kind,
+                "receipt_id": receipt.id,
+                "detail": reason,
+                "pinned": bool(pinned_key),
+                "warnings": warnings,
+            }
+            if ots:
+                out["ots"] = ots
+            print(json.dumps(out, indent=2))
+        else:
+            print(f"OK{pinned}: {kind} {receipt.id} — {reason}.")
+            for w in warnings:
+                print(f"WARNING: {w}")
+            print(f"Note: a valid signature proves record integrity {trust_note}, not physical truth.")
+            if ots:
+                print(f"OpenTimestamps: {ots}.")
         return
 
     try:
         bundle = ReviewBundle.model_validate(data)
     except Exception:
-        sys.exit(
+        fail(
             f"not a reviewable artifact: {path.name}\n"
             "  expected a bundle.json, receipt, anchor, or receipts.json export list."
         )
@@ -1156,37 +1201,59 @@ def _verify(args: argparse.Namespace) -> None:
             rj = json.loads(kr_path.read_text(encoding="utf-8"))
             rotations += [Receipt.model_validate(r) for r in rj.get("rotations") or []]
         except Exception as exc:  # noqa: BLE001
-            sys.exit(f"verification failed: key_rotations.json malformed ({exc})")
+            fail(f"verification failed: key_rotations.json malformed ({exc})")
     if rotations:
         trusted = ledger.trusted_issuer_keys(key, rotations) | ledger.descendant_issuer_keys(key, rotations)
         ok, reason = reviews.verify_bundle(bundle, trusted_keys=trusted)
     else:
         ok, reason = reviews.verify_bundle(bundle, public_key=key)
     if not ok:
-        sys.exit(f"verification failed: {reason}")
-    print(f"OK{pinned}: {reason}.")
+        fail(f"verification failed: {reason}", kind="bundle")
+    warnings = []
     if rotations:
         # Match verify_bundle.py: a revocation overlays trust without
         # touching the verdict — surface suspect-window signings, anchored
         # at the verified key so a grafted foreign receipt stays inert.
         revoked = ledger.revoked_issuer_keys(rotations, issuer_key=key)
         if ledger.suspect_receipts([bundle.original] + [e.receipt for e in bundle.reviews], revoked=revoked):
-            print(
-                "WARNING: record(s) signed inside their issuer's declared suspect window — "
-                "integrity intact, trust qualified."
+            warnings.append(
+                "record(s) signed inside their issuer's declared suspect window — "
+                "integrity intact, trust qualified"
             )
     stance = reviews.countersign_status(bundle)
-    print(f"Worker stance: {stance['state']} — {stance['detail']}")
-    print(f"Note: a valid signature proves record integrity {trust_note}, not physical truth.")
+    if json_mode:
+        print(
+            json.dumps(
+                {
+                    "ok": True,
+                    "kind": "bundle",
+                    "detail": reason,
+                    "pinned": bool(pinned_key),
+                    "worker_stance": stance,
+                    "warnings": warnings,
+                },
+                indent=2,
+            )
+        )
+    else:
+        print(f"OK{pinned}: {reason}.")
+        for w in warnings:
+            print(f"WARNING: {w}")
+        print(f"Worker stance: {stance['state']} — {stance['detail']}")
+        print(f"Note: a valid signature proves record integrity {trust_note}, not physical truth.")
 
 
-def _verify_zip(raw: bytes, pinned_key: str | None, known_rotations: list | None = None) -> None:
+def _verify_zip(
+    raw: bytes, pinned_key: str | None, known_rotations: list | None = None, *, json_mode: bool = False
+) -> None:
     """Verify a dispute pack or case pack zip in place — same checks as the
     embedded verify_case.py and the /verify page. Without --key the pack's own
     declared issuer key is pinned (self-consistency); --key pins a deployment key.
     ``known_rotations`` (e.g. fetched via --issuer-url) extends trust forward
     through the deployment's signed lifecycle — a pack exported before a
-    rotation still verifies under the current issuer."""
+    rotation still verifies under the current issuer. In --json mode stdout
+    carries exactly one object: {ok, kind, detail, pinned} — a CI can gate on
+    it without parsing prose."""
     import io
     import zipfile
 
@@ -1194,23 +1261,39 @@ def _verify_zip(raw: bytes, pinned_key: str | None, known_rotations: list | None
     from .models import ReviewBundle
     from .packdiff import BoundedZip
 
+    def fail(detail: str, **kw) -> None:
+        if json_mode:
+            print(json.dumps({"ok": False, "detail": detail, **kw}, indent=2))
+            sys.exit(1)
+        sys.exit(detail)
+
     try:
         z = BoundedZip(zipfile.ZipFile(io.BytesIO(raw)))
         names = set(z.namelist())
         if "manifest.json" in names:
+            kind = "case-pack"
             declared = json.loads(z.read("manifest.json")).get("issuer_key")
         elif "bundle.json" in names:
+            kind = "pack"
             declared = ReviewBundle.model_validate(json.loads(z.read("bundle.json"))).original.public_key
         else:
-            sys.exit("zip contains no manifest.json or bundle.json — not an Attest pack")
+            fail("zip contains no manifest.json or bundle.json — not an Attest pack")
     except zipfile.BadZipFile:
-        sys.exit("not a valid zip file")
+        fail("not a valid zip file")
     except Exception as exc:
-        sys.exit(f"could not read pack issuer: {exc}")
+        fail(f"could not read pack issuer: {exc}")
     key = pinned_key or declared
     ok, detail = _verify_pack(raw, key, known_rotations=known_rotations)
     if not ok:
-        sys.exit(f"verification failed: {detail}")
+        fail(f"verification failed: {detail}", kind=kind)
+    if json_mode:
+        print(
+            json.dumps(
+                {"ok": True, "kind": kind, "detail": detail, "pinned": bool(pinned_key)},
+                indent=2,
+            )
+        )
+        return
     print(f"OK: {detail}")
     if pinned_key:
         print("Note: a valid pack proves record integrity under the pinned issuer key, not physical truth.")
@@ -1221,16 +1304,16 @@ def _verify_zip(raw: bytes, pinned_key: str | None, known_rotations: list | None
         )
 
 
-def _report_sibling_ots(path) -> None:
-    """If FILE.ots sits next to the artifact, report its OpenTimestamps status
-    and check the stamped digest still matches the file's bytes."""
+def _sibling_ots_report(path) -> str | None:
+    """If FILE.ots sits next to the artifact, describe its OpenTimestamps status
+    and whether the stamped digest still matches the file's bytes."""
     import hashlib
 
     from .timestamp import extract_digest, ots_status
 
     ots_path = path.with_name(path.name + ".ots")
     if not ots_path.exists():
-        return
+        return None
     ots = ots_path.read_bytes()
     stamped = extract_digest(ots)
     actual = hashlib.sha256(path.read_bytes()).digest()
@@ -1238,7 +1321,7 @@ def _report_sibling_ots(path) -> None:
         match = "digest matches this file"
     else:
         match = "stamped digest differs — file changed since stamping"
-    print(f"OpenTimestamps: {ots_status(ots)} — {match}.")
+    return f"{ots_status(ots)} — {match}"
 
 
 def _anchor(args: argparse.Namespace) -> None:
@@ -2758,6 +2841,12 @@ def main(argv: list[str] | None = None) -> None:
         "(HTTPS; loopback excepted) or an issuer document file written by "
         "`attest issuer --out` — the deployment's signed lifecycle extends "
         "trust to pre-rotation packs",
+    )
+    s.add_argument(
+        "--json",
+        action="store_true",
+        help="emit the verdict as one JSON object ({ok, kind, detail, pinned, "
+        "warnings}) — exit 1 on failure, so a CI gate needs no prose parsing",
     )
     s.set_defaults(fn=_verify)
 
