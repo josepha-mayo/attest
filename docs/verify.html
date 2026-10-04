@@ -614,20 +614,57 @@ async function _sthCheck(node,trustedSet){
    live head ahead → its own signed `extends` bridge or a fetched consistency
    proof must bridge from the pack's head — a forked history cannot produce
    one. The only online step this page ever takes; say(cls,msg) renders. */
+/* Same remote-trust policy as the CLI: loopback (127/8, ::1, localhost)
+   may speak plain HTTP for local development; anything else must be
+   HTTPS — an on-path attacker on cleartext could replay whichever signed
+   head produces a false "agree". */
+function isLoopHost(h){
+  h=String(h||"").toLowerCase();
+  if(h==="localhost"||h==="::1"||h==="[::1]")return true;
+  const m=h.match(/^([0-9]+)[.]([0-9]+)[.]([0-9]+)[.]([0-9]+)$/);
+  if(m)return +m[1]===127;
+  return false;
+}
+/* Bodies are verification material, not trusted content — but an
+   unbounded read is still a memory DoS, so stream with the same 4 MB
+   bound the CLI enforces on every remote fetch. */
+async function fetchCap(url){
+  const big=()=>{const e=new Error("response exceeds the 4 MB bound");
+    e.oversize=true;return e;};
+  const r=await fetch(url);
+  if(!r.ok)throw new Error(url.split("/").pop()+" HTTP "+r.status);
+  if(!r.body||!r.body.getReader){const t=await r.text();
+    if(t.length>4194304)throw big();
+    return t;}
+  const rd=r.body.getReader(),parts=[];let n=0;
+  for(;;){const c=await rd.read();if(c.done)break;
+    n+=c.value.length;
+    if(n>4194304){try{await rd.cancel();}catch(e){}
+      throw big();}
+    parts.push(c.value);}
+  const all=new Uint8Array(n);let off=0;
+  for(const p of parts){all.set(p,off);off+=p.length;}
+  return new TextDecoder().decode(all);
+}
 async function liveCheck(base,say){
   if(!packStash){say("bad","no checkpoint in this pack to cross-check");return;}
   base=String(base||"").trim().replace(/[/]+$/,"");
-  if(!/^https?:[/][/]/i.test(base)){say("bad","enter the deployment URL (https://… or http://…)");return;}
+  let bu;
+  try{bu=new URL(base);}catch(e){say("bad","enter the deployment URL (https://… )");return;}
+  if(bu.protocol!=="https:"&&!isLoopHost(bu.hostname)){
+    say("bad","live cross-check requires HTTPS for remote deployments — "
+      +"loopback excepted for local verification");return;}
+  if(bu.protocol!=="https:"&&bu.protocol!=="http:"){
+    say("bad","enter the deployment URL (https://… )");return;}
   say("","fetching the deployment's issuer document and live log head…");
   let docDn,headDn;
   try{
-    const dr=await fetch(base+"/.well-known/attest-issuer.json");
-    if(!dr.ok)throw new Error("issuer doc HTTP "+dr.status);
-    docDn=parseKeep(await dr.text());
-    const hr=await fetch(base+"/api/log/head");
-    if(!hr.ok)throw new Error("log head HTTP "+hr.status);
-    headDn=parseKeep(await hr.text());
+    docDn=parseKeep(await fetchCap(base+"/.well-known/attest-issuer.json"));
+    headDn=parseKeep(await fetchCap(base+"/api/log/head"));
   }catch(e){
+    if(e&&e.oversize){say("bad","live response is unusable ("+esc(e.message)
+      +") — a deployment serving oversized verification material fails "
+      +"closed, like the CLI's bound");return;}
     say("warn","live check unreachable ("+esc(e.message)+") — the offline "
       +"verification above still holds; the fork question just can't be "
       +"answered without the deployment");return;
@@ -636,6 +673,11 @@ async function liveCheck(base,say){
   if(d.schema!=="attest.issuer/1"||typeof d.issuer_key!=="string"){
     say("bad","live issuer document is not attest.issuer/1");return;}
   const kn=get(docDn,"key_receipts"),inodes=kn&&kn.t==="arr"?kn.v:[];
+  /* Same bound the CLI puts on the served document — the lineage walk is
+     one signature verification per candidate per hop, so a hostile
+     deployment can't serve a CPU amplifier as its identity document. */
+  if(inodes.length>64){say("bad","live issuer document key_receipts exceeds "
+    +"the 64-entry bound");return;}
   const liveTrusted=new Set([d.issuer_key,
     ...(await trustedKeys(d.issuer_key,inodes)),
     ...(await descendantKeys(d.issuer_key,inodes))]);
@@ -665,8 +707,7 @@ async function liveCheck(base,say){
       +"pack's tree size but starting from a different root — split-view log");return;}
     let proof=null;
     try{
-      const cr=await fetch(`${base}/api/log/consistency?first=${ps}&size=${ls}`);
-      if(cr.ok)proof=toJS(parseKeep(await cr.text()));
+      proof=toJS(parseKeep(await fetchCap(`${base}/api/log/consistency?first=${ps}&size=${ls}`)));
     }catch(e){proof=null;}
     if(!proof||!Array.isArray(proof.proof)){
       say("bad","live head cannot bridge from the pack's head — the deployment cannot "
@@ -745,8 +786,40 @@ async function checkLog(byName,trustedSet,refs,bad,ok){
     const rc=await checkReceipt(coNodes[i]);
     if(rc.ok){seenCosig.add(raw.id);seenKeys.add(pk);cosigs++;}
   }
+  /* packed self-anchors: the WITNESS's own signed head + the cosig's
+     inclusion path, so the pack proves the attestation was committed to
+     the witness's published log — not just signed and handed over. An
+     anchor only counts when its head is signed by the cosig's own key;
+     a present one that fails is a lie, not a downgrade (logmonitor
+     check_cosig_anchors parity). */
+  let anchored=0;
+  const asec=get(dn,"cosig_anchors"),aNodes=asec&&asec.t==="obj"?asec.v:{};
+  for(const cid of Object.keys(doc.cosig_anchors||{})){
+    const anchor=(doc.cosig_anchors||{})[cid];
+    const cosig=(doc.cosignatures||[]).find(c=>c&&c.id===cid);
+    if(!cosig){
+      bad(`log_checkpoint.json: cosig_anchors ${esc(cid)} anchors a cosignature `
+        +"the doc doesn't carry");continue;}
+    const acp=anchor&&anchor.checkpoint,ap=acp&&acp.payload;
+    if(!ap||ap.record_type!=="log_checkpoint"){
+      bad(`log_checkpoint.json: cosig_anchors ${esc(cid)}: anchor is not a `
+        +"log_checkpoint receipt");continue;}
+    if(acp.public_key!==cosig.public_key){
+      bad(`log_checkpoint.json: cosig_anchors ${esc(cid)}: anchor head not `
+        +"signed by the cosig's own witness key");continue;}
+    const anode=aNodes[cid];
+    const arc=anode?await checkReceipt(anode.v&&anode.v.checkpoint)
+      :{ok:false,why:"anchor checkpoint missing from canonical map"};
+    if(!arc.ok){bad(`log_checkpoint.json: cosig_anchors ${esc(cid)}: ${arc.why}`);continue;}
+    const proof=anchor.proof||{};
+    if(!await _incOk(cosig.payload_hash,ap.tree_size,proof.leaf_index,proof.path||[],ap.root_sha256)){
+      bad(`log_checkpoint.json: cosig_anchors ${esc(cid)}: the cosig does not reach `
+        +"the anchor's signed tree head");continue;}
+    anchored++;
+  }
   if(proven)ok(`${proven} receipt(s) proven inside the deployment transparency `
-    +`log at checkpoint size ${size}${cosigs?` — cosigned by ${cosigs} witness(es)`:""}`);
+    +`log at checkpoint size ${size}${cosigs?` — cosigned by ${cosigs} witness(es)`:""}`
+    +`${anchored?` (${anchored} anchored in the witness's own published log)`:""}`);
 }
 async function verifyFiles(files){
   const byName={};for(const f of files)byName[f.name]=f;

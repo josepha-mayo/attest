@@ -78,6 +78,27 @@ def test_admin_writes_require_auth_and_same_origin(api):
     assert api.get("/api/state").headers["Cache-Control"] == "no-store"
 
 
+def test_log_prefix_exemption_is_read_scoped(api):
+    """The /api/log/ auth exemption covers READS only — the cross-site
+    write check runs FIRST, so a future write route under the prefix can
+    never slip past CSRF protection or admin auth through the exemption.
+    (Route dependencies don't run on 404s, so the ordering is asserted at
+    the source — the same discipline test_instance.py uses for locks.)"""
+    import inspect
+
+    from attest import app as app_mod
+
+    src = inspect.getsource(app_mod)
+    authorize = src[src.index("async def authorize") : src.index("app = FastAPI")]
+    write_check = authorize.index('request.method not in ("GET", "HEAD", "OPTIONS")')
+    log_exempt = authorize.index('"/api/log/"')
+    assert write_check < log_exempt
+    neighborhood = authorize[log_exempt - 300 : log_exempt + 300]
+    assert 'request.method in ("GET", "HEAD", "OPTIONS")' in neighborhood
+    # Reads stay open — verification material is public.
+    assert api.get("/api/log/head", auth=None).status_code == 200
+
+
 def test_old_worker_tokens_no_longer_authenticate(api):
     assert api.get("/checkin/tok123", auth=None).status_code == 404
     assert api.post("/checkin/tok123", auth=None).status_code == 410  # dead link page

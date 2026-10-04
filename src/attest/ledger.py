@@ -213,6 +213,23 @@ def trusted_issuer_keys(issuer_key: str, key_receipts: list[Receipt], *, max_hop
     return trusted
 
 
+def lineage_root(issuer_key: str, key_receipts: list[Receipt], *, max_hops: int = 32) -> str:
+    """The oldest ancestor reachable from ``issuer_key`` through consented
+    pivots — the issuer family's STABLE identity. A rotation adds a key to
+    the trusted set but can never rewrite the root, so this is the slot a
+    continuity pin binds to: claiming the tip, an ancestor, or any alias
+    inside the family resolves to the same identity. Same consented-hop
+    discipline as ``trusted_issuer_keys`` — a forged or uncountersigned
+    rotation never extends the walk."""
+    cur = issuer_key
+    for _ in range(max_hops):
+        hop = _rotation_hop(key_receipts, cur)
+        if hop is None:
+            break
+        cur = hop.payload["previous_key"]
+    return cur
+
+
 def descendant_issuer_keys(root_key: str, rotations: list[Receipt], *, max_hops: int = 32) -> set[str]:
     """The forward walk for single-visit bundles: reviews append after the
     original, so a bundle legitimately carries issuer keys the rotations

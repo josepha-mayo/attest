@@ -389,7 +389,55 @@ def check_log(pack_dir, trusted, receipts):
             )
         proven += 1
     cosigs, _ = _cosig_count(doc, cp, size, root_hex, issuer_keys=trusted)
-    return proven, size, cosigs
+    # Packed self-anchors: the witness's own signed head + the cosig's
+    # inclusion path. Auxiliary like the cosig count — but a present one
+    # that fails is a lie, not a downgrade (logmonitor parity).
+    anchored = _cosig_anchors(doc)
+    return proven, size, cosigs, anchored
+
+
+def _cosig_anchors(doc):
+    """Verify each ``cosig_anchors`` entry: an anchor only means 'inside
+    the witness's own log' when its head is signed by the cosig's own
+    signer, and the cosig's payload hash must reach that head. Present-
+    and-broken is a lie indicator — exits FAIL like a bad proof."""
+    anchors = doc.get("cosig_anchors")
+    if not isinstance(anchors, dict):
+        return 0
+    cosigs = {}
+    cosig_list = doc.get("cosignatures")
+    for raw in cosig_list if isinstance(cosig_list, list) else []:
+        if isinstance(raw, dict) and isinstance(raw.get("id"), str):
+            cosigs[raw["id"]] = raw
+    anchored = 0
+    for cid, anchor in anchors.items():
+        cosig = cosigs.get(cid)
+        if cosig is None:
+            sys.exit(f"FAIL log_checkpoint.json: cosig_anchors {cid[:24]}… "
+                     "anchors a cosignature the doc doesn't carry")
+        acp = (anchor or {}).get("checkpoint")
+        ap = (acp or {}).get("payload") if isinstance(acp, dict) else None
+        if not isinstance(ap, dict) or ap.get("record_type") != "log_checkpoint":
+            sys.exit(f"FAIL log_checkpoint.json: cosig_anchors {cid[:24]}… "
+                     "anchor is not a log_checkpoint receipt")
+        if acp.get("public_key") != cosig.get("public_key"):
+            sys.exit(f"FAIL log_checkpoint.json: cosig_anchors {cid[:24]}… "
+                     "anchor head not signed by the cosig's own witness key")
+        ok, why = check_receipt(acp, acp["public_key"])
+        if not ok:
+            sys.exit(f"FAIL log_checkpoint.json: cosig_anchors {cid[:24]}… {why}")
+        proof = (anchor or {}).get("proof") or {}
+        if not _merkle_inclusion(
+            cosig.get("payload_hash"),
+            ap.get("tree_size"),
+            proof.get("leaf_index", -1),
+            proof.get("path") or [],
+            ap.get("root_sha256"),
+        ):
+            sys.exit(f"FAIL log_checkpoint.json: cosig_anchors {cid[:24]}… "
+                     "the cosig does not reach the anchor's signed tree head")
+        anchored += 1
+    return anchored
 
 
 def _cosig_count(doc, cp, size, root_hex, issuer_keys=None):
@@ -403,7 +451,8 @@ def _cosig_count(doc, cp, size, root_hex, issuer_keys=None):
     n, keys = 0, []
     self_keys = set(issuer_keys or ()) | {cp.get("public_key")}
     seen_ids, seen_keys = set(), set()
-    for raw in doc.get("cosignatures") or []:
+    cosig_list = doc.get("cosignatures")
+    for raw in cosig_list if isinstance(cosig_list, list) else []:
         p = raw.get("payload") if isinstance(raw, dict) else None
         if not isinstance(p, dict) or p.get("record_type") != "witness_cosignature":
             continue
@@ -828,6 +877,8 @@ def main():
               "the pack's own scripts are proven unmodified)")
     if logged:
         w = f" · cosigned by {logged[2]} witness(es)" if logged[2] else ""
+        if logged[3]:
+            w += f" ({logged[3]} anchored in the witness's own published log)"
         print(f"    ({logged[0]} receipt(s) proven inside the deployment's transparency"
               f" log at checkpoint size {logged[1]}{w})")
     print("Signature proves record integrity under the issuer key - not identity,")
@@ -1061,6 +1112,8 @@ def main():
               "the pack's own scripts are proven unmodified)")
     if logged:
         w = f" · cosigned by {logged[2]} witness(es)" if logged[2] else ""
+        if logged[3]:
+            w += f" ({logged[3]} anchored in the witness's own published log)"
         print(f"    ({logged[0]} receipt(s) proven inside the deployment's transparency"
               f" log at checkpoint size {logged[1]}{w})")
     if len(trusted) > 1:
@@ -1461,9 +1514,11 @@ def log_member(engine, receipts, cosign_fn=None) -> dict:
     Proofs are computed against the tree AT the checkpoint's size — the
     checkpoint's own append grows the tree past its STH, so paths against
     the grown tree would not reach the signed root. ``cosign_fn`` is called
-    with the fresh checkpoint to collect witness counter-signatures — the
-    pack then proves its head was observed and vouched for by deployments
-    outside the issuer's control."""
+    with the fresh checkpoint to collect witness counter-signatures — it
+    returns ``(cosigs, anchors)`` where anchors maps each cosig's id to the
+    witness's self-anchor (its own signed head + the cosig's inclusion
+    proof), so the pack proves the attestation was committed to the
+    witness's published log, not just signed and handed over."""
     cp = engine.issue_log_checkpoint()
     n = cp.payload["tree_size"]
     # One leaf-list build for every proof — per-receipt log_leaves() calls
@@ -1487,9 +1542,11 @@ def log_member(engine, receipts, cosign_fn=None) -> dict:
         "proofs": proofs,
     }
     if cosign_fn:
-        cosigs = cosign_fn(cp)
+        cosigs, anchors = cosign_fn(cp)
         if cosigs:
             doc["cosignatures"] = cosigs
+        if anchors:
+            doc["cosig_anchors"] = anchors
     return doc
 
 

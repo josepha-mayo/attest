@@ -365,3 +365,171 @@ def test_diff_rejects_forward_signed_member(tmp_path):
     # membership: K2 is a descendant of the declared issuer, not an ancestor.
     assert not any("lifecycle link" in f for f in art["verify_failures"])
     assert any("outside the rotation chain" in f for f in art["verify_failures"])
+
+
+def _case_with_log(engine, store, tmp_path, site, service, entries):
+    """_case with the transparency member attached — each call issues a
+    fresh signed checkpoint, so consecutive exports carry adjacent heads."""
+    from attest.disputepack import log_member
+
+    data = build_case_pack(
+        store,
+        tmp_path / "media",
+        site,
+        [(v, service.bundle(v.id), countersign_status(service.bundle(v.id))) for v in entries],
+        log_fn=lambda rs: log_member(engine, rs),
+    )
+    out = tmp_path / f"case-{len(list(tmp_path.glob('case-*.zip')))}.zip"
+    out.write_bytes(data)
+    return out
+
+
+def _rewrite_member(pack, member, new_bytes, tmp_path):
+    """Return a copy of `pack` with one zip member's bytes swapped."""
+    import zipfile as _zf
+
+    out = tmp_path / f"rewritten-{len(list(tmp_path.glob('rewritten-*.zip')))}.zip"
+    with _zf.ZipFile(pack) as zin, _zf.ZipFile(out, "w") as zout:
+        for info in zin.infolist():
+            data = zin.read(info.filename)
+            zout.writestr(info.filename, new_bytes if info.filename == member else data)
+    return out
+
+
+def _head(pack):
+    import zipfile as _zf
+
+    with _zf.ZipFile(pack) as z:
+        doc = json.loads(z.read("log_checkpoint.json"))
+    return doc["checkpoint"]["payload"]["tree_size"], doc
+
+
+def test_diff_bridges_adjacent_log_heads(engine, store, household, schedule, t0, tmp_path):
+    service = ReviewService(store, engine.signer, engine.clock)
+    site = store.sites()[0]
+    v1 = _visit(engine, household, t0)
+    first = _case_with_log(engine, store, tmp_path, site, service, [v1])
+    v2 = _visit(engine, household, t0, offset=90)
+    second = _case_with_log(engine, store, tmp_path, site, service, [v1, v2])
+
+    s1, _ = _head(first)
+    s2, _ = _head(second)
+    assert s2 > s1
+
+    lines, anomalies = diff(first, second)
+    text = "\n".join(lines)
+    assert anomalies == 0, text
+    assert f"the size-{s2} head provably extends the size-{s1} head" in text, text
+
+    # Reversed direction is NOT symmetric: the newer export pinning an
+    # earlier head is the rollback signature (an old signed head replayed)
+    # or simply an older export — reported as drift, never a clean append.
+    lines, anomalies = diff(second, first)
+    text = "\n".join(lines)
+    assert f"EARLIER signed head (size {s1} < {s2})" in text, text
+
+
+def _forge_same_size(pack, engine, store, tmp_path):
+    """Rebuild a pack's log_checkpoint.json as a self-consistent FORKED
+    history at the same tree size: the pack's proven receipts sit inside a
+    fabricated leaf arrangement whose root differs from the honest head —
+    every inclusion proof still verifies under a validly-issuer-signed
+    checkpoint. This is exactly what a deployment serving per-victim
+    histories would hand out."""
+    import zipfile as _zf
+
+    from attest.transparency import inclusion_path
+    from attest.transparency import root as _troot
+
+    with _zf.ZipFile(pack) as z:
+        doc = json.loads(z.read("log_checkpoint.json"))
+    size = int(doc["checkpoint"]["payload"]["tree_size"])
+    leaves = [bytes.fromhex(h) for h in sorted(doc["proofs"])]
+    assert len(leaves) <= size
+    leaves += [b"\xf0" * 32] * (size - len(leaves))
+    if _troot(leaves).hex() == doc["checkpoint"]["payload"]["root_sha256"]:
+        leaves = leaves[::-1]  # same leaves, alternative order → different root
+    assert _troot(leaves).hex() != doc["checkpoint"]["payload"]["root_sha256"]
+    doc["proofs"] = {
+        h: {
+            "leaf_index": leaves.index(bytes.fromhex(h)),
+            "path": [p.hex() for p in inclusion_path(leaves, leaves.index(bytes.fromhex(h)))],
+        }
+        for h in sorted(doc["proofs"])
+    }
+    prev = store.latest_receipt()
+    doc["checkpoint"] = engine.signer.issue(
+        visit_id=f"log-fork:{size}",
+        sequence=prev.sequence + 1,
+        prev_hash=prev.payload_hash,
+        facts={
+            "record_type": "log_checkpoint",
+            "tree_size": size,
+            "root_sha256": _troot(leaves).hex(),
+            "journal_head": store.journal_head(),
+        },
+    ).model_dump(mode="json")
+    return _rewrite_member(pack, "log_checkpoint.json", json.dumps(doc).encode(), tmp_path)
+
+
+def test_diff_flags_a_same_size_different_root_log_fork(engine, store, household, schedule, t0, tmp_path):
+    service = ReviewService(store, engine.signer, engine.clock)
+    site = store.sites()[0]
+    v1 = _visit(engine, household, t0)
+    v2 = _visit(engine, household, t0, offset=90)
+    second = _case_with_log(engine, store, tmp_path, site, service, [v1, v2])
+    # An unchanged leaf set re-checkpoints to the identical head — a pack
+    # taken "at the same time" is a byte-identical signed view.
+    twin = _case_with_log(engine, store, tmp_path, site, service, [v1, v2])
+    size, _ = _head(second)
+    size2, _ = _head(twin)
+    assert size == size2
+
+    forked = _forge_same_size(second, engine, store, tmp_path)
+    lines, anomalies = diff(forked, twin)
+    text = "\n".join(lines)
+    assert anomalies >= 1, text
+    assert f"size-{size} log heads with DIFFERENT roots" in text
+    assert "provable fork" in text
+
+
+def test_diff_reports_same_head_and_unbridged_gap(engine, store, household, schedule, t0, tmp_path):
+    service = ReviewService(store, engine.signer, engine.clock)
+    site = store.sites()[0]
+    v1 = _visit(engine, household, t0)
+    first = _case_with_log(engine, store, tmp_path, site, service, [v1])
+
+    # A pack diffed against itself: identical signed heads.
+    lines, anomalies = diff(first, first)
+    text = "\n".join(lines)
+    assert anomalies == 0, text
+    assert "both exports commit to the same signed log head" in text
+
+    # A checkpoint issued between the exports breaks adjacency — the
+    # newer head's bridge names THAT head, not the first pack's, so the
+    # comparison stays honestly undecidable offline. The intermediate
+    # checkpoint must cover a GROWN tree (unchanged heads are idempotent),
+    # and the tree must grow again after it so the export's checkpoint is
+    # a distinct, non-adjacent head.
+    v2 = _visit(engine, household, t0, offset=90)
+    engine.issue_log_checkpoint()
+    v3 = _visit(engine, household, t0, offset=180)
+    third = _case_with_log(engine, store, tmp_path, site, service, [v1, v2, v3])
+    lines, anomalies = diff(first, third)
+    text = "\n".join(lines)
+    assert anomalies == 0, text
+    assert "no embedded bridge" in text
+
+
+def test_diff_notes_when_only_one_export_carries_a_checkpoint(
+    engine, store, household, schedule, t0, tmp_path
+):
+    service = ReviewService(store, engine.signer, engine.clock)
+    site = store.sites()[0]
+    v1 = _visit(engine, household, t0)
+    with_log = _case_with_log(engine, store, tmp_path, site, service, [v1])
+    without = _case(store, tmp_path, site, service, [v1])
+
+    lines, anomalies = diff(without, with_log)
+    text = "\n".join(lines)
+    assert "only the new export carries a transparency checkpoint" in text

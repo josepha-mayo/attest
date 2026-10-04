@@ -794,15 +794,16 @@ def test_compare_views_agree_diverge_lag(engine, store, household, schedule, t0)
     assert verdict == "unverifiable" and "unsigned" in line
 
     # A cosig signed by a key outside the witness's lineage can't be
-    # attributed to it.
+    # attributed to it — a verified attribution failure is 'dishonest'.
     verdict, _ = logmonitor.compare_views(mine, pin, {"some-other-key"})
-    assert verdict == "unverifiable"
+    assert verdict == "dishonest"
 
     # A pin claiming a different size than the signed receipt attests is
-    # tampered serving data — unverifiable, not a fork claim.
+    # tampered serving data — the receipt verifies, so the contradiction
+    # is a served lie: 'dishonest', not a transient 'unverifiable'.
     lying = dict(pin, tree_size=pin["tree_size"] + 5)
     verdict, line = logmonitor.compare_views(mine, lying, wtrusted)
-    assert verdict == "unverifiable" and "disagree" in line
+    assert verdict == "dishonest" and "disagree" in line
 
     # The real fork: a cosig VALIDLY signed by the witness attesting a
     # different root at the same size — the unforgeable divergence.
@@ -836,7 +837,7 @@ def test_compare_views_agree_diverge_lag(engine, store, household, schedule, t0)
         cosignature=cosig2.model_dump(mode="json"),
     )
     verdict, _ = logmonitor.compare_views(mine, behind_pin, {w_signer2.public_key_b64})
-    assert verdict == "unverifiable"  # subject size disagrees with the claim
+    assert verdict == "dishonest"  # subject size disagrees with the claim
 
     smaller_cosig = w_signer2.issue(
         visit_id="witness:x:smaller",
@@ -999,11 +1000,13 @@ def test_monitor_witness_cross_view_cli(tmp_path, monkeypatch, capsys):
     code, out = run({"pins": [pin(with_cosig=False)]})
     assert code == 1 and "[unverifiable]" in out
 
-    # A pin whose claim disagrees with its signed cosig → unverifiable.
+    # A pin whose claim disagrees with its signed cosig → dishonest: the
+    # receipt verifies, so the contradiction is the witness's own lie —
+    # it freezes repins exactly like a divergence.
     lying = pin()
     lying["tree_size"] = 9
     code, out = run({"pins": [lying]})
-    assert code == 1 and "[unverifiable]" in out
+    assert code == 1 and "[dishonest]" in out
 
     # Validly-signed fork attestation at the same size → diverged, exit 1.
     code, out = run({"pins": [pin(root="ff" * 32)]})
@@ -1386,19 +1389,19 @@ def test_cosign_at_survives_malformed_witness_responses():
             logmonitor.post_json = orig
 
     # A 409 carrying {"pinned": {}} — no tree_size — is a refusal, not a KeyError.
-    cosig_out, line = cosign([(409, {"pinned": {}})])
+    cosig_out, line, _anchor = cosign([(409, {"pinned": {}})])
     assert cosig_out is None and "refused" in line
 
     # A 409 with pinned as a string — a refusal, not a TypeError.
-    cosig_out, line = cosign([(409, {"pinned": "bogus"})])
+    cosig_out, line, _anchor = cosign([(409, {"pinned": "bogus"})])
     assert cosig_out is None and "refused" in line
 
     # A 200 whose cosignature isn't a receipt — a refusal, not a KeyError.
-    cosig_out, line = cosign([(200, {"cosignature": {}})])
+    cosig_out, line, _anchor = cosign([(200, {"cosignature": {}})])
     assert cosig_out is None and "refused" in line and "malformed" in line
 
     # A body's "status" key can't overwrite the real HTTP status.
-    cosig_out, line = cosign([(409, {"status": 200, "pinned": {}})])
+    cosig_out, line, _anchor = cosign([(409, {"status": 200, "pinned": {}})])
     assert cosig_out is None and "refused" in line
 
 
@@ -1439,14 +1442,16 @@ def test_compare_views_rejects_wrong_issuer_pin(engine, store, household, schedu
     pin = heads["pins"][0]
 
     # My pin tracks a DIFFERENT issuer — the witness's cosig names the real
-    # one, so the comparison refuses rather than accusing.
+    # one, so the comparison refuses rather than accusing. A signed cosig
+    # that doesn't attest the pin's claimed subject is a VERIFIED lie —
+    # 'dishonest', not a transient 'unverifiable'.
     mine = {
         "issuer_key": "different-issuer-key",
         "tree_size": pin["tree_size"],
         "root_sha256": pin["root_sha256"],
     }
     verdict, _ = logmonitor.compare_views(mine, pin, {w_signer.public_key_b64})
-    assert verdict == "unverifiable"
+    assert verdict == "dishonest"
 
     # Same pin, correct issuer → agree.
     mine["issuer_key"] = pin["issuer_key"]
@@ -1727,14 +1732,15 @@ def test_witness_heads_anchor_attestations_in_the_witness_log(engine, store, hou
     verdict, line = logmonitor.compare_views(mine, pin, {w_signer.public_key_b64})
     assert verdict == "agree" and "publicly anchored" in line
 
-    # A tampered anchor is a served falsehood — unverifiable, not ignored.
+    # A tampered anchor is a served falsehood — 'dishonest', not ignored:
+    # the anchor claims inclusion the math can't prove.
     forged = dict(pin)
     forged["witness_anchor"] = {
         **anchor,
         "proof": {**anchor["proof"], "leaf_index": 99},
     }
     verdict, _ = logmonitor.compare_views(mine, forged, {w_signer.public_key_b64})
-    assert verdict == "unverifiable"
+    assert verdict == "dishonest"
 
 
 def test_verify_threshold_counts_witness_identities_not_lineage_keys(
@@ -1971,9 +1977,11 @@ def test_compare_views_binds_anchor_to_the_watched_witness_log(engine, store, ho
     assert verdict == "agree" and "verified against our own pin" in line
 
     # A witness pinning a DIFFERENT log than the anchor names — fork caught.
+    # The anchor is witness-signed and self-contradicting: 'dishonest',
+    # not a transient 'unverifiable' — the monitor freezes repins on it.
     other = {"tree_size": len(leaves), "root_sha256": "00" * 32}
     verdict2, line2 = logmonitor.compare_views(mine, pin, {w_signer.public_key_b64}, witness_pin=other)
-    assert verdict2 == "unverifiable" and "reconciled" in line2
+    assert verdict2 == "dishonest" and "reconciled" in line2
 
     # Our pin BEHIND the anchor — a real earlier head the anchor provably
     # extends: the served consistency proof bridges prefix → anchor.
@@ -2005,4 +2013,297 @@ def test_compare_views_binds_anchor_to_the_watched_witness_log(engine, store, ho
         witness_pin=fake,
         fetch_wconsistency=fetch,
     )
-    assert verdict4 == "unverifiable"
+    assert verdict4 == "dishonest"
+
+
+def test_check_cosig_anchors_verifies_a_packed_witness_anchor(engine, store, household, schedule, t0):
+    """A pack can carry the witness's self-anchor next to each cosig:
+    the anchor only counts when its head is signed by the cosig's OWN key
+    and the cosig reaches that head — a claimed anchor that fails is a
+    lie indicator, not a downgrade."""
+    from attest import logmonitor
+    from attest.transparency import inclusion_path, leaf_hashes, root
+
+    w_store, w_signer = _witness_deployment()
+    _seed(engine, household[0], t0)
+    cp = engine.issue_log_checkpoint()
+    status, out = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": _doc_for(engine), "checkpoint": cp.model_dump(mode="json")}
+    )
+    assert status == 200
+    cosig = out["cosignature"]
+
+    # The witness checkpoints its own log — the cosig becomes a leaf.
+    leaves = leaf_hashes(w_store.receipts())
+    w_cp = w_signer.issue(
+        visit_id="log:wcp",
+        sequence=99,
+        prev_hash=None,
+        facts={
+            "record_type": "log_checkpoint",
+            "tree_size": len(leaves),
+            "root_sha256": root(leaves).hex(),
+        },
+    )
+    w_store.put_receipt(w_cp)
+    idx = leaves.index(bytes.fromhex(cosig["payload_hash"]))
+    anchor = {
+        "checkpoint": w_cp.model_dump(mode="json"),
+        "proof": {
+            "leaf_index": idx,
+            "path": [p.hex() for p in inclusion_path(leaves, idx)],
+        },
+    }
+    doc = {"cosignatures": [cosig], "cosig_anchors": {cosig["id"]: anchor}}
+    anchored, errors = logmonitor.check_cosig_anchors(doc)
+    assert anchored == 1 and errors == []
+
+    # No anchors at all — legacy pack, nothing to count or fail.
+    assert logmonitor.check_cosig_anchors({"cosignatures": [cosig]}) == (0, [])
+
+    # An anchor keyed to a cosig the doc doesn't carry is a lie indicator.
+    a2, e2 = logmonitor.check_cosig_anchors(
+        {"cosignatures": [cosig], "cosig_anchors": {"rcpt_ghost": anchor}}
+    )
+    assert a2 == 0 and e2
+
+    # An anchor head signed by anyone but the cosig's own witness anchors
+    # nothing about this attestation.
+    bad = json.loads(json.dumps(anchor))
+    bad["checkpoint"] = cp.model_dump(mode="json")  # the ISSUER's checkpoint
+    a3, e3 = logmonitor.check_cosig_anchors({"cosignatures": [cosig], "cosig_anchors": {cosig["id"]: bad}})
+    assert a3 == 0 and any("own witness key" in e for e in e3)
+
+    # A proof that doesn't reach the anchor head fails closed — a
+    # one-leaf tree needs an empty path, so a supplied node can't be right.
+    bad2 = json.loads(json.dumps(anchor))
+    bad2["proof"]["path"] = ["00" * 32]
+    a4, e4 = logmonitor.check_cosig_anchors({"cosignatures": [cosig], "cosig_anchors": {cosig["id"]: bad2}})
+    assert a4 == 0 and e4
+
+
+def _rotated_issuer(engine, store):
+    """Rotate the engine's signer for real (consented pivot) and return
+    (new_key, receipts) — the issuer doc fields the witness consumes."""
+    from attest.ledger import Signer
+
+    new_signer = Signer.ephemeral()
+    new_key = new_signer.public_key_b64
+    engine.rotate_signing_key(new_key, lambda: new_signer)
+    receipts = [
+        r.model_dump(mode="json")
+        for r in store.receipts()
+        if r.payload.get("record_type") in ("key_rotation", "key_adoption")
+    ]
+    return new_key, receipts
+
+
+def test_witness_pin_binds_the_lineage_root_not_the_claimed_tip(engine, store, household, schedule, t0):
+    """HIGH audit fix: the pin slot keys on the issuer family's ROOT — the
+    stable identity — not the claimed issuer_key. A rotated tip (or a
+    claimed ancestor, or any in-lineage alias) resolves to the SAME slot,
+    so a rotation can't launder a forked head into a fresh pin."""
+    from attest import logmonitor
+
+    w_store, w_signer = _witness_deployment()
+    k_old = engine.signer.public_key_b64
+
+    _seed(engine, household[0], t0)
+    cp1 = engine.issue_log_checkpoint()
+    doc_v1 = _doc_for(engine)
+    status, _ = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": doc_v1, "checkpoint": cp1.model_dump(mode="json")}
+    )
+    assert status == 200
+    assert w_store.setting(f"witness:{k_old}")["tree_size"] == cp1.payload["tree_size"]
+
+    # The issuer rotates: it now claims — and signs with — k_new. The
+    # canonical identity stays the root key, so the pin slot never moves.
+    k_new, receipts = _rotated_issuer(engine, store)
+    doc_v2 = {"schema": "attest.issuer/1", "issuer_key": k_new, "key_receipts": receipts}
+    from attest.ledger import lineage_root
+
+    assert lineage_root(k_new, logmonitor._doc_receipts(doc_v2)) == k_old
+
+    # A grown head under the NEW tip cosigns — rotation is not a new issuer.
+    _seed(engine, household[0], t0 - timedelta(hours=5), n=1)
+    cp2 = engine.issue_log_checkpoint()
+    assert cp2.public_key == k_new
+    status, out = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": doc_v2, "checkpoint": cp2.model_dump(mode="json")}
+    )
+    assert status == 200 and out["pinned"]["tree_size"] == cp2.payload["tree_size"]
+    assert out["cosignature"]["payload"]["subject_issuer"] == k_old
+    assert out["cosignature"]["payload"]["subject_issuer_claimed"] == k_new
+    assert w_store.setting(f"witness:{k_old}")["tree_size"] == cp2.payload["tree_size"]
+    assert w_store.setting(f"witness:{k_new}") is None  # no second slot
+
+    # The exploit itself: a FORKED head under the rotated tip — same size,
+    # different root. Under claimed-key pinning this minted a fresh slot
+    # and got signed; under the root slot it is the same 409 any fork gets.
+    fork = engine.signer.issue(
+        visit_id="log:forked-tip",
+        sequence=999,
+        prev_hash=None,
+        facts={
+            "record_type": "log_checkpoint",
+            "tree_size": cp2.payload["tree_size"],
+            "root_sha256": "00" * 32,
+        },
+    )
+    status, out = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": doc_v2, "checkpoint": fork.model_dump(mode="json")}
+    )
+    assert status == 409 and out["pinned"]["tree_size"] == cp2.payload["tree_size"]
+
+    # Claiming the ANCESTOR lands in the same slot too — a regressed head
+    # offered under the old key is refused, not welcomed as a new issuer.
+    doc_alias = {"schema": "attest.issuer/1", "issuer_key": k_old, "key_receipts": receipts}
+    status, _ = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": doc_alias, "checkpoint": cp1.model_dump(mode="json")}
+    )
+    assert status == 409
+
+    # The published view names the canonical identity — the monitor's
+    # lineage-membership match finds it whatever tip is claimed.
+    heads = logmonitor.witness_heads(w_store, w_signer.public_key_b64)
+    assert [p["issuer_key"] for p in heads["pins"]] == [k_old]
+
+
+def test_witness_migrates_a_claimed_key_pin_into_the_canonical_slot(engine, store, household, schedule, t0):
+    """Pins minted before canonical slots live under the claimed key — the
+    upgrade must carry their continuity forward, not read them as 'no
+    prior view'. Migration adopts the family-member pin, repins under the
+    root, and tombstones the old slot out of /api/witness/heads."""
+    from attest import logmonitor
+
+    w_store, w_signer = _witness_deployment()
+    k_old = engine.signer.public_key_b64
+
+    _seed(engine, household[0], t0)
+    cp1 = engine.issue_log_checkpoint()
+
+    # The issuer rotates: it now claims — and signs with — k_new. k_old is
+    # the family root, i.e. the canonical slot name.
+    k_new, receipts = _rotated_issuer(engine, store)
+    doc_v2 = {"schema": "attest.issuer/1", "issuer_key": k_new, "key_receipts": receipts}
+
+    # Pre-canonical world: this issuer's pin was written under the key it
+    # claimed THEN — the rotated tip — not under the root. The slot holds
+    # cp1's real head, so offering cp1 must satisfy continuity, not reset.
+    w_store.put_setting(
+        f"witness:{k_new}",
+        {
+            "schema": logmonitor.WITNESS_SCHEMA,
+            "issuer_key": k_new,
+            "tree_size": cp1.payload["tree_size"],
+            "root_sha256": cp1.payload["root_sha256"],
+            "checkpoint_id": cp1.id,
+        },
+    )
+    assert w_store.setting(f"witness:{k_old}") is None  # canonical slot absent
+
+    _seed(engine, household[0], t0 - timedelta(hours=5), n=1)
+    cp2 = engine.issue_log_checkpoint()
+    status, out = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": doc_v2, "checkpoint": cp2.model_dump(mode="json")}
+    )
+    assert status == 200 and out["pinned"]["tree_size"] == cp2.payload["tree_size"]
+    # Continuity came from the migrated pin — repinned under the root.
+    assert w_store.setting(f"witness:{k_old}")["tree_size"] == cp2.payload["tree_size"]
+    tomb = w_store.setting(f"witness:{k_new}")
+    assert tomb["schema"] == "attest.witness-pin-migrated/1"
+
+    # The tombstoned slot no longer publishes a second view.
+    heads = logmonitor.witness_heads(w_store, w_signer.public_key_b64)
+    assert [p["issuer_key"] for p in heads["pins"]] == [k_old]
+
+
+def test_witness_migration_never_adopts_a_foreign_slot(engine, store, household, schedule, t0):
+    """A legacy slot is family-bound: a slot whose stored issuer_key lies
+    OUTSIDE the requester's certified lineage is not this issuer's pin —
+    migrating it would let one deployment inherit another's continuity."""
+    from attest import logmonitor
+    from attest.ledger import Signer
+
+    w_store, w_signer = _witness_deployment()
+
+    # A foreign issuer's pin — a completely different key family.
+    stranger = Signer.ephemeral()
+    w_store.put_setting(
+        f"witness:{stranger.public_key_b64}",
+        {
+            "schema": logmonitor.WITNESS_SCHEMA,
+            "issuer_key": stranger.public_key_b64,
+            "tree_size": 50,
+            "root_sha256": "ab" * 32,
+            "checkpoint_id": "rcpt_x",
+        },
+    )
+
+    _seed(engine, household[0], t0)
+    cp1 = engine.issue_log_checkpoint()
+    status, out = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": _doc_for(engine), "checkpoint": cp1.model_dump(mode="json")}
+    )
+    # First-contact for THIS issuer — the foreign pin was never adopted.
+    assert status == 200 and out["pinned"]["tree_size"] == cp1.payload["tree_size"]
+    assert w_store.setting(f"witness:{stranger.public_key_b64}")["tree_size"] == 50
+
+
+def test_compare_views_reports_dishonest_for_signed_lies(engine, store, household, schedule, t0):
+    """Verdict taxonomy: 'unverifiable' is transient/missing material;
+    'dishonest' is a VERIFIED lie — a cosig that fails signature checks,
+    signs subjects contradicting the pin, or carries malformed signed
+    subject fields. Dishonest freezes repins like a divergence."""
+    from attest import logmonitor
+
+    w_store, w_signer = _witness_deployment()
+    _seed(engine, household[0], t0)
+    cp = engine.issue_log_checkpoint()
+    status, _ = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": _doc_for(engine), "checkpoint": cp.model_dump(mode="json")}
+    )
+    assert status == 200
+    pin = logmonitor.witness_heads(w_store, w_signer.public_key_b64)["pins"][0]
+    mine = {
+        "issuer_key": engine.signer.public_key_b64,
+        "tree_size": pin["tree_size"],
+        "root_sha256": pin["root_sha256"],
+    }
+
+    # A cosig whose signature no longer verifies is a served lie.
+    forged = dict(pin)
+    forged["cosignature"] = dict(pin["cosignature"])
+    forged["cosignature"]["signature"] = "AA=="
+    verdict, _ = logmonitor.compare_views(mine, forged, {w_signer.public_key_b64})
+    assert verdict == "dishonest"
+
+    # Unsigned pin fields contradicting the signed subjects — a served lie.
+    lied = dict(pin)
+    lied["tree_size"] = pin["tree_size"] + 1
+    verdict, _ = logmonitor.compare_views(mine, lied, {w_signer.public_key_b64})
+    assert verdict == "dishonest"
+
+    # A cosig whose SIGNED subject is malformed — the witness signed it, so
+    # the lie is its own attestation (the signature fails too — either way,
+    # never a crash).
+    bad_subj = dict(pin)
+    bad_subj["cosignature"] = dict(pin["cosignature"])
+    bad_subj["cosignature"]["payload"] = dict(pin["cosignature"]["payload"])
+    bad_subj["cosignature"]["payload"]["subject_tree_size"] = "not-an-int"
+    verdict, _ = logmonitor.compare_views(mine, bad_subj, {w_signer.public_key_b64})
+    assert verdict == "dishonest"
+
+    # No cosignature at all — nothing attested, nothing to accuse.
+    bare = {k: v for k, v in pin.items() if k != "cosignature"}
+    verdict, _ = logmonitor.compare_views(mine, bare, {w_signer.public_key_b64})
+    assert verdict == "unverifiable"
+
+    # Malformed LOCAL state is unverifiable — corrupt pin, not a witness verdict.
+    verdict, line = logmonitor.compare_views(
+        {"issuer_key": mine["issuer_key"], "tree_size": "x", "root_sha256": None},
+        pin,
+        {w_signer.public_key_b64},
+    )
+    assert verdict == "unverifiable" and "monitor's own pin" in line

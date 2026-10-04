@@ -1649,6 +1649,15 @@ const run=async(head,cp,size,root)=>{
   console.log('behind:',await run(sc.heads.same,cp3,6,cp3.payload.root_sha256));
   packStash={node:parseKeep(JSON.stringify(sc.pack_cp)),size:2,root:sc.pack_root};
   const r2=[];await liveCheck('notaurl',(c,m)=>r2.push(c));console.log('badurl:',r2[0]);
+  /* Cleartext remote: an on-path replay could fabricate 'agree' — refused
+     outright. Loopback http stays allowed for local development. */
+  const r4=[];await liveCheck('http://dep.example',(c,m)=>r4.push(c));
+  console.log('cleartext:',r4[0]);
+  const r5=[];await liveCheck('http://127.0.0.1:8080',(c,m)=>r5.push(c));
+  console.log('loopback:',r5[r5.length-1]);
+  globalThis.fetch=async()=>({ok:true,text:async()=>'x'.repeat(5*1024*1024)});
+  const r6=[];await liveCheck('https://dep.example',(c,m)=>r6.push(c));
+  console.log('oversize:',r6[r6.length-1]);
   globalThis.fetch=async()=>{throw new Error('conn refused')};
   const r3=[];await liveCheck('https://dep.example',(c,m)=>r3.push(c));console.log('down:',r3[r3.length-1]);
 })();`);
@@ -1669,4 +1678,7 @@ const run=async(head,cp,size,root)=>{
     assert "fork: bad" in out, out
     assert "behind: warn" in out, out
     assert "badurl: bad" in out, out
+    assert "cleartext: bad" in out, out
+    assert "loopback: warn" in out, out  # http on loopback proceeds to fetch, gets 404
+    assert "oversize: bad" in out, out
     assert "down: warn" in out, out

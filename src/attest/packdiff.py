@@ -79,7 +79,9 @@ def _log_pin_check(z, names, trusted, member_ids, failures, notes):
     """``log_checkpoint.json`` turns 'the pack's receipts verify' into 'the
     pack's receipts were committed to the deployment's published log' —
     an RFC 6962 inclusion proof each, checked against a signed tree head.
-    A validly-signed receipt never committed to the log now fails."""
+    A validly-signed receipt never committed to the log now fails.
+    Returns the validated checkpoint payload when the member verifies so
+    the artifact can carry its head into cross-pack comparison."""
     res, err = check_log_pin(
         lambda n: z.read(n) if n in names else None,
         member_ids,
@@ -87,12 +89,17 @@ def _log_pin_check(z, names, trusted, member_ids, failures, notes):
     )
     if err:
         failures.append(err)
-    elif res:
-        proven, size, cosigs = res
-        note = f"{proven} receipt(s) proven inside the deployment transparency log at checkpoint size {size}"
-        if cosigs:
-            note += f" — cosigned by {cosigs} witness(es)"
-        notes.append(note)
+        return None
+    if not res:
+        return None
+    proven, size, cosigs, anchored, head = res
+    note = f"{proven} receipt(s) proven inside the deployment transparency log at checkpoint size {size}"
+    if cosigs:
+        note += f" — cosigned by {cosigs} witness(es)"
+        if anchored:
+            note += f" ({anchored} anchored in the witness's own published log)"
+    notes.append(note)
+    return head
 
 
 def _bundle_receipt_ids(bundle) -> list[tuple[str, str, str]]:
@@ -177,7 +184,7 @@ _LOG_MEMBER = "log_checkpoint.json"
 
 def check_log_pin(
     read_member, receipt_ids: list[tuple[str, str, str]], trusted: set
-) -> tuple[tuple[int, int] | None, str | None]:
+) -> tuple[tuple[int, int, int, dict] | None, str | None]:
     """Validate ``log_checkpoint.json``: a signed Merkle Tree Head plus an
     RFC 6962 inclusion path proving every receipt in the pack sat inside the
     deployment's published log — 'valid signature' alone no longer implies
@@ -188,7 +195,8 @@ def check_log_pin(
     pre-checkpoint pack — reported,
     not failed; present-and-incomplete fails closed. The checkpoint receipt
     itself anchors the tree and carries no proof (its own leaf postdates its
-    head). Returns ((proven, tree_size), None), (None, None) when absent, or
+    head). Returns ((proven, tree_size, cosigs, anchored_cosigs,
+    checkpoint_payload), None), (None, None) when absent, or
     (None, error)."""
     raw = read_member(_LOG_MEMBER)
     if raw is None:
@@ -257,10 +265,19 @@ def check_log_pin(
     # Witness counter-signatures ride the checkpoint document: verified
     # under each cosig's own key + subject binding, reported as auxiliary
     # attestation — never the gate the issuer's own checkpoint is.
-    from .logmonitor import check_cosignatures
+    from .logmonitor import check_cosig_anchors, check_cosignatures
 
     cosigs, _ = check_cosignatures(doc, cp.id, size, root_hex, issuer_keys=trusted)
-    return (proven, size, cosigs), None
+    # Packed self-anchors are auxiliary too, but a PRESENT one that fails
+    # is a lie, not a downgrade — same closed posture as a bad proof.
+    anchored, anchor_errors = check_cosig_anchors(doc)
+    if anchor_errors:
+        return None, f"log_checkpoint.json: {anchor_errors[0]}"
+    # The validated checkpoint payload rides out so callers diffing two
+    # packs can compare the SIGNED heads themselves — same-size different-
+    # root is a proven fork; an embedded extends bridge proves append-only
+    # growth between consecutive exports with no network at all.
+    return (proven, size, cosigs, anchored, payload), None
 
 
 def _key_pool(z, attestations: dict) -> list:
@@ -613,7 +630,7 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                             member_ids.append((vm["id"], vm["payload_hash"], vm.get("public_key")))
                     except Exception:  # noqa: BLE001 — flagged by check_tools_pin
                         pass
-                _log_pin_check(z, names, trusted, member_ids, failures, notes)
+                log_head = _log_pin_check(z, names, trusted, member_ids, failures, notes)
                 mfail = _verify_manifest_signature(manifest, issuer, trusted)
                 if mfail:
                     failures.append(mfail)
@@ -622,6 +639,7 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                     "visits": visits,
                     "attestations": attestations,
                     "kind": "case-pack",
+                    "log_head": log_head,
                     "verify_failures": failures,
                     "notes": notes,
                 }
@@ -701,7 +719,7 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                             member_ids.append((vm["id"], vm["payload_hash"], vm.get("public_key")))
                     except Exception:  # noqa: BLE001 — flagged by check_tools_pin
                         pass
-                _log_pin_check(
+                log_head = _log_pin_check(
                     z,
                     names,
                     _trusted_set(issuer, kr_pool) or {issuer},
@@ -713,6 +731,7 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                     "issuer": issuer,
                     "visits": visits,
                     "kind": "pack",
+                    "log_head": log_head,
                     "verify_failures": failures,
                     "notes": notes,
                 }
@@ -830,6 +849,70 @@ def diff_report(
     }
 
 
+def _log_head_verdict(a: dict, b: dict) -> tuple[str, str] | None:
+    """Compare two VALIDATED log_checkpoint payloads — the signed tree
+    heads two exports committed to. Returns (severity, line) or None when
+    a head is too malformed to judge (the pack verify loop already flags
+    malformed checkpoints; this only sees ones that parsed)."""
+    try:
+        sa, sb = int(a["tree_size"]), int(b["tree_size"])
+        ra, rb = bytes.fromhex(a["root_sha256"]), bytes.fromhex(b["root_sha256"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if sa == sb:
+        if ra == rb:
+            return "ok", f"both exports commit to the same signed log head (tree size {sa})"
+        return (
+            "anomaly",
+            f"both exports carry size-{sa} log heads with DIFFERENT roots — "
+            "the issuer signed two histories at one tree size: a provable fork",
+        )
+    # Direction matters: a LARGER head on the new pack bridged from the
+    # old is proven append-only growth. A SMALLER one is not symmetric —
+    # the old head extends it just as provably, but that is exactly the
+    # shape a rollback attack produces (an old signed head replayed), so
+    # it reports as drift, not a clean append.
+    if sb < sa:
+        from .transparency import verify_extends
+
+        if verify_extends(a, first=sb, first_root=rb) is True:
+            return (
+                "drift",
+                f"the newer export pins an EARLIER signed head (size {sb} < {sa}) — "
+                "the old head provably extends it: either this pack was exported "
+                "before the old one, or the deployment served a regressed head "
+                "(a rollback is indistinguishable from an older export offline)",
+            )
+        return (
+            "drift",
+            f"the newer export pins an earlier signed head (size {sb} < {sa}) with "
+            "no bridge — an older export or a regression, undecidable offline",
+        )
+    from .transparency import verify_extends
+
+    bridged = verify_extends(b, first=sa, first_root=ra)
+    if bridged is True:
+        return (
+            "ok",
+            f"the size-{sb} head provably extends the size-{sa} head "
+            "via the larger checkpoint's own signed bridge — the log only appended "
+            "between these exports",
+        )
+    if bridged is False:
+        return (
+            "anomaly",
+            f"the size-{sb} checkpoint's signed extends bridge names the "
+            f"size-{sa} head but does not reach it — the issuer's own proof "
+            "material contradicts the pack: fork evidence",
+        )
+    return (
+        "info",
+        f"export log heads differ (size {sa} vs {sb}) with no embedded bridge "
+        "between them — checkpoints bridge only adjacent heads; `attest "
+        "consistency` against the live deployment decides",
+    )
+
+
 def _diff_events(old: dict, new: dict, key: str | None, old_path: str, new_path: str):
     """The single comparison core — text output and the JSON report are built
     from the same event stream so the two can never disagree."""
@@ -870,6 +953,33 @@ def _diff_events(old: dict, new: dict, key: str | None, old_path: str, new_path:
             "!! ",
         )
         anomalies += 1
+
+    # Two exports = two snapshots of the same transparency log, each
+    # carrying a signed tree head. Same head is agreement; adjacent
+    # checkpoints bridge via the embedded extends proof (append-only
+    # between exports, verified offline); same-size different-root is a
+    # PROVEN fork — the issuer signed two different roots at one size.
+    oh, nh = old.get("log_head"), new.get("log_head")
+    if oh is not None and nh is not None:
+        verdict = _log_head_verdict(oh, nh)
+        if verdict:
+            severity, detail = verdict
+            ev(
+                severity,
+                "log_checkpoint.json",
+                detail,
+                {"ok": "ok ", "info": "+  ", "anomaly": "!! ", "drift": "~  "}[severity],
+            )
+            if severity == "anomaly":
+                anomalies += 1
+    elif oh is not None or nh is not None:
+        ev(
+            "drift",
+            "log_checkpoint.json",
+            f"only the {'old' if oh is not None else 'new'} export carries a transparency "
+            "checkpoint — the append-only postures can't be compared",
+            "~  ",
+        )
 
     for vid in sorted(set(old["visits"]) | set(new["visits"])):
         a, b = old["visits"].get(vid), new["visits"].get(vid)

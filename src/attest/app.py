@@ -278,11 +278,6 @@ def create_app(
     async def authorize(request: Request):
         if request.url.path in ("/webhooks/ring", "/healthz", "/.well-known/attest-issuer.json"):
             return
-        # Transparency-log reads are public verification material — proof
-        # nodes are bare hashes and the head is a commitment to public
-        # receipts, so they carry no secret beyond what a pack already ships.
-        if request.url.path.startswith("/api/log/"):
-            return
         if request.method not in ("GET", "HEAD", "OPTIONS"):
             # Every write surface — public or admin — refuses cross-site
             # browser posts first: a hostile page can fire text/plain JSON
@@ -296,6 +291,13 @@ def create_app(
                 origin is not None and origin != expected_origin
             ):
                 raise HTTPException(403, "cross-origin writes are not allowed")
+        # Transparency-log reads are public verification material — proof
+        # nodes are bare hashes and the head is a commitment to public
+        # receipts, so they carry no secret beyond what a pack already ships.
+        # The exemption is READ-SCOPED so a future write route under the
+        # prefix still hits the cross-site check above and admin auth below.
+        if request.method in ("GET", "HEAD", "OPTIONS") and request.url.path.startswith("/api/log/"):
+            return
         # The witness endpoints are the same class as the log reads: the
         # requester ships its own issuer doc + checkpoint (public crypto
         # material), and the witness's only privilege spent is its own
@@ -408,6 +410,19 @@ def create_app(
             "img-src 'self' data:; connect-src 'self'; font-src 'self'; "
             "form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
         )
+        if request.url.path == "/verify-pack":
+            # The standalone browser verifier's live cross-check fetches the
+            # TARGET deployment's issuer doc + log head — necessarily
+            # cross-origin when the pack under audit came from elsewhere.
+            # Signatures authenticate everything fetched, and the fetch
+            # policy itself is HTTPS-only for non-loopback targets, so the
+            # widened scheme list matches it exactly.
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+                "img-src 'self' data:; connect-src 'self' https: http://localhost:* "
+                "http://127.0.0.1:* http://[::1]:*; font-src 'self'; "
+                "form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+            )
         # Verification reads are meant to be fetched cross-origin — a verifier
         # page (the pack's embedded verify.html on file://, a hosted copy)
         # cross-checks the pack's signed head against the live one. GETs only;
@@ -2396,10 +2411,12 @@ def _verify_log_pin(z, trusted: set, member_ids: list[tuple[str, str, str]]) -> 
         return False, err
     if res is None:
         return True, ""
-    proven, size, cosigs = res
+    proven, size, cosigs, anchored, _head = res
     note = f"{proven} receipt(s) proven inside the deployment transparency log at checkpoint size {size}"
     if cosigs:
         note += f" — cosigned by {cosigs} witness(es)"
+        if anchored:
+            note += f" ({anchored} anchored in the witness's own published log)"
     return True, note
 
 

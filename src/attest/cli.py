@@ -1077,8 +1077,9 @@ def _verify(args: argparse.Namespace) -> None:
     # to its certified lineage, so "vouched by https://witness.example" means
     # the whole rotation-aware identity, not one frozen key. A witness that
     # can't be identified can't vouch — an unreachable doc fails loudly.
-    required_witnesses = set(getattr(args, "witness_key", None) or [])
+    required_witnesses: set[str] = set()
     witness_names: dict[str, str] = {}
+    _revoked_known: set[str] = set()
     for _wurl in getattr(args, "witness_url", None) or []:
         from . import logmonitor as _lmw
 
@@ -1095,14 +1096,38 @@ def _verify(args: argparse.Namespace) -> None:
             except Exception:  # noqa: BLE001 — malformed entries just can't revoke
                 continue
         _wrevoked = set(ledger.revoked_issuer_keys(_wreceipts, issuer_key=_wdoc["issuer_key"]))
-        for _k in _lmw._trusted_set(_wdoc) - _wrevoked:
+        _wtrusted = _lmw._trusted_set(_wdoc)
+        _revoked_known |= _wrevoked & _wtrusted
+        for _k in _wtrusted - _wrevoked:
             witness_names.setdefault(_k, _host or _wurl)
             required_witnesses.add(_k)
         print(
             f"requiring a counter-signature from witness {_host or _wurl} "
-            f"({len(_lmw._trusted_set(_wdoc))} key(s) in its certified lineage)",
+            f"({len(_wtrusted)} key(s) in its certified lineage)",
             file=sys.stderr if json_mode else sys.stdout,
         )
+    for _k in getattr(args, "witness_key", None) or []:
+        if _k in witness_names:
+            # Resolves to an already-named deployment — one identity, not
+            # two; counting it twice would let one witness satisfy 2-of-n.
+            print(
+                f"--witness-key {_k[:16]}… resolves to named witness "
+                f"{witness_names[_k]} — one identity, counted once",
+                file=sys.stderr if json_mode else sys.stdout,
+            )
+            continue
+        if _k in _revoked_known:
+            print(
+                f"--witness-key {_k[:16]}… is revoked inside a named "
+                "witness's lineage — a declared-suspect key cannot vouch; "
+                "excluding it from the requirement",
+                file=sys.stderr if json_mode else sys.stdout,
+            )
+            continue
+        # A raw key with no resolvable deployment is a per-KEY identity —
+        # two lineage keys of one rotated witness can't be told apart
+        # from two witnesses here; --witness-url is the rotation-aware form.
+        required_witnesses.add(_k)
     witness_threshold = int(getattr(args, "witness_threshold", 1) or 1)
     if witness_threshold < 1:
         fail("--witness-threshold must be at least 1")
@@ -1476,6 +1501,13 @@ def _verify_log_doc(
             detail += (
                 f" — cosigned by {n_cosig} witness(es) ({', '.join(k[:12] + '…' for k in cosigners[:3])})"
             )
+        # A packed witness anchor that doesn't verify is a lie indicator,
+        # not a downgrade — fail closed like the pin check does.
+        _anch, _aerr = _lm.check_cosig_anchors(data)
+        if _aerr:
+            fail(f"checkpoint document: {_aerr[0]}", kind="log_checkpoint")
+        if _anch:
+            detail += f" — {_anch} attestation(s) anchored in the witness's own published log"
         if required_witnesses:
             # Threshold counts distinct witness IDENTITIES, not keys: every
             # lineage key of one --witness-url maps to that deployment's
@@ -1606,6 +1638,36 @@ def _verify_log_doc(
     )
 
 
+def _pack_key_pool(z, names) -> list:
+    """Lifecycle receipts the pack itself carries — case packs list them
+    in ``manifest.attestations``, single-visit packs in
+    ``key_rotations.json``. Malformed members already failed the verify
+    pass; this pool only widens the issuer lineage used for self-vouch
+    exclusion and reporting, so unreadable entries are skipped."""
+    from .models import Receipt
+
+    pool: list = []
+    if "manifest.json" in names:
+        try:
+            manifest = json.loads(z.read("manifest.json"))
+            for a in manifest.get("attestations") or []:
+                rid = a.get("receipt_id") if isinstance(a, dict) else None
+                if not rid or f"attestations/{rid}.json" not in names:
+                    continue
+                att = Receipt.model_validate(json.loads(z.read(f"attestations/{rid}.json")))
+                if att.payload.get("record_type") in ("key_rotation", "key_adoption", "key_revocation"):
+                    pool.append(att)
+        except Exception:  # noqa: BLE001
+            pass
+    if "key_rotations.json" in names:
+        try:
+            kr = json.loads(z.read("key_rotations.json"))
+            pool += [Receipt.model_validate(r) for r in kr.get("rotations") or []]
+        except Exception:  # noqa: BLE001
+            pass
+    return pool
+
+
 def _verify_zip(
     raw: bytes,
     pinned_key: str | None,
@@ -1700,9 +1762,11 @@ def _verify_zip(
             )
         cpdoc = json.loads(z.read("log_checkpoint.json"))
         _cp, _p = cpdoc["checkpoint"], cpdoc["checkpoint"]["payload"]
-        _lineage = ledger.trusted_issuer_keys(key, known_rotations or []) | (
-            ledger.descendant_issuer_keys(key, known_rotations or [])
-        )
+        # Self-vouch exclusion needs the WHOLE issuer family — the pack's
+        # own lifecycle receipts name rotated issuer keys that
+        # --issuer-url material alone can't see.
+        _pool = _pack_key_pool(z, names) + list(known_rotations or [])
+        _lineage = ledger.trusted_issuer_keys(key, _pool) | (ledger.descendant_issuer_keys(key, _pool))
         _, signers = logmonitor.check_cosignatures(
             cpdoc, _cp["id"], int(_p["tree_size"]), _p["root_sha256"], issuer_keys=_lineage
         )
@@ -1733,19 +1797,24 @@ def _verify_zip(
                 from . import logmonitor as _lm2
 
                 _p = cp["checkpoint"]["payload"]
+                _pool = _pack_key_pool(z, names) + list(known_rotations or [])
                 _nc, _sig = _lm2.check_cosignatures(
                     cp,
                     cp["checkpoint"]["id"],
                     int(_p["tree_size"]),
                     _p["root_sha256"],
-                    issuer_keys=ledger.trusted_issuer_keys(key, known_rotations or [])
-                    | ledger.descendant_issuer_keys(key, known_rotations or []),
+                    issuer_keys=ledger.trusted_issuer_keys(key, _pool)
+                    | ledger.descendant_issuer_keys(key, _pool),
                 )
+                _anch, _aerr = _lm2.check_cosig_anchors(cp)
                 extra["log"] = {
                     "tree_size": _p["tree_size"],
                     "proven": len(cp.get("proofs") or {}),
                     "cosigned": _nc,
+                    "anchored_cosigs": _anch,
                 }
+                if _aerr:
+                    extra["log"]["anchor_errors"] = _aerr
             except Exception:  # noqa: BLE001 — verified pack; report what parses
                 pass
         if live_report is not None:
@@ -2247,7 +2316,7 @@ def _checkpoint(args: argparse.Namespace) -> None:
             for url in witnesses:
                 base = url.rstrip("/")
                 try:
-                    cosig, line = logmonitor.cosign_at(
+                    cosig, line, anchor = logmonitor.cosign_at(
                         base,
                         issuer_doc,
                         out["checkpoint"],
@@ -2258,6 +2327,8 @@ def _checkpoint(args: argparse.Namespace) -> None:
                     continue
                 if cosig:
                     out["cosignatures"].append(cosig)
+                    if anchor:
+                        out.setdefault("cosig_anchors", {})[cosig["id"]] = anchor
                     print(f"witness {base}: {line}")
                 else:
                     print(f"witness {base}: {line}", file=sys.stderr)
@@ -2414,6 +2485,21 @@ def _monitor(args: argparse.Namespace) -> None:
                     lines.append("witness heads response is malformed — cannot compare views")
                 else:
                     wtrusted = logmonitor._trusted_set(wdoc)
+                    # A revoked WITNESS key can still sign — it just can't
+                    # vouch: the revocation is the deployment declaring the
+                    # key suspect, so its attestations don't count as an
+                    # independent second view (same discipline as
+                    # --witness-url's named-requirement set).
+                    from . import ledger as _ledger
+                    from .models import Receipt as _Rc
+
+                    _wrecs = []
+                    for _x in wdoc.get("key_receipts") or []:
+                        try:
+                            _wrecs.append(_Rc.model_validate(_x))
+                        except Exception:  # noqa: BLE001 — malformed entries can't revoke
+                            continue
+                    wtrusted -= set(_ledger.revoked_issuer_keys(_wrecs, issuer_key=wdoc["issuer_key"]))
                     # Pin the WITNESS's own log head too: a served
                     # witness_anchor only means 'in the published log' when
                     # it provably reconciles with the head THIS monitor
@@ -2436,8 +2522,8 @@ def _monitor(args: argparse.Namespace) -> None:
                         lines.append(f"witness log head unreachable: {exc}")
                     else:
                         prev_wlog = None
-                        if isinstance(state, dict):
-                            prev_wlog = (state.get("witness_logs") or {}).get(wbase)
+                        if isinstance(state, dict) and isinstance(state.get("witness_logs"), dict):
+                            prev_wlog = state["witness_logs"].get(wbase)
                         wlog_state, wok, wlines = logmonitor.check(
                             prev_wlog,
                             wdoc,
@@ -2449,11 +2535,15 @@ def _monitor(args: argparse.Namespace) -> None:
                             lines.append(f"witness log: {_wl}")
                         if not wok:
                             ok = False
+                    # Pins key on the issuer's canonical LINEAGE identity —
+                    # match any key inside the lineage we track, not just
+                    # the tip our issuer doc happens to claim.
+                    _ilineage = logmonitor._trusted_set(doc)
                     pin = next(
                         (
                             p
                             for p in heads["pins"]
-                            if isinstance(p, dict) and p.get("issuer_key") == doc["issuer_key"]
+                            if isinstance(p, dict) and p.get("issuer_key") in _ilineage
                         ),
                         None,
                     )
@@ -2463,6 +2553,7 @@ def _monitor(args: argparse.Namespace) -> None:
                         wtrusted,
                         witness_pin=wlog_state,
                         fetch_wconsistency=_wconsistency,
+                        issuer_lineage=_ilineage,
                     )
                     lines.append(f"witness cross-view [{verdict}]: {line}")
                     if wlog_state is not None and new_state is not None:
@@ -2473,7 +2564,11 @@ def _monitor(args: argparse.Namespace) -> None:
                         new_state.setdefault("witness_logs", {})[wbase] = {
                             k: v for k, v in wlog_state.items() if k != "witness_logs"
                         }
-                    if verdict == "diverged":
+                    if verdict in ("diverged", "dishonest"):
+                        # Contradictory views — OR a witness serving
+                        # verifiably false material (a bad anchor, a
+                        # self-contradicting pin). Either way one view may
+                        # be a fork: never repin past it.
                         ok = False
                         repin = False
                     elif verdict == "unverifiable":
@@ -2997,11 +3092,11 @@ def _export(args: argparse.Namespace) -> None:
             issuer_doc = ledger.issuer_document(engine.signer.public_key_b64, store.receipts())
 
             def cosign_fn(cp):
-                cosigs = []
+                cosigs, anchors = [], {}
                 for url in witnesses:
                     base = url.rstrip("/")
                     try:
-                        cosig, line = logmonitor.cosign_at(
+                        cosig, line, anchor = logmonitor.cosign_at(
                             base,
                             issuer_doc,
                             cp.model_dump(mode="json"),
@@ -3012,10 +3107,12 @@ def _export(args: argparse.Namespace) -> None:
                         continue
                     if cosig:
                         cosigs.append(cosig)
+                        if anchor:
+                            anchors[cosig["id"]] = anchor
                         print(f"witness {base}: {line}")
                     else:
                         print(f"witness {base}: {line}", file=sys.stderr)
-                return cosigs
+                return cosigs, anchors
 
         data = build_case_pack(
             store,

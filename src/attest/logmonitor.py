@@ -26,11 +26,9 @@ def _doc_checkpoint(head: dict) -> dict | None:
     return cp if isinstance(cp, dict) else None
 
 
-def _trusted_set(doc: dict) -> set:
-    """Issuer lineage the issuer document certifies — ancestors through
-    consented pivots plus descendants, so a deployment mid-rotation still
-    verifies. Mirrors what pack verification does with the same doc."""
-    from .ledger import descendant_issuer_keys, trusted_issuer_keys
+def _doc_receipts(doc: dict) -> list:
+    """The issuer document's key_receipts, model-validated — malformed
+    entries just can't bridge, exactly like _trusted_set treats them."""
     from .models import Receipt
 
     receipts = []
@@ -39,7 +37,17 @@ def _trusted_set(doc: dict) -> set:
             receipts.append(Receipt.model_validate(r))
         except Exception:  # noqa: BLE001 — malformed entries just can't bridge
             continue
+    return receipts
+
+
+def _trusted_set(doc: dict) -> set:
+    """Issuer lineage the issuer document certifies — ancestors through
+    consented pivots plus descendants, so a deployment mid-rotation still
+    verifies. Mirrors what pack verification does with the same doc."""
+    from .ledger import descendant_issuer_keys, trusted_issuer_keys
+
     issuer = doc["issuer_key"]
+    receipts = _doc_receipts(doc)
     return trusted_issuer_keys(issuer, receipts) | descendant_issuer_keys(issuer, receipts)
 
 
@@ -374,6 +382,20 @@ def witness_cosign(store, signer, body: dict) -> tuple[int, dict]:
     issuer_key = issuer_doc["issuer_key"]
     cp = Receipt.model_validate(cp_raw)
     size, root_hex = int(payload["tree_size"]), payload["root_sha256"]
+    # The continuity pin keys on the issuer's CANONICAL lineage identity —
+    # the family ROOT, not the claimed tip and not a set-ordering artifact:
+    # a doc claiming issuer_key=K_new after rotating (or claiming an
+    # ancestor, or any alias the lineage certifies) resolves to the SAME
+    # slot — one pin per lineage, so rotation can't launder a rewrite into
+    # a fresh pin. ``min(trusted)`` would not do: an alphabetically-smaller
+    # successor key would shift it. The residual: a doc that hides its own
+    # rotation history presents a root that is just its claimed key — but
+    # presenting a new, undisclosed identity is indistinguishable from
+    # being a genuinely new issuer to any pinning scheme that learns
+    # identity from the requester's own document.
+    from .ledger import lineage_root
+
+    canonical = lineage_root(issuer_key, _doc_receipts(issuer_doc))
 
     # The pin-check → sequence-allocate → sign → repin section is a single
     # store transaction: without it, two parallel offers each read the same
@@ -383,7 +405,38 @@ def witness_cosign(store, signer, body: dict) -> tuple[int, dict]:
     # writer (checkpoints, cosigns, receipts) — the codebase's own @atomic
     # discipline, just applied to a free function.
     with store.transaction():
-        state = store.setting(f"witness:{issuer_key}") or {}
+        state = store.setting(f"witness:{canonical}") or {}
+        if not state:
+            # Pins minted before canonical slots live under whatever key
+            # the requester claimed then — any alias inside this lineage.
+            # Find the NEWEST family-member legacy pin (two historical
+            # claims can each leave a slot): continuity must apply to the
+            # furthest head the witness attested, or the upgrade window
+            # would launder a rewrite past a stale slot.
+            legacy_slot, legacy_pin = None, None
+            for slot_name, legacy in store.settings_by_prefix("witness:").items():
+                if (
+                    slot_name != f"witness:{canonical}"
+                    and isinstance(legacy, dict)
+                    and legacy.get("schema") == WITNESS_SCHEMA
+                    and legacy.get("issuer_key") in trusted
+                    and isinstance(legacy.get("tree_size"), int)
+                    and (legacy_pin is None or legacy["tree_size"] > legacy_pin["tree_size"])
+                ):
+                    legacy_slot, legacy_pin = slot_name, legacy
+            if legacy_pin is not None:
+                state = legacy_pin
+                # Tombstone the claimed-key slot: the canonical slot gets
+                # repinned below, and a stale second pin must not keep
+                # publishing an old head from /api/witness/heads.
+                store.put_setting(
+                    legacy_slot,
+                    {
+                        "schema": "attest.witness-pin-migrated/1",
+                        "issuer_key": legacy_pin.get("issuer_key"),
+                        "migrated_to": canonical,
+                    },
+                )
         if state and state.get("schema") != WITNESS_SCHEMA:
             return 500, {"error": "witness pin state is corrupt — refusing to repin"}
         old_size = state.get("tree_size")
@@ -430,7 +483,7 @@ def witness_cosign(store, signer, body: dict) -> tuple[int, dict]:
                         },
                     }
 
-        pseudo_id = f"witness:{issuer_key[:24]}:{cp.id}"
+        pseudo_id = f"witness:{canonical[:24]}:{cp.id}"
         cosig = store.receipt_for_visit(pseudo_id)
         # Idempotency must still bind THIS head: a stored cosig attesting a
         # different (size, root) — an issuer re-signed the same checkpoint id
@@ -442,7 +495,7 @@ def witness_cosign(store, signer, body: dict) -> tuple[int, dict]:
             or cosig.payload.get("subject_root_sha256") != root_hex
         ):
             cosig = None
-            pseudo_id = f"witness:{issuer_key[:24]}:{cp.id}:{root_hex[:16]}"
+            pseudo_id = f"witness:{canonical[:24]}:{cp.id}:{root_hex[:16]}"
             cosig = store.receipt_for_visit(pseudo_id)
             if cosig is not None and (
                 cosig.payload.get("subject_tree_size") != size
@@ -452,7 +505,7 @@ def witness_cosign(store, signer, body: dict) -> tuple[int, dict]:
                 # attestation under the qualified pseudo — never reuse it;
                 # fall deeper so the fresh cosig still stores uniquely.
                 cosig = None
-                pseudo_id = f"witness:{issuer_key[:24]}:{cp.id}:{root_hex}"
+                pseudo_id = f"witness:{canonical[:24]}:{cp.id}:{root_hex}"
         if cosig is None:
             prev = store.latest_receipt()
             cosig = signer.issue(
@@ -464,7 +517,10 @@ def witness_cosign(store, signer, body: dict) -> tuple[int, dict]:
                     "subject_checkpoint": cp.id,
                     "subject_tree_size": size,
                     "subject_root_sha256": root_hex,
-                    "subject_issuer": issuer_key,
+                    # The stable lineage identity, not the claimed tip —
+                    # post-rotation attestations still name the same issuer.
+                    "subject_issuer": canonical,
+                    "subject_issuer_claimed": issuer_key,
                     # Same discipline as engine-issued receipts: pin the
                     # mutation-journal head so the cosig also covers the
                     # witness's own audit trail at signing time.
@@ -481,13 +537,14 @@ def witness_cosign(store, signer, body: dict) -> tuple[int, dict]:
             store.put_receipt(cosig)
         new_state = {
             "schema": WITNESS_SCHEMA,
-            "issuer_key": issuer_key,
+            "issuer_key": canonical,
+            "claimed_issuer": issuer_key,
             "tree_size": size,
             "root_sha256": root_hex,
             "checkpoint_id": cp.id,
             "cosignature_id": cosig.id,
         }
-        store.put_setting(f"witness:{issuer_key}", new_state)
+        store.put_setting(f"witness:{canonical}", new_state)
         return 200, {"cosignature": cosig.model_dump(mode="json"), "pinned": new_state}
 
 
@@ -599,6 +656,7 @@ def compare_views(
     *,
     witness_pin: dict | None = None,
     fetch_wconsistency=None,
+    issuer_lineage: set | None = None,
 ) -> tuple[str, str]:
     """Cross-check two independent pins of the same issuer's log — mine (the
     monitor's last verified head) against a witness's published pin.
@@ -628,7 +686,19 @@ def compare_views(
     crypto, but over a tree the witness could mint per victim.
     ``fetch_wconsistency(first, size)`` pulls consistency proofs off the
     witness's own log for the bridging cases the anchor's embedded
-    `extends` doesn't already name."""
+    `extends` doesn't already name.
+    ``issuer_lineage`` is the monitor's trusted key set for the SUBJECT
+    issuer — cosigs stamp the issuer's canonical lineage identity, so a
+    post-rotation attestation still names a key inside the lineage even
+    when it isn't the tip the monitor pins.
+
+    Verdicts distinguish *proven lies* from *unestablished claims*:
+    'dishonest' means the witness served material that verifiably
+    contradicts itself (signature fails, subjects disagree, anchor
+    doesn't verify or can't reconcile with the pinned witness log) —
+    the monitor treats it like 'diverged' and never repins past it.
+    'unverifiable' means the view simply can't be established yet —
+    transient outage, missing fields, unparseable shapes."""
     if theirs is None:
         return "unseen", "the witness has never cosigned this issuer — no second view exists"
     if mine is None:
@@ -647,10 +717,10 @@ def compare_views(
         )
     ok, why = verify_receipt(cosig, public_key=cosig.public_key)
     if not ok:
-        return "unverifiable", f"the witness's published cosignature fails verification ({why})"
+        return "dishonest", f"the witness's published cosignature fails verification ({why})"
     if witness_trusted is not None and cosig.public_key not in witness_trusted:
         return (
-            "unverifiable",
+            "dishonest",
             "the published cosignature is signed outside the witness's certified "
             "issuer lineage — the view can't be attributed to this witness",
         )
@@ -661,12 +731,22 @@ def compare_views(
         or p.get("subject_root_sha256") != theirs.get("root_sha256")
         or p.get("subject_checkpoint") != theirs.get("checkpoint_id")
         or p.get("subject_issuer") != theirs.get("issuer_key")
-        # The signed subject must name the issuer MY pin tracks — a pin
-        # selected for a different issuer can never yield an honest verdict.
-        or (isinstance(mine.get("issuer_key"), str) and p.get("subject_issuer") != mine["issuer_key"])
+        # The signed subject must name an issuer inside the lineage MY pin
+        # tracks — a pin selected for a different issuer (or an attestation
+        # naming a foreign lineage) can never yield an honest verdict.
+        or (
+            issuer_lineage is not None
+            and isinstance(p.get("subject_issuer"), str)
+            and p["subject_issuer"] not in issuer_lineage
+        )
+        or (
+            issuer_lineage is None
+            and isinstance(mine.get("issuer_key"), str)
+            and p.get("subject_issuer") != mine["issuer_key"]
+        )
     ):
         return (
-            "unverifiable",
+            "dishonest",
             "the signed cosignature does not attest the pin's claimed head — "
             "the unsigned fields disagree with the receipt; the view is unusable",
         )
@@ -704,7 +784,7 @@ def compare_views(
             anchored_size = int(ap["tree_size"])
         else:
             return (
-                "unverifiable",
+                "dishonest",
                 "the pin's witness_anchor does not verify — the cosig does not "
                 "sit inside the witness's own published log as claimed",
             )
@@ -757,7 +837,7 @@ def compare_views(
                 same_log = _bridge(anchored_size, a_root, wp_size, wp_root)
             if not same_log:
                 return (
-                    "unverifiable",
+                    "dishonest",
                     "the pin's witness_anchor cannot be reconciled with the "
                     "witness log head this monitor pinned — a checkpoint over "
                     "a private per-victim fork verifies in isolation and is "
@@ -771,9 +851,25 @@ def compare_views(
     else:
         anchor_note = ""
     # From here the comparison runs on the SIGNED subject fields — the only
-    # view the witness actually attested.
-    my_size, my_root = int(mine["tree_size"]), str(mine["root_sha256"])
-    w_size, w_root = int(p["subject_tree_size"]), str(p["subject_root_sha256"])
+    # view the witness actually attested. Served fields that can't even
+    # coerce are a served lie: the witness signed this receipt, so a
+    # malformed subject is its own attestation, not a transient error.
+    try:
+        my_size, my_root = int(mine["tree_size"]), str(mine["root_sha256"])
+    except (KeyError, TypeError, ValueError):
+        return (
+            "unverifiable",
+            "the monitor's own pin is malformed — corrupt local state, "
+            "not a witness verdict; repin locally and rerun",
+        )
+    try:
+        w_size, w_root = int(p["subject_tree_size"]), str(p["subject_root_sha256"])
+    except (KeyError, TypeError, ValueError):
+        return (
+            "dishonest",
+            "the published cosignature's subject fields are malformed — the "
+            "witness signed them, so this is its own attestation failing",
+        )
     w_id = cosig.id[:24]
     if my_size == w_size and my_root == w_root:
         return (
@@ -805,21 +901,24 @@ def compare_views(
 
 def cosign_at(
     base_url: str, issuer_doc: dict, checkpoint_raw: dict, consistency_fn
-) -> tuple[dict | None, str]:
+) -> tuple[dict | None, str, dict | None]:
     """One witness exchange: POST the checkpoint, retry once with the
     consistency bridge the 409 names (``consistency_fn(pinned_size)`` must
     produce the requester's own proof document — the witness verifies the
     math itself, so handing it the bridge is not trusting the requester).
-    Returns (cosignature receipt | None, human line)."""
+    Returns (cosignature receipt | None, human line, witness_anchor |
+    None) — the anchor is the witness's own signed checkpoint plus the
+    cosig's inclusion proof, so a packed cosig can carry proof the
+    attestation was committed to the witness's published log."""
     body = {"issuer_doc": issuer_doc, "checkpoint": checkpoint_raw}
     resp = post_json(f"{base_url}/api/witness/cosign", body)
     if resp.get("status") == 409 and isinstance(resp.get("pinned"), dict):
         try:
             body["consistency"] = consistency_fn(int(resp["pinned"].get("tree_size") or -1))
         except (TypeError, ValueError):
-            return None, f"refused — malformed 409 pinned head: {resp.get('pinned')}"
+            return None, f"refused — malformed 409 pinned head: {resp.get('pinned')}", None
         if not isinstance(body["consistency"], dict):
-            return None, "refused — no consistency proof available for the pinned head"
+            return None, "refused — no consistency proof available for the pinned head", None
         resp = post_json(f"{base_url}/api/witness/cosign", body)
     if resp.get("status") == 200:
         cosig = resp.get("cosignature")
@@ -833,10 +932,13 @@ def cosign_at(
                         f"at size {int(anchor['checkpoint']['payload']['tree_size'])}"
                     )
                 except (KeyError, TypeError, ValueError):
+                    anchor = None
                     note = ""
-            return cosig, f"cosigned ({cosig['id'][:24]}…){note}"
-        return None, f"refused — malformed cosignature in response: {cosig}"
-    return None, f"refused — {resp.get('error') or resp}"
+            else:
+                anchor = None
+            return cosig, f"cosigned ({cosig['id'][:24]}…){note}", anchor
+        return None, f"refused — malformed cosignature in response: {cosig}", None
+    return None, f"refused — {resp.get('error') or resp}", None
 
 
 def check_cosignatures(
@@ -867,7 +969,8 @@ def check_cosignatures(
         self_keys.add(cp_raw["public_key"])
     verified, signers = 0, []
     seen_ids, seen_keys = set(), set()
-    for raw in doc.get("cosignatures") or []:
+    cosig_list = doc.get("cosignatures")
+    for raw in cosig_list if isinstance(cosig_list, list) else []:
         try:
             cosig = Receipt.model_validate(raw)
             p = cosig.payload
@@ -875,7 +978,10 @@ def check_cosignatures(
                 continue
             if (
                 p.get("subject_checkpoint") != cp_id
-                or int(p.get("subject_tree_size") or -1) != size
+                # Strict comparison — a stringified "5" doesn't bind head 5
+                # (the JS verifier's !== agrees), and a malformed field
+                # just can't bind.
+                or p.get("subject_tree_size") != size
                 or p.get("subject_root_sha256") != root_hex
             ):
                 continue
@@ -898,6 +1004,64 @@ def check_cosignatures(
         except Exception:  # noqa: BLE001 — one bad cosig doesn't taint the rest
             continue
     return verified, signers
+
+
+def check_cosig_anchors(doc: dict) -> tuple[int, list[str]]:
+    """Verify the ``cosig_anchors`` a checkpoint document carries: the map
+    ``{cosig_id: {checkpoint, proof}}`` a pack stashes from each witness's
+    ``witness_anchor`` response — the WITNESS's own signed tree head plus
+    an inclusion path proving the cosig is a leaf of the witness's log.
+
+    An anchor is meaningful only when the anchor checkpoint's signer IS
+    the cosig's signer — 'inside the witness's own log' fails when the
+    head is signed by anyone else (a grafted anchor over an unrelated log
+    proves nothing). Returns (anchored_count, errors): a present anchor
+    that doesn't verify is a lie indicator, not a downgrade — every error
+    names the cosig. Absent anchors and absent cosigs just don't count."""
+    from .ledger import verify_receipt
+    from .models import Receipt
+    from .transparency import verify_inclusion
+
+    anchors = doc.get("cosig_anchors")
+    if not isinstance(anchors, dict):
+        return 0, []
+    cosigs = {}
+    cosig_list = doc.get("cosignatures")
+    for raw in cosig_list if isinstance(cosig_list, list) else []:
+        if isinstance(raw, dict) and isinstance(raw.get("id"), str):
+            cosigs[raw["id"]] = raw
+    anchored, errors = 0, []
+    for cid, anchor in anchors.items():
+        cosig = cosigs.get(cid)
+        if cosig is None:
+            errors.append(f"cosig_anchors: {cid} — anchor for a cosignature the doc doesn't carry")
+            continue
+        try:
+            acp = Receipt.model_validate((anchor or {}).get("checkpoint"))
+            p = acp.payload
+            if p.get("record_type") != "log_checkpoint":
+                raise ValueError("anchor checkpoint is not a log_checkpoint")
+            # The witness's own log is signed by the witness — an anchor
+            # under any other key anchors nothing about THIS attestation.
+            if acp.public_key != cosig.get("public_key"):
+                raise ValueError("anchor head not signed by the cosig's own witness key")
+            ok, why = verify_receipt(acp, public_key=acp.public_key)
+            if not ok:
+                raise ValueError(f"anchor checkpoint: {why}")
+            size = int(p["tree_size"])
+            root = bytes.fromhex(str(p["root_sha256"]))
+            leaf = bytes.fromhex(str(cosig["payload_hash"]))
+            proof = anchor.get("proof") or {}
+            path = [bytes.fromhex(h) for h in proof.get("path") or []]
+            idx = proof.get("leaf_index")
+            if not isinstance(idx, int) or not verify_inclusion(leaf, size, idx, path, root):
+                raise ValueError("the cosig does not reach the anchor's signed tree head")
+            anchored += 1
+        except (KeyError, TypeError, ValueError) as exc:
+            errors.append(f"cosig_anchors: {cid[:24]}… — {exc}")
+        except Exception as exc:  # noqa: BLE001 — model_validate can raise broadly
+            errors.append(f"cosig_anchors: {cid[:24]}… — {exc}")
+    return anchored, errors
 
 
 def state_load(path) -> dict | None:
