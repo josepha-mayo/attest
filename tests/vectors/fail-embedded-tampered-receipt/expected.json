@@ -1,0 +1,13 @@
+{
+  "kind": "case",
+  "pin": "declared",
+  "verdict": "fail",
+  "detail_contains": [
+    "embedded receipt"
+  ],
+  "js": {
+    "bundle_ok": true,
+    "verdict": "fail"
+  },
+  "note": "an embedded receipt's payload flipped \u2014 payload hash and signature both fail; a doctored observation can never ride the signed head"
+}

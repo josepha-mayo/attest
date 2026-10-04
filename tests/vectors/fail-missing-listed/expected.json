@@ -3,7 +3,7 @@
   "pin": "declared",
   "verdict": "fail",
   "detail_contains": [
-    "vis_255e3f6c1461"
+    "vis_bf32d569d4e3"
   ],
   "js": {
     "bundle_ok": true,

@@ -1,0 +1,14 @@
+{
+  "kind": "case",
+  "pin": "declared",
+  "verdict": "ok",
+  "detail_contains": [
+    "anchored in the witness",
+    "own published log"
+  ],
+  "js": {
+    "bundle_ok": true,
+    "verdict": "ok"
+  },
+  "note": "the witness's attestation is itself committed to the witness's own transparency log \u2014 the pack proves the cosignature was published, not just signed and handed over"
+}

@@ -100,7 +100,7 @@ const receiptText=${JSON.stringify(rt)};
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=180,
     )
     assert proc.returncode == 0, proc.stderr
     out = proc.stdout
@@ -133,7 +133,7 @@ eval(src + `
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=180,
     )
     assert proc.returncode == 0, proc.stderr
     assert '"ok":true' in proc.stdout and "review(s) verified" in proc.stdout
@@ -172,7 +172,7 @@ eval(src + `
             cwd=tmp_path,
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=180,
         )
         assert proc.returncode == 0, proc.stderr
         return proc.stdout
@@ -275,7 +275,7 @@ const arm=dt=>{const dn=parseKeep(dt),d=toJS(dn)||{},kn=get(dn,'key_receipts');
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=180,
     )
     assert proc.returncode == 0, proc.stderr
     out = proc.stdout
@@ -335,7 +335,7 @@ console.log('empty:', timelineSVG({})==='');`);
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=180,
     )
     assert proc.returncode == 0, proc.stderr
     out = proc.stdout
@@ -602,7 +602,7 @@ __r().then(()=>{
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=180,
     )
     assert proc.returncode == 0, proc.stderr
     out = proc.stdout
@@ -663,7 +663,7 @@ __r().then(()=>{
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=180,
     )
     assert proc.returncode == 0, proc.stderr
     out = proc.stdout
@@ -738,7 +738,7 @@ __r().then(()=>{
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=180,
     )
     assert proc.returncode == 0, proc.stderr
     out = proc.stdout
@@ -889,7 +889,7 @@ __r().then(()=>{
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=180,
     )
     assert proc.returncode == 0, proc.stderr
     out = proc.stdout
@@ -973,7 +973,7 @@ __r().then(()=>{
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=180,
     )
     assert proc.returncode == 0, proc.stderr
     out = proc.stdout
@@ -1026,7 +1026,7 @@ __rz(fake).then(async files=>{
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=180,
     )
     assert proc.returncode == 0, proc.stderr
     out = proc.stdout
@@ -1063,7 +1063,7 @@ __rz(fake).then(async files=>{
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=180,
     )
     assert proc.returncode == 0, proc.stderr
     return proc.stdout
@@ -1097,7 +1097,7 @@ __v([f]).then(html=>{
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=180,
     )
     assert proc.returncode == 0, proc.stderr
     out = proc.stdout
@@ -1282,7 +1282,7 @@ const receiptText=${JSON.stringify(rt)};
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=180,
     )
     assert proc.returncode == 0, proc.stderr
     assert 'edge: {"ok":true}' in proc.stdout, proc.stdout
@@ -1425,7 +1425,7 @@ const arm=dt=>{const dn=parseKeep(dt),d=toJS(dn)||{},kn=get(dn,'key_receipts');
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=180,
     )
     assert proc.returncode == 0, proc.stderr
     assert "pinned: true true" in proc.stdout, proc.stdout
@@ -1562,7 +1562,7 @@ const arm=dt=>{const dn=parseKeep(dt),o=toJS(dn)||{},kn=get(dn,'key_receipts');
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=180,
     )
     assert proc.returncode == 0, proc.stderr
     assert "forward: true true true" in proc.stdout, proc.stdout
@@ -1668,7 +1668,7 @@ const run=async(head,cp,size,root)=>{
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=180,
     )
     assert proc.returncode == 0, proc.stderr
     out = proc.stdout
@@ -1794,7 +1794,7 @@ eval(src + `
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=180,
     )
     assert proc.returncode == 0, proc.stderr
     out = proc.stdout

@@ -1,0 +1,13 @@
+{
+  "kind": "case",
+  "pin": "declared",
+  "verdict": "fail",
+  "detail_contains": [
+    "outside the issuer lineage"
+  ],
+  "js": {
+    "bundle_ok": true,
+    "verdict": "fail"
+  },
+  "note": "an embedded receipt signed outside the issuer lineage \u2014 embedded evidence must bind the pack's issuer or it is grafted testimony"
+}

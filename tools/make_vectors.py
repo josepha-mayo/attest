@@ -47,6 +47,7 @@ VECTORS = ROOT / "tests" / "vectors"
 # diffs only in timestamps/ids, never in which keys the vectors name.
 KEY_A = Signer(Ed25519PrivateKey.from_private_bytes(b"\x11" * 32))
 KEY_B = Signer(Ed25519PrivateKey.from_private_bytes(b"\x22" * 32))
+KEY_W = Signer(Ed25519PrivateKey.from_private_bytes(b"\x77" * 32))
 ATTACKER = Signer(Ed25519PrivateKey.from_private_bytes(b"\x66" * 32))
 
 
@@ -115,7 +116,7 @@ def _visit(engine: VisitEngine, cam, t0: datetime, world, offset_min: int = 0):
     return visit
 
 
-def _case_pack(store, engine, site, visits, tmp: Path, *, redact=False) -> bytes:
+def _case_pack(store, engine, site, visits, tmp: Path, *, redact=False, log_fn=None) -> bytes:
     service = ReviewService(store, engine.signer, engine.clock)
     entries = [(v, service.bundle(v.id), countersign_status(service.bundle(v.id))) for v in visits]
     return build_case_pack(
@@ -127,7 +128,7 @@ def _case_pack(store, engine, site, visits, tmp: Path, *, redact=False) -> bytes
         manifest_signer=lambda m: engine.issue_export_manifest(site, m),
         issuer_key=engine.signer.public_key_b64,
         tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"site:{site.id}", t),
-        log_fn=lambda rs: log_member(engine, rs),
+        log_fn=log_fn or (lambda rs: log_member(engine, rs)),
     )
 
 
@@ -848,6 +849,193 @@ def main() -> None:
             "signature fails after the edit) counts as absent — the pack "
             "still verifies on its own proofs; auxiliary attestations "
             "report honestly, never gate",
+        },
+    )
+
+    # --- a REAL witness deployment: cosignature + its own-log anchor. The
+    # witness is a second Attest runtime — the cosign exchange runs the same
+    # code the /api/witness/cosign route serves, so the anchor the pack
+    # carries is the artifact a live deployment produces. ---
+    from attest import logmonitor
+    from attest.models import Receipt as _Receipt
+
+    w_store, w_engine, _ws, _wc, _wt, _ww = _deployment(tmp / "wit", KEY_W)
+
+    def _cosign_with_anchor(cp):
+        status, out = logmonitor.witness_cosign(
+            w_store,
+            w_engine.signer,
+            {
+                "issuer_doc": issuer_document(engine.signer.public_key_b64, store.receipts()),
+                "checkpoint": cp.model_dump(mode="json"),
+            },
+        )
+        assert status == 200, out
+        cosig = out["cosignature"]
+        # Mirror the app route: the witness checkpoints its own log on the
+        # spot and returns the cosig's inclusion proof — 'the witness
+        # attested this' is committed the moment it is served.
+        w_cp = w_engine.issue_log_checkpoint()
+        proof = w_engine.inclusion_proof(
+            _Receipt.model_validate(cosig), size=int(w_cp.payload["tree_size"])
+        )
+        anchors = {}
+        if proof is not None:
+            anchors[cosig["id"]] = {"checkpoint": w_cp.model_dump(mode="json"), "proof": proof}
+        return [cosig], anchors
+
+    anchored_pack = _case_pack(
+        store,
+        engine,
+        site,
+        [v1],
+        tmp / "d1",
+        log_fn=lambda rs: log_member(engine, rs, cosign_fn=_cosign_with_anchor),
+    )
+    _write_vector(
+        "ok-witness-anchored",
+        anchored_pack,
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "ok",
+            "detail_contains": ["anchored in the witness", "own published log"],
+            "js": {"bundle_ok": True, "verdict": "ok"},
+            "note": "the witness's attestation is itself committed to the "
+            "witness's own transparency log — the pack proves the cosignature "
+            "was published, not just signed and handed over",
+        },
+    )
+
+    def _break_anchor(doc: dict) -> dict:
+        cid = next(iter(doc["cosig_anchors"]))
+        doc["cosig_anchors"][cid]["proof"]["path"] = ["00" * 32]
+        return doc
+
+    _write_vector(
+        "fail-anchor-proof-graft",
+        _log_edit(anchored_pack, _break_anchor),
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "fail",
+            "detail_contains": ["does not reach"],
+            "js": {"bundle_ok": True, "verdict": "fail"},
+            "note": "a packed anchor whose cosig cannot reach the anchor's "
+            "signed head — a claimed anchor is either verifiable or a lie; "
+            "every verifier fails closed",
+        },
+    )
+
+    # --- embedded evidence receipts: `attest checkpoint --include monitor:`
+    # rides a site pack the same way it rides an exported checkpoint doc ---
+    obs1 = engine.issue_monitor_observation(
+        {
+            "observed_at": t0.isoformat(),
+            "subject": {"url": "https://vector.example", "issuer_key": engine.signer.public_key_b64},
+            "outcome": "steady",
+            "served_head": {"tree_size": 3, "root_sha256": "aa" * 32},
+            "pin_before": {"issuer_key": engine.signer.public_key_b64, "tree_size": 3},
+            "pin_after": {"issuer_key": engine.signer.public_key_b64, "tree_size": 3},
+        }
+    )
+    obs2 = engine.issue_monitor_observation(
+        {
+            "observed_at": (t0 + timedelta(minutes=5)).isoformat(),
+            "subject": {"url": "https://vector.example", "issuer_key": engine.signer.public_key_b64},
+            "outcome": "alert",
+            "served_head": {"tree_size": 3, "root_sha256": "bb" * 32},
+            "pin_before": {"issuer_key": engine.signer.public_key_b64, "tree_size": 3},
+            "served_doc": {"tree_size": 3, "root_sha256": "bb" * 32, "note": "served verbatim"},
+        }
+    )
+
+    def _log_embed(rs):
+        doc = log_member(engine, rs)
+        n = int(doc["checkpoint"]["payload"]["tree_size"])
+        doc["receipts"] = [r.model_dump(mode="json") for r in (obs1, obs2)]
+        for r in (obs1, obs2):
+            proof = engine.inclusion_proof(r, size=n)
+            assert proof is not None, "monitor receipt must be inside the committed tree"
+            doc["proofs"][r.payload_hash] = proof
+        return doc
+
+    embedded_pack = _case_pack(store, engine, site, [v1], tmp / "d1", log_fn=_log_embed)
+    _write_vector(
+        "ok-embedded-monitor-trail",
+        embedded_pack,
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "ok",
+            "detail_contains": ["receipt(s) proven inside"],
+            "js": {"bundle_ok": True, "verdict": "ok"},
+            "note": "monitor_observation receipts embedded in the checkpoint "
+            "doc — each verified under the issuer lineage and proven inside "
+            "the signed head, so the watch trail travels with the pack",
+        },
+    )
+
+    def _foreign_embed(doc: dict) -> dict:
+        fake = ATTACKER.issue(
+            visit_id=f"monitor:{('cd' * 8)}",
+            sequence=1,
+            prev_hash=None,
+            facts={"record_type": "monitor_observation", "outcome": "steady"},
+        )
+        doc["receipts"] = doc["receipts"] + [fake.model_dump(mode="json")]
+        return doc
+
+    _write_vector(
+        "fail-embedded-foreign-receipt",
+        _log_edit(embedded_pack, _foreign_embed),
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "fail",
+            "detail_contains": ["outside the issuer lineage"],
+            "js": {"bundle_ok": True, "verdict": "fail"},
+            "note": "an embedded receipt signed outside the issuer lineage — "
+            "embedded evidence must bind the pack's issuer or it is grafted "
+            "testimony",
+        },
+    )
+
+    def _tamper_embed(doc: dict) -> dict:
+        doc["receipts"][0]["payload"]["outcome"] = "alert"
+        return doc
+
+    _write_vector(
+        "fail-embedded-tampered-receipt",
+        _log_edit(embedded_pack, _tamper_embed),
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "fail",
+            "detail_contains": ["embedded receipt"],
+            "js": {"bundle_ok": True, "verdict": "fail"},
+            "note": "an embedded receipt's payload flipped — payload hash "
+            "and signature both fail; a doctored observation can never ride "
+            "the signed head",
+        },
+    )
+
+    def _junk_proof(doc: dict) -> dict:
+        doc["proofs"]["ff" * 32] = {"leaf_index": 0, "path": ["00" * 32]}
+        return doc
+
+    _write_vector(
+        "fail-unreferenced-junk-proof",
+        _log_edit(embedded_pack, _junk_proof),
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "fail",
+            "detail_contains": ["unreferenced inclusion proof"],
+            "js": {"bundle_ok": True, "verdict": "fail"},
+            "note": "a proof entry referencing nothing and reaching nothing — "
+            "every proofs entry must verify; unexplained material is a lie, "
+            "not decoration",
         },
     )
 

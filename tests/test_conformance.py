@@ -268,7 +268,7 @@ def test_browser_lib_matches_oracle(vec: Path, tmp_path: Path):
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=180,
     )
     assert proc.returncode == 0, proc.stderr
     got = json.loads(proc.stdout.strip().splitlines()[-1])

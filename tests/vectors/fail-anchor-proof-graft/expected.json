@@ -1,0 +1,13 @@
+{
+  "kind": "case",
+  "pin": "declared",
+  "verdict": "fail",
+  "detail_contains": [
+    "does not reach"
+  ],
+  "js": {
+    "bundle_ok": true,
+    "verdict": "fail"
+  },
+  "note": "a packed anchor whose cosig cannot reach the anchor's signed head \u2014 a claimed anchor is either verifiable or a lie; every verifier fails closed"
+}

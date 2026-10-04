@@ -1,0 +1,13 @@
+{
+  "kind": "case",
+  "pin": "declared",
+  "verdict": "ok",
+  "detail_contains": [
+    "receipt(s) proven inside"
+  ],
+  "js": {
+    "bundle_ok": true,
+    "verdict": "ok"
+  },
+  "note": "monitor_observation receipts embedded in the checkpoint doc \u2014 each verified under the issuer lineage and proven inside the signed head, so the watch trail travels with the pack"
+}

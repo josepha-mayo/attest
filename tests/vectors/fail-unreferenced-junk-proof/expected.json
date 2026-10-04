@@ -1,0 +1,13 @@
+{
+  "kind": "case",
+  "pin": "declared",
+  "verdict": "fail",
+  "detail_contains": [
+    "unreferenced inclusion proof"
+  ],
+  "js": {
+    "bundle_ok": true,
+    "verdict": "fail"
+  },
+  "note": "a proof entry referencing nothing and reaching nothing \u2014 every proofs entry must verify; unexplained material is a lie, not decoration"
+}
