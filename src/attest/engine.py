@@ -1272,9 +1272,7 @@ class VisitEngine:
         to — receipts appended after that head have no proof under it."""
         from . import transparency
 
-        return transparency.inclusion_proof(
-            self.log_leaves(), receipt.payload_hash, size=size
-        )
+        return transparency.inclusion_proof(self.log_leaves(), receipt.payload_hash, size=size)
 
     def consistency_proof(self, old_size: int, size: int | None = None) -> dict | None:
         """Node list proving the tree extends ``old_size`` leaves, bounded

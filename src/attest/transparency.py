@@ -185,9 +185,7 @@ def leaf_hashes(receipts) -> list[bytes]:
     """Ordered ``payload_hash`` bytes of every non-checkpoint receipt —
     the transparency log's leaf input in committed (sequence) order."""
     return [
-        bytes.fromhex(r.payload_hash)
-        for r in receipts
-        if r.payload.get("record_type") != "log_checkpoint"
+        bytes.fromhex(r.payload_hash) for r in receipts if r.payload.get("record_type") != "log_checkpoint"
     ]
 
 

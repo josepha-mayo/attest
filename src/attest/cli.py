@@ -2006,9 +2006,7 @@ def _prove(args: argparse.Namespace) -> None:
         # a proof command must never mint state into the runtime it audits.
         from . import transparency
 
-        proof = transparency.inclusion_proof(
-            transparency.leaf_hashes(store.receipts()), receipt.payload_hash
-        )
+        proof = transparency.inclusion_proof(transparency.leaf_hashes(store.receipts()), receipt.payload_hash)
         if proof is None:
             sys.exit(f"receipt {receipt.id} is not in the log's committed order")
         print(json.dumps(proof, indent=2, ensure_ascii=False))
@@ -2030,7 +2028,7 @@ def _consistency(args: argparse.Namespace) -> None:
         from . import transparency
 
         proof = transparency.consistency_proof(
-            transparency.leaf_hashes(store.receipts()), args.first
+            transparency.leaf_hashes(store.receipts()), args.first, getattr(args, "size", None)
         )
         if proof is None:
             sys.exit(f"cannot prove consistency from size {args.first}")
@@ -2078,9 +2076,7 @@ def _monitor(args: argparse.Namespace) -> None:
 
         def fetch_consistency(first: int, size: int):
             try:
-                return logmonitor.fetch_json(
-                    f"{base}/api/log/consistency?first={first}&size={size}"
-                )
+                return logmonitor.fetch_json(f"{base}/api/log/consistency?first={first}&size={size}")
             except ValueError:
                 return None
 
@@ -3421,6 +3417,13 @@ def main(argv: list[str] | None = None) -> None:
         "from an earlier tree size to the current head",
     )
     s.add_argument("first", type=int, help="earlier tree size to prove extension from")
+    s.add_argument(
+        "--size",
+        type=int,
+        default=None,
+        help="bound the proof to the tree at this size — the checkpoint the "
+        "auditor holds usually sits behind the live tip",
+    )
     s.set_defaults(fn=_consistency)
 
     s = sub.add_parser(

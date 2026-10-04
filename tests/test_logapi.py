@@ -268,6 +268,16 @@ def test_cli_checkpoint_and_prove(tmp_path, monkeypatch, ring_world, ring_client
     assert excinfo.value.code == 1
     assert json.loads(buf.getvalue())["ok"] is False
 
+    # --size bounds a bridge to a checkpoint behind the live tip — the
+    # steady state on an active log (the API's ?size= does the same).
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cli._consistency(
+            argparse.Namespace(first=doc["checkpoint"]["payload"]["tree_size"], size=verdict["new_size"])
+        )
+    bounded = json.loads(buf.getvalue())
+    assert bounded["tree_size"] == verdict["new_size"]  # closed ON cp3's tree, not the tip
+
 
 def test_status_reports_the_log_head(tmp_path, monkeypatch, ring_world, ring_client, settings, t0):
     """``attest status --json`` exposes the same tree commitment the API and
