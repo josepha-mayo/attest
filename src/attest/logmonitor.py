@@ -110,6 +110,15 @@ def check(
     live_size = head.get("tree_size")
     if not isinstance(live_size, int) or isinstance(live_size, bool) or live_size < 0:
         return None, False, ["log head did not report a usable tree_size"]
+    if not isinstance(issuer_doc, dict) or not isinstance(issuer_doc.get("issuer_key"), str):
+        return (
+            None,
+            False,
+            [
+                "issuer document is missing or malformed — issuer trust "
+                "cannot be established, so nothing served can be evaluated"
+            ],
+        )
     trusted = _trusted_set(issuer_doc)
     cp_raw = _doc_checkpoint(head)
     if cp_raw is None:
@@ -752,8 +761,19 @@ def compare_views(
     transient outage, missing fields, unparseable shapes."""
     if theirs is None:
         return "unseen", "the witness has never cosigned this issuer — no second view exists"
+    if not isinstance(theirs, dict):
+        return (
+            "unverifiable",
+            "the witness pin is not a JSON object — unsigned serving data, "
+            "not an attestation; nothing to compare",
+        )
     if mine is None:
         return "no_pin", "no local pin to compare — run a monitor cycle first"
+    if not isinstance(mine, dict):
+        return (
+            "unverifiable",
+            "the local pin is not a JSON object — monitor state is corrupt; re-pin before cross-checking",
+        )
     from .ledger import verify_receipt
     from .models import Receipt
 

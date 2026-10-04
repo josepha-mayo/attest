@@ -2942,3 +2942,183 @@ def test_monitor_journal_embeds_witness_head_on_a_witness_log_alert(tmp_path, mo
     assert obs[0].payload["outcome"] == "alert"
     assert obs[0].payload["served_witness_head"] == whead
     store.close()
+
+
+# --- the untrusted-input battery: every remote-served byte is hostile ---
+#
+# check(), compare_views(), and live_check() sit directly on fetched JSON.
+# Their contract: never raise, return an honest verdict, and never call a
+# signed-contradiction 'dishonest' on unsigned garbage. This corpus is the
+# systematic version of every crash the audits ever found here.
+
+_MALFORMED = [
+    None,
+    True,
+    5,
+    5.5,
+    "x",
+    "a" * 4096,
+    b"bytes",
+    [],
+    [1, 2],
+    {},
+    {"tree_size": "7"},
+    {"tree_size": True},
+    {"tree_size": 7.0},
+    {"tree_size": -1},
+    {"tree_size": 2**64},
+    {"tree_size": None},
+    {"tree_size": 7, "checkpoint": "nope"},
+    {"tree_size": 7, "checkpoint": 5},
+    {"tree_size": 7, "checkpoint": []},
+    {"tree_size": 7, "checkpoint": {}},
+    {"tree_size": 7, "checkpoint": {"id": None}},
+    {"tree_size": 7, "checkpoint": {"payload": "x"}},
+    {"tree_size": 0, "checkpoint": {"payload": {"tree_size": 0}}},
+    {"tree_size": 7, "root_sha256": None},
+    {"tree_size": 7, "checkpoint": {"a": {"b": {"c": [{"d": None}]}}}},
+]
+
+_MALFORMED_DOCS = [
+    None,
+    True,
+    7,
+    "doc",
+    [],
+    {},
+    {"issuer_key": 5},
+    {"issuer_key": None},
+    {"key_receipts": "x"},
+    {"key_receipts": 5},
+    {"key_receipts": [{"sig": 1}, None, "x"]},
+    {"issuer_key": "K" * 43, "key_receipts": {}},
+]
+
+_MALFORMED_STATES = [
+    {},
+    {"schema": "bogus/1"},
+    {"schema": "attest.log-monitor/1"},
+    {"schema": "attest.log-monitor/1", "issuer_key": 5},
+    {"schema": "attest.log-monitor/1", "tree_size": "7", "root_sha256": "ab" * 32},
+    {"schema": "attest.log-monitor/1", "tree_size": True, "root_sha256": "ab" * 32},
+    {"schema": "attest.log-monitor/1", "tree_size": 7, "root_sha256": "zz"},
+    {"schema": "attest.log-monitor/1", "tree_size": 7, "root_sha256": None},
+    {"schema": "attest.log-monitor/1", "tree_size": 7, "root_sha256": "ab" * 32, "checkpoint_id": 5},
+]
+
+
+def test_check_never_crashes_on_malformed_heads(engine, store, household, schedule, t0):
+    """A hostile deployment endpoint gets exactly one shot at the watch —
+    check() must fail the cycle, not die, across the whole malformed-head
+    corpus and across every plausible prior-state shape."""
+    from attest import logmonitor
+
+    _seed(engine, household[0], t0)
+    cp = engine.issue_log_checkpoint()
+    good_state = {
+        "schema": logmonitor.STATE_SCHEMA,
+        "issuer_key": engine.signer.public_key_b64,
+        "tree_size": cp.payload["tree_size"],
+        "root_sha256": cp.payload["root_sha256"],
+        "checkpoint_id": cp.id,
+    }
+    doc = _doc_for(engine)
+    for head in _MALFORMED:
+        for state in [None, good_state, *_MALFORMED_STATES]:
+            res = logmonitor.check(state, doc, head, _consistency_fetch(engine), "t")
+            new_state, ok, lines = res
+            assert isinstance(ok, bool)
+            assert lines and all(isinstance(ln, str) for ln in lines)
+            if ok:
+                assert new_state is None or new_state.get("schema") == logmonitor.STATE_SCHEMA
+            else:
+                assert new_state is None
+
+
+def test_check_never_crashes_on_malformed_issuer_docs(engine, store, household, schedule, t0):
+    """The issuer document is fetched, not signed — a garbage doc body
+    must fail the cycle honestly, never kill the process."""
+    from attest import logmonitor
+
+    _seed(engine, household[0], t0)
+    cp = engine.issue_log_checkpoint()
+    head = _head(engine, cp)
+    for doc in _MALFORMED_DOCS:
+        new_state, ok, lines = logmonitor.check(None, doc, head, _consistency_fetch(engine), "t")
+        assert isinstance(ok, bool)
+        assert lines and all(isinstance(ln, str) for ln in lines)
+        assert ok is False or new_state is None or new_state.get("schema") == logmonitor.STATE_SCHEMA
+
+
+def test_compare_views_never_crashes_on_malformed_witness_pins(engine, store, household, schedule, t0):
+    """compare_views reads a REMOTE witness's published pin — the whole
+    shape is adversary-controlled. Malformed pins are 'unverifiable'
+    (unsigned material can never be a lie), never a crash, and never
+    'dishonest' unless a signed artifact actually fails verification."""
+    from attest import logmonitor
+
+    _seed(engine, household[0], t0)
+    cp = engine.issue_log_checkpoint()
+    mine = {
+        "issuer_key": engine.signer.public_key_b64,
+        "tree_size": cp.payload["tree_size"],
+        "root_sha256": cp.payload["root_sha256"],
+        "checkpoint_id": cp.id,
+    }
+    malformed_theirs = [
+        None,
+        True,
+        7,
+        "pin",
+        [],
+        {},
+        {"issuer_key": 5},
+        {"tree_size": "9"},
+        {"tree_size": True},
+        {"cosignature": None},
+        {"cosignature": "x"},
+        {"cosignature": 5},
+        {"cosignature": []},
+        {"cosignature": {}},
+        {"cosignature": {"payload": "x"}},
+        {"cosignature": {"id": 5}},
+        {"witness_anchor": "x"},
+        {"witness_anchor": 5},
+        {"witness_anchor": {"checkpoint": "x"}},
+        {"witness_anchor": {"checkpoint": {}, "proof": []}},
+        {"issuer_key": "K" * 43, "tree_size": 9, "root_sha256": "zz", "checkpoint_id": 7},
+    ]
+    for theirs in malformed_theirs:
+        for mine_state in [mine, {}, {"issuer_key": 5}, None]:
+            for lineage in [None, {engine.signer.public_key_b64}, set()]:
+                if mine_state is None:
+                    continue  # compare_views is only called with a pin
+                verdict, line = logmonitor.compare_views(mine_state, theirs, issuer_lineage=lineage)
+                assert verdict in ("agree", "diverged", "dishonest", "unverifiable", "unseen")
+                assert isinstance(line, str) and line
+                # Malformed pins carry no valid signed artifact — nothing
+                # here can be a verified lie.
+                if not isinstance(theirs, dict) or not isinstance(theirs.get("cosignature"), dict):
+                    assert verdict != "agree"
+                assert verdict != "diverged" or isinstance(theirs, dict)
+
+
+def test_live_check_never_crashes_on_malformed_remote_heads(engine, store, household, schedule, t0):
+    """live_check cross-checks a pack's checkpoint against the served head
+    — the pack side is verified first, the remote side is the hostile
+    input."""
+    from attest import logmonitor
+
+    _seed(engine, household[0], t0)
+    cp = engine.issue_log_checkpoint()
+    trusted = {engine.signer.public_key_b64}
+    for head in _MALFORMED:
+        res = logmonitor.live_check(
+            cp.model_dump(mode="json"),
+            head,
+            lambda first, size: engine.consistency_proof(first, size),
+            trusted,
+        )
+        ok, line = res
+        assert isinstance(ok, (bool, type(None)))
+        assert isinstance(line, str) and line
