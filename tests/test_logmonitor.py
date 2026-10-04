@@ -3177,3 +3177,69 @@ def test_witness_cosign_never_crashes_on_malformed_bodies(engine, store, househo
         status, out = logmonitor.witness_cosign(w_store, w_signer, body)
         assert isinstance(status, int)
         assert isinstance(out, dict)
+
+
+def test_pack_doc_surfaces_never_crash_on_malformed_members(engine, store, household, schedule, t0):
+    """log_checkpoint.json inside a pack is pack-author-controlled: the
+    checkpoint itself is verified first, but the cosignatures/anchors/
+    proofs members around it are hostile decorating fields. Every surface
+    that reads them must fail closed or tolerate honestly, never crash."""
+    from attest import logmonitor, packdiff
+
+    _seed(engine, household[0], t0)
+    cp = engine.issue_log_checkpoint()
+    p = cp.payload
+    base_doc = {
+        "schema": "attest.log-checkpoint/1",
+        "checkpoint": cp.model_dump(mode="json"),
+        "proofs": {},
+    }
+    trusted = {engine.signer.public_key_b64}
+    size, root_hex = int(p["tree_size"]), p["root_sha256"]
+
+    # cosignatures + anchors member garbage
+    cosig_docs = [
+        {**base_doc, "cosignatures": "x"},
+        {**base_doc, "cosignatures": 5},
+        {**base_doc, "cosignatures": {}},
+        {**base_doc, "cosignatures": [None, "x", 5, {}]},
+        {**base_doc, "cosignatures": [{"id": 5}]},
+        {**base_doc, "cosig_anchors": "x"},
+        {**base_doc, "cosig_anchors": 5},
+        {**base_doc, "cosig_anchors": []},
+        {**base_doc, "cosig_anchors": {"rcpt_x": "y"}},
+        {**base_doc, "cosig_anchors": {"rcpt_x": {"checkpoint": 5}}},
+        {**base_doc, "cosig_anchors": {"rcpt_x": {"checkpoint": {}, "proof": "z"}}},
+        {**base_doc, "receipts": "x"},
+        {**base_doc, "receipts": {}},
+        {**base_doc, "receipts": [None, "x", 5, {}]},
+        {**base_doc, "proofs": "x"},
+        {**base_doc, "proofs": {"h" * 64: 5}},
+        {**base_doc, "proofs": {"h" * 64: "z"}},
+        {**base_doc, "proofs": {"h" * 64: {"leaf_index": True, "path": []}}},
+        {**base_doc, "proofs": {"h" * 64: {"leaf_index": "0", "path": "z"}}},
+    ]
+    for doc in cosig_docs:
+        count, ids = logmonitor.check_cosignatures(doc, cp.id, size, root_hex, issuer_keys=trusted)
+        assert isinstance(count, int) and count >= 0
+        assert isinstance(ids, list)
+        anchored, errors = logmonitor.check_cosig_anchors(doc)
+        assert isinstance(anchored, int) and anchored >= 0
+        assert isinstance(errors, list)
+
+        raw = json.dumps(doc).encode()
+        res, err = packdiff.check_log_pin(
+            lambda name, raw=raw: raw if name == "log_checkpoint.json" else None, [], trusted
+        )
+        assert err is None or isinstance(err, str)
+        if err is None and res is not None:
+            assert isinstance(res[0], int)
+
+    # A doc whose member bytes aren't even JSON, or whose root is a
+    # non-dict body — the reader itself must refuse cleanly.
+    for raw in [b"not json", b"[1,2]", b"5", b"null", b'{"checkpoint": 5}', b""]:
+        res, err = packdiff.check_log_pin(
+            lambda name, raw=raw: raw if name == "log_checkpoint.json" else None, [], trusted
+        )
+        assert isinstance(err, str)
+        assert res is None
