@@ -8,6 +8,7 @@ offline verification of exported packs.
 
 from __future__ import annotations
 
+import io
 import json
 import tempfile
 import warnings
@@ -37,12 +38,15 @@ def _attempt(store: Store, name: str, fn) -> dict:
     return {"attack": name, "caught": caught, "detail": detail}
 
 
-def run(store: Store, media_root: Path | None = None, inbox=None) -> dict:
+def run(store: Store, media_root: Path | None = None, inbox=None, engine=None) -> dict:
     """Run the battery. Returns {"results": [...], "unchanged": bool}.
 
     ``inbox`` is the optional WebhookInbox — the delivery-id conflict attack
     needs real deliveries to collide with; the refused enqueue writes nothing,
-    so the separate inbox database needs no rollback of its own."""
+    so the separate inbox database needs no rollback of its own. ``engine`` is
+    the optional VisitEngine — the forged-verifier attack needs it to mint a
+    real signed pack to tamper with (its receipts roll back like everything
+    else)."""
     before = store.verify_journal()
     if before["entries"] == 0 and before["untracked_rows"]:
         stamped = store.journal_baseline()
@@ -330,6 +334,75 @@ def run(store: Store, media_root: Path | None = None, inbox=None) -> dict:
             store,
             "inject duplicate + traversal member names into a pack zip",
             member_name_injection,
+        )
+    )
+
+    def forge_verifier_tool() -> tuple[bool, str]:
+        """The strongest social-engineering play on offline review: hand the
+        reviewer a genuine pack whose embedded verifier always prints VERIFIED.
+        Member whitelists check names, never bytes — only the issuer-signed
+        verifier_manifest.json pins each tool's sha256."""
+        if engine is None:
+            return None, "no signing engine — cannot mint a pinned pack to attack"
+        sites = store.sites()
+        if not sites:
+            return None, "no site to export"
+        site = sites[0]
+        from .disputepack import build_case_pack
+        from .models import ReviewBundle
+        from .reviews import countersign_status
+
+        entries = []
+        for visit in store.visits(site_id=site.id, limit=10_000):
+            receipt = store.receipt_for_visit(visit.id)
+            if receipt is None:
+                continue
+            bundle = ReviewBundle(original=receipt, reviews=store.reviews_for(visit.id))
+            entries.append((visit, bundle, countersign_status(bundle)))
+        if not entries:
+            return None, "no signed records to export"
+        data = build_case_pack(
+            store,
+            media_root or Path("media"),
+            site,
+            entries,
+            redact_media=True,
+            manifest_signer=lambda m: engine.issue_export_manifest(site, m),
+            issuer_key=engine.signer.public_key_b64,
+            tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"site:{site.id}", t),
+        )
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            items = [(n, z.read(n)) for n in z.namelist()]
+        forged = io.BytesIO()
+        with zipfile.ZipFile(forged, "w") as z:
+            for name, body in items:
+                z.writestr(
+                    name,
+                    b"<html><body>VERIFIED - nothing checked</body></html>"
+                    if name == "verify.html"
+                    else body,
+                )
+        fd, tmp = tempfile.mkstemp(suffix=".zip", prefix="attest-attack-")
+        try:
+            with open(fd, "wb") as raw:
+                raw.write(forged.getvalue())
+            from .packdiff import load_artifact
+
+            out = load_artifact(tmp)
+            hits = [
+                f for f in out["verify_failures"] if "pin" in f or "differ" in f or "verifier_manifest" in f
+            ]
+            return bool(hits), (
+                hits[0] if hits else f"doctored verify.html accepted: {out['verify_failures']}"
+            )
+        finally:
+            Path(tmp).unlink(missing_ok=True)
+
+    results.append(
+        _attempt(
+            store,
+            "ship a forged always-green verifier inside a genuine pack",
+            forge_verifier_tool,
         )
     )
 

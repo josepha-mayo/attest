@@ -36,7 +36,10 @@
   <code>key_revocation</code> attestations: receipts on both sides of the
   pivot still verify, the verifier annotates the suspect window, and it even
   flags that the pivot itself was signed by the compromised key — the trust
-  handoff inherits the doubt.</p>
+  handoff inherits the doubt. The pack also carries
+  <code>verifier_manifest.json</code> — an issuer-signed receipt pinning the
+  sha256 of its own verifier tooling, so a forged always-green script can't
+  ride inside a genuine pack.</p>
   <p>Or check our own claim: <a href="live-sweep-receipt.json">this signed
   receipt</a> is the <code>verify-live --sign</code> sweep run against the
   real <code>api.amazonvision.com</code> on 2026-09-30 — 5 pass, 3 fail

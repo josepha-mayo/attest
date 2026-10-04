@@ -2160,7 +2160,10 @@ def _attack_demo(args: argparse.Namespace) -> None:
 
         inbox = WebhookInbox(inbox_path)
     try:
-        out = run(store, settings.data_dir / "media", inbox=inbox)
+        # The engine lets the battery mint a real signed pack, so the
+        # forged-verifier attack exercises the issuer pin end to end —
+        # its receipts roll back with the attempt like everything else.
+        out = run(store, settings.data_dir / "media", inbox=inbox, engine=_cli_engine(store))
         if out.get("baseline_note"):
             print(out["baseline_note"])
         caught = skipped = 0

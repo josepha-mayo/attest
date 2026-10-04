@@ -39,12 +39,23 @@ def seeded(engine, store, household, schedule, t0):
     return visit
 
 
-def test_battery_catches_everything_and_leaves_store_unchanged(store, seeded, tmp_path):
-    out = run(store, tmp_path / "media")
+def test_battery_catches_everything_and_leaves_store_unchanged(store, seeded, engine, tmp_path):
+    out = run(store, tmp_path / "media", engine=engine)
     assert out["unchanged"], out
     for r in out["results"]:
         # None = no target on this store (skipped), not a missed defense
         assert r["caught"] is not False, f"{r['attack']} went undetected: {r['detail']}"
+
+
+def test_battery_catches_forged_pack_verifier(store, seeded, engine, tmp_path):
+    """The flagship pack attack — a doctored always-green verify.html inside a
+    genuine pack — fails on the issuer-signed tooling pin, never on membership:
+    the forged member's name still matches the whitelist."""
+    out = run(store, tmp_path / "media", engine=engine)
+    hit = next(r for r in out["results"] if "always-green" in r["attack"])
+    assert hit["caught"] is True, hit["detail"]
+    assert "pin" in hit["detail"] or "differ" in hit["detail"]
+    assert out["unchanged"], out
 
 
 def test_battery_catches_inbox_delivery_id_conflict(store, seeded, tmp_path):
