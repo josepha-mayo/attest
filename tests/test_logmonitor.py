@@ -3122,3 +3122,58 @@ def test_live_check_never_crashes_on_malformed_remote_heads(engine, store, house
         ok, line = res
         assert isinstance(ok, (bool, type(None)))
         assert isinstance(line, str) and line
+
+
+def test_witness_cosign_never_crashes_on_malformed_bodies(engine, store, household, schedule, t0):
+    """POST /api/witness/cosign is unauthenticated BY DESIGN — the whole
+    body is adversary JSON. The decision function must return a status
+    code, never raise, and refuse (4xx/5xx) anything it cannot use."""
+    from attest import logmonitor
+
+    w_store, w_signer = _witness_deployment()
+    doc = _doc_for(engine)
+    _seed(engine, household[0], t0)
+    cp = engine.issue_log_checkpoint()
+    good = {"issuer_doc": doc, "checkpoint": cp.model_dump(mode="json")}
+
+    malformed = [
+        None,
+        True,
+        5,
+        "body",
+        [],
+        {},
+        {"issuer_doc": None},
+        {"issuer_doc": "x"},
+        {"issuer_doc": 5},
+        {"issuer_doc": {"issuer_key": 5}},
+        {"issuer_doc": {"issuer_key": "K" * 43, "key_receipts": "x"}},
+        {"issuer_doc": {"issuer_key": "K" * 43, "key_receipts": [{}] * 65}},
+        {"issuer_doc": doc},
+        {"issuer_doc": doc, "checkpoint": None},
+        {"issuer_doc": doc, "checkpoint": "x"},
+        {"issuer_doc": doc, "checkpoint": 5},
+        {"issuer_doc": doc, "checkpoint": []},
+        {"issuer_doc": doc, "checkpoint": {}},
+        {"issuer_doc": doc, "checkpoint": {"payload": "x"}},
+        {"issuer_doc": doc, "checkpoint": {"id": 5}},
+    ]
+    for body in malformed:
+        status, out = logmonitor.witness_cosign(w_store, w_signer, body)
+        assert isinstance(status, int)
+        assert isinstance(out, dict)
+        assert status >= 400, f"malformed body accepted: {body!r} -> {status}"
+
+    # A VALID doc + checkpoint with hostile AUXILIARY fields: the offer is
+    # legitimate, so success is fine — the contract is only 'never crash'.
+    tolerated = [
+        {**good, "consistency": "x"},
+        {**good, "consistency": 5},
+        {**good, "consistency": {"proof": "x"}},
+        {**good, "issuer_doc": {**doc, "key_receipts": [{"sig": 1}, None, "x"]}},
+        {**good, "issuer_doc": {**doc, "extra": {"deeply": [{"nested": True}]}}, "consistency": []},
+    ]
+    for body in tolerated:
+        status, out = logmonitor.witness_cosign(w_store, w_signer, body)
+        assert isinstance(status, int)
+        assert isinstance(out, dict)

@@ -389,6 +389,8 @@ def witness_cosign(store, signer, body: dict) -> tuple[int, dict]:
     from .models import Receipt
     from .transparency import verify_consistency, verify_extends
 
+    if not isinstance(body, dict):
+        return 422, {"error": "request body is not a JSON object"}
     issuer_doc = body.get("issuer_doc")
     if not isinstance(issuer_doc, dict) or not isinstance(issuer_doc.get("issuer_key"), str):
         return 422, {"error": "issuer_doc missing or malformed"}
