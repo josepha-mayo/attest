@@ -1635,9 +1635,16 @@ def _verify_zip(
             # (e.g. require the log to have grown since a prior export).
             try:
                 cp = json.loads(z.read("log_checkpoint.json"))
+                from . import logmonitor as _lm2
+
+                _p = cp["checkpoint"]["payload"]
+                _nc, _sig = _lm2.check_cosignatures(
+                    cp, cp["checkpoint"]["id"], int(_p["tree_size"]), _p["root_sha256"]
+                )
                 extra["log"] = {
-                    "tree_size": cp["checkpoint"]["payload"]["tree_size"],
+                    "tree_size": _p["tree_size"],
                     "proven": len(cp.get("proofs") or {}),
+                    "cosigned": _nc,
                 }
             except Exception:  # noqa: BLE001 — verified pack; report what parses
                 pass
