@@ -52,7 +52,15 @@
   alone can't stand. Every deployment is also a cosigning witness —
   <code>attest export --witness</code> collects independent
   counter-signatures into this very pack's checkpoint, and a forked log
-  can never honestly collect them.</p>
+  can never honestly collect them. Look for the cosignature in this
+  pack's checkpoint — it is itself <em>anchored</em>: the witness
+  committed its attestation to its own published log and the pack
+  carries the inclusion proof, so the counter-signature is publicly
+  committed, not just handed over. And the attestations list carries a
+  real watch trail — <code>monitor_observation</code> receipts from
+  <code>monitor --journal</code> cycles (pinned → advanced → steady)
+  signed into the record, so "someone was watching the log" is itself
+  signed evidence.</p>
   <p>Or check our own claim: <a href="live-sweep-receipt.json">this signed
   receipt</a> is the <code>verify-live --sign</code> sweep run against the
   real <code>api.amazonvision.com</code> on 2026-09-30 — 5 pass, 3 fail
