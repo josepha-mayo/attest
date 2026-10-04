@@ -38,6 +38,18 @@ key_rotations.json  Present only if the deployment rotated its signing key:
                that let reviews written under the successor verify. A key that
                appears without a signed endorsement link is rejected, never
                trusted.
+verifier_manifest.json  A signed receipt pinning the sha256 of every verifier
+               shipped in this pack (verify_bundle.py, verify.html, index.html,
+               README.txt). A forged pack that doctors its own verifier to
+               print VERIFIED is caught: the manifest names the real bytes,
+               and only the deployment's key can sign one.
+log_checkpoint.json   Present when the deployment publishes a transparency
+               log: a signed Merkle tree head plus an inclusion proof for
+               every receipt in this pack — cryptographic evidence that these
+               receipts were committed to the deployment's published append-
+               only log, in this order. A receipt with a valid signature but
+               no log membership still fails: signing a record is not the
+               same as committing it.
 
 WHAT A VALID VERIFICATION PROVES
 - Every receipt in bundle.json is byte-identical to what was signed: the payload
@@ -46,6 +58,9 @@ WHAT A VALID VERIFICATION PROVES
 - If the deployment rotated keys, the rotation receipts prove the retiring
   key endorsed each successor — records on both sides of the transition
   verify under one signed chain.
+- If log_checkpoint.json is present, every issuer-signed receipt in the pack
+  proves inclusion in the deployment's transparency log at the checkpoint's
+  committed size — the pack cannot carry receipts the log never saw.
 - Media files match the sha256 digests recorded in the evidence list (when the
   verifier is run from this directory, it checks media/ too).
 
@@ -1063,12 +1078,24 @@ verify_case.py      Offline verifier. Run:  python verify_case.py .
 verify.html         Zero-install verifier — open in any browser and drop the
                     pack files in. Same checks, pure JavaScript, works offline.
                     Also checks the media bytes index.html can only list.
+verifier_manifest.json  A signed receipt pinning the sha256 of every verifier
+                    shipped in this pack. A forged pack that doctors its own
+                    verifier to print VERIFIED is caught — only the
+                    deployment's key can sign the real manifest.
+log_checkpoint.json   Present when the deployment publishes a transparency
+                    log: a signed Merkle tree head plus an inclusion proof
+                    for every issuer-signed receipt in this pack — evidence
+                    that these records were committed to the deployment's
+                    published append-only log.
 
 WHAT A VALID VERIFICATION PROVES
 - Each bundle.json is byte-identical to what was signed, and every appended
   review is hash-anchored to its original receipt.
 - manifest.json's receipt hashes match the signed originals — the case summary
   cannot quietly describe different records than the signed ones.
+- If log_checkpoint.json is present, every issuer-signed receipt in the pack
+  proves inclusion in the deployment's transparency log at the checkpoint's
+  committed size — a valid signature on an uncommitted receipt still fails.
 - Media files match the sha256 digests in each record's evidence list.
 - If the deployment rotated its signing key, the rotation receipts are signed
   pivots: the retiring key endorsed each successor, so records on both sides

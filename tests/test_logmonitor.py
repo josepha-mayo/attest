@@ -34,7 +34,7 @@ def _head(engine, cp):
 
 
 def _consistency_fetch(engine):
-    return lambda first: engine.consistency_proof(first)
+    return lambda first, size: engine.consistency_proof(first, size)
 
 
 def test_monitor_pins_then_verifies_extension(engine, store, household, schedule, t0):
@@ -64,6 +64,38 @@ def test_monitor_pins_then_verifies_extension(engine, store, household, schedule
         state2, _doc_for(engine), _head(engine, cp2), _consistency_fetch(engine), "t3"
     )
     assert ok and "unchanged" in lines[0]
+
+
+def test_monitor_accepts_a_checkpoint_behind_the_live_tip(
+    engine, store, household, schedule, t0
+):
+    """The normal live-deployment state: content receipts land constantly
+    but checkpoints only mint on export or `attest checkpoint`, so the
+    newest SIGNED head almost always lags the tip. The monitor must bridge
+    to the checkpoint's tree — a proof to the unsigned live head can never
+    close on it."""
+    from attest import logmonitor
+
+    _seed(engine, household[0], t0)
+    cp1 = engine.issue_log_checkpoint()
+    state, ok, _ = logmonitor.check(
+        None, _doc_for(engine), _head(engine, cp1), _consistency_fetch(engine), "t1"
+    )
+    assert ok
+
+    _seed(engine, household[0], t0 - timedelta(hours=5), n=1)
+    cp2 = engine.issue_log_checkpoint()
+    # One more content receipt lands AFTER the checkpoint — live tip runs
+    # ahead of the newest signed head, the steady state of a real log.
+    _seed(engine, household[0], t0 - timedelta(hours=6), n=1)
+    live_head = _head(engine, cp2)  # tree_size = cp2.size + 1, checkpoint = cp2
+    assert live_head["tree_size"] == cp2.payload["tree_size"] + 1
+    state2, ok, lines = logmonitor.check(
+        state, _doc_for(engine), live_head, _consistency_fetch(engine), "t2"
+    )
+    assert ok, lines
+    assert state2["tree_size"] == cp2.payload["tree_size"]
+    assert any("log extended" in line for line in lines)
 
 
 def test_monitor_catches_a_rewritten_log(engine, store, household, schedule, t0):
@@ -176,7 +208,9 @@ def test_monitor_fetch_layer_against_the_live_app(
     assert head["checkpoint"]["id"] == cp.id
     proof = logmonitor.fetch_json("http://127.0.0.1/api/log/consistency?first=1", client=client)
     assert proof["first"] == 1
-    state, ok, lines = logmonitor.check(None, _doc_for(engine), head, lambda first: proof, "t1")
+    state, ok, lines = logmonitor.check(
+        None, _doc_for(engine), head, lambda first, size: proof, "t1"
+    )
     assert ok and state["tree_size"] == cp.payload["tree_size"]
 
 

@@ -1210,11 +1210,9 @@ class VisitEngine:
         leaves: a checkpoint commits to the content log's head, and making
         the checkpoint itself a leaf would grow the tree past the head it
         just signed — self-reference that also breaks idempotent re-issue."""
-        return [
-            bytes.fromhex(r.payload_hash)
-            for r in self.store.receipts()
-            if r.payload.get("record_type") != "log_checkpoint"
-        ]
+        from . import transparency
+
+        return transparency.leaf_hashes(self.store.receipts())
 
     def log_head(self) -> tuple[int, bytes]:
         """(tree_size, Merkle Tree Head) over every chained receipt."""
@@ -1272,34 +1270,20 @@ class VisitEngine:
 
         ``size`` bounds the proof to the tree a signed checkpoint committed
         to — receipts appended after that head have no proof under it."""
-        from .transparency import inclusion_path
+        from . import transparency
 
-        leaves = self.log_leaves()
-        size = len(leaves) if size is None else size
-        leaves = leaves[:size]
-        try:
-            index = leaves.index(bytes.fromhex(receipt.payload_hash))
-        except ValueError:
-            return None  # never committed (or a checkpoint — not a leaf)
-        return {
-            "tree_size": size,
-            "leaf_index": index,
-            "leaf": receipt.payload_hash,
-            "path": [p.hex() for p in inclusion_path(leaves, index)],
-        }
+        return transparency.inclusion_proof(
+            self.log_leaves(), receipt.payload_hash, size=size
+        )
 
-    def consistency_proof(self, old_size: int) -> dict | None:
-        """Node list proving the current tree extends ``old_size`` leaves."""
-        from .transparency import consistency_nodes
+    def consistency_proof(self, old_size: int, size: int | None = None) -> dict | None:
+        """Node list proving the tree extends ``old_size`` leaves, bounded
+        at ``size`` — a monitor holds a checkpoint at a size BEHIND the live
+        tip, so the bridge must close on the checkpoint's tree, not the
+        newest one."""
+        from . import transparency
 
-        leaves = self.log_leaves()
-        if not 0 < old_size <= len(leaves):
-            return None
-        return {
-            "tree_size": len(leaves),
-            "first": old_size,
-            "proof": [p.hex() for p in consistency_nodes(leaves, old_size)],
-        }
+        return transparency.consistency_proof(self.log_leaves(), old_size, size)
 
     @atomic
     def issue_verification_report(self, report: dict) -> Receipt:

@@ -186,6 +186,88 @@ def test_cli_checkpoint_and_prove(tmp_path, monkeypatch, ring_world, ring_client
         cli._checkpoint(argparse.Namespace(out=str(tmp_path / "cp2.json"), timestamp=True))
     assert stamped == [str(tmp_path / "cp2.json")]
 
+    # --- attest verify reads every transparency artifact the CLI emits.
+    def verify_doc(**kw):
+        v = argparse.Namespace(
+            **{"key": None, "issuer_url": None, "json": True, "checkpoint": None, "against": None, **kw}
+        )
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            cli._verify(v)
+        return json.loads(buf.getvalue())
+
+    verdict = verify_doc(bundle=str(tmp_path / "cp2.json"))
+    assert verdict["ok"] and verdict["kind"] == "log_checkpoint"
+    assert verdict["tree_size"] == proof["tree_size"]
+
+    # The inclusion proof verifies against the signed head it was cut at.
+    (tmp_path / "proof.json").write_text(json.dumps(proof))
+    verdict = verify_doc(bundle=str(tmp_path / "proof.json"), checkpoint=str(tmp_path / "cp2.json"))
+    assert verdict["ok"] and verdict["kind"] == "inclusion_proof"
+    assert verdict["leaf_index"] == proof["leaf_index"]
+
+    # A proof against the wrong head fails closed — no "probably fine" middle.
+    with pytest.raises(SystemExit) as excinfo:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            cli._verify(
+                argparse.Namespace(
+                    bundle=str(tmp_path / "proof.json"),
+                    key=None,
+                    issuer_url=None,
+                    json=True,
+                    checkpoint=None,
+                    against=None,
+                )
+            )
+    assert excinfo.value.code == 1
+    assert json.loads(buf.getvalue())["ok"] is False
+
+    # Grow the tree, issue a second head, bridge them with a consistency
+    # proof, and verify the bridge offline against the two signed heads.
+    disk_store = Store(tmp_path / "attest.sqlite3")
+    prev = disk_store.latest_receipt()
+    disk_store.put_receipt(
+        disk_engine.signer.issue(
+            visit_id=f"coverage:{site.id}:cli-seed-2",
+            sequence=prev.sequence + 1,
+            prev_hash=prev.payload_hash,
+            facts={"record_type": "coverage_attestation"},
+        )
+    )
+    disk_store.close()
+    with contextlib.redirect_stdout(io.StringIO()):
+        cli._checkpoint(argparse.Namespace(out=str(tmp_path / "cp3.json"), timestamp=False))
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        cli._consistency(argparse.Namespace(first=doc["checkpoint"]["payload"]["tree_size"]))
+    (tmp_path / "bridge.json").write_text(buf.getvalue())
+
+    verdict = verify_doc(
+        bundle=str(tmp_path / "bridge.json"),
+        against=str(tmp_path / "cp2.json"),
+        checkpoint=str(tmp_path / "cp3.json"),
+    )
+    assert verdict["ok"] and verdict["kind"] == "consistency_proof"
+    assert verdict["new_size"] > verdict["old_size"]
+
+    # Swapped heads cannot bridge — a rewritten log fails closed.
+    with pytest.raises(SystemExit) as excinfo:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            cli._verify(
+                argparse.Namespace(
+                    bundle=str(tmp_path / "bridge.json"),
+                    key=None,
+                    issuer_url=None,
+                    json=True,
+                    checkpoint=str(tmp_path / "cp3.json"),
+                    against=str(tmp_path / "cp3.json"),
+                )
+            )
+    assert excinfo.value.code == 1
+    assert json.loads(buf.getvalue())["ok"] is False
+
 
 def test_status_reports_the_log_head(tmp_path, monkeypatch, ring_world, ring_client, settings, t0):
     """``attest status --json`` exposes the same tree commitment the API and

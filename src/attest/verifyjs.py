@@ -708,6 +708,10 @@ async function verifyFiles(files){
       const rn=get(parseKeep(kt),"rotations");
       if(!rn||rn.t!=="arr"){
         anyBad=true;say("bad","key_rotations.json: malformed");
+      }else if(rn.v.some(e=>!e||e.t!=="obj")){
+        /* Python fails the same bytes via Receipt.model_validate — a scalar
+           or nested array must split no verdict across surfaces. */
+        anyBad=true;say("bad","key_rotations.json: malformed");
       }else{
         rnV.push(...rn.v);
         /* Pack-member lifecycle receipts owe inclusion proofs; the issuer

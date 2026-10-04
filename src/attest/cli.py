@@ -1192,12 +1192,23 @@ def _verify(args: argparse.Namespace) -> None:
                 print(f"OpenTimestamps: {ots}.")
         return
 
+    # --- transparency-log artifacts: the CLI's checkpoint/prove/consistency
+    # outputs, and the log_checkpoint.json member packs carry. The signed
+    # tree head anchors everything; proofs check out against it or not at all.
+    if isinstance(data, dict) and (
+        isinstance(data.get("checkpoint"), dict)
+        or ("proof" in data and "first" in data)
+        or ("path" in data and "leaf_index" in data)
+    ):
+        _verify_log_doc(data, args, pinned_key, known_rotations, fail, json_mode=json_mode)
+        return
+
     try:
         bundle = ReviewBundle.model_validate(data)
     except Exception:
         fail(
             f"not a reviewable artifact: {path.name}\n"
-            "  expected a bundle.json, receipt, anchor, or receipts.json export list."
+            "  expected a bundle.json, receipt, anchor, checkpoint doc, or receipts.json export list."
         )
     key = pinned_key or bundle.original.public_key
     kr_path = path.parent / "key_rotations.json"
@@ -1250,6 +1261,196 @@ def _verify(args: argparse.Namespace) -> None:
             print(f"WARNING: {w}")
         print(f"Worker stance: {stance['state']} — {stance['detail']}")
         print(f"Note: a valid signature proves record integrity {trust_note}, not physical truth.")
+
+
+def _verify_log_doc(
+    data: dict,
+    args: argparse.Namespace,
+    pinned_key: str | None,
+    known_rotations: list | None,
+    fail,
+    *,
+    json_mode: bool = False,
+) -> None:
+    """Offline check for the CLI's transparency artifacts: a checkpoint doc
+    (``attest checkpoint --out`` / a pack's ``log_checkpoint.json``), an
+    inclusion proof (``attest prove``), or a consistency bridge (``attest
+    consistency``). Proofs are checked against a SIGNED head supplied with
+    --checkpoint / --against — never against bare size claims in the doc."""
+    from pathlib import Path
+
+    from . import ledger, transparency
+    from .models import Receipt
+
+    def head_doc(path_str: str | None, label: str):
+        """Parse a checkpoint document → (receipt, tree_size, root_bytes), or fail."""
+        if not path_str:
+            fail(f"this artifact needs a signed head to check against — pass --{label} FILE")
+        try:
+            doc = json.loads(Path(path_str).read_bytes())
+        except (OSError, json.JSONDecodeError) as exc:
+            fail(f"--{label}: unreadable checkpoint document ({exc})")
+        raw_cp = doc.get("checkpoint") if isinstance(doc, dict) else None
+        if not isinstance(raw_cp, dict):
+            fail(f"--{label}: not a checkpoint document (expected {{'checkpoint': <receipt>}})")
+        try:
+            cp = Receipt.model_validate(raw_cp)
+        except Exception as exc:  # noqa: BLE001
+            fail(f"--{label}: malformed checkpoint receipt ({exc})")
+        trusted(cp, label)
+        ok, why = ledger.verify_receipt(cp, public_key=cp.public_key)
+        if not ok:
+            fail(f"--{label}: checkpoint receipt invalid ({why})")
+        try:
+            return cp, int(cp.payload["tree_size"]), bytes.fromhex(cp.payload["root_sha256"])
+        except (KeyError, ValueError) as exc:
+            fail(f"--{label}: checkpoint payload malformed ({exc})")
+
+    def trusted(cp: Receipt, label: str) -> None:
+        if cp.payload.get("record_type") != "log_checkpoint":
+            fail(f"{label}: receipt is a {cp.payload.get('record_type')!r}, not a log_checkpoint")
+        if pinned_key:
+            lineage = {pinned_key}
+            if known_rotations is not None:
+                lineage = ledger.trusted_issuer_keys(pinned_key, known_rotations) | (
+                    ledger.descendant_issuer_keys(pinned_key, known_rotations)
+                )
+            if cp.public_key not in lineage:
+                fail(f"{label}: checkpoint signed outside the pinned issuer lineage")
+
+    def emit(kind: str, detail: str, **kw) -> None:
+        if json_mode:
+            print(
+                json.dumps(
+                    {"ok": True, "kind": kind, "detail": detail, "pinned": bool(pinned_key), **kw}, indent=2
+                )
+            )
+        else:
+            print(f"OK: {detail}.")
+
+    if isinstance(data.get("checkpoint"), dict):
+        try:
+            cp = Receipt.model_validate(data["checkpoint"])
+        except Exception as exc:  # noqa: BLE001
+            fail(f"malformed checkpoint receipt: {exc}", kind="log_checkpoint")
+        trusted(cp, "checkpoint")
+        ok, why = ledger.verify_receipt(cp, public_key=cp.public_key)
+        if not ok:
+            fail(f"checkpoint signature invalid: {why}", kind="log_checkpoint")
+        try:
+            size = int(cp.payload["tree_size"])
+            root = bytes.fromhex(cp.payload["root_sha256"])
+        except (KeyError, ValueError) as exc:
+            fail(f"checkpoint payload malformed: {exc}", kind="log_checkpoint")
+        if len(root) != 32 or size < 0:
+            fail("checkpoint carries a malformed root or size", kind="log_checkpoint")
+        proven = None
+        proofs = data.get("proofs")
+        if isinstance(proofs, dict):
+            proven = 0
+            for ph, p in proofs.items():
+                try:
+                    good = transparency.verify_inclusion(
+                        bytes.fromhex(ph),
+                        size,
+                        int(p["leaf_index"]),
+                        [bytes.fromhex(b) for b in p["path"]],
+                        root,
+                    )
+                except (KeyError, ValueError, TypeError):
+                    good = False
+                if not good:
+                    fail(
+                        f"inclusion proof for {ph[:16]}… fails against this "
+                        "signed head — never committed there",
+                        kind="log_checkpoint",
+                    )
+                proven += 1
+        detail = f"signed transparency head: tree size {size}, root {cp.payload['root_sha256'][:16]}…"
+        if proven is not None:
+            detail += f" — {proven} packed inclusion proof(s) verified"
+        ots = (
+            _sibling_ots_report(Path(args.bundle))
+            if not args.bundle.startswith(("http://", "https://"))
+            else None
+        )
+        emit(
+            "log_checkpoint",
+            detail,
+            tree_size=size,
+            root_sha256=cp.payload["root_sha256"],
+            proven=proven,
+            **({"ots": ots} if ots else {}),
+        )
+        if not json_mode and ots:
+            print(f"OpenTimestamps: {ots}.")
+        if not json_mode and not pinned_key:
+            print(
+                "Note: the head verifies under its self-declared key — "
+                "pin the issuer with --key or --issuer-url."
+            )
+        return
+
+    if "proof" in data and "first" in data:
+        old_cp, old_size, old_root = head_doc(getattr(args, "against", None), "against")
+        new_cp, new_size, new_root = head_doc(getattr(args, "checkpoint", None), "checkpoint")
+        if new_cp.public_key != old_cp.public_key:
+            fail("--against and --checkpoint heads are signed by different issuers", kind="consistency_proof")
+        try:
+            first = int(data["first"])
+            nodes = [bytes.fromhex(b) for b in data["proof"]]
+        except (ValueError, TypeError) as exc:
+            fail(f"consistency bridge malformed: {exc}", kind="consistency_proof")
+        if first != old_size:
+            fail(
+                f"bridge starts at size {first} but --against signs "
+                f"{old_size} — pair each head with its own file",
+                kind="consistency_proof",
+            )
+        if int(data.get("tree_size", new_size)) != new_size:
+            fail(
+                f"bridge was emitted for a tree of size {data.get('tree_size')} "
+                f"but --checkpoint signs {new_size}",
+                kind="consistency_proof",
+            )
+        if not transparency.verify_consistency(old_root, first, new_root, new_size, nodes):
+            fail(
+                "consistency proof does not bridge these heads — history may have been rewritten",
+                kind="consistency_proof",
+            )
+        emit(
+            "consistency_proof",
+            f"append-only extension verified: tree grew {first} → {new_size} without rewriting",
+            old_size=first,
+            new_size=new_size,
+        )
+        return
+
+    # Inclusion proof doc: {tree_size, leaf_index, leaf, path}.
+    _, size, root = head_doc(getattr(args, "checkpoint", None), "checkpoint")
+    try:
+        index = int(data["leaf_index"])
+        leaf = bytes.fromhex(data["leaf"])
+        path_nodes = [bytes.fromhex(b) for b in data["path"]]
+    except (ValueError, TypeError) as exc:
+        fail(f"inclusion proof malformed: {exc}", kind="inclusion_proof")
+    if int(data.get("tree_size", size)) != size:
+        fail(
+            f"proof was computed at tree size {data.get('tree_size')} but --checkpoint signs {size} — "
+            "it reaches a different root",
+            kind="inclusion_proof",
+        )
+    if not transparency.verify_inclusion(leaf, size, index, path_nodes, root):
+        fail(
+            "inclusion proof does not reach the signed root — the leaf was never committed there",
+            kind="inclusion_proof",
+        )
+    emit(
+        "inclusion_proof",
+        f"receipt {data['leaf'][:16]}… sits at index {index} inside the signed head of size {size}",
+        leaf_index=index,
+        tree_size=size,
+    )
 
 
 def _verify_zip(
@@ -1801,8 +2002,13 @@ def _prove(args: argparse.Namespace) -> None:
         receipt = store.receipt(args.receipt_id)
         if receipt is None:
             sys.exit(f"unknown receipt {args.receipt_id}")
-        engine = _cli_engine(store)
-        proof = engine.inclusion_proof(receipt)
+        # Read-only: no engine, so no key custody, media dir, or clock row —
+        # a proof command must never mint state into the runtime it audits.
+        from . import transparency
+
+        proof = transparency.inclusion_proof(
+            transparency.leaf_hashes(store.receipts()), receipt.payload_hash
+        )
         if proof is None:
             sys.exit(f"receipt {receipt.id} is not in the log's committed order")
         print(json.dumps(proof, indent=2, ensure_ascii=False))
@@ -1821,8 +2027,11 @@ def _consistency(args: argparse.Namespace) -> None:
         sys.exit(f"no store at {db}")
     store = Store(db)
     try:
-        engine = _cli_engine(store)
-        proof = engine.consistency_proof(args.first)
+        from . import transparency
+
+        proof = transparency.consistency_proof(
+            transparency.leaf_hashes(store.receipts()), args.first
+        )
         if proof is None:
             sys.exit(f"cannot prove consistency from size {args.first}")
         print(json.dumps(proof, indent=2, ensure_ascii=False))
@@ -1867,9 +2076,11 @@ def _monitor(args: argparse.Namespace) -> None:
         except ValueError as exc:
             return False, [str(exc)], state
 
-        def fetch_consistency(first: int):
+        def fetch_consistency(first: int, size: int):
             try:
-                return logmonitor.fetch_json(f"{base}/api/log/consistency?first={first}")
+                return logmonitor.fetch_json(
+                    f"{base}/api/log/consistency?first={first}&size={size}"
+                )
             except ValueError:
                 return None
 
@@ -3039,6 +3250,19 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="emit the verdict as one JSON object ({ok, kind, detail, pinned, "
         "warnings}) — exit 1 on failure, so a CI gate needs no prose parsing",
+    )
+    s.add_argument(
+        "--checkpoint",
+        default=None,
+        metavar="FILE",
+        help="signed tree-head doc (`attest checkpoint --out`) an inclusion "
+        "proof or consistency bridge verifies against",
+    )
+    s.add_argument(
+        "--against",
+        default=None,
+        metavar="FILE",
+        help="the older signed head a consistency bridge must extend from",
     )
     s.set_defaults(fn=_verify)
 

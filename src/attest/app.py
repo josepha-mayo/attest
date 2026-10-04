@@ -930,11 +930,13 @@ def create_app(
         return proof
 
     @app.get("/api/log/consistency")
-    async def log_consistency(first: int = Query(ge=1)):
-        """RFC 6962 consistency proof: the current head extends the tree of
-        ``first`` leaves — 'nothing was rewritten or dropped' as a compact
-        proof between two signed tree heads."""
-        proof = await asyncio.to_thread(engine.consistency_proof, first)
+    async def log_consistency(first: int = Query(ge=1), size: int | None = Query(default=None, ge=1)):
+        """RFC 6962 consistency proof: the head extends the tree of ``first``
+        leaves — 'nothing was rewritten or dropped' as a compact proof
+        between two signed tree heads. ``size`` bounds the proof to the
+        tree at that size — a monitor holds a checkpoint behind the live
+        tip, so it asks for the bridge that ends AT its checkpoint."""
+        proof = await asyncio.to_thread(engine.consistency_proof, first, size)
         if proof is None:
             raise HTTPException(404, "no tree of that size is on record")
         return proof

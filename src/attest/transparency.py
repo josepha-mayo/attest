@@ -179,3 +179,47 @@ def verify_consistency(
         fn >>= 1
         sn >>= 1
     return sn == 0 and fr == old_root and sr == new_root
+
+
+def leaf_hashes(receipts) -> list[bytes]:
+    """Ordered ``payload_hash`` bytes of every non-checkpoint receipt —
+    the transparency log's leaf input in committed (sequence) order."""
+    return [
+        bytes.fromhex(r.payload_hash)
+        for r in receipts
+        if r.payload.get("record_type") != "log_checkpoint"
+    ]
+
+
+def inclusion_proof(leaves: list[bytes], payload_hash: str, *, size: int | None = None) -> dict | None:
+    """Wire-format audit path proving ``payload_hash`` sits in the tree.
+
+    ``size`` bounds the proof to the tree a signed checkpoint committed
+    to — receipts appended after that head have no proof under it."""
+    size = len(leaves) if size is None else size
+    leaves = leaves[:size]
+    try:
+        index = leaves.index(bytes.fromhex(payload_hash))
+    except ValueError:
+        return None  # never committed (or a checkpoint — not a leaf)
+    return {
+        "tree_size": size,
+        "leaf_index": index,
+        "leaf": payload_hash,
+        "path": [p.hex() for p in inclusion_path(leaves, index)],
+    }
+
+
+def consistency_proof(leaves: list[bytes], old_size: int, size: int | None = None) -> dict | None:
+    """Wire-format node list proving the tree extends ``old_size`` leaves,
+    bounded at ``size`` — a monitor holds a checkpoint at a size BEHIND the
+    live tip, so the bridge must close on the checkpoint's tree, not the
+    newest one."""
+    size = len(leaves) if size is None else size
+    if not 0 < old_size <= size <= len(leaves):
+        return None
+    return {
+        "tree_size": size,
+        "first": old_size,
+        "proof": [p.hex() for p in consistency_nodes(leaves[:size], old_size)],
+    }

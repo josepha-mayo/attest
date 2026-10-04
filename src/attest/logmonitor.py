@@ -82,9 +82,12 @@ def check(
 
     ``state`` is the persisted last-seen head (or None on first run);
     ``issuer_doc`` is the fetched attest.issuer/1 document; ``head`` is the
-    fetched /api/log/head body; ``fetch_consistency(first) -> dict | None``
+    fetched /api/log/head body; ``fetch_consistency(first, size) -> dict | None``
     pulls the consistency endpoint lazily — only called when the head
-    moved. Returns (new_state, ok, human lines).
+    moved. ``size`` bounds the proof to the checkpoint's tree: the live
+    tip usually runs ahead of the newest signed head, so a proof to the
+    tip can never bridge to the checkpoint the pin tracks. Returns
+    (new_state, ok, human lines).
     """
     lines: list[str] = []
     if state is not None and state.get("schema") != STATE_SCHEMA:
@@ -160,8 +163,10 @@ def check(
                 "different history than the one pinned"
             ],
         )
-    # Extension claim: the new STH must bridge from the pinned one.
-    proof = fetch_consistency(old_size)
+    # Extension claim: the new STH must bridge from the pinned one. The
+    # proof is bounded at the CHECKPOINT's size — not the live tip, which
+    # is almost always ahead of the newest signed head on an active log.
+    proof = fetch_consistency(old_size, size)
     if proof is None or not isinstance(proof.get("proof"), list):
         return (
             None,
@@ -171,7 +176,7 @@ def check(
                 "deployment cannot show the pinned head inside its current tree"
             ],
         )
-    if int(proof.get("first") or -1) != old_size or int(proof.get("tree_size") or -1) != live_size:
+    if int(proof.get("first") or -1) != old_size or int(proof.get("tree_size") or -1) != size:
         return (
             None,
             False,
