@@ -372,6 +372,7 @@ def check_log(pack_dir, trusted, receipts):
     if not _is_int(size) or size < 1 or not isinstance(root_hex, str):
         sys.exit("FAIL log_checkpoint.json: malformed tree head")
     proven = 0
+    verified_ph = set()
     for r in receipts:
         ph = r.get("payload_hash") if isinstance(r, dict) else None
         # Only issuer-lineage receipts owe proofs: a foreign-signed pool
@@ -394,6 +395,7 @@ def check_log(pack_dir, trusted, receipts):
                 f"FAIL log_checkpoint.json: inclusion proof for receipt "
                 f"{r.get('id') or ph[:16]} does not reach the signed tree head"
             )
+        verified_ph.add(ph)
         proven += 1
     # Embedded evidence receipts (`attest checkpoint --include monitor:`):
     # each must verify under the issuer lineage AND carry a proof that
@@ -415,7 +417,12 @@ def check_log(pack_dir, trusted, receipts):
                     f"FAIL log_checkpoint.json: embedded receipt {rid[:24]}… "
                     "signed outside the issuer lineage"
                 )
-            ok, why = check_receipt(raw, raw["public_key"])
+            try:
+                ok, why = check_receipt(raw, raw["public_key"])
+            except (KeyError, TypeError, ValueError, AttributeError) as exc:
+                sys.exit(
+                    f"FAIL log_checkpoint.json: embedded receipt {rid[:24]}… malformed: {exc}"
+                )
             if not ok:
                 sys.exit(f"FAIL log_checkpoint.json: embedded receipt {rid[:24]}… invalid: {why}")
             p = proofs.get(raw.get("payload_hash"))
@@ -430,7 +437,20 @@ def check_log(pack_dir, trusted, receipts):
                     f"FAIL log_checkpoint.json: embedded receipt {rid[:24]}… "
                     "carries no working inclusion proof"
                 )
+            verified_ph.add(raw.get("payload_hash"))
             proven += 1
+    # CLI _verify_log_doc parity: every proofs entry must verify — a junk
+    # entry referencing nothing is a lie, not decoration.
+    for ph, p in proofs.items():
+        if ph in verified_ph:
+            continue
+        if not isinstance(p, dict) or not _merkle_inclusion(
+            ph, size, p.get("leaf_index", -1), p.get("path") or [], root_hex
+        ):
+            sys.exit(
+                f"FAIL log_checkpoint.json: unreferenced inclusion proof for "
+                f"{str(ph)[:16]}… does not reach the signed tree head"
+            )
     cosigs, _ = _cosig_count(doc, cp, size, root_hex, issuer_keys=trusted)
     # Packed self-anchors: the witness's own signed head + the cosig's
     # inclusion path. Auxiliary like the cosig count — but a present one

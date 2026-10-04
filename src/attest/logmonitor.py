@@ -70,7 +70,7 @@ def _check_sth(cp_raw: dict, trusted: set) -> tuple[dict | None, str | None]:
     if not ok:
         return None, f"checkpoint signature invalid: {why}"
     size, root_hex = payload.get("tree_size"), payload.get("root_sha256")
-    if not isinstance(size, int) or size < 1 or not isinstance(root_hex, str):
+    if not isinstance(size, int) or isinstance(size, bool) or size < 1 or not isinstance(root_hex, str):
         return None, "checkpoint carries a malformed tree head"
     try:
         bytes.fromhex(root_hex)
@@ -102,13 +102,18 @@ def check(
     lines: list[str] = []
     if state is not None and state.get("schema") != STATE_SCHEMA:
         return None, False, [f"monitor state {state.get('schema')!r} is not {STATE_SCHEMA}"]
+    if not isinstance(head, dict):
+        # A malformed body must fail the cycle, not crash the watch — a
+        # long-running monitor dying on one bad response is the worst
+        # failure mode for a continuity watcher.
+        return None, False, ["log head is not a JSON object — cannot evaluate this cycle"]
     live_size = head.get("tree_size")
-    if not isinstance(live_size, int) or live_size < 0:
+    if not isinstance(live_size, int) or isinstance(live_size, bool) or live_size < 0:
         return None, False, ["log head did not report a usable tree_size"]
     trusted = _trusted_set(issuer_doc)
     cp_raw = _doc_checkpoint(head)
     if cp_raw is None:
-        if live_size == 0:
+        if live_size == 0 and state is None:
             return None, True, ["log is empty and unsigned — nothing to pin yet"]
         if state is not None:
             return (
@@ -289,6 +294,8 @@ def live_check(
     if err:
         return False, f"pack checkpoint: {err}"
     pack_size, pack_root = int(payload["tree_size"]), payload["root_sha256"]
+    if not isinstance(head, dict):
+        return None, "deployment head is not a JSON object — cannot cross-check"
     live_cp = _doc_checkpoint(head)
     if live_cp is None:
         return None, "deployment serves no signed head — cannot cross-check"
@@ -439,7 +446,18 @@ def witness_cosign(store, signer, body: dict) -> tuple[int, dict]:
                     and legacy.get("schema") == WITNESS_SCHEMA
                     and legacy.get("issuer_key") in trusted
                     and isinstance(legacy.get("tree_size"), int)
-                    and (legacy_pin is None or legacy["tree_size"] > legacy_pin["tree_size"])
+                    and (
+                        legacy_pin is None
+                        or legacy["tree_size"] > legacy_pin["tree_size"]
+                        # Equal-size tie: deterministic pick on the root —
+                        # two slots can hold same-size/different-root pins
+                        # (the witness attested a fork); row order must not
+                        # decide which head continuity binds to.
+                        or (
+                            legacy["tree_size"] == legacy_pin["tree_size"]
+                            and str(legacy.get("root_sha256")) < str(legacy_pin.get("root_sha256"))
+                        )
+                    )
                 ):
                     legacy_pin = legacy
             if legacy_pin is not None:
@@ -760,6 +778,8 @@ def compare_views(
     p = cosig.payload
     if (
         p.get("record_type") != "witness_cosignature"
+        or not isinstance(p.get("subject_tree_size"), int)
+        or isinstance(p.get("subject_tree_size"), bool)
         or p.get("subject_tree_size") != theirs.get("tree_size")
         or p.get("subject_root_sha256") != theirs.get("root_sha256")
         or p.get("subject_checkpoint") != theirs.get("checkpoint_id")
@@ -1030,8 +1050,10 @@ def check_cosignatures(
             if (
                 p.get("subject_checkpoint") != cp_id
                 # Strict comparison — a stringified "5" doesn't bind head 5
-                # (the JS verifier's !== agrees), and a malformed field
-                # just can't bind.
+                # (the JS verifier's !== agrees), a bool aliases int 0/1,
+                # and a malformed field just can't bind.
+                or not isinstance(p.get("subject_tree_size"), int)
+                or isinstance(p.get("subject_tree_size"), bool)
                 or p.get("subject_tree_size") != size
                 or p.get("subject_root_sha256") != root_hex
             ):

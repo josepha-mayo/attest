@@ -1375,8 +1375,10 @@ class VisitEngine:
             sequence=prev.sequence + 1 if prev else 1,
             prev_hash=prev.payload_hash if prev else None,
             facts={
-                "record_type": "monitor_observation",
                 **observation,
+                # Post-splat: an observation key can never shadow the type
+                # stamp — the receipt's record_type is not caller input.
+                "record_type": "monitor_observation",
                 "boundary": (
                     "A signed statement about the material this observer was "
                     "served at this instant — what the issuer and witness SAID, "

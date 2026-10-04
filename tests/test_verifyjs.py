@@ -1776,6 +1776,10 @@ eval(src + `
   tag('embNoProof',await run(embNoProof));
   const embStr=JSON.parse(JSON.stringify(doc));embStr.receipts='bogus';
   tag('embStr',await run(embStr));
+  /* an unreferenced junk proof fails like the CLI — every entry verifies */
+  const junk=JSON.parse(JSON.stringify(doc));
+  junk.proofs['ff'.repeat(32)]={leaf_index:0,path:['00'.repeat(32)]};
+  tag('junk',await run(junk));
 })();`);
 """
     meta = {

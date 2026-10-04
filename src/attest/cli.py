@@ -2356,6 +2356,12 @@ def _checkpoint(args: argparse.Namespace) -> None:
     store = Store(db)
     try:
         engine = _cli_engine(store)
+        # A size-0 head attests an empty log — legal to mint but every
+        # verifier rejects it as a malformed tree head, so serving it would
+        # make a monitor ALERT forever against an honest deployment. Refuse
+        # before minting: an empty log is 'nothing to pin yet'.
+        if not engine.log_leaves():
+            sys.exit("log is empty — nothing to checkpoint yet")
         receipt = engine.issue_log_checkpoint()
         p = receipt.payload
         out = {
@@ -2529,16 +2535,113 @@ def _monitor(args: argparse.Namespace) -> None:
             print(f"note: initializing monitor journal at {db}", file=sys.stderr)
         j_engine = _cli_engine(Store(db))
 
+    def _journal(
+        ok: bool,
+        lines: list[str],
+        *,
+        state,
+        new_state,
+        verdict,
+        pin,
+        wbase,
+        head,
+        doc,
+        whead=None,
+    ) -> None:
+        """Mint one monitor_observation for the cycle — including cycles that
+        never reached the deployment, so an outage is durable evidence rather
+        than a silent gap in the trail."""
+        if j_engine is None:
+            return
+        # "ALERT" anywhere catches wrapped alerts too ('witness log: ALERT:
+        # …') — a witness-log contradiction is alert evidence like any other.
+        alert = verdict in ("diverged", "dishonest") or any("ALERT" in str(ln) for ln in lines)
+        served_head = None
+        _cp = (head or {}).get("checkpoint") if isinstance(head, dict) else None
+        _p = _cp.get("payload") if isinstance(_cp, dict) else None
+        if isinstance(_p, dict):
+            served_head = {
+                "checkpoint_id": _cp.get("id"),
+                "tree_size": _p.get("tree_size"),
+                "root_sha256": _p.get("root_sha256"),
+            }
+
+        def _pin_fields(s):
+            if not isinstance(s, dict):
+                return None
+            return {k: s.get(k) for k in ("issuer_key", "tree_size", "root_sha256", "checkpoint_id")}
+
+        if ok:
+            if state is None:
+                outcome = "pinned"
+            elif _pin_fields(new_state) != _pin_fields(state):
+                outcome = "advanced"
+            else:
+                outcome = "steady"
+        elif alert:
+            outcome = verdict if verdict in ("diverged", "dishonest") else "alert"
+        else:
+            outcome = "unverifiable"
+        observation = {
+            "observed_at": datetime.now(tz=UTC).isoformat(),
+            "subject": {"url": base, "issuer_key": (doc or {}).get("issuer_key")},
+            "outcome": outcome,
+            "served_head": served_head,
+            "pin_before": _pin_fields(state),
+            "pin_after": _pin_fields(new_state),
+            "witness_view": (
+                {"url": wbase, "verdict": verdict, "pin_issuer_key": (pin or {}).get("issuer_key")}
+                if wbase
+                else None
+            ),
+            # On an alert the served material itself is the evidence —
+            # verbatim, so the signed contradiction is re-checkable.
+            "served_doc": head if alert else None,
+            "served_witness_pin": pin if alert and pin else None,
+            "served_witness_head": whead if alert and whead else None,
+        }
+        try:
+            obs_receipt = j_engine.issue_monitor_observation(observation)
+            lines.append(f"journaled observation {obs_receipt.id[:24]}… ({outcome})")
+        except Exception as exc:  # noqa: BLE001 — a failed journal write
+            # must not silence the watch; the trail records the gap.
+            lines.append(f"journal write failed: {exc}")
+
     def cycle() -> tuple[bool, list[str], dict | None, bool]:
         state = logmonitor.state_load(state_path)
+        doc = head = None
         try:
             doc = _fetch_issuer_doc(issuer_src)
         except SystemExit as exc:
-            return False, [f"issuer document: {exc.code}"], state, False
+            lines = [f"issuer document: {exc.code}"]
+            _journal(
+                False,
+                lines,
+                state=state,
+                new_state=state,
+                verdict=None,
+                pin=None,
+                wbase=None,
+                head=head,
+                doc=doc,
+            )
+            return False, lines, state, False
         try:
             head = logmonitor.fetch_json(f"{base}/api/log/head")
         except ValueError as exc:
-            return False, [str(exc)], state, False
+            lines = [str(exc)]
+            _journal(
+                False,
+                lines,
+                state=state,
+                new_state=state,
+                verdict=None,
+                pin=None,
+                wbase=None,
+                head=head,
+                doc=doc,
+            )
+            return False, lines, state, False
 
         def fetch_consistency(first: int, size: int):
             try:
@@ -2549,6 +2652,14 @@ def _monitor(args: argparse.Namespace) -> None:
         new_state, ok, lines = logmonitor.check(
             state, doc, head, fetch_consistency, datetime.now(tz=UTC).isoformat()
         )
+        # check() rebuilds the state fresh each cycle — carry forward the
+        # witness-log pins, or any cycle that doesn't refresh them (witness
+        # outage, failed wlog check) silently drops the view the anchor
+        # check pins against — and the next cycle would re-pin whatever the
+        # witness serves, including the head that just failed. A fresh wlog
+        # pin below overlays its slot.
+        if new_state is not None and isinstance(state, dict) and isinstance(state.get("witness_logs"), dict):
+            new_state["witness_logs"] = dict(state["witness_logs"])
         # Cross-view: compare what THIS monitor pinned against what an
         # independent witness deployment attests — two signed views of the
         # same issuer's log that either agree or expose a fork visible to
@@ -2566,6 +2677,7 @@ def _monitor(args: argparse.Namespace) -> None:
         verdict = None
         pin = None
         wbase = None
+        whead = None
         if ok and new_state is not None and getattr(args, "witness", None):
             wbase = _https_base(args.witness, "witness")
             try:
@@ -2674,57 +2786,18 @@ def _monitor(args: argparse.Namespace) -> None:
                         repin = False
                     elif verdict == "unverifiable":
                         ok = False
-        if j_engine is not None:
-            alert = verdict in ("diverged", "dishonest") or any(str(ln).startswith("ALERT") for ln in lines)
-            served_head = None
-            _cp = (head or {}).get("checkpoint") if isinstance(head, dict) else None
-            _p = _cp.get("payload") if isinstance(_cp, dict) else None
-            if isinstance(_p, dict):
-                served_head = {
-                    "checkpoint_id": _cp.get("id"),
-                    "tree_size": _p.get("tree_size"),
-                    "root_sha256": _p.get("root_sha256"),
-                }
-
-            def _pin_fields(s):
-                if not isinstance(s, dict):
-                    return None
-                return {k: s.get(k) for k in ("issuer_key", "tree_size", "root_sha256", "checkpoint_id")}
-
-            if ok:
-                if state is None:
-                    outcome = "pinned"
-                elif _pin_fields(new_state) != _pin_fields(state):
-                    outcome = "advanced"
-                else:
-                    outcome = "steady"
-            elif alert:
-                outcome = verdict if verdict in ("diverged", "dishonest") else "alert"
-            else:
-                outcome = "unverifiable"
-            observation = {
-                "observed_at": datetime.now(tz=UTC).isoformat(),
-                "subject": {"url": base, "issuer_key": (doc or {}).get("issuer_key")},
-                "outcome": outcome,
-                "served_head": served_head,
-                "pin_before": _pin_fields(state),
-                "pin_after": _pin_fields(new_state),
-                "witness_view": (
-                    {"url": wbase, "verdict": verdict, "pin_issuer_key": (pin or {}).get("issuer_key")}
-                    if wbase
-                    else None
-                ),
-                # On an alert the served material itself is the evidence —
-                # verbatim, so the signed contradiction is re-checkable.
-                "served_doc": head if alert else None,
-                "served_witness_pin": pin if alert and pin else None,
-            }
-            try:
-                obs_receipt = j_engine.issue_monitor_observation(observation)
-                lines.append(f"journaled observation {obs_receipt.id[:24]}… ({outcome})")
-            except Exception as exc:  # noqa: BLE001 — a failed journal write
-                # must not silence the watch; the trail records the gap.
-                lines.append(f"journal write failed: {exc}")
+        _journal(
+            ok,
+            lines,
+            state=state,
+            new_state=new_state,
+            verdict=verdict,
+            pin=pin,
+            wbase=wbase,
+            head=head,
+            doc=doc,
+            whead=whead,
+        )
         return ok, lines, new_state, repin
 
     while True:

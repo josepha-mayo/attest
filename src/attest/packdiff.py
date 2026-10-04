@@ -227,13 +227,14 @@ def check_log_pin(
         return None, f"log_checkpoint.json: {why}"
     size = payload.get("tree_size")
     root_hex = payload.get("root_sha256")
-    if not isinstance(size, int) or size < 1 or not isinstance(root_hex, str):
+    if not isinstance(size, int) or isinstance(size, bool) or size < 1 or not isinstance(root_hex, str):
         return None, "log_checkpoint.json: malformed tree head"
     try:
         root_b = bytes.fromhex(root_hex)
     except ValueError:
         return None, "log_checkpoint.json: malformed tree head"
     proven = 0
+    referenced_ph: set = set()
     for rid, ph, pub in receipt_ids:
         # Only issuer-lineage receipts owe proofs: a foreign-signed pool
         # entry is inert (it can't join the trust walk) and never claimed
@@ -257,11 +258,83 @@ def check_log_pin(
             leaf_b = bytes.fromhex(ph)
         except (TypeError, ValueError):
             return None, f"log_checkpoint.json: malformed receipt hash for {rid}"
-        if not isinstance(idx, int) or not verify_inclusion(leaf_b, size, idx, path, root_b):
+        if (
+            not isinstance(idx, int)
+            or isinstance(idx, bool)
+            or not verify_inclusion(leaf_b, size, idx, path, root_b)
+        ):
             return None, (
                 f"log_checkpoint.json: inclusion proof for receipt {rid} does not reach the signed tree head"
             )
+        referenced_ph.add(ph)
         proven += 1
+    # Embedded evidence receipts (`attest checkpoint --include monitor:`)
+    # riding a crafted checkpoint doc — same closed discipline as the CLI,
+    # the embedded verifier, and the browser page: dedupe, issuer lineage,
+    # signature, and a working inclusion proof.
+    embedded = doc.get("receipts")
+    if embedded is not None:
+        if not isinstance(embedded, list) or len(embedded) > 2048:
+            return None, "log_checkpoint.json: 'receipts' must be a list of at most 2048"
+        seen_ids: set = set()
+        for raw in embedded:
+            try:
+                er = Receipt.model_validate(raw)
+            except Exception as exc:  # noqa: BLE001
+                return None, f"log_checkpoint.json: embedded receipt malformed ({exc})"
+            if er.id in seen_ids:
+                return None, f"log_checkpoint.json: embedded receipt {er.id[:24]}… listed twice"
+            seen_ids.add(er.id)
+            if er.public_key not in trusted:
+                return None, (
+                    f"log_checkpoint.json: embedded receipt {er.id[:24]}… signed outside the issuer lineage"
+                )
+            ok2, why2 = verify_receipt(er, public_key=er.public_key)
+            if not ok2:
+                return None, f"log_checkpoint.json: embedded receipt {er.id[:24]}… invalid: {why2}"
+            p = proofs.get(er.payload_hash)
+            if not isinstance(p, dict):
+                return None, (
+                    f"log_checkpoint.json: embedded receipt {er.id[:24]}… carries no working inclusion proof"
+                )
+            try:
+                path = [bytes.fromhex(h) for h in p.get("path") or []]
+                idx = p.get("leaf_index")
+                leaf_b = bytes.fromhex(er.payload_hash)
+            except (TypeError, ValueError):
+                return None, f"log_checkpoint.json: malformed proof for receipt {er.id[:24]}…"
+            if (
+                not isinstance(idx, int)
+                or isinstance(idx, bool)
+                or not verify_inclusion(leaf_b, size, idx, path, root_b)
+            ):
+                return None, (
+                    f"log_checkpoint.json: embedded receipt {er.id[:24]}… carries no working inclusion proof"
+                )
+            referenced_ph.add(er.payload_hash)
+            proven += 1
+    # Every proofs entry must verify — the CLI and both embedded verifiers
+    # refuse an unreferenced junk entry; a broken proof is a lie, not
+    # decoration. An extra entry that DOES verify is tolerated here.
+    for ph, p in proofs.items():
+        if ph in referenced_ph:
+            continue
+        if not isinstance(p, dict):
+            return None, "log_checkpoint.json: unreferenced inclusion proof is malformed"
+        try:
+            path = [bytes.fromhex(h) for h in p.get("path") or []]
+            idx = p.get("leaf_index")
+            leaf_b = bytes.fromhex(ph)
+        except (TypeError, ValueError):
+            return None, "log_checkpoint.json: unreferenced inclusion proof is malformed"
+        if (
+            not isinstance(idx, int)
+            or isinstance(idx, bool)
+            or not verify_inclusion(leaf_b, size, idx, path, root_b)
+        ):
+            return None, (
+                "log_checkpoint.json: unreferenced inclusion proof does not reach the signed tree head"
+            )
     # Witness counter-signatures ride the checkpoint document: verified
     # under each cosig's own key + subject binding, reported as auxiliary
     # attestation — never the gate the issuer's own checkpoint is.

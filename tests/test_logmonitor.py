@@ -2725,3 +2725,220 @@ def test_lineage_root_is_deterministic_under_a_reordered_merge(engine):
     expected = min(sa.public_key_b64, sb.public_key_b64)
     assert lineage_root(sn.public_key_b64, receipts) == expected
     assert lineage_root(sn.public_key_b64, list(reversed(receipts))) == expected
+
+
+def test_monitor_journal_records_an_unreachable_cycle(tmp_path, monkeypatch, capsys):
+    """A cycle that never reaches the deployment still mints a receipt —
+    'at this instant the subject was unreachable' is durable evidence, not
+    a silent gap in the watch trail (early fetch returns bypassed the
+    journal before this fix)."""
+    import argparse
+    import contextlib
+    import io
+
+    from attest import cli, logmonitor
+    from attest.store import Store
+
+    monkeypatch.setattr(cli.settings, "data_dir", tmp_path)
+    monkeypatch.setattr(cli.settings, "kms_key_id", None)
+    monkeypatch.setattr(cli, "_fetch_issuer_doc", lambda url: {"issuer_key": "K" * 43})
+
+    def _down(url, client=None):
+        raise ValueError("connection refused")
+
+    monkeypatch.setattr(logmonitor, "fetch_json", _down)
+    ns = argparse.Namespace(
+        url="https://deploy.example",
+        issuer=None,
+        state=str(tmp_path / "mon.json"),
+        interval=60,
+        once=True,
+        json=False,
+        witness=None,
+        journal=True,
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        with contextlib.redirect_stdout(io.StringIO()):
+            cli._monitor(ns)
+    assert excinfo.value.code == 1  # the watch failed — and the failure is on the record
+
+    store = Store(tmp_path / "attest.sqlite3")
+    obs = [r for r in store.receipts() if r.payload.get("record_type") == "monitor_observation"]
+    assert len(obs) == 1
+    assert obs[0].payload["outcome"] == "unverifiable"
+    assert obs[0].payload["served_head"] is None
+    assert obs[0].payload["served_doc"] is None
+    assert obs[0].payload["subject"]["url"] == "https://deploy.example"
+    store.close()
+
+
+def test_monitor_check_survives_a_non_dict_head(engine, store, household, schedule, t0):
+    """A malformed served body must fail the cycle, not crash the watch —
+    a long-running monitor dying on one bad response is the worst failure
+    mode for a continuity watcher (audit M1)."""
+    from attest import logmonitor
+
+    for bad_head in ([], "ok", 5, None):
+        new_state, ok, lines = logmonitor.check(None, {"issuer_key": "K"}, bad_head, None, "t")
+        assert new_state is None and not ok and lines
+
+
+def test_monitor_check_alerts_when_a_pinned_log_serves_empty(engine, store, household, schedule, t0):
+    """live_size 0 + no checkpoint used to return ok=True BEFORE the pin
+    check — a wiped/replaced log read green every cycle and the journal
+    signed 'advanced' to nothing. With a pin, empty means replaced."""
+    from attest import logmonitor
+
+    pinned = {
+        "schema": logmonitor.STATE_SCHEMA,
+        "issuer_key": "K",
+        "tree_size": 7,
+        "root_sha256": "ab" * 32,
+        "checkpoint_id": "rcpt_cp",
+    }
+    head = {"tree_size": 0, "checkpoint": None}
+    new_state, ok, lines = logmonitor.check(pinned, {"issuer_key": "K"}, head, None, "t")
+    assert new_state is None and not ok
+    assert any("ALERT" in ln for ln in lines)
+
+    # First contact still honestly reports 'nothing to pin yet'.
+    new_state, ok, _ = logmonitor.check(None, {"issuer_key": "K"}, head, None, "t")
+    assert new_state is None and ok
+
+
+def test_monitor_witness_log_pin_survives_an_outage(tmp_path, monkeypatch, capsys):
+    """check() rebuilds state fresh every cycle — without a carry-forward,
+    a witness outage or a failed witness-log check overwrote the state file
+    WITHOUT the witness_logs pin, and the next cycle re-pinned whatever the
+    witness served (audit M3). The pin must survive soft failures."""
+    import argparse
+    import contextlib
+    import io
+
+    from attest import cli, logmonitor
+
+    monkeypatch.setattr(cli.settings, "data_dir", tmp_path / "d")
+    (tmp_path / "d").mkdir()
+    state_file = tmp_path / "mon.json"
+    prior_wlog = {
+        "schema": logmonitor.STATE_SCHEMA,
+        "issuer_key": "WK",
+        "tree_size": 3,
+        "root_sha256": "ee" * 32,
+    }
+    logmonitor.state_save(
+        str(state_file),
+        {
+            "schema": logmonitor.STATE_SCHEMA,
+            "issuer_key": "K" * 43,
+            "tree_size": 7,
+            "root_sha256": "ab" * 32,
+            "checkpoint_id": "rcpt_cp",
+            "witness_logs": {"https://w.example": prior_wlog},
+        },
+    )
+    doc = {"schema": "attest.issuer/1", "issuer_key": "K" * 43, "key_receipts": []}
+    head = {"tree_size": 8, "root_sha256": "cd" * 32, "checkpoint": {"id": "rcpt_new"}}
+    monkeypatch.setattr(cli, "_fetch_issuer_doc", lambda url: doc)
+    monkeypatch.setattr(logmonitor, "fetch_json", lambda url, client=None: head)
+
+    new_state = {
+        "schema": logmonitor.STATE_SCHEMA,
+        "issuer_key": "K" * 43,
+        "tree_size": 8,
+        "root_sha256": "cd" * 32,
+        "checkpoint_id": "rcpt_new",
+    }
+    monkeypatch.setattr(logmonitor, "check", lambda s, d, h, fc, at: (dict(new_state), True, ["ok"]))
+
+    # Witness heads unreachable — a soft failure: cycle fails but repins.
+    def _unreachable(url, client=None):
+        if "witness/heads" in url or "log/head" in url and "w.example" in url:
+            raise ValueError("down")
+        return head
+
+    monkeypatch.setattr(logmonitor, "fetch_json", _unreachable)
+    ns = argparse.Namespace(
+        url="https://deploy.example",
+        issuer=None,
+        state=str(state_file),
+        interval=60,
+        once=True,
+        json=False,
+        witness="https://w.example",
+        journal=False,
+    )
+    with pytest.raises(SystemExit):
+        with contextlib.redirect_stdout(io.StringIO()):
+            cli._monitor(ns)
+    saved = logmonitor.state_load(str(state_file))
+    assert saved["witness_logs"]["https://w.example"] == prior_wlog
+
+
+def test_monitor_journal_embeds_witness_head_on_a_witness_log_alert(tmp_path, monkeypatch, capsys):
+    """A witness-log contradiction used to journal as 'unverifiable' with
+    no evidence: 'witness log: ALERT: …' lines wrapped the marker so the
+    alert detector missed it, and the served head never embedded (audit
+    M4). The receipt must read 'alert' and carry the verbatim material."""
+    import argparse
+    import contextlib
+    import io
+
+    from attest import cli, logmonitor
+    from attest.store import Store
+
+    monkeypatch.setattr(cli.settings, "data_dir", tmp_path)
+    monkeypatch.setattr(cli.settings, "kms_key_id", None)
+    doc = {"schema": "attest.issuer/1", "issuer_key": "K" * 43, "key_receipts": []}
+    head = {"tree_size": 8, "root_sha256": "cd" * 32, "checkpoint": {"id": "rcpt_new"}}
+    whead = {"tree_size": 9, "root_sha256": "ff" * 32, "checkpoint": {"id": "rcpt_w"}}
+    heads = {"pins": [{"issuer_key": "K" * 43, "tree_size": 8, "root_sha256": "cd" * 32}]}
+    monkeypatch.setattr(cli, "_fetch_issuer_doc", lambda url: doc)
+
+    def _fetch(url, client=None):
+        if "witness/heads" in url:
+            return heads
+        if "w.example" in url:
+            return whead
+        return head
+
+    monkeypatch.setattr(logmonitor, "fetch_json", _fetch)
+
+    def _check(state, d, h, fc, at):
+        if h is whead:  # the WITNESS's own log regressed against our pin
+            return None, False, ["ALERT: witness log head regressed below the pin"]
+        return (
+            {
+                "schema": logmonitor.STATE_SCHEMA,
+                "issuer_key": "K" * 43,
+                "tree_size": 8,
+                "root_sha256": "cd" * 32,
+                "checkpoint_id": "rcpt_new",
+            },
+            True,
+            ["ok"],
+        )
+
+    monkeypatch.setattr(logmonitor, "check", _check)
+    monkeypatch.setattr(logmonitor, "compare_views", lambda *a, **k: ("agree", "views agree"))
+    ns = argparse.Namespace(
+        url="https://deploy.example",
+        issuer=None,
+        state=str(tmp_path / "mon.json"),
+        interval=60,
+        once=True,
+        json=False,
+        witness="https://w.example",
+        journal=True,
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        with contextlib.redirect_stdout(io.StringIO()):
+            cli._monitor(ns)
+    assert excinfo.value.code == 1
+
+    store = Store(tmp_path / "attest.sqlite3")
+    obs = [r for r in store.receipts() if r.payload.get("record_type") == "monitor_observation"]
+    assert len(obs) == 1
+    assert obs[0].payload["outcome"] == "alert"
+    assert obs[0].payload["served_witness_head"] == whead
+    store.close()
