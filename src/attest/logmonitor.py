@@ -533,7 +533,7 @@ def _pseudo_for(state: dict) -> str | None:
     return f"witness:{str(issuer_key)[:24]}:{cp_id}"
 
 
-def anchor_published_pins(store, engine, heads: dict) -> dict:
+def anchor_published_pins(store, heads: dict) -> dict:
     """Anchor each published pin inside the WITNESS's own transparency log.
 
     A witness_cosignature is a leaf in this deployment's Merkle log like
@@ -545,19 +545,23 @@ def anchor_published_pins(store, engine, heads: dict) -> dict:
     newest checkpoint stay unanchored — absence is honest, never a claim."""
     from .models import Receipt
 
+    receipts = store.receipts()
     latest_cp = next(
-        (r for r in reversed(store.receipts()) if r.payload.get("record_type") == "log_checkpoint"),
+        (r for r in reversed(receipts) if r.payload.get("record_type") == "log_checkpoint"),
         None,
     )
     if latest_cp is None:
         return heads
     size = int(latest_cp.payload["tree_size"])
+    from .transparency import inclusion_proof, leaf_hashes
+
+    leaves = leaf_hashes(receipts)  # compute once, not per pin
     for pin in heads.get("pins") or []:
         cosig = pin.get("cosignature")
         if not isinstance(cosig, dict):
             continue
         try:
-            proof = engine.inclusion_proof(Receipt.model_validate(cosig), size=size)
+            proof = inclusion_proof(leaves, Receipt.model_validate(cosig).payload_hash, size=size)
         except Exception:  # noqa: BLE001 — unanchorable cosigs stay unanchored
             proof = None
         if proof is not None:

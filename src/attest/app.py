@@ -1048,7 +1048,7 @@ def create_app(
         # Anchor each published view inside THIS deployment's own log where a
         # checkpoint covers the cosig — the witness can't serve divergent
         # attestations to different auditors without forking its own log too.
-        await asyncio.to_thread(logmonitor.anchor_published_pins, store, engine, heads)
+        await asyncio.to_thread(logmonitor.anchor_published_pins, store, heads)
         return heads
 
     @app.get("/visits/{visit_id}", response_class=HTMLResponse)

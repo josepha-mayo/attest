@@ -1682,7 +1682,7 @@ def test_witness_heads_anchor_attestations_in_the_witness_log(engine, store, hou
     double-speak across auditors without forking its own log too. An anchor
     present but not verifying is served falsehood, so unverifiable."""
     from attest import logmonitor
-    from attest.transparency import inclusion_proof, leaf_hashes, root
+    from attest.transparency import leaf_hashes, root
 
     w_store, w_signer = _witness_deployment()
     _seed(engine, household[0], t0)
@@ -1692,14 +1692,8 @@ def test_witness_heads_anchor_attestations_in_the_witness_log(engine, store, hou
     )
     assert status == 200
 
-    class _Stub:
-        """The witness's proof engine — inclusion proofs only touch the store."""
-
-        def inclusion_proof(self, receipt, *, size=None):
-            return inclusion_proof(leaf_hashes(w_store.receipts()), receipt.payload_hash, size=size)
-
     heads = logmonitor.witness_heads(w_store, w_signer.public_key_b64)
-    heads = logmonitor.anchor_published_pins(w_store, _Stub(), heads)
+    heads = logmonitor.anchor_published_pins(w_store, heads)
     # The witness hasn't checkpointed its own log yet — no anchor is claimed.
     assert "witness_anchor" not in heads["pins"][0]
 
@@ -1716,7 +1710,7 @@ def test_witness_heads_anchor_attestations_in_the_witness_log(engine, store, hou
         },
     )
     w_store.put_receipt(w_cp)
-    heads = logmonitor.anchor_published_pins(w_store, _Stub(), heads)
+    heads = logmonitor.anchor_published_pins(w_store, heads)
     pin = heads["pins"][0]
     anchor = pin["witness_anchor"]
     assert anchor["checkpoint"]["id"] == w_cp.id
