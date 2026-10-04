@@ -445,24 +445,40 @@ def witness_heads(store, issuer_key: str) -> dict:
     pinned by cosigning, transport-free and read-only. Served publicly so a
     third party can compare what THIS witness attests against what the
     issuer's deployment currently serves: two independently-signed views of
-    'the log' that either agree or expose a fork."""
+    'the log' that either agree or expose a fork.
+
+    Every pin carries the cosignature RECEIPT itself — the settings row is
+    unsigned, so publishing it alone would let a MITM or a dishonest
+    endpoint claim any view. The receipt is the attestation: it verifies
+    under the witness's own key and its signed subject fields are the only
+    view a cross-check believes. Pins whose receipt is missing or no longer
+    verifies are dropped — an unservable view is published as absent."""
     pins = []
     for _name, state in sorted(store.settings_by_prefix("witness:").items()):
+        cosig_id = state.get("cosignature_id")
+        cosig = (
+            store.receipt_for_visit(_pseudo_for(state))
+            if cosig_id is None
+            else _receipt_by_id(store, cosig_id)
+        )
         if (
-            state.get("schema") == WITNESS_SCHEMA
-            and isinstance(state.get("issuer_key"), str)
-            and isinstance(state.get("tree_size"), int)
-            and isinstance(state.get("root_sha256"), str)
+            state.get("schema") != WITNESS_SCHEMA
+            or not isinstance(state.get("issuer_key"), str)
+            or not isinstance(state.get("tree_size"), int)
+            or not isinstance(state.get("root_sha256"), str)
+            or cosig is None
         ):
-            pins.append(
-                {
-                    "issuer_key": state["issuer_key"],
-                    "tree_size": state["tree_size"],
-                    "root_sha256": state["root_sha256"],
-                    "checkpoint_id": state.get("checkpoint_id"),
-                    "cosignature_id": state.get("cosignature_id"),
-                }
-            )
+            continue
+        pins.append(
+            {
+                "issuer_key": state["issuer_key"],
+                "tree_size": state["tree_size"],
+                "root_sha256": state["root_sha256"],
+                "checkpoint_id": state.get("checkpoint_id"),
+                "cosignature_id": cosig_id or cosig.id,
+                "cosignature": cosig.model_dump(mode="json"),
+            }
+        )
     return {
         "schema": "attest.witness-heads/1",
         "witness_key": issuer_key,
@@ -470,14 +486,46 @@ def witness_heads(store, issuer_key: str) -> dict:
         "boundary": (
             "These are heads this deployment counter-signed after verifying "
             "each extended its previous pin — they attest what the witness "
-            "OBSERVED, not that the logged content is true."
+            "OBSERVED, not that the logged content is true. Each pin's view "
+            "lives in the signed cosignature receipt; the unsigned fields "
+            "are a serving hint only."
         ),
     }
 
 
-def compare_views(mine: dict | None, theirs: dict | None) -> tuple[str, str]:
+def _receipt_by_id(store, receipt_id: str):
+    """Look up a receipt by id — the store indexes receipts by visit, so
+    scan; per-issuer pins are few."""
+    for r in store.receipts():
+        if r.id == receipt_id:
+            return r
+    return None
+
+
+def _pseudo_for(state: dict) -> str | None:
+    """The pseudo visit-id a cosignature is stored under —
+    ``witness:{issuer_key[:24]}:{checkpoint_id}`` — for pins written before
+    the state carried an explicit cosignature_id."""
+    issuer_key, cp_id = state.get("issuer_key"), state.get("checkpoint_id")
+    if not issuer_key or not cp_id:
+        return None
+    return f"witness:{str(issuer_key)[:24]}:{cp_id}"
+
+
+def compare_views(
+    mine: dict | None, theirs: dict | None, witness_trusted: set | None = None
+) -> tuple[str, str]:
     """Cross-check two independent pins of the same issuer's log — mine (the
     monitor's last verified head) against a witness's published pin.
+
+    The pin's own fields are unsigned serving hints; the view a comparison
+    believes comes only from the pin's signed cosignature receipt — its
+    signature must verify under the witness's certified lineage
+    (``witness_trusted``, from the witness's issuer doc) and its subject
+    fields must name the pin's claimed head. Without that, a MITM or a
+    dishonest endpoint could claim agreement it never signed or fabricate
+    divergences to cry wolf. An unsigned or unverifiable view is reported
+    as such — never silently compared, never a fork accusation.
 
     Two observers signing the same (size, root) is the strongest public-log
     evidence available: it means a single log was served to both. Same size
@@ -490,9 +538,45 @@ def compare_views(mine: dict | None, theirs: dict | None) -> tuple[str, str]:
         return "unseen", "the witness has never cosigned this issuer — no second view exists"
     if mine is None:
         return "no_pin", "no local pin to compare — run a monitor cycle first"
+    from .ledger import verify_receipt
+    from .models import Receipt
+
+    cosig_raw = theirs.get("cosignature")
+    try:
+        cosig = Receipt.model_validate(cosig_raw)
+    except Exception:  # noqa: BLE001
+        return (
+            "unverifiable",
+            "the witness's pin carries no usable cosignature — the view is "
+            "unsigned serving data, not an attestation; nothing to compare",
+        )
+    ok, why = verify_receipt(cosig, public_key=cosig.public_key)
+    if not ok:
+        return "unverifiable", f"the witness's published cosignature fails verification ({why})"
+    if witness_trusted is not None and cosig.public_key not in witness_trusted:
+        return (
+            "unverifiable",
+            "the published cosignature is signed outside the witness's certified "
+            "issuer lineage — the view can't be attributed to this witness",
+        )
+    p = cosig.payload
+    if (
+        p.get("record_type") != "witness_cosignature"
+        or p.get("subject_tree_size") != theirs.get("tree_size")
+        or p.get("subject_root_sha256") != theirs.get("root_sha256")
+        or p.get("subject_checkpoint") != theirs.get("checkpoint_id")
+        or p.get("subject_issuer") != theirs.get("issuer_key")
+    ):
+        return (
+            "unverifiable",
+            "the signed cosignature does not attest the pin's claimed head — "
+            "the unsigned fields disagree with the receipt; the view is unusable",
+        )
+    # From here the comparison runs on the SIGNED subject fields — the only
+    # view the witness actually attested.
     my_size, my_root = int(mine["tree_size"]), str(mine["root_sha256"])
-    w_size, w_root = int(theirs["tree_size"]), str(theirs["root_sha256"])
-    w_id = str(theirs.get("cosignature_id") or "?")[:24]
+    w_size, w_root = int(p["subject_tree_size"]), str(p["subject_root_sha256"])
+    w_id = cosig.id[:24]
     if my_size == w_size and my_root == w_root:
         return (
             "agree",

@@ -2247,14 +2247,22 @@ def _monitor(args: argparse.Namespace) -> None:
             wbase = _https_base(args.witness, "witness")
             try:
                 heads = logmonitor.fetch_json(f"{wbase}/api/witness/heads")
+                # The pin's own fields are unsigned hints — the comparison
+                # only believes the signed cosignature, and only under the
+                # witness's certified lineage, so fetch its issuer doc too.
+                wdoc = _fetch_issuer_doc(wbase)
             except ValueError as exc:
                 ok = False
                 lines.append(f"witness view unreachable: {exc}")
+            except SystemExit as exc:
+                ok = False
+                lines.append(f"witness issuer document: {exc.code}")
             else:
                 if not isinstance(heads, dict) or not isinstance(heads.get("pins"), list):
                     ok = False
                     lines.append("witness heads response is malformed — cannot compare views")
                 else:
+                    wtrusted = logmonitor._trusted_set(wdoc)
                     pin = next(
                         (
                             p
@@ -2263,9 +2271,9 @@ def _monitor(args: argparse.Namespace) -> None:
                         ),
                         None,
                     )
-                    verdict, line = logmonitor.compare_views(new_state, pin)
+                    verdict, line = logmonitor.compare_views(new_state, pin, wtrusted)
                     lines.append(f"witness cross-view [{verdict}]: {line}")
-                    if verdict == "diverged":
+                    if verdict in ("diverged", "unverifiable"):
                         ok = False
         return ok, lines, new_state
 

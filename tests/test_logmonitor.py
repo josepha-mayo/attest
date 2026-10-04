@@ -760,32 +760,125 @@ def test_witness_heads_publishes_pinned_views(engine, store, household, schedule
     assert len(heads["pins"]) == 1
 
 
-def test_compare_views_agree_diverge_lag():
-    """The cross-view verdict: same head = two observers agree; same size
-    different root = the unforgeable fork; different sizes = honestly
-    undecidable (cosign cadence lags growth)."""
+def test_compare_views_agree_diverge_lag(engine, store, household, schedule, t0):
+    """The cross-view verdict — but only on SIGNED views: the pin's unsigned
+    fields are serving hints, the cosignature receipt is the attestation.
+    Unsigned, wrongly-signed, or subject-mismatched views are 'unverifiable',
+    never silently compared and never a fork accusation."""
     from attest import logmonitor
 
-    mine = {"tree_size": 10, "root_sha256": "aa" * 32}
-    theirs = {"tree_size": 10, "root_sha256": "aa" * 32, "cosignature_id": "rcpt_x"}
+    w_store, w_signer = _witness_deployment()
+    _seed(engine, household[0], t0)
+    cp = engine.issue_log_checkpoint()
+    status, out = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": _doc_for(engine), "checkpoint": cp.model_dump(mode="json")}
+    )
+    assert status == 200
+    heads = logmonitor.witness_heads(w_store, w_signer.public_key_b64)
+    pin = heads["pins"][0]
+    wtrusted = {w_signer.public_key_b64}
 
-    verdict, line = logmonitor.compare_views(mine, theirs)
+    mine = {"tree_size": pin["tree_size"], "root_sha256": pin["root_sha256"]}
+    verdict, line = logmonitor.compare_views(mine, pin, wtrusted)
     assert verdict == "agree" and "two independent observers" in line
 
-    verdict, line = logmonitor.compare_views(mine, None)
+    verdict, _ = logmonitor.compare_views(mine, None, wtrusted)
     assert verdict == "unseen"
-
-    verdict, line = logmonitor.compare_views(None, theirs)
+    verdict, _ = logmonitor.compare_views(None, pin, wtrusted)
     assert verdict == "no_pin"
 
-    fork = dict(theirs, root_sha256="bb" * 32)
-    verdict, line = logmonitor.compare_views(mine, fork)
+    # Unsigned views can't be believed — a pin without its receipt is
+    # unverifiable, not comparable.
+    bare = {k: v for k, v in pin.items() if k != "cosignature"}
+    verdict, line = logmonitor.compare_views(mine, bare, wtrusted)
+    assert verdict == "unverifiable" and "unsigned" in line
+
+    # A cosig signed by a key outside the witness's lineage can't be
+    # attributed to it.
+    verdict, _ = logmonitor.compare_views(mine, pin, {"some-other-key"})
+    assert verdict == "unverifiable"
+
+    # A pin claiming a different size than the signed receipt attests is
+    # tampered serving data — unverifiable, not a fork claim.
+    lying = dict(pin, tree_size=pin["tree_size"] + 5)
+    verdict, line = logmonitor.compare_views(mine, lying, wtrusted)
+    assert verdict == "unverifiable" and "disagree" in line
+
+    # The real fork: a cosig VALIDLY signed by the witness attesting a
+    # different root at the same size — the unforgeable divergence.
+    w_store2, w_signer2 = _witness_deployment()
+    # Mint a second witness cosig over a forged head at the same size.
+    import hashlib
+
+    prev = w_store2.latest_receipt()
+    fork_root = hashlib.sha256(b"fork").hexdigest()
+    cosig2 = w_signer2.issue(
+        visit_id=f"witness:x:{cp.id}",
+        sequence=prev.sequence + 1 if prev else 1,
+        prev_hash=prev.payload_hash if prev else None,
+        facts={
+            "record_type": "witness_cosignature",
+            "subject_checkpoint": cp.id,
+            "subject_tree_size": pin["tree_size"],
+            "subject_root_sha256": fork_root,
+            "subject_issuer": pin["issuer_key"],
+        },
+    )
+    fork_pin = dict(pin, root_sha256=fork_root, cosignature=cosig2.model_dump(mode="json"))
+    verdict, line = logmonitor.compare_views(mine, fork_pin, {w_signer2.public_key_b64})
     assert verdict == "diverged" and "forked log" in line
 
-    verdict, line = logmonitor.compare_views(mine, dict(theirs, tree_size=7))
+    # A head the witness signed at a different size: honestly undecidable —
+    # cadence lags growth, so lag is reported, never alarmed.
+    behind_pin = dict(
+        pin,
+        tree_size=pin["tree_size"] - 1,
+        cosignature=cosig2.model_dump(mode="json"),
+    )
+    verdict, _ = logmonitor.compare_views(mine, behind_pin, {w_signer2.public_key_b64})
+    assert verdict == "unverifiable"  # subject size disagrees with the claim
+
+    smaller_cosig = w_signer2.issue(
+        visit_id="witness:x:smaller",
+        sequence=cosig2.sequence + 1,
+        prev_hash=cosig2.payload_hash,
+        facts={
+            "record_type": "witness_cosignature",
+            "subject_checkpoint": "rcpt_older",
+            "subject_tree_size": pin["tree_size"] - 1,
+            "subject_root_sha256": "00" * 32,
+            "subject_issuer": pin["issuer_key"],
+        },
+    )
+    behind = dict(
+        pin,
+        tree_size=pin["tree_size"] - 1,
+        root_sha256="00" * 32,
+        checkpoint_id="rcpt_older",
+        cosignature=smaller_cosig.model_dump(mode="json"),
+    )
+    verdict, line = logmonitor.compare_views(mine, behind, {w_signer2.public_key_b64})
     assert verdict == "witness_behind" and "undecidable" in line
 
-    verdict, line = logmonitor.compare_views(mine, dict(theirs, tree_size=14))
+    ahead = dict(
+        behind,
+        tree_size=pin["tree_size"] + 3,
+        checkpoint_id="rcpt_newer",
+        cosignature=w_signer2.issue(
+            visit_id="witness:x:newer",
+            sequence=smaller_cosig.sequence + 1,
+            prev_hash=smaller_cosig.payload_hash,
+            facts={
+                "record_type": "witness_cosignature",
+                "subject_checkpoint": "rcpt_newer",
+                "subject_tree_size": pin["tree_size"] + 3,
+                "subject_root_sha256": "11" * 32,
+                "subject_issuer": pin["issuer_key"],
+            },
+        ).model_dump(mode="json"),
+    )
+    ahead["root_sha256"] = "11" * 32
+    verdict, line = logmonitor.compare_views(mine, ahead, {w_signer2.public_key_b64})
     assert verdict == "witness_ahead" and "undecidable" in line
 
 
@@ -811,13 +904,15 @@ def test_settings_by_prefix_reads_only_matching_rows(store):
 
 def test_monitor_witness_cross_view_cli(tmp_path, monkeypatch, capsys):
     """`attest monitor --witness` compares the pinned head against the
-    witness's published pins — agreement extends the cycle's report, a
-    same-size different-root divergence fails the cycle without repinning."""
+    witness's published pins — and only believes SIGNED views: the witness's
+    cosignature must verify under the witness's own issuer lineage before
+    its (size, root) means anything."""
     import argparse
     import contextlib
     import io
 
     from attest import cli, logmonitor
+    from attest.ledger import Signer
 
     state_file = tmp_path / "mon.json"
     cp = {
@@ -831,7 +926,9 @@ def test_monitor_witness_cross_view_cli(tmp_path, monkeypatch, capsys):
     }
     doc = {"schema": "attest.issuer/1", "issuer_key": "K" * 43, "key_receipts": []}
     head = {"tree_size": 7, "root_sha256": "ab" * 32, "checkpoint": cp}
-    monkeypatch.setattr(cli, "_fetch_issuer_doc", lambda url: doc)
+    w_signer = Signer.ephemeral()
+    wdoc = {"schema": "attest.issuer/1", "issuer_key": w_signer.public_key_b64, "key_receipts": []}
+    monkeypatch.setattr(cli, "_fetch_issuer_doc", lambda url: wdoc if "witness" in str(url) else doc)
 
     state = {
         "schema": logmonitor.STATE_SCHEMA,
@@ -852,6 +949,32 @@ def test_monitor_witness_cross_view_cli(tmp_path, monkeypatch, capsys):
         witness="https://witness.example",
     )
 
+    def cosig(tree_size=7, root="ab" * 32, cp_id="rcpt_cp"):
+        r = w_signer.issue(
+            visit_id=f"witness:x:{cp_id}:{tree_size}",
+            sequence=1,
+            prev_hash=None,
+            facts={
+                "record_type": "witness_cosignature",
+                "subject_checkpoint": cp_id,
+                "subject_tree_size": tree_size,
+                "subject_root_sha256": root,
+                "subject_issuer": doc["issuer_key"],
+            },
+        )
+        return r.model_dump(mode="json")
+
+    def pin(tree_size=7, root="ab" * 32, cp_id="rcpt_cp", with_cosig=True):
+        p = {
+            "issuer_key": doc["issuer_key"],
+            "tree_size": tree_size,
+            "root_sha256": root,
+            "checkpoint_id": cp_id,
+        }
+        if with_cosig:
+            p["cosignature"] = cosig(tree_size, root, cp_id)
+        return p
+
     def run(heads):
         monkeypatch.setattr(
             logmonitor,
@@ -864,16 +987,26 @@ def test_monitor_witness_cross_view_cli(tmp_path, monkeypatch, capsys):
                 cli._monitor(ns)
         return e.value.code, buf.getvalue()
 
-    # Same pin as the witness attests → agree, exit 0.
-    code, out = run({"pins": [{"issuer_key": doc["issuer_key"], "tree_size": 7, "root_sha256": "ab" * 32}]})
+    # Same signed head attested by the witness → agree, exit 0.
+    code, out = run({"pins": [pin()]})
     assert code == 0 and "[agree]" in out
 
     # Witness never cosigned this issuer → reported, still passes.
     code, out = run({"pins": []})
     assert code == 0 and "[unseen]" in out
 
-    # Same size, different root → the unforgeable divergence, exit 1.
-    code, out = run({"pins": [{"issuer_key": doc["issuer_key"], "tree_size": 7, "root_sha256": "ff" * 32}]})
+    # An unsigned pin is serving data, not an attestation → unverifiable.
+    code, out = run({"pins": [pin(with_cosig=False)]})
+    assert code == 1 and "[unverifiable]" in out
+
+    # A pin whose claim disagrees with its signed cosig → unverifiable.
+    lying = pin()
+    lying["tree_size"] = 9
+    code, out = run({"pins": [lying]})
+    assert code == 1 and "[unverifiable]" in out
+
+    # Validly-signed fork attestation at the same size → diverged, exit 1.
+    code, out = run({"pins": [pin(root="ff" * 32)]})
     assert code == 1 and "[diverged]" in out
     assert not state_file.exists() or logmonitor.state_load(state_file)["root_sha256"] == "ab" * 32
 
