@@ -1824,6 +1824,75 @@ def _consistency(args: argparse.Namespace) -> None:
         store.close()
 
 
+def _monitor(args: argparse.Namespace) -> None:
+    """Watch a deployment's transparency log like a Certificate-Transparency
+    monitor watches a CT log: pin the signed tree head, then require every
+    later checkpoint to prove it extends the pinned one — a rewritten or
+    forked log cannot produce the bridging nodes, so the monitor catches
+    what a signature check alone never would. No local store needed: the
+    pin lives in a small state file next to wherever the auditor runs this."""
+    import time
+    from datetime import UTC, datetime
+
+    from . import logmonitor
+
+    url = args.url
+    if "://" in url:
+        base_parts = urlsplit(url)
+    else:
+        probe = urlsplit(f"https://{url}")
+        base_parts = urlsplit(f"{'http' if _is_loopback(probe.hostname or '') else 'https'}://{url}")
+    if base_parts.scheme != "https" and not _is_loopback(base_parts.hostname or ""):
+        sys.exit("monitoring a remote deployment requires HTTPS — loopback excepted")
+    base = f"{base_parts.scheme}://{base_parts.netloc}"
+    import hashlib
+
+    state_path = args.state or f"attest-monitor-{hashlib.sha256(base.encode()).hexdigest()[:12]}.json"
+    issuer_src = args.issuer or base
+
+    def cycle() -> tuple[bool, list[str], dict | None]:
+        state = logmonitor.state_load(state_path)
+        try:
+            doc = _fetch_issuer_doc(issuer_src)
+        except SystemExit as exc:
+            return False, [f"issuer document: {exc.code}"], state
+        try:
+            head = logmonitor.fetch_json(f"{base}/api/log/head")
+        except ValueError as exc:
+            return False, [str(exc)], state
+
+        def fetch_consistency(first: int):
+            try:
+                return logmonitor.fetch_json(f"{base}/api/log/consistency?first={first}")
+            except ValueError:
+                return None
+
+        new_state, ok, lines = logmonitor.check(
+            state, doc, head, fetch_consistency, datetime.now(tz=UTC).isoformat()
+        )
+        return ok, lines, new_state
+
+    while True:
+        ok, lines, new_state = cycle()
+        if getattr(args, "json", False):
+            print(json.dumps({"ok": ok, "state": new_state, "lines": lines}, ensure_ascii=False))
+        else:
+            for line in lines:
+                print(line)
+        if ok and new_state is not None:
+            try:
+                logmonitor.state_save(state_path, new_state)
+            except OSError as exc:
+                sys.exit(f"cannot persist monitor state at {state_path}: {exc}")
+        if args.once:
+            sys.exit(0 if ok else 1)
+        if not ok:
+            # A failed cycle never repins — the last good head stays the
+            # baseline every later checkpoint must still extend.
+            print(f"watch continues — pinned state at {state_path} unchanged")
+        time.sleep(args.interval)
+
+
 def _digest(args: argparse.Namespace) -> None:
     """Sign a digest of the records written for an interval — counts by outcome,
     review counts by stance, and the exact receipt set summarized."""
@@ -3118,6 +3187,23 @@ def main(argv: list[str] | None = None) -> None:
     )
     s.add_argument("first", type=int, help="earlier tree size to prove extension from")
     s.set_defaults(fn=_consistency)
+
+    s = sub.add_parser(
+        "monitor",
+        help="watch a deployment's transparency log — pin the signed tree head, "
+        "then require each later checkpoint to extend it by consistency proof",
+    )
+    s.add_argument("url", help="deployment base URL (or its issuer-doc URL)")
+    s.add_argument(
+        "--issuer",
+        default=None,
+        help="pin to a local attest.issuer/1 document instead of fetching the well-known one",
+    )
+    s.add_argument("--state", default=None, help="monitor state file (default: attest-monitor-<hash>.json)")
+    s.add_argument("--interval", type=int, default=60, help="seconds between checks (default: 60)")
+    s.add_argument("--once", action="store_true", help="run one check and exit — the CI-gate mode")
+    s.add_argument("--json", action="store_true", help="emit each cycle's verdict as one JSON object")
+    s.set_defaults(fn=_monitor)
 
     s = sub.add_parser(
         "triage",

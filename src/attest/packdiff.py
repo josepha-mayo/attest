@@ -244,7 +244,11 @@ def check_log_pin(
         except (TypeError, ValueError):
             return None, f"log_checkpoint.json: malformed proof for receipt {rid}"
         idx = p.get("leaf_index")
-        if not isinstance(idx, int) or not verify_inclusion(bytes.fromhex(ph), size, idx, path, root_b):
+        try:
+            leaf_b = bytes.fromhex(ph)
+        except (TypeError, ValueError):
+            return None, f"log_checkpoint.json: malformed receipt hash for {rid}"
+        if not isinstance(idx, int) or not verify_inclusion(leaf_b, size, idx, path, root_b):
             return None, (
                 f"log_checkpoint.json: inclusion proof for receipt {rid} does not reach the signed tree head"
             )
