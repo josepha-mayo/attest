@@ -345,6 +345,14 @@ def witness_cosign(store, signer, body: dict) -> tuple[int, dict]:
     issuer_doc = body.get("issuer_doc")
     if not isinstance(issuer_doc, dict) or not isinstance(issuer_doc.get("issuer_key"), str):
         return 422, {"error": "issuer_doc missing or malformed"}
+    # A requester-supplied key_receipts pool feeds the lineage walks — bound it:
+    # real lineages are single-digit hops, but every candidate is an Ed25519
+    # verification, so an oversized pool is a CPU denial-of-service amplifier.
+    if (
+        not isinstance(issuer_doc.get("key_receipts") or [], list)
+        or len(issuer_doc.get("key_receipts") or []) > 64
+    ):
+        return 422, {"error": "issuer_doc key_receipts malformed or over the 64-entry bound"}
     cp_raw = body.get("checkpoint")
     if not isinstance(cp_raw, dict):
         return 422, {"error": "checkpoint receipt missing"}
@@ -359,85 +367,111 @@ def witness_cosign(store, signer, body: dict) -> tuple[int, dict]:
     cp = Receipt.model_validate(cp_raw)
     size, root_hex = int(payload["tree_size"]), payload["root_sha256"]
 
-    state = store.setting(f"witness:{issuer_key}") or {}
-    if state and state.get("schema") != WITNESS_SCHEMA:
-        return 500, {"error": "witness pin state is corrupt — refusing to repin"}
-    old_size = state.get("tree_size")
-    old_root = state.get("root_sha256")
-    if old_size is not None:
-        if size < int(old_size) or (size == int(old_size) and root_hex != old_root):
-            return 409, {
-                "error": "offered head forks or regresses the pinned head",
-                "pinned": {
-                    "tree_size": old_size,
-                    "root_sha256": old_root,
-                    "checkpoint_id": state.get("checkpoint_id"),
-                },
-            }
-        if size != int(old_size):
-            bridge = verify_extends(payload, first=int(old_size), first_root=bytes.fromhex(old_root))
-            if bridge is None:
-                cons = body.get("consistency")
-                try:
-                    bridge = (
-                        isinstance(cons, dict)
-                        and int(cons.get("first") or -1) == int(old_size)
-                        and int(cons.get("tree_size") or -1) == size
-                        and verify_consistency(
-                            bytes.fromhex(old_root),
-                            int(old_size),
-                            bytes.fromhex(root_hex),
-                            size,
-                            [bytes.fromhex(h) for h in cons["proof"]],
-                        )
-                    )
-                except (KeyError, TypeError, ValueError):
-                    bridge = False
-            if not bridge:
+    # The pin-check → sequence-allocate → sign → repin section is a single
+    # store transaction: without it, two parallel offers each read the same
+    # stale pin and BOTH get counter-signed — the witness would attest two
+    # mutually-exclusive heads, which is exactly what a witness exists to
+    # refuse. The RLock + BEGIN IMMEDIATE serializes us against every other
+    # writer (checkpoints, cosigns, receipts) — the codebase's own @atomic
+    # discipline, just applied to a free function.
+    with store.transaction():
+        state = store.setting(f"witness:{issuer_key}") or {}
+        if state and state.get("schema") != WITNESS_SCHEMA:
+            return 500, {"error": "witness pin state is corrupt — refusing to repin"}
+        old_size = state.get("tree_size")
+        old_root = state.get("root_sha256")
+        if old_size is not None and not (isinstance(old_size, int) and isinstance(old_root, str)):
+            return 500, {"error": "witness pin fields are corrupt — refusing to repin"}
+        if old_size is not None:
+            if size < int(old_size) or (size == int(old_size) and root_hex != old_root):
                 return 409, {
-                    "error": "cannot bridge the pinned head to the offered checkpoint — "
-                    "retry with a consistency proof from the pinned size",
+                    "error": "offered head forks or regresses the pinned head",
                     "pinned": {
                         "tree_size": old_size,
                         "root_sha256": old_root,
                         "checkpoint_id": state.get("checkpoint_id"),
                     },
                 }
+            if size != int(old_size):
+                bridge = verify_extends(payload, first=int(old_size), first_root=bytes.fromhex(old_root))
+                if bridge is None:
+                    cons = body.get("consistency")
+                    try:
+                        bridge = (
+                            isinstance(cons, dict)
+                            and int(cons.get("first") or -1) == int(old_size)
+                            and int(cons.get("tree_size") or -1) == size
+                            and verify_consistency(
+                                bytes.fromhex(old_root),
+                                int(old_size),
+                                bytes.fromhex(root_hex),
+                                size,
+                                [bytes.fromhex(h) for h in cons["proof"]],
+                            )
+                        )
+                    except (KeyError, TypeError, ValueError):
+                        bridge = False
+                if not bridge:
+                    return 409, {
+                        "error": "cannot bridge the pinned head to the offered checkpoint — "
+                        "retry with a consistency proof from the pinned size",
+                        "pinned": {
+                            "tree_size": old_size,
+                            "root_sha256": old_root,
+                            "checkpoint_id": state.get("checkpoint_id"),
+                        },
+                    }
 
-    pseudo_id = f"witness:{issuer_key[:24]}:{cp.id}"
-    cosig = store.receipt_for_visit(pseudo_id)
-    if cosig is None:
-        prev = store.latest_receipt()
-        cosig = signer.issue(
-            visit_id=pseudo_id,
-            sequence=prev.sequence + 1 if prev else 1,
-            prev_hash=prev.payload_hash if prev else None,
-            facts={
-                "record_type": "witness_cosignature",
-                "subject_checkpoint": cp.id,
-                "subject_tree_size": size,
-                "subject_root_sha256": root_hex,
-                "subject_issuer": issuer_key,
-                "boundary": (
-                    "The countersigning deployment attests it OBSERVED this "
-                    "signed tree head and verified it extends the head it "
-                    "previously pinned for this issuer — a forked, regressed, "
-                    "or rewritten log cannot collect this counter-signature. "
-                    "It does not attest the log's contents are true."
-                ),
-            },
-        )
-        store.put_receipt(cosig)
-    new_state = {
-        "schema": WITNESS_SCHEMA,
-        "issuer_key": issuer_key,
-        "tree_size": size,
-        "root_sha256": root_hex,
-        "checkpoint_id": cp.id,
-        "cosignature_id": cosig.id,
-    }
-    store.put_setting(f"witness:{issuer_key}", new_state)
-    return 200, {"cosignature": cosig.model_dump(mode="json"), "pinned": new_state}
+        pseudo_id = f"witness:{issuer_key[:24]}:{cp.id}"
+        cosig = store.receipt_for_visit(pseudo_id)
+        # Idempotency must still bind THIS head: a stored cosig attesting a
+        # different (size, root) — an issuer re-signed the same checkpoint id
+        # over different content — is not a cosig of this offer, so issue a
+        # fresh one under the root-qualified pseudo instead of repinning onto
+        # a mismatched attestation.
+        if cosig is not None and (
+            cosig.payload.get("subject_tree_size") != size
+            or cosig.payload.get("subject_root_sha256") != root_hex
+        ):
+            cosig = None
+            pseudo_id = f"witness:{issuer_key[:24]}:{cp.id}:{root_hex[:16]}"
+            cosig = store.receipt_for_visit(pseudo_id)
+        if cosig is None:
+            prev = store.latest_receipt()
+            cosig = signer.issue(
+                visit_id=pseudo_id,
+                sequence=prev.sequence + 1 if prev else 1,
+                prev_hash=prev.payload_hash if prev else None,
+                facts={
+                    "record_type": "witness_cosignature",
+                    "subject_checkpoint": cp.id,
+                    "subject_tree_size": size,
+                    "subject_root_sha256": root_hex,
+                    "subject_issuer": issuer_key,
+                    # Same discipline as engine-issued receipts: pin the
+                    # mutation-journal head so the cosig also covers the
+                    # witness's own audit trail at signing time.
+                    "journal_head": store.journal_head(),
+                    "boundary": (
+                        "The countersigning deployment attests it OBSERVED this "
+                        "signed tree head and verified it extends the head it "
+                        "previously pinned for this issuer — a forked, regressed, "
+                        "or rewritten log cannot collect this counter-signature. "
+                        "It does not attest the log's contents are true."
+                    ),
+                },
+            )
+            store.put_receipt(cosig)
+        new_state = {
+            "schema": WITNESS_SCHEMA,
+            "issuer_key": issuer_key,
+            "tree_size": size,
+            "root_sha256": root_hex,
+            "checkpoint_id": cp.id,
+            "cosignature_id": cosig.id,
+        }
+        store.put_setting(f"witness:{issuer_key}", new_state)
+        return 200, {"cosignature": cosig.model_dump(mode="json"), "pinned": new_state}
 
 
 def witness_heads(store, issuer_key: str) -> dict:
@@ -456,11 +490,7 @@ def witness_heads(store, issuer_key: str) -> dict:
     pins = []
     for _name, state in sorted(store.settings_by_prefix("witness:").items()):
         cosig_id = state.get("cosignature_id")
-        cosig = (
-            store.receipt_for_visit(_pseudo_for(state))
-            if cosig_id is None
-            else _receipt_by_id(store, cosig_id)
-        )
+        cosig = store.receipt_for_visit(_pseudo_for(state)) if cosig_id is None else store.receipt(cosig_id)
         if (
             state.get("schema") != WITNESS_SCHEMA
             or not isinstance(state.get("issuer_key"), str)
@@ -491,15 +521,6 @@ def witness_heads(store, issuer_key: str) -> dict:
             "are a serving hint only."
         ),
     }
-
-
-def _receipt_by_id(store, receipt_id: str):
-    """Look up a receipt by id — the store indexes receipts by visit, so
-    scan; per-issuer pins are few."""
-    for r in store.receipts():
-        if r.id == receipt_id:
-            return r
-    return None
 
 
 def _pseudo_for(state: dict) -> str | None:
@@ -566,6 +587,9 @@ def compare_views(
         or p.get("subject_root_sha256") != theirs.get("root_sha256")
         or p.get("subject_checkpoint") != theirs.get("checkpoint_id")
         or p.get("subject_issuer") != theirs.get("issuer_key")
+        # The signed subject must name the issuer MY pin tracks — a pin
+        # selected for a different issuer can never yield an honest verdict.
+        or (isinstance(mine.get("issuer_key"), str) and p.get("subject_issuer") != mine["issuer_key"])
     ):
         return (
             "unverifiable",
@@ -614,24 +638,50 @@ def cosign_at(
     Returns (cosignature receipt | None, human line)."""
     body = {"issuer_doc": issuer_doc, "checkpoint": checkpoint_raw}
     resp = post_json(f"{base_url}/api/witness/cosign", body)
-    if resp.get("status") == 409 and resp.get("pinned"):
-        body["consistency"] = consistency_fn(int(resp["pinned"]["tree_size"]))
+    if resp.get("status") == 409 and isinstance(resp.get("pinned"), dict):
+        try:
+            body["consistency"] = consistency_fn(int(resp["pinned"].get("tree_size") or -1))
+        except (TypeError, ValueError):
+            return None, f"refused — malformed 409 pinned head: {resp.get('pinned')}"
+        if not isinstance(body["consistency"], dict):
+            return None, "refused — no consistency proof available for the pinned head"
         resp = post_json(f"{base_url}/api/witness/cosign", body)
-    if resp.get("status") == 200 and isinstance(resp.get("cosignature"), dict):
-        return resp["cosignature"], f"cosigned ({resp['cosignature']['id'][:24]}…)"
+    if resp.get("status") == 200:
+        cosig = resp.get("cosignature")
+        if isinstance(cosig, dict) and isinstance(cosig.get("id"), str):
+            return cosig, f"cosigned ({cosig['id'][:24]}…)"
+        return None, f"refused — malformed cosignature in response: {cosig}"
     return None, f"refused — {resp.get('error') or resp}"
 
 
-def check_cosignatures(doc: dict, cp_id: str, size: int, root_hex: str) -> tuple[int, list[str]]:
+def check_cosignatures(
+    doc: dict,
+    cp_id: str,
+    size: int,
+    root_hex: str,
+    issuer_keys: set[str] | list[str] | None = None,
+) -> tuple[int, list[str]]:
     """Verify the witness counter-signatures a checkpoint document carries.
     Each cosig is a witness_cosignature receipt whose subject fields must
     name THIS checkpoint and tree head — a validly-signed cosig about a
     different head is not a cosig of this head. Returns (verified_count,
-    signer_ids)."""
+    distinct_signer_ids).
+
+    The count is an honest measure of independent attestations: the same
+    cosig receipt pasted twice counts once, two cosigs from one witness
+    key count once, and a cosig signed by the issuer's OWN key lineage
+    (self-vouching — a sock-puppet) is not a witness at all. ``issuer_keys``
+    is the issuer's trusted lineage where the caller has computed it;
+    absent that, the checkpoint's own signer key is the floor."""
     from .ledger import verify_receipt
     from .models import Receipt
 
+    self_keys = set(issuer_keys or ())
+    cp_raw = doc.get("checkpoint")
+    if isinstance(cp_raw, dict) and isinstance(cp_raw.get("public_key"), str):
+        self_keys.add(cp_raw["public_key"])
     verified, signers = 0, []
+    seen_ids, seen_keys = set(), set()
     for raw in doc.get("cosignatures") or []:
         try:
             cosig = Receipt.model_validate(raw)
@@ -644,8 +694,14 @@ def check_cosignatures(doc: dict, cp_id: str, size: int, root_hex: str) -> tuple
                 or p.get("subject_root_sha256") != root_hex
             ):
                 continue
+            if cosig.id in seen_ids or cosig.public_key in seen_keys:
+                continue
+            if cosig.public_key in self_keys:
+                continue
             ok, _ = verify_receipt(cosig, public_key=cosig.public_key)
             if ok:
+                seen_ids.add(cosig.id)
+                seen_keys.add(cosig.public_key)
                 verified += 1
                 signers.append(cosig.public_key)
         except Exception:  # noqa: BLE001 — one bad cosig doesn't taint the rest
@@ -742,4 +798,12 @@ def post_json(url: str, body: dict, client=None, *, bound: int = 4 * 1024 * 1024
         doc = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError(f"{url} did not serve JSON: {exc}") from exc
-    return {"status": r.status_code, **(doc if isinstance(doc, dict) else {"body": doc})}
+    if not isinstance(doc, dict):
+        return {"status": r.status_code, "body": doc}
+    # A "status" key in the body must never overwrite the real HTTP status —
+    # a witness serving {"status": 200, ...} on an error response would
+    # spoof the accepted path. The transport verdict wins; keep the body's
+    # copy under its own key so nothing is lost.
+    if "status" in doc:
+        doc["body_status"] = doc.pop("status")
+    return {"status": r.status_code, **doc}

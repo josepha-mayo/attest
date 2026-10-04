@@ -281,20 +281,28 @@ def create_app(
         # Transparency-log reads are public verification material — proof
         # nodes are bare hashes and the head is a commitment to public
         # receipts, so they carry no secret beyond what a pack already ships.
-        # The witness endpoint is the same class: the requester ships its own
-        # issuer doc + checkpoint (public crypto material), and the witness's
-        # only privilege spent is its own signature — a public cosigning
-        # service by design, like a CT witness.
-        if request.url.path.startswith(("/api/log/", "/api/witness/")):
+        if request.url.path.startswith("/api/log/"):
             return
         if request.method not in ("GET", "HEAD", "OPTIONS"):
+            # Every write surface — public or admin — refuses cross-site
+            # browser posts first: a hostile page can fire text/plain JSON
+            # from each visitor's IP, and on the unauthenticated cosign
+            # route that dilutes the per-IP flood budget into real writes.
+            # Server-to-server callers (the cosign exchange) send no Origin
+            # or Sec-Fetch headers and are unaffected.
             origin = request.headers.get("origin")
             expected_origin = str(request.base_url).rstrip("/")
             if request.headers.get("sec-fetch-site") == "cross-site" or (
                 origin is not None and origin != expected_origin
             ):
                 raise HTTPException(403, "cross-origin writes are not allowed")
-        if request.url.path.startswith(("/checkin/", "/review/", "/family/")):
+        # The witness endpoints are the same class as the log reads: the
+        # requester ships its own issuer doc + checkpoint (public crypto
+        # material), and the witness's only privilege spent is its own
+        # signature — a public cosigning service by design, like a CT
+        # witness. Unauthenticated by choice, rate-limited for floods, and
+        # browser-cross-site-blocked for writes like every other surface.
+        if request.url.path.startswith(("/checkin/", "/review/", "/family/", "/api/witness/")):
             return
         if s.admin_token is None:
             raise HTTPException(503, "Configure ATTEST_ADMIN_TOKEN before using the application")

@@ -1094,3 +1094,453 @@ def test_verify_witness_key_gates_on_named_witnesses(
     # No flag → the old behavior: reported, never gated.
     out = run(None)
     assert "cosigned by 1 witness" in out
+
+
+def test_witness_cosign_serializes_concurrent_offers(engine, store, household, schedule, t0):
+    """The pin-check → sign → repin section is one store transaction: parallel
+    offers can't interleave into two signed divergent heads (the witness's
+    whole reason to exist), and concurrent sequence allocation can't collide
+    into an IntegrityError/500 — before the transaction wrap, both raced."""
+    import concurrent.futures
+
+    from attest import logmonitor
+    from attest.ledger import Signer
+
+    w_store, w_signer = _witness_deployment()
+    _seed(engine, household[0], t0)
+    cp = engine.issue_log_checkpoint()
+    body = {"issuer_doc": _doc_for(engine), "checkpoint": cp.model_dump(mode="json")}
+
+    # The same head offered six ways concurrently: idempotent — one cosig.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
+        results = list(ex.map(lambda _: logmonitor.witness_cosign(w_store, w_signer, body), range(6)))
+    assert {s for s, _ in results} == {200}
+    assert len({o["cosignature"]["id"] for _, o in results}) == 1
+    assert len([r for r in w_store.receipts() if r.payload.get("record_type") == "witness_cosignature"]) == 1
+
+    # Six FOREIGN issuers racing their first contact: independent pins,
+    # unique sequences — a collision would have surfaced as a thread error.
+    foreigners = []
+    for i in range(6):
+        fk = Signer.ephemeral()
+        fk_cp = fk.issue(
+            visit_id=f"log:fk{i}",
+            sequence=1,
+            prev_hash=None,
+            facts={
+                "record_type": "log_checkpoint",
+                "tree_size": 3,
+                "root_sha256": f"{i:02x}" * 32,
+            },
+        )
+        foreigners.append((fk, fk_cp))
+
+    def offer(fk_cp):
+        fk, fcp = fk_cp
+        fdoc = {"schema": "attest.issuer/1", "issuer_key": fk.public_key_b64, "key_receipts": []}
+        return logmonitor.witness_cosign(
+            w_store, w_signer, {"issuer_doc": fdoc, "checkpoint": fcp.model_dump(mode="json")}
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
+        results = list(ex.map(offer, foreigners))
+    assert {s for s, _ in results} == {200}
+    seqs = [r.sequence for r in w_store.receipts()]
+    assert len(seqs) == len(set(seqs))
+    assert len(w_store.settings_by_prefix("witness:")) == 7
+
+
+def test_witness_cosign_reissues_when_subject_diverges(engine, store, household, schedule, t0, monkeypatch):
+    """Idempotent return binds THIS head: an issuer that re-signs the same
+    checkpoint receipt id over DIFFERENT content can't make the witness
+    repin a stored cosig attesting a different (size, root) — the mismatch
+    issues a fresh attestation under a root-qualified pseudo instead."""
+    import uuid as _uuid
+
+    from attest import logmonitor
+
+    w_store, w_signer = _witness_deployment()
+    doc = _doc_for(engine)
+    _seed(engine, household[0], t0)
+    cp1 = engine.issue_log_checkpoint()
+    status, out1 = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": doc, "checkpoint": cp1.model_dump(mode="json")}
+    )
+    assert status == 200
+
+    # The grown log's head honestly extends the pin — but the issuer ships a
+    # checkpoint under cp1's receipt id (receipt ids are issuer-chosen):
+    # same id, different signed content. Minted directly on the signer so it
+    # never sits in the engine's own store.
+    _seed(engine, household[0], t0 - timedelta(hours=5), n=1)
+    new_size, new_root = engine.log_head()
+    cons = engine.consistency_proof(cp1.payload["tree_size"], new_size)
+    monkeypatch.setattr(_uuid, "uuid4", lambda: _uuid.UUID(cp1.id[5:]))
+    cp2 = engine.signer.issue(
+        visit_id="log:twin-id",
+        sequence=9999,
+        prev_hash=None,
+        facts={
+            "record_type": "log_checkpoint",
+            "tree_size": new_size,
+            "root_sha256": new_root.hex(),
+            "extends": {
+                "first": cp1.payload["tree_size"],
+                "first_root_sha256": cp1.payload["root_sha256"],
+                "checkpoint_id": cp1.id,
+                "proof": cons["proof"],
+            },
+        },
+    )
+    assert cp2.id == cp1.id and cp2.payload["tree_size"] != cp1.payload["tree_size"]
+    status, out2 = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": doc, "checkpoint": cp2.model_dump(mode="json")}
+    )
+    assert status == 200
+    cosig = out2["cosignature"]
+    # The returned attestation is about cp2's head, never cp1's stale one —
+    # and both attestations survive independently on the ledger.
+    assert cosig["payload"]["subject_tree_size"] == cp2.payload["tree_size"]
+    assert cosig["payload"]["subject_root_sha256"] == cp2.payload["root_sha256"]
+    assert cosig["id"] != out1["cosignature"]["id"]
+    heads = logmonitor.witness_heads(w_store, w_signer.public_key_b64)
+    pin = next(p for p in heads["pins"] if p["issuer_key"] == doc["issuer_key"])
+    assert pin["tree_size"] == cp2.payload["tree_size"]
+    assert pin["cosignature_id"] == cosig["id"]
+
+
+def test_witness_cosign_bounds_requester_key_pool(engine, store, household, schedule, t0):
+    """The requester-supplied key_receipts pool feeds signature walks — an
+    oversized pool is a CPU denial-of-service amplifier, so the endpoint
+    refuses it before a single verification runs."""
+    from attest import logmonitor
+
+    w_store, w_signer = _witness_deployment()
+    doc = _doc_for(engine)
+    _seed(engine, household[0], t0)
+    cp = engine.issue_log_checkpoint()
+
+    fat = dict(doc, key_receipts=[cp.model_dump(mode="json")] * 65)
+    status, out = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": fat, "checkpoint": cp.model_dump(mode="json")}
+    )
+    assert status == 422 and "bound" in out["error"]
+
+    wrong_shape = dict(doc, key_receipts={"not": "a list"})
+    status, _ = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": wrong_shape, "checkpoint": cp.model_dump(mode="json")}
+    )
+    assert status == 422
+
+    # A sane lineage still passes — the bound is generous, not tight.
+    status, _ = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": doc, "checkpoint": cp.model_dump(mode="json")}
+    )
+    assert status == 200
+
+
+def test_witness_cosign_refuses_corrupt_pin_fields(engine, store, household, schedule, t0):
+    """A pin row with the right schema but unusable typed fields fails
+    closed like every other corrupt store read — a crash is not a repin."""
+    from attest import logmonitor
+
+    w_store, w_signer = _witness_deployment()
+    doc = _doc_for(engine)
+    _seed(engine, household[0], t0)
+    cp = engine.issue_log_checkpoint()
+
+    w_store.put_setting(
+        f"witness:{doc['issuer_key']}",
+        {
+            "schema": logmonitor.WITNESS_SCHEMA,
+            "issuer_key": doc["issuer_key"],
+            "tree_size": "not-an-int",
+            "root_sha256": "ab" * 32,
+        },
+    )
+    status, out = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": doc, "checkpoint": cp.model_dump(mode="json")}
+    )
+    assert status == 500 and "corrupt" in out["error"]
+
+
+def test_check_cosignatures_counts_distinct_witnesses(engine, store, household, schedule, t0):
+    """'cosigned by N' is a count of INDEPENDENT attestations: a pasted
+    duplicate counts once, two cosigs from one signer count once, and a
+    cosig from the issuer's own lineage is self-vouching — never a witness."""
+    from attest import logmonitor
+
+    w_store, w_signer = _witness_deployment()
+    w_store2, w_signer2 = _witness_deployment()
+    _seed(engine, household[0], t0)
+    cp = engine.issue_log_checkpoint()
+    doc_issuer = _doc_for(engine)
+    status, out1 = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": doc_issuer, "checkpoint": cp.model_dump(mode="json")}
+    )
+    status, out2 = logmonitor.witness_cosign(
+        w_store2, w_signer2, {"issuer_doc": doc_issuer, "checkpoint": cp.model_dump(mode="json")}
+    )
+    assert status == 200
+    cosig1, cosig2 = out1["cosignature"], out2["cosignature"]
+
+    doc = {"checkpoint": cp.model_dump(mode="json"), "cosignatures": [cosig1, cosig2]}
+    n, keys = logmonitor.check_cosignatures(doc, cp.id, cp.payload["tree_size"], cp.payload["root_sha256"])
+    assert n == 2 and set(keys) == {w_signer.public_key_b64, w_signer2.public_key_b64}
+
+    # The same cosig pasted twice still counts once.
+    n, _ = logmonitor.check_cosignatures(
+        {"checkpoint": cp.model_dump(mode="json"), "cosignatures": [cosig1, cosig1, cosig2]},
+        cp.id,
+        cp.payload["tree_size"],
+        cp.payload["root_sha256"],
+    )
+    assert n == 2
+
+    # A second, different cosig receipt from the SAME witness key counts once.
+    dup = w_signer.issue(
+        visit_id="witness:x:second-cosig",
+        sequence=99,
+        prev_hash=None,
+        facts={
+            "record_type": "witness_cosignature",
+            "subject_checkpoint": cp.id,
+            "subject_tree_size": cp.payload["tree_size"],
+            "subject_root_sha256": cp.payload["root_sha256"],
+            "subject_issuer": doc_issuer["issuer_key"],
+        },
+    )
+    n, keys = logmonitor.check_cosignatures(
+        {
+            "checkpoint": cp.model_dump(mode="json"),
+            "cosignatures": [cosig1, dup.model_dump(mode="json"), cosig2],
+        },
+        cp.id,
+        cp.payload["tree_size"],
+        cp.payload["root_sha256"],
+    )
+    assert n == 2 and w_signer.public_key_b64 in keys
+
+    # Self-vouching: the issuer's own key countersigning its head is not a
+    # witness — excluded even though the signature verifies.
+    self_cosig = engine.signer.issue(
+        visit_id="log:self-cosig",
+        sequence=999,
+        prev_hash=None,
+        facts={
+            "record_type": "witness_cosignature",
+            "subject_checkpoint": cp.id,
+            "subject_tree_size": cp.payload["tree_size"],
+            "subject_root_sha256": cp.payload["root_sha256"],
+            "subject_issuer": doc_issuer["issuer_key"],
+        },
+    )
+    n, _ = logmonitor.check_cosignatures(
+        {
+            "checkpoint": cp.model_dump(mode="json"),
+            "cosignatures": [self_cosig.model_dump(mode="json")],
+        },
+        cp.id,
+        cp.payload["tree_size"],
+        cp.payload["root_sha256"],
+    )
+    assert n == 0
+
+    # A lineage-aware caller can exclude ANY issuer-lineage key, not just the
+    # checkpoint's immediate signer — the sock-puppet rotated-key case.
+    n, _ = logmonitor.check_cosignatures(
+        {"checkpoint": cp.model_dump(mode="json"), "cosignatures": [cosig1]},
+        cp.id,
+        cp.payload["tree_size"],
+        cp.payload["root_sha256"],
+        issuer_keys={w_signer.public_key_b64},
+    )
+    assert n == 0
+
+
+def test_cosign_at_survives_malformed_witness_responses():
+    """A hostile or buggy witness can't crash the CLI path: a 409 without a
+    usable pinned head, or a 200 without a real cosignature, is reported as
+    refusal — never a traceback. A body's own 'status' key can't overwrite
+    the real HTTP status either."""
+    from attest import logmonitor
+
+    class R:
+        def __init__(self, status, doc):
+            self.status_code = status
+            self.content = json.dumps(doc).encode()
+
+    class FakeClient:
+        def __init__(self, responses):
+            self.responses = iter(responses)
+
+        def post(self, url, json=None, timeout=None):
+            return R(*next(self.responses))
+
+    def cosign(responses):
+        orig = logmonitor.post_json
+        logmonitor.post_json = lambda url, body: orig(url, body, client=FakeClient(responses))
+        try:
+            return logmonitor.cosign_at("http://w", {"issuer_key": "k"}, {"id": "rcpt_x"}, lambda f: None)
+        finally:
+            logmonitor.post_json = orig
+
+    # A 409 carrying {"pinned": {}} — no tree_size — is a refusal, not a KeyError.
+    cosig_out, line = cosign([(409, {"pinned": {}})])
+    assert cosig_out is None and "refused" in line
+
+    # A 409 with pinned as a string — a refusal, not a TypeError.
+    cosig_out, line = cosign([(409, {"pinned": "bogus"})])
+    assert cosig_out is None and "refused" in line
+
+    # A 200 whose cosignature isn't a receipt — a refusal, not a KeyError.
+    cosig_out, line = cosign([(200, {"cosignature": {}})])
+    assert cosig_out is None and "refused" in line and "malformed" in line
+
+    # A body's "status" key can't overwrite the real HTTP status.
+    cosig_out, line = cosign([(409, {"status": 200, "pinned": {}})])
+    assert cosig_out is None and "refused" in line
+
+
+def test_post_json_body_status_cannot_clobber_http_status():
+    """The transport verdict is authoritative: a response body carrying its
+    own 'status' key never overrides the real HTTP status — kept as
+    body_status so nothing is silently lost."""
+    from attest import logmonitor
+
+    class R:
+        status_code = 409
+        content = b'{"status": 200, "pinned": {"tree_size": 5}}'
+
+    class FakeClient:
+        def post(self, url, json=None, timeout=None):
+            return R()
+
+    out = logmonitor.post_json("http://w/api/witness/cosign", {}, client=FakeClient())
+    assert out["status"] == 409
+    assert out["body_status"] == 200
+    assert out["pinned"]["tree_size"] == 5
+
+
+def test_compare_views_rejects_wrong_issuer_pin(engine, store, household, schedule, t0):
+    """A pin selected for the wrong issuer can never yield an honest verdict:
+    the cosig's signed subject_issuer must name the issuer the monitor is
+    tracking — else 'diverged' would accuse the wrong log."""
+    from attest import logmonitor
+
+    w_store, w_signer = _witness_deployment()
+    _seed(engine, household[0], t0)
+    cp = engine.issue_log_checkpoint()
+    status, out = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": _doc_for(engine), "checkpoint": cp.model_dump(mode="json")}
+    )
+    assert status == 200
+    heads = logmonitor.witness_heads(w_store, w_signer.public_key_b64)
+    pin = heads["pins"][0]
+
+    # My pin tracks a DIFFERENT issuer — the witness's cosig names the real
+    # one, so the comparison refuses rather than accusing.
+    mine = {
+        "issuer_key": "different-issuer-key",
+        "tree_size": pin["tree_size"],
+        "root_sha256": pin["root_sha256"],
+    }
+    verdict, _ = logmonitor.compare_views(mine, pin, {w_signer.public_key_b64})
+    assert verdict == "unverifiable"
+
+    # Same pin, correct issuer → agree.
+    mine["issuer_key"] = pin["issuer_key"]
+    verdict, _ = logmonitor.compare_views(mine, pin, {w_signer.public_key_b64})
+    assert verdict == "agree"
+
+
+def test_monitor_repin_survives_witness_outage_but_not_divergence(tmp_path, monkeypatch, capsys):
+    """Repin policy: a locally-verified new head persists even when the
+    witness is unreachable or its view unverifiable — a downed witness can't
+    freeze honest advancement. Only 'diverged' (someone may be on a fork)
+    freezes the pin for a human."""
+    import argparse
+    import contextlib
+    import io
+
+    from attest import cli, logmonitor
+    from attest.ledger import Signer
+
+    state_file = tmp_path / "mon.json"
+    doc = {"schema": "attest.issuer/1", "issuer_key": "K" * 43, "key_receipts": []}
+    w_signer = Signer.ephemeral()
+    wdoc = {"schema": "attest.issuer/1", "issuer_key": w_signer.public_key_b64, "key_receipts": []}
+    monkeypatch.setattr(cli, "_fetch_issuer_doc", lambda url: wdoc if "witness" in str(url) else doc)
+
+    grown = {
+        "schema": logmonitor.STATE_SCHEMA,
+        "issuer_key": doc["issuer_key"],
+        "tree_size": 9,
+        "root_sha256": "cd" * 32,
+        "checkpoint_id": "rcpt_grown",
+    }
+    monkeypatch.setattr(logmonitor, "check", lambda *a, **k: (grown, True, ["log extended"]))
+    head = {"tree_size": 9, "root_sha256": "cd" * 32, "checkpoint": {"id": "rcpt_grown"}}
+
+    ns = argparse.Namespace(
+        url="https://deploy.example",
+        issuer=None,
+        state=str(state_file),
+        interval=60,
+        once=True,
+        json=False,
+        witness="https://witness.example",
+    )
+
+    def run(heads_or_exc):
+        if isinstance(heads_or_exc, Exception):
+
+            def fetch(url, client=None):
+                if "witness" in url:
+                    raise heads_or_exc
+                return head
+
+            monkeypatch.setattr(logmonitor, "fetch_json", fetch)
+        else:
+            monkeypatch.setattr(
+                logmonitor,
+                "fetch_json",
+                lambda url, client=None: heads_or_exc if "witness" in url else head,
+            )
+        buf = io.StringIO()
+        with pytest.raises(SystemExit) as e:
+            with contextlib.redirect_stdout(buf):
+                cli._monitor(ns)
+        return e.value.code, buf.getvalue()
+
+    # Witness unreachable: the cycle reports failure BUT the locally-verified
+    # head still repins — availability of a third party can't stall the pin.
+    code, out = run(ValueError("connection refused"))
+    assert code == 1 and "unreachable" in out
+    assert state_file.exists() and logmonitor.state_load(state_file)["tree_size"] == 9
+
+    # Divergence: validly-signed different root at the same size — the pin
+    # stays frozen; a human must reconcile which observer saw the fork.
+    divergent_cosig = w_signer.issue(
+        visit_id="witness:x:div",
+        sequence=1,
+        prev_hash=None,
+        facts={
+            "record_type": "witness_cosignature",
+            "subject_checkpoint": "rcpt_grown",
+            "subject_tree_size": 9,
+            "subject_root_sha256": "ff" * 32,
+            "subject_issuer": doc["issuer_key"],
+        },
+    )
+    pin = {
+        "issuer_key": doc["issuer_key"],
+        "tree_size": 9,
+        "root_sha256": "ff" * 32,
+        "checkpoint_id": "rcpt_grown",
+        "cosignature": divergent_cosig.model_dump(mode="json"),
+    }
+    state_file.unlink()
+    code, out = run({"pins": [pin]})
+    assert code == 1 and "[diverged]" in out
+    assert not state_file.exists()  # never repinned onto the possibly-forked head

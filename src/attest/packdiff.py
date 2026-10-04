@@ -259,7 +259,7 @@ def check_log_pin(
     # attestation — never the gate the issuer's own checkpoint is.
     from .logmonitor import check_cosignatures
 
-    cosigs, _ = check_cosignatures(doc, cp.id, size, root_hex)
+    cosigs, _ = check_cosignatures(doc, cp.id, size, root_hex, issuer_keys=trusted)
     return (proven, size, cosigs), None
 
 

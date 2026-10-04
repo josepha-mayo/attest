@@ -568,16 +568,21 @@ async function checkLog(byName,trustedSet,refs,bad,ok){
   }
   /* witness counter-signatures ride the checkpoint doc — verify each under
      its own signer's key and count only those whose subject binds THIS head;
-     auxiliary attestation, never the gate. Mirrors _cosig_count. */
-  let cosigs=0;
+     auxiliary attestation, never the gate. The count tracks INDEPENDENT
+     witnesses: duplicate receipts count once, repeat cosigs from one key
+     count once, and a cosig signed inside the issuer's own lineage is
+     self-vouching — not a witness. Mirrors _cosig_count. */
+  let cosigs=0;const seenCosig=new Set(),seenKeys=new Set();
   const cosec=get(dn,"cosignatures"),coNodes=cosec&&cosec.t==="arr"?cosec.v:[];
   for(let i=0;i<(doc.cosignatures||[]).length;i++){
-    const cp2=doc.cosignatures[i]&&doc.cosignatures[i].payload;
+    const raw=doc.cosignatures[i]||{},cp2=raw.payload;
     if(!cp2||cp2.record_type!=="witness_cosignature")continue;
     if(cp2.subject_checkpoint!==cp.id||cp2.subject_tree_size!==size
       ||cp2.subject_root_sha256!==rootHex)continue;
+    const pk=raw.public_key;
+    if(seenCosig.has(raw.id)||seenKeys.has(pk)||(trustedSet&&trustedSet.has(pk)))continue;
     const rc=await checkReceipt(coNodes[i]);
-    if(rc.ok)cosigs++;
+    if(rc.ok){seenCosig.add(raw.id);seenKeys.add(pk);cosigs++;}
   }
   if(proven)ok(`${proven} receipt(s) proven inside the deployment transparency `
     +`log at checkpoint size ${size}${cosigs?` — cosigned by ${cosigs} witness(es)`:""}`);
@@ -1094,6 +1099,15 @@ record can be toggled between the technical view and the plain-language family v
 (&ldquo;View as the family sees it&rdquo;). Signed media digests are listed per record;
 to check the media bytes themselves, open <code>verify.html</code> and drop every file
 from this extracted pack onto it.</small></p>
+<h2>The transparency checkpoint</h2>
+<p><small>This pack also carries <code>log_checkpoint.json</code> — a signed Merkle
+tree head over the deployment's receipt log (RFC 6962-style), with an inclusion
+proof per pack receipt and, when present, <code>cosignatures</code> from independent
+witness deployments. This page verifies the records' signatures and chains; to prove
+each receipt was committed to the published log — and see which witnesses vouched
+for that head — drop the whole pack on <code>verify.html</code> or run
+<code>attest verify</code>. This page can't inline the checkpoint doc: the pack's
+verifier manifest signs this page's bytes before the checkpoint can be issued.</small></p>
 <h2>What this does and does not establish</h2>
 <p><small>A green result proves the signed records are intact and were issued under the pinned
 issuer key — integrity, not physical truth. It does not prove anyone was present, absent, or

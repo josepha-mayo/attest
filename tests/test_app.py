@@ -1883,5 +1883,30 @@ def test_witness_endpoint_over_http(api, household, t0):
         assert again.status_code == 200
         # Idempotent: the repeat returns the SAME cosig, no duplicate write.
         assert again.json()["cosignature"]["id"] == resp.json()["cosignature"]["id"]
+
+        # ...but a CROSS-SITE browser post cannot: unauthenticated doesn't
+        # mean CSRF-able — Origin/Sec-Fetch marked foreign are refused like
+        # every other write surface, so a hostile page can't dilute the
+        # per-IP flood budget through visitors' browsers.
+        csrf = anon.post(
+            "/api/witness/cosign",
+            content=_json.dumps({"issuer_doc": doc, "checkpoint": cp.model_dump(mode="json")}),
+            headers={
+                "content-type": "application/json",
+                "sec-fetch-site": "cross-site",
+            },
+        )
+        assert csrf.status_code == 403
+        csrf2 = anon.post(
+            "/api/witness/cosign",
+            content=_json.dumps({"issuer_doc": doc, "checkpoint": cp.model_dump(mode="json")}),
+            headers={
+                "content-type": "application/json",
+                "origin": "https://evil.example",
+            },
+        )
+        assert csrf2.status_code == 403
+        # Reads stay open — the published view is for anyone to compare.
+        assert anon.get("/api/witness/heads").status_code == 200
     finally:
         anon.close()

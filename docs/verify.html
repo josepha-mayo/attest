@@ -572,16 +572,21 @@ async function checkLog(byName,trustedSet,refs,bad,ok){
   }
   /* witness counter-signatures ride the checkpoint doc — verify each under
      its own signer's key and count only those whose subject binds THIS head;
-     auxiliary attestation, never the gate. Mirrors _cosig_count. */
-  let cosigs=0;
+     auxiliary attestation, never the gate. The count tracks INDEPENDENT
+     witnesses: duplicate receipts count once, repeat cosigs from one key
+     count once, and a cosig signed inside the issuer's own lineage is
+     self-vouching — not a witness. Mirrors _cosig_count. */
+  let cosigs=0;const seenCosig=new Set(),seenKeys=new Set();
   const cosec=get(dn,"cosignatures"),coNodes=cosec&&cosec.t==="arr"?cosec.v:[];
   for(let i=0;i<(doc.cosignatures||[]).length;i++){
-    const cp2=doc.cosignatures[i]&&doc.cosignatures[i].payload;
+    const raw=doc.cosignatures[i]||{},cp2=raw.payload;
     if(!cp2||cp2.record_type!=="witness_cosignature")continue;
     if(cp2.subject_checkpoint!==cp.id||cp2.subject_tree_size!==size
       ||cp2.subject_root_sha256!==rootHex)continue;
+    const pk=raw.public_key;
+    if(seenCosig.has(raw.id)||seenKeys.has(pk)||(trustedSet&&trustedSet.has(pk)))continue;
     const rc=await checkReceipt(coNodes[i]);
-    if(rc.ok)cosigs++;
+    if(rc.ok){seenCosig.add(raw.id);seenKeys.add(pk);cosigs++;}
   }
   if(proven)ok(`${proven} receipt(s) proven inside the deployment transparency `
     +`log at checkpoint size ${size}${cosigs?` — cosigned by ${cosigs} witness(es)`:""}`);

@@ -1403,7 +1403,15 @@ def _verify_log_doc(
         # countersigned this head, not just that the issuer signed it.
         from . import logmonitor as _lm
 
-        n_cosig, cosigners = _lm.check_cosignatures(data, cp.id, size, cp.payload["root_sha256"])
+        _lineage = (
+            ledger.trusted_issuer_keys(pinned_key, known_rotations or [])
+            | ledger.descendant_issuer_keys(pinned_key, known_rotations or [])
+            if pinned_key
+            else None
+        )
+        n_cosig, cosigners = _lm.check_cosignatures(
+            data, cp.id, size, cp.payload["root_sha256"], issuer_keys=_lineage
+        )
         if n_cosig:
             detail += (
                 f" — cosigned by {n_cosig} witness(es) ({', '.join(k[:12] + '…' for k in cosigners[:3])})"
@@ -1548,6 +1556,7 @@ def _verify_zip(
     import io
     import zipfile
 
+    from . import ledger
     from .app import _verify_pack
     from .models import ReviewBundle
     from .packdiff import BoundedZip
@@ -1618,7 +1627,12 @@ def _verify_zip(
             )
         cpdoc = json.loads(z.read("log_checkpoint.json"))
         _cp, _p = cpdoc["checkpoint"], cpdoc["checkpoint"]["payload"]
-        _, signers = logmonitor.check_cosignatures(cpdoc, _cp["id"], int(_p["tree_size"]), _p["root_sha256"])
+        _lineage = ledger.trusted_issuer_keys(key, known_rotations or []) | (
+            ledger.descendant_issuer_keys(key, known_rotations or [])
+        )
+        _, signers = logmonitor.check_cosignatures(
+            cpdoc, _cp["id"], int(_p["tree_size"]), _p["root_sha256"], issuer_keys=_lineage
+        )
         matched = [k for k in signers if k in required_witnesses]
         if not matched:
             fail(
@@ -1639,7 +1653,12 @@ def _verify_zip(
 
                 _p = cp["checkpoint"]["payload"]
                 _nc, _sig = _lm2.check_cosignatures(
-                    cp, cp["checkpoint"]["id"], int(_p["tree_size"]), _p["root_sha256"]
+                    cp,
+                    cp["checkpoint"]["id"],
+                    int(_p["tree_size"]),
+                    _p["root_sha256"],
+                    issuer_keys=ledger.trusted_issuer_keys(key, known_rotations or [])
+                    | ledger.descendant_issuer_keys(key, known_rotations or []),
                 )
                 extra["log"] = {
                     "tree_size": _p["tree_size"],
@@ -2260,16 +2279,16 @@ def _monitor(args: argparse.Namespace) -> None:
     state_path = args.state or f"attest-monitor-{hashlib.sha256(base.encode()).hexdigest()[:12]}.json"
     issuer_src = args.issuer or base
 
-    def cycle() -> tuple[bool, list[str], dict | None]:
+    def cycle() -> tuple[bool, list[str], dict | None, bool]:
         state = logmonitor.state_load(state_path)
         try:
             doc = _fetch_issuer_doc(issuer_src)
         except SystemExit as exc:
-            return False, [f"issuer document: {exc.code}"], state
+            return False, [f"issuer document: {exc.code}"], state, False
         try:
             head = logmonitor.fetch_json(f"{base}/api/log/head")
         except ValueError as exc:
-            return False, [str(exc)], state
+            return False, [str(exc)], state, False
 
         def fetch_consistency(first: int, size: int):
             try:
@@ -2285,6 +2304,15 @@ def _monitor(args: argparse.Namespace) -> None:
         # same issuer's log that either agree or expose a fork visible to
         # only one observer. Only compared after a successful check cycle:
         # a failed pin is no trustworthy view to compare from.
+        #
+        # Repinning policy: the local check already VERIFIED new_state, so a
+        # witness availability problem (unreachable, malformed, unverifiable
+        # view) reports the cycle as failed but must not freeze the pin — a
+        # downed or DoS'd witness shouldn't stall honest advancement. Only a
+        # `diverged` verdict blocks repinning: equal-size distinct roots mean
+        # one of the two views sits on a fork, and pinning commits us to the
+        # possibly-forked one — a human must reconcile that by hand.
+        repin = True
         if ok and new_state is not None and getattr(args, "witness", None):
             wbase = _https_base(args.witness, "witness")
             try:
@@ -2315,18 +2343,21 @@ def _monitor(args: argparse.Namespace) -> None:
                     )
                     verdict, line = logmonitor.compare_views(new_state, pin, wtrusted)
                     lines.append(f"witness cross-view [{verdict}]: {line}")
-                    if verdict in ("diverged", "unverifiable"):
+                    if verdict == "diverged":
                         ok = False
-        return ok, lines, new_state
+                        repin = False
+                    elif verdict == "unverifiable":
+                        ok = False
+        return ok, lines, new_state, repin
 
     while True:
-        ok, lines, new_state = cycle()
+        ok, lines, new_state, repin = cycle()
         if getattr(args, "json", False):
             print(json.dumps({"ok": ok, "state": new_state, "lines": lines}, ensure_ascii=False))
         else:
             for line in lines:
                 print(line)
-        if ok and new_state is not None:
+        if new_state is not None and (ok or repin):
             try:
                 logmonitor.state_save(state_path, new_state)
             except OSError as exc:
@@ -2334,9 +2365,13 @@ def _monitor(args: argparse.Namespace) -> None:
         if args.once:
             sys.exit(0 if ok else 1)
         if not ok:
-            # A failed cycle never repins — the last good head stays the
-            # baseline every later checkpoint must still extend.
-            print(f"watch continues — pinned state at {state_path} unchanged")
+            if repin and new_state is not None:
+                print(
+                    "watch continues — locally-verified head repinned; the "
+                    "cross-view failure stays on the record"
+                )
+            else:
+                print(f"watch continues — pinned state at {state_path} unchanged")
         time.sleep(args.interval)
 
 

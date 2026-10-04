@@ -388,16 +388,21 @@ def check_log(pack_dir, trusted, receipts):
                 f"{r.get('id') or ph[:16]} does not reach the signed tree head"
             )
         proven += 1
-    cosigs, _ = _cosig_count(doc, cp, size, root_hex)
+    cosigs, _ = _cosig_count(doc, cp, size, root_hex, issuer_keys=trusted)
     return proven, size, cosigs
 
 
-def _cosig_count(doc, cp, size, root_hex):
+def _cosig_count(doc, cp, size, root_hex, issuer_keys=None):
     """Count the checkpoint document's witness counter-signatures whose
     subject binds THIS head — each verified under its own signer's key;
     a cosig about a different head or one that fails its signature counts
-    as absent, never as a verdict against the checkpoint."""
+    as absent, never as a verdict against the checkpoint. The count tracks
+    INDEPENDENT witnesses: duplicate receipts count once, repeat cosigs
+    from one signer count once, and a cosig from the issuer's own key
+    lineage (self-vouching) never counts."""
     n, keys = 0, []
+    self_keys = set(issuer_keys or ()) | {cp.get("public_key")}
+    seen_ids, seen_keys = set(), set()
     for raw in doc.get("cosignatures") or []:
         p = raw.get("payload") if isinstance(raw, dict) else None
         if not isinstance(p, dict) or p.get("record_type") != "witness_cosignature":
@@ -408,10 +413,15 @@ def _cosig_count(doc, cp, size, root_hex):
             or p.get("subject_root_sha256") != root_hex
         ):
             continue
-        ok, _why = check_receipt(raw, raw.get("public_key"))
+        pk = raw.get("public_key")
+        if raw.get("id") in seen_ids or pk in seen_keys or pk in self_keys:
+            continue
+        ok, _why = check_receipt(raw, pk)
         if ok:
+            seen_ids.add(raw.get("id"))
+            seen_keys.add(pk)
             n += 1
-            keys.append(raw.get("public_key"))
+            keys.append(pk)
     return n, keys
 
 
