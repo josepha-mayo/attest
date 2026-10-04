@@ -6,7 +6,8 @@
     "issuer"
   ],
   "js": {
-    "bundle_ok": false
+    "bundle_ok": false,
+    "verdict": "fail"
   },
   "note": "a rotation the successor never countersigned cannot pivot trust"
 }

@@ -126,6 +126,20 @@ def _case_pack(store, engine, site, visits, tmp: Path, *, redact=False) -> bytes
         redact_media=redact,
         manifest_signer=lambda m: engine.issue_export_manifest(site, m),
         issuer_key=engine.signer.public_key_b64,
+        tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"site:{site.id}", t),
+    )
+
+
+def _dispute_pack(store, engine, media_root, bundle, **kw) -> bytes:
+    """A single-visit pack pinned like a real export: the verifier_manifest
+    receipt binds this pack's visit scope."""
+    vid = bundle.original.visit_id
+    return build_pack(
+        store,
+        media_root,
+        bundle,
+        tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"visit:{vid}", t),
+        **kw,
     )
 
 
@@ -168,7 +182,7 @@ def main() -> None:
     bundle1 = service_a.bundle(v1.id)
     media_root = tmp / "d1" / "media"
 
-    clean_bundle = build_pack(store, media_root, bundle1)
+    clean_bundle = _dispute_pack(store, engine, media_root, bundle1)
     _write_vector(
         "ok-clean-bundle",
         clean_bundle,
@@ -176,13 +190,19 @@ def main() -> None:
             "kind": "bundle",
             "pin": "declared",
             "verdict": "ok",
-            "detail_contains": ["verified", "media"],
-            "js": {"bundle_ok": True, "trusted_count": 1, "suspect_count": 0, "lifecycle_suspect_count": 0},
+            "detail_contains": ["verified", "media", "pinned"],
+            "js": {
+                "bundle_ok": True,
+                "trusted_count": 1,
+                "suspect_count": 0,
+                "lifecycle_suspect_count": 0,
+                "verdict": "ok",
+            },
             "note": "one visit, one key, media digests all present — the baseline",
         },
     )
 
-    redacted = build_pack(store, media_root, bundle1, redact_media=True)
+    redacted = _dispute_pack(store, engine, media_root, bundle1, redact_media=True)
     _write_vector(
         "ok-redacted-media",
         redacted,
@@ -190,8 +210,14 @@ def main() -> None:
             "kind": "bundle",
             "pin": "declared",
             "verdict": "ok",
-            "detail_contains": ["withheld"],
-            "js": {"bundle_ok": True, "trusted_count": 1, "suspect_count": 0, "lifecycle_suspect_count": 0},
+            "detail_contains": ["withheld", "pinned"],
+            "js": {
+                "bundle_ok": True,
+                "trusted_count": 1,
+                "suspect_count": 0,
+                "lifecycle_suspect_count": 0,
+                "verdict": "ok",
+            },
             "note": "media bytes withheld by redaction; signed digests still verify",
         },
     )
@@ -215,8 +241,14 @@ def main() -> None:
             "kind": "case",
             "pin": KEY_A.public_key_b64,  # pinning the RETIRED key still verifies
             "verdict": "ok",
-            "detail_contains": ["issuer keys linked via the signed rotation chain"],
-            "js": {"bundle_ok": True, "trusted_count": 2, "suspect_count": 0, "lifecycle_suspect_count": 0},
+            "detail_contains": ["issuer keys linked via the signed rotation chain", "pinned"],
+            "js": {
+                "bundle_ok": True,
+                "trusted_count": 2,
+                "suspect_count": 0,
+                "lifecycle_suspect_count": 0,
+                "verdict": "ok",
+            },
             "note": "case pack spanning a signed rotation — predecessor pin verifies both eras",
         },
     )
@@ -247,18 +279,19 @@ def main() -> None:
 
     _write_vector(
         "ok-grafted-revocation",
-        _rewrite_zip(build_pack(store, media_root, bundle2), graft_revocation),
+        _rewrite_zip(_dispute_pack(store, engine, media_root, bundle2), graft_revocation),
         {
             "kind": "bundle",
             "pin": "declared",
             "verdict": "ok",
-            "detail_contains": ["verified"],
+            "detail_contains": ["verified", "pinned"],
             "detail_excludes": ["suspect window"],
             "js": {
                 "bundle_ok": True,
                 "trusted_count": 2,
                 "suspect_count": 0,
                 "lifecycle_suspect_count": 0,
+                "verdict": "ok",
             },
             "note": "a self-signed key_revocation grafted at sequence 0 cannot "
             "make itself the revocation root — the smear is inert",
@@ -277,8 +310,14 @@ def main() -> None:
             "kind": "case",
             "pin": "declared",
             "verdict": "ok",
-            "detail_contains": ["suspect window", "trust pivot"],
-            "js": {"bundle_ok": True, "trusted_count": 2, "suspect_count": 1, "lifecycle_suspect_count": 1},
+            "detail_contains": ["suspect window", "trust pivot", "pinned"],
+            "js": {
+                "bundle_ok": True,
+                "trusted_count": 2,
+                "suspect_count": 1,
+                "lifecycle_suspect_count": 1,
+                "verdict": "ok",
+            },
             "note": "revocation annotates: records + the pivot receipt itself sit in the suspect window",
         },
     )
@@ -293,13 +332,14 @@ def main() -> None:
             "kind": "case",
             "issuer_doc": "issuer.json",
             "verdict": "ok",
-            "detail_contains": ["suspect window"],
+            "detail_contains": ["suspect window", "pinned"],
             "js": {
                 "bundle_ok": True,
                 "trusted_count": 1,
                 "pin_linked": True,
                 "suspect_count": 1,
                 "lifecycle_suspect_count": 1,
+                "verdict": "ok",
             },
             "note": "pre-rotation pack pinned to the deployment's CURRENT issuer "
             "through the discovery document — and the doc's revocation still "
@@ -323,7 +363,7 @@ def main() -> None:
             "kind": "case",
             "issuer_doc": "issuer.json",
             "verdict": "ok",
-            "detail_contains": ["suspect window"],
+            "detail_contains": ["suspect window", "pinned"],
             "js": {
                 "bundle_ok": True,
                 "trusted_count": 2,
@@ -332,6 +372,7 @@ def main() -> None:
                 # the KEY_A-signed rotation rides BOTH the doc and the pack's
                 # own attestations — two copies inside its suspect window
                 "lifecycle_suspect_count": 2,
+                "verdict": "ok",
             },
             "note": "a forged revocation inside the issuer document cannot "
             "smear the live key — the honest revocation still annotates",
@@ -346,13 +387,14 @@ def main() -> None:
             "kind": "case",
             "issuer_doc": "issuer.json",
             "verdict": "ok",
-            "detail_contains": ["issuer keys linked"],
+            "detail_contains": ["issuer keys linked", "pinned"],
             "js": {
                 "bundle_ok": True,
                 "trusted_count": 2,
                 "pin_linked": True,
                 "suspect_count": 0,
                 "lifecycle_suspect_count": 0,
+                "verdict": "ok",
             },
             "note": "an OLDER document still verifies the rotated deployment's "
             "newer packs — the link runs the other direction through the pack's "
@@ -409,7 +451,7 @@ def main() -> None:
             "issuer_doc": "issuer.json",
             "verdict": "fail",
             "detail_contains": ["issuer"],
-            "js": {"bundle_ok": True, "pin_linked": False},
+            "js": {"bundle_ok": True, "pin_linked": False, "verdict": "fail"},
             "note": "a foreign deployment's document cannot pin this pack — "
             "the pin must reach the issuer through signed lifecycle",
         },
@@ -431,7 +473,8 @@ def main() -> None:
             "pin": KEY_A.public_key_b64,
             "verdict": "fail",
             "detail_contains": ["issuer"],
-            "js": {"bundle_ok": False},  # issuer self-declares as B; A-signed bundle can't verify
+            # issuer self-declares as B; the A-signed bundle can't verify
+            "js": {"bundle_ok": False, "verdict": "fail"},
             "note": "a rotation the successor never countersigned cannot pivot trust",
         },
     )
@@ -452,7 +495,7 @@ def main() -> None:
             "pin": "declared",
             "verdict": "fail",
             "detail_contains": ["hash"],
-            "js": {"bundle_ok": False},
+            "js": {"bundle_ok": False, "verdict": "fail"},
             "note": "a flipped payload field breaks the signed hash",
         },
     )
@@ -472,7 +515,7 @@ def main() -> None:
             "pin": "declared",
             "verdict": "fail",
             "detail_contains": [],
-            "js": {"bundle_ok": False},
+            "js": {"bundle_ok": False, "verdict": "fail"},
             "note": "a corrupted signature must never verify",
         },
     )
@@ -490,7 +533,8 @@ def main() -> None:
             "pin": "declared",
             "verdict": "fail",
             "detail_contains": ["media"],
-            "js": None,  # media byte checks live in the pack driver, not the lib
+            # bundle_ok stays true: only the pack-driver media pass catches it
+            "js": {"bundle_ok": True, "verdict": "fail"},
             "note": "media bytes that don't hash to the signed digest are caught",
         },
     )
@@ -510,7 +554,7 @@ def main() -> None:
             "pin": "declared",
             "verdict": "fail",
             "detail_contains": ["smuggled.txt"],
-            "js": None,
+            "js": {"bundle_ok": True, "verdict": "fail"},
             "note": "a member the pack format doesn't name fails closed",
         },
     )
@@ -523,8 +567,74 @@ def main() -> None:
             "pin": ATTACKER.public_key_b64,
             "verdict": "fail",
             "detail_contains": [],
-            "js": None,  # pin semantics are a CLI/server concept
+            # The browser has no --key flag: self-declared it verifies — the
+            # pin is enforced where a pin can be expressed (server/CLI/doc).
+            "js": {"bundle_ok": True, "verdict": "ok"},
             "note": "pinning an unrelated key must not bless the pack",
+        },
+    )
+
+    # --- negative vectors: the signed verifier_manifest pin. Membership
+    # whitelists check names — only the pin binds the tooling BYTES, so every
+    # surface must reject forged, grafted, or foreign-signed pins alike.
+    # The tool tamper stays benign (a comment) so the honest check inside
+    # the running script still fires and reports itself.
+    def forged_tool(name: str, body: bytes):
+        if name != "verify_bundle.py":
+            return body
+        return body + b"\n# doctored\n"
+
+    _write_vector(
+        "fail-forged-verifier-tool",
+        _rewrite_zip(clean_bundle, forged_tool),
+        {
+            "kind": "bundle",
+            "pin": "declared",
+            "verdict": "fail",
+            "detail_contains": ["bytes differ from the issuer-signed pin"],
+            "js": {"verdict": "fail"},
+            "note": "a modified verify_bundle.py fails its own signed pin — "
+            "membership whitelists names, only the manifest pins bytes",
+        },
+    )
+
+    # A pinned member absent from the zip — the membership whitelist only
+    # bounds what MAY be present, never what MUST be.
+    _write_vector(
+        "fail-missing-pinned-tool",
+        _rewrite_zip(rotated_pack, lambda name, body: None if name == "verify.html" else body),
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "fail",
+            "detail_contains": ["pinned verifier tool missing"],
+            "js": {"verdict": "fail"},
+            "note": "a tool the signed pin names but the pack lacks fails — the pin binds both directions",
+        },
+    )
+
+    # Legacy packs predate the pin — absence is reported, never failed.
+    _write_vector(
+        "ok-legacy-no-manifest",
+        _rewrite_zip(
+            clean_bundle,
+            lambda name, body: None if name == "verifier_manifest.json" else body,
+        ),
+        {
+            "kind": "bundle",
+            "pin": "declared",
+            "verdict": "ok",
+            "detail_contains": ["verified", "media"],
+            "detail_excludes": ["pinned by issuer-signed manifest"],
+            "js": {
+                "bundle_ok": True,
+                "trusted_count": 1,
+                "suspect_count": 0,
+                "lifecycle_suspect_count": 0,
+                "verdict": "ok",
+            },
+            "note": "a pre-pin pack still verifies — the manifest is optional "
+            "when absent, mandatory when present",
         },
     )
 
@@ -541,8 +651,89 @@ def main() -> None:
             "pin": "declared",
             "verdict": "fail",
             "detail_contains": [v1.id],
-            "js": None,
+            "js": {"bundle_ok": True, "verdict": "fail"},
             "note": "a bundle the signed manifest lists but the zip lacks fails",
+        },
+    )
+
+    # --- verifier tooling pin: the signed verifier_manifest binds the pack's
+    # own scripts to the issuer — a forged always-green verifier can no
+    # longer ride a genuine pack. The ok-path pin is exercised by every
+    # regenerated vector above; these vectors attack the pin itself. ---
+    doctored = _rewrite_zip(
+        rotated_pack,
+        lambda name, body: body + b"\n# doctored after export\n" if name == "verify_case.py" else body,
+    )
+    _write_vector(
+        "fail-doctored-verifier",
+        doctored,
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "fail",
+            "detail_contains": ["issuer-signed pin"],
+            "js": {"bundle_ok": True, "verdict": "fail"},
+            "note": "a post-export edit to verify_case.py — membership checks "
+            "names, only the signed pin checks the bytes",
+        },
+    )
+
+    # A valid verifier_manifest replayed from a DIFFERENT scope: the dispute
+    # pack's pin names visit:{v1}, the case pack expects site:{site} — the
+    # scope binding makes the graft detectable on every surface.
+    vm_visit_scope = zipfile.ZipFile(io.BytesIO(clean_bundle)).read("verifier_manifest.json")
+    grafted_pin = _rewrite_zip(
+        rotated_pack,
+        lambda name, body: vm_visit_scope if name == "verifier_manifest.json" else body,
+    )
+    _write_vector(
+        "fail-grafted-pin",
+        grafted_pin,
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "fail",
+            "detail_contains": ["different pack"],
+            "js": {"bundle_ok": True, "verdict": "fail"},
+            "note": "a verifier_manifest signed for another pack cannot pin "
+            "this one — the scope binding stops the replay",
+        },
+    )
+
+    # A well-formed pin under a foreign key: the receipt verifies, the scope
+    # matches, but the signer sits outside the trusted issuer chain.
+    real_tools = json.loads(zipfile.ZipFile(io.BytesIO(rotated_pack)).read("verifier_manifest.json"))[
+        "payload"
+    ]["tools"]
+    foreign_vm = ATTACKER.issue(
+        visit_id="export-tools:foreign",
+        sequence=1,
+        prev_hash=None,
+        facts={
+            "record_type": "verifier_manifest",
+            "scope": f"site:{site.id}",
+            "tools": real_tools,
+        },
+    )
+    foreign_pin = _rewrite_zip(
+        rotated_pack,
+        lambda name, body: (
+            json.dumps(foreign_vm.model_dump(mode="json"), indent=2).encode()
+            if name == "verifier_manifest.json"
+            else body
+        ),
+    )
+    _write_vector(
+        "fail-foreign-pin",
+        foreign_pin,
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "fail",
+            "detail_contains": ["outside the trusted issuer chain"],
+            "js": {"bundle_ok": True, "verdict": "fail"},
+            "note": "a valid pin receipt under an untrusted key — signature "
+            "integrity is not issuer authority",
         },
     )
 

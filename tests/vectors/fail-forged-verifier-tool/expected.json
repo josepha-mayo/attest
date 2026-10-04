@@ -1,0 +1,12 @@
+{
+  "kind": "bundle",
+  "pin": "declared",
+  "verdict": "fail",
+  "detail_contains": [
+    "bytes differ from the issuer-signed pin"
+  ],
+  "js": {
+    "verdict": "fail"
+  },
+  "note": "a modified verify_bundle.py fails its own signed pin \u2014 membership whitelists names, only the manifest pins bytes"
+}

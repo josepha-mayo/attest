@@ -4,7 +4,8 @@
   "verdict": "fail",
   "detail_contains": [],
   "js": {
-    "bundle_ok": false
+    "bundle_ok": false,
+    "verdict": "fail"
   },
   "note": "a corrupted signature must never verify"
 }

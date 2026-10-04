@@ -4,7 +4,7 @@ import re
 import subprocess
 import sys
 import zipfile
-from datetime import timedelta
+from datetime import UTC, timedelta
 from pathlib import Path
 
 import pytest
@@ -534,6 +534,21 @@ def test_lambda_handler_verifies_single_pack(engine, store, household, schedule,
     assert "not a zip" in body["error"]
 
 
+def test_lambda_handler_rejects_ambiguous_member_names(tmp_path):
+    """The intake guard mirrors packdiff.check_member_names: duplicates and
+    backslash/drive-qualified traversal names are refused before extractall —
+    a shadowed verifier_manifest.json can't dodge the pin on Windows hosts."""
+    mod = _lambda_deploy(tmp_path)
+    for bad in ("bundle.json", "visits\\..\\x", "C:/evil", "dir/../x", "/abs"):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("bundle.json", b"{}")
+            z.writestr(bad, b"x")
+        body = _invoke(mod, buf.getvalue())
+        assert body["ok"] is False, bad
+        assert "unsafe paths" in body["error"]
+
+
 def test_case_pack_verifier_pins_an_issuer_document(engine, store, household, schedule, t0, tmp_path):
     """The stdlib-only verifier accepts the deployment's issuer document —
     a pre-rotation pack verifies under the CURRENT key on a stock Python
@@ -578,3 +593,125 @@ def test_case_pack_verifier_pins_an_issuer_document(engine, store, household, sc
     result = _run_case(pack_dir, "--issuer", str(tmp_path / "bad.json"))
     assert result.returncode != 0
     assert "disagrees with the pinned" in result.stderr
+
+
+@pytest.fixture
+def pinned_case_pack(engine, store, household, schedule, t0, tmp_path):
+    """A signed case pack carrying the issuer-pinned verifier_manifest —
+    what real exports now ship."""
+    service = ReviewService(store, engine.signer, engine.clock)
+    event = WebhookEvent.model_validate(
+        webhooks.build_event(event_type="button_press", device_id=household[2].id, occurred_at=t0)
+    )
+    visit = engine.ingest(event).visit
+    engine.close_for_review(visit.id)
+    bundle = service.bundle(visit.id)
+    site = store.sites()[0]
+    data = build_case_pack(
+        store,
+        tmp_path / "media",
+        site,
+        [(visit, bundle, countersign_status(bundle))],
+        manifest_signer=lambda m: engine.issue_export_manifest(site, m),
+        tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"site:{site.id}", t),
+    )
+    out = tmp_path / "case-pinned"
+    zipfile.ZipFile(io.BytesIO(data)).extractall(out)
+    return data, out, site, engine
+
+
+def test_pinned_tools_verify_on_every_surface(pinned_case_pack, tmp_path):
+    """A genuine pack's verifier_manifest pins the tooling bytes — verified
+    by the embedded script, the server path, and packdiff alike."""
+    import io as _io
+    import zipfile as _zip
+
+    from attest.app import _verify_case_pack
+    from attest.packdiff import load_artifact
+
+    data, pack_dir, site, engine = pinned_case_pack
+    assert (pack_dir / "verifier_manifest.json").is_file()
+
+    result = _run_case(pack_dir)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "verifier tool(s) pinned" in result.stdout
+
+    with _zip.ZipFile(_io.BytesIO(data)) as z:
+        ok, detail = _verify_case_pack(z, engine.signer.public_key_b64)
+    assert ok, detail
+    assert "pinned by issuer-signed manifest" in detail
+
+    (tmp_path / "pack.zip").write_bytes(data)
+    res = load_artifact(tmp_path / "pack.zip")
+    assert not res["verify_failures"], res["verify_failures"]
+    assert any("pinned by issuer-signed manifest" in n for n in res["notes"])
+
+
+def test_forged_verifier_script_fails_closed(pinned_case_pack, tmp_path):
+    """A doctored verify_case.py riding a genuine pack: membership whitelists
+    check names, so only the signed tool pin catches it. Every surface fails
+    — and a grafted manifest from another pack fails too."""
+    import io as _io
+    import zipfile as _zip
+
+    from attest.app import _verify_case_pack
+
+    data, pack_dir, site, engine = pinned_case_pack
+    forged = (pack_dir / "verify_case.py").read_text(encoding="utf-8") + "\n# doctored\n"
+    (pack_dir / "verify_case.py").write_text(forged, encoding="utf-8")
+    result = _run_case(pack_dir)
+    assert result.returncode != 0
+    assert "issuer-signed pin" in result.stdout + result.stderr
+
+    # Same tamper inside the zip — the server verifier must agree.
+    zin = _zip.ZipFile(_io.BytesIO(data))
+    buf = _io.BytesIO()
+    with _zip.ZipFile(buf, "w", _zip.ZIP_DEFLATED) as zout:
+        for name in zin.namelist():
+            body = zin.read(name)
+            if name == "verify_case.py":
+                body += b"\n# doctored\n"
+            zout.writestr(name, body)
+    with _zip.ZipFile(_io.BytesIO(buf.getvalue())) as z:
+        ok, detail = _verify_case_pack(z, engine.signer.public_key_b64)
+    assert not ok and "pin" in detail
+
+
+def test_grafted_verifier_manifest_fails_closed(pinned_case_pack, tmp_path):
+    """A verifier_manifest signed for a DIFFERENT pack can't pin this one —
+    the scope binding stops a valid foreign receipt being replayed here."""
+    data, pack_dir, site, engine = pinned_case_pack
+    vm = json.loads((pack_dir / "verifier_manifest.json").read_text(encoding="utf-8"))
+    vm["payload"]["scope"] = "site:elsewhere"
+    (pack_dir / "verifier_manifest.json").write_text(json.dumps(vm), encoding="utf-8")
+    result = _run_case(pack_dir)
+    assert result.returncode != 0
+    assert "different pack" in result.stdout + result.stderr
+
+
+def test_newest_issuer_key_orders_by_sequence_not_wall_clock(pack):
+    """The fallback issuer declaration must sit at the chain TIP. A stepped-
+    back clock (NTP, snapshot restore, manual change) leaves a successor's
+    receipts with an older issued_at than a retired key's — ordering by the
+    signed wall-clock claim would declare the retired key, and the whole
+    export would then fail verification for honest bytes. ``sequence`` is
+    the chain's own position and cannot regress."""
+    from datetime import datetime
+    from types import SimpleNamespace
+
+    from attest.disputepack import _newest_issuer_key
+    from attest.models import Receipt
+
+    tip = Receipt.model_validate(json.loads((pack / "bundle.json").read_text())["original"])
+    # A retired key's receipt: lower sequence but a clock far in the future.
+    retired_future_clock = tip.model_copy(
+        update={
+            "public_key": "retired-key",
+            "sequence": tip.sequence - 1,
+            "issued_at": datetime(2999, 1, 1, tzinfo=UTC),
+        }
+    )
+    # The honest tip: higher sequence but an older wall-clock stamp.
+    tip_backdated = tip.model_copy(update={"issued_at": datetime(2001, 1, 1, tzinfo=UTC)})
+    entries = [(None, SimpleNamespace(original=tip_backdated, reviews=[]), "")]
+    assert _newest_issuer_key(entries, [retired_future_clock]) == tip.public_key

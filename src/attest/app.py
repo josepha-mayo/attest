@@ -1421,7 +1421,12 @@ def create_app(
                 return resp
         bundle = await action(reviews.bundle, visit_id)
         data = await asyncio.to_thread(
-            build_pack, store, s.data_dir / "media", bundle, redact_media=redact_media
+            build_pack,
+            store,
+            s.data_dir / "media",
+            bundle,
+            redact_media=redact_media,
+            tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"visit:{visit_id}", t),
         )
         return Response(
             data,
@@ -1762,6 +1767,7 @@ def create_app(
                 redact_media=redact_media,
                 manifest_signer=lambda m: engine.issue_export_manifest(site, m),
                 issuer_key=engine.signer.public_key_b64,
+                tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"site:{site.id}", t),
             )
 
         data = await asyncio.to_thread(build)
@@ -2099,13 +2105,20 @@ def _verify_pack(data: bytes, public_key: str, known_rotations: list | None = No
             "index.html",
             "redaction.json",
             "key_rotations.json",
+            "verifier_manifest.json",
         }
         for name in names:
             if name.endswith("/") or name in allowed or name.startswith("media/"):
                 continue
             return False, f"{name}: present but not in the signed manifest"
+        trusted_set = trusted if isinstance(trusted, set) else {trusted}
+        tok, tnote = _verify_tools_pin(z, trusted_set, f"visit:{bundle.original.visit_id}")
+        if not tok:
+            return False, tnote
         if isinstance(trusted, set) and len(trusted) > 1:
             detail += f" ({len(trusted)} issuer keys linked via the signed rotation chain)"
+        if tnote:
+            detail += f" ({tnote})"
         return True, detail
     except Exception as exc:  # noqa: BLE001
         return False, f"not a valid exported pack: {exc}"
@@ -2147,6 +2160,23 @@ def _check_pack_bundle(
         f", {len(withheld & digests)} withheld by redaction" if withheld else ""
     )
     return (covered == len(digests), detail)
+
+
+def _verify_tools_pin(z, trusted: set, scope: str) -> tuple[bool, str]:
+    """Enforce the signed ``verifier_manifest.json`` pin — the pack's tooling
+    members must byte-match the issuer-signed sha256 set. Membership checks
+    whitelist *names*; only this receipt binds the *bytes*, which is what
+    stops a forged always-green verifier script riding a genuine pack.
+    Older packs without the member pass with no note. The rule itself lives
+    in packdiff.check_tools_pin so every Python surface shares one
+    implementation (the embedded verifier keeps a stdlib-only copy)."""
+    from .packdiff import check_tools_pin
+
+    names = set(z.namelist())
+    pinned, err = check_tools_pin(lambda n: z.read(n) if n in names else None, names, trusted, scope)
+    if err:
+        return False, err
+    return True, (f"{pinned} verifier tool(s) pinned by issuer-signed manifest" if pinned else "")
 
 
 def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -> tuple[bool, str]:
@@ -2251,7 +2281,14 @@ def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -
     # otherwise ride inside a "VERIFIED" pack. Media members are digest-checked
     # per visit in _check_pack_bundle.
     visit_ids = {v.get("visit_id") for v in manifest.get("visits", [])}
-    allowed = {"manifest.json", "README.txt", "verify_case.py", "verify.html", "index.html"}
+    allowed = {
+        "manifest.json",
+        "README.txt",
+        "verify_case.py",
+        "verify.html",
+        "index.html",
+        "verifier_manifest.json",
+    }
     allowed |= {f"attestations/{a.get('receipt_id')}.json" for a in manifest.get("attestations", [])}
     for vid in visit_ids:
         allowed |= {f"visits/{vid}/bundle.json", f"visits/{vid}/redaction.json"}
@@ -2262,6 +2299,11 @@ def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -
         if len(parts) >= 4 and parts[0] == "visits" and parts[2] == "media" and parts[1] in visit_ids:
             continue  # digest-checked against the signed evidence above
         return False, f"{name}: present but not in the signed manifest"
+    tok, tnote = _verify_tools_pin(z, trusted, f"site:{(manifest.get('site') or {}).get('id') or ''}")
+    if not tok:
+        return False, tnote
+    if tnote:
+        manifest_note += f"; {tnote}"
     if len(trusted) > 1:
         manifest_note += f"; {len(trusted)} issuer keys linked via the signed rotation chain"
     if suspect_total:

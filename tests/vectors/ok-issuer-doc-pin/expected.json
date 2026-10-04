@@ -3,14 +3,16 @@
   "issuer_doc": "issuer.json",
   "verdict": "ok",
   "detail_contains": [
-    "suspect window"
+    "suspect window",
+    "pinned"
   ],
   "js": {
     "bundle_ok": true,
     "trusted_count": 1,
     "pin_linked": true,
     "suspect_count": 1,
-    "lifecycle_suspect_count": 1
+    "lifecycle_suspect_count": 1,
+    "verdict": "ok"
   },
   "note": "pre-rotation pack pinned to the deployment's CURRENT issuer through the discovery document \u2014 and the doc's revocation still annotates the retired key's window"
 }

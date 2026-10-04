@@ -5,6 +5,9 @@
   "detail_contains": [
     "smuggled.txt"
   ],
-  "js": null,
+  "js": {
+    "bundle_ok": true,
+    "verdict": "fail"
+  },
   "note": "a member the pack format doesn't name fails closed"
 }

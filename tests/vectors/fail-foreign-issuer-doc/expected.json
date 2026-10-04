@@ -7,7 +7,8 @@
   ],
   "js": {
     "bundle_ok": true,
-    "pin_linked": false
+    "pin_linked": false,
+    "verdict": "fail"
   },
   "note": "a foreign deployment's document cannot pin this pack \u2014 the pin must reach the issuer through signed lifecycle"
 }

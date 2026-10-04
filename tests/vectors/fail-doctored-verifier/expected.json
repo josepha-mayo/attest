@@ -3,11 +3,11 @@
   "pin": "declared",
   "verdict": "fail",
   "detail_contains": [
-    "vis_bae1477010ff"
+    "issuer-signed pin"
   ],
   "js": {
     "bundle_ok": true,
     "verdict": "fail"
   },
-  "note": "a bundle the signed manifest lists but the zip lacks fails"
+  "note": "a post-export edit to verify_case.py \u2014 membership checks names, only the signed pin checks the bytes"
 }

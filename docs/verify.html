@@ -476,6 +476,42 @@ function deriveStance(js){
    verification to the deployment's current issuer and supplies the signed
    lifecycle receipts that extend trust across rotations. */
 let issuerDoc=null;
+const _TOOLNAMES=new Set(["verify_case.py","verify_bundle.py","verify.html","index.html","README.txt"]);
+async function checkTools(byName,trustedSet,scope,bad,ok){
+  /* verifier_manifest.json pins the pack's tooling BYTES to the issuer —
+     membership whitelists check names only, so without this a forged
+     always-green verify_case.py could ride a genuine pack. Mirrors the
+     Python check_tools/_verify_tools_pin on every other surface. */
+  if(!byName["verifier_manifest.json"])return;
+  let vn=null;
+  try{vn=parseKeep(await byName["verifier_manifest.json"].text());}catch(e){}
+  if(!vn){bad("verifier_manifest.json: malformed receipt");return;}
+  const vm=toJS(vn)||{};const p=vm.payload||{};
+  if(p.record_type!=="verifier_manifest"){
+    bad("verifier_manifest.json: not a verifier_manifest receipt");return;
+  }
+  if(p.scope!==scope){bad("verifier_manifest.json: signed for a different pack — grafted pin");return;}
+  if(!trustedSet||!trustedSet.has(vm.public_key)){
+    bad("verifier_manifest.json: signed outside the trusted issuer chain");return;}
+  const rc=await checkReceipt(vn);
+  if(!rc.ok){bad(`verifier_manifest.json: ${esc(rc.why)}`);return;}
+  const tools=p.tools;
+  if(!tools||typeof tools!=="object"||Array.isArray(tools)||!Object.keys(tools).length){
+    bad("verifier_manifest.json: tools map missing or malformed");return;}
+  for(const[name,want]of Object.entries(tools)){
+    if(!_TOOLNAMES.has(name)||typeof want!=="string"){
+      bad(`verifier_manifest.json: unsafe or unknown member ${esc(String(name))}`);continue;}
+    if(!byName[name]){bad(`${esc(name)}: pinned verifier tool missing from the pack`);continue;}
+    const h=await sha256hex(new Uint8Array(await byName[name].arrayBuffer()));
+    if(h!==want)
+      bad(`${esc(name)}: bytes differ from the issuer-signed pin — a verifier script `
+        +"modified after export cannot be trusted");
+    else ok(`${esc(name)}: tool bytes match the issuer-signed pin`);
+  }
+  for(const n of Object.keys(byName))
+    if(_TOOLNAMES.has(n)&&!(n in tools))
+      bad(`${esc(n)}: verifier tooling present but not covered by the signed pin`);
+}
 async function verifyFiles(files){
   const byName={};for(const f of files)byName[f.name]=f;
   const out=[];const say=(c,m)=>out.push(`<div class="row ${c}">${m}</div>`);
@@ -734,7 +770,8 @@ async function verifyFiles(files){
        top-level file or an extra member inside a listed visit dir would ride
        inside a VERIFIED pack. Media members are digest-checked per visit. */
     const vids=new Set((manifest.visits||[]).map(v=>v.visit_id));
-    const allowed=new Set(["manifest.json","README.txt","verify_case.py","verify.html","index.html"]);
+    const allowed=new Set(["manifest.json","README.txt","verify_case.py","verify.html","index.html",
+      "verifier_manifest.json"]);
     for(const a of manifest.attestations||[])allowed.add(`attestations/${a.receipt_id}.json`);
     for(const v of vids){allowed.add(`visits/${v}/bundle.json`);allowed.add(`visits/${v}/redaction.json`);}
     for(const name of Object.keys(byName)){
@@ -743,16 +780,22 @@ async function verifyFiles(files){
       if(parts.length>=4&&parts[0]==="visits"&&parts[2]==="media"&&vids.has(parts[1]))continue;
       anyBad=true;say("bad",`${esc(name)}: present but not in the signed manifest`);
     }
+    await checkTools(byName,trusted||new Set([manifest.issuer_key||""]),
+      `site:${(manifest.site||{}).id||""}`,
+      m=>{anyBad=true;say("bad",m);},m=>say("ok",m));
   }else{
     /* Single-visit dispute pack — the format names a fixed top-level set plus
        media/* (digest-checked above). */
     const allowed=new Set([
       "bundle.json","README.txt","verify_bundle.py","verify.html","index.html","redaction.json",
-      "key_rotations.json"]);
+      "key_rotations.json","verifier_manifest.json"]);
     for(const name of Object.keys(byName)){
       if(name.endsWith("/")||allowed.has(name)||name.startsWith("media/"))continue;
       anyBad=true;say("bad",`${esc(name)}: present but not in the signed manifest`);
     }
+    await checkTools(byName,trusted||new Set([key||""]),
+      `visit:${bundles.length?bundles[0][0]:""}`,
+      m=>{anyBad=true;say("bad",m);},m=>say("ok",m));
   }
   /* A rotation signed by a key later declared suspect means the handoff
      itself may be attacker-authored — the lineage carries the doubt. */

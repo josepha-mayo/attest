@@ -3,11 +3,11 @@
   "pin": "declared",
   "verdict": "fail",
   "detail_contains": [
-    "vis_bae1477010ff"
+    "different pack"
   ],
   "js": {
     "bundle_ok": true,
     "verdict": "fail"
   },
-  "note": "a bundle the signed manifest lists but the zip lacks fails"
+  "note": "a verifier_manifest signed for another pack cannot pin this one \u2014 the scope binding stops the replay"
 }

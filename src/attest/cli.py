@@ -2115,6 +2115,7 @@ def _export(args: argparse.Namespace) -> None:
             redact_media=args.redact_media,
             manifest_signer=lambda m: engine.issue_export_manifest(site, m),
             issuer_key=engine.signer.public_key_b64,
+            tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"site:{site.id}", t),
         )
         out = Path(args.out or f"case-{site.id}.zip")
         out.write_bytes(data)

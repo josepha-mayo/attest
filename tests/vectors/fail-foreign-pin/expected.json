@@ -3,11 +3,11 @@
   "pin": "declared",
   "verdict": "fail",
   "detail_contains": [
-    "vis_bae1477010ff"
+    "outside the trusted issuer chain"
   ],
   "js": {
     "bundle_ok": true,
     "verdict": "fail"
   },
-  "note": "a bundle the signed manifest lists but the zip lacks fails"
+  "note": "a valid pin receipt under an untrusted key \u2014 signature integrity is not issuer authority"
 }

@@ -58,6 +58,88 @@ def check_member_names(names: list) -> str | None:
     return None
 
 
+def _tools_pin_check(z, names, trusted, scope, failures, notes):
+    """``verifier_manifest.json`` binds the pack's tooling bytes to the issuer:
+    membership whitelists check *names* — only this signed receipt pins the
+    *bytes*, which is what stops a forged always-green verifier riding a real
+    pack. Same rule the server and embedded verifiers enforce."""
+    pinned, err = check_tools_pin(
+        lambda n: z.read(n) if n in names else None,
+        names,
+        trusted or set(),
+        scope,
+    )
+    if err:
+        failures.append(err)
+    elif pinned:
+        notes.append(f"{pinned} verifier tool(s) pinned by issuer-signed manifest")
+
+
+_TOOLS_PIN_NAME = "verifier_manifest.json"
+_VERIFIER_TOOL_NAMES = frozenset(
+    {"verify_case.py", "verify_bundle.py", "verify.html", "index.html", "README.txt"}
+)
+
+
+def check_tools_pin(read_member, names, trusted: set, scope: str) -> tuple[int | None, str | None]:
+    """Validate the issuer-signed ``verifier_manifest.json`` pin: the pack's
+    own verifier tooling must byte-match the signed sha256 set, or a forged
+    always-green script can ride a genuine pack — membership whitelists names,
+    never bytes. ``scope`` binds the receipt to this pack (``visit:{id}`` or
+    ``site:{id}``). Mirrors the embedded ``check_tools`` and the browser
+    verifier's ``checkTools`` exactly: absent is a legacy pack (reported,
+    not failed); present-and-wrong fails. ``read_member(name)`` returns member
+    bytes or None. Returns (pinned_count, None), (None, None) when absent, or
+    (None, error)."""
+    raw = read_member(_TOOLS_PIN_NAME)
+    if raw is None:
+        return None, None
+    import hashlib
+
+    from .ledger import verify_receipt
+    from .models import Receipt
+
+    try:
+        vm = json.loads(raw)
+    except Exception:  # noqa: BLE001
+        return None, "verifier_manifest.json: not readable JSON"
+    try:
+        receipt = Receipt.model_validate(vm)
+    except Exception as exc:  # noqa: BLE001
+        return None, f"verifier_manifest.json: not a receipt ({exc})"
+    payload = receipt.payload
+    if payload.get("record_type") != "verifier_manifest":
+        return None, "verifier_manifest.json: not a verifier_manifest receipt"
+    if payload.get("scope") != scope:
+        return None, "verifier_manifest.json: signed for a different pack — grafted pin"
+    if receipt.public_key not in trusted:
+        return None, "verifier_manifest.json: signed outside the trusted issuer chain"
+    ok, why = verify_receipt(receipt, public_key=receipt.public_key)
+    if not ok:
+        return None, f"verifier_manifest.json: {why}"
+    tools = payload.get("tools")
+    if not isinstance(tools, dict) or not tools:
+        return None, "verifier_manifest.json: tools map missing or malformed"
+    for name, want in tools.items():
+        if not isinstance(name, str) or not isinstance(want, str) or name not in _VERIFIER_TOOL_NAMES:
+            return None, f"verifier_manifest.json: unsafe or unknown member {name!r}"
+        body = read_member(name)
+        if body is None:
+            return None, f"{name}: pinned verifier tool missing from the pack"
+        if hashlib.sha256(body).hexdigest() != want:
+            return None, (
+                f"{name}: bytes differ from the issuer-signed pin — "
+                "a verifier script modified after export cannot be trusted"
+            )
+    for name in names:
+        # A tool member that ISN'T pinned is as suspect as a mismatched one —
+        # otherwise the forger just ships a doctored index.html. Tools live at
+        # the pack root, so nested members can't smuggle the check.
+        if "/" not in name and name in _VERIFIER_TOOL_NAMES and name not in tools:
+            return None, f"{name}: verifier tooling present but not covered by the signed pin"
+    return len(tools), None
+
+
 def _key_pool(z, attestations: dict) -> list:
     """The pack's signed key-rotation link receipts (rotations AND adoptions),
     read from its attestation files — a pack written across a key rotation
@@ -323,10 +405,13 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                 failures += _verify_attestation_files(z, attestations, issuer, trusted)
                 # The revocation overlay annotates, never fails — the same
                 # suspect-window line every other verifier surface reports.
+                # With no issuer anchor at all there is no revocation
+                # authority either — pool position must never confer it, so
+                # an issuer-less manifest gets no suspect-window notes.
                 from .ledger import revoked_issuer_keys, suspect_receipts
                 from .models import Receipt as _R
 
-                revoked = revoked_issuer_keys(pool, issuer_key=issuer)
+                revoked = revoked_issuer_keys(pool, issuer_key=issuer) if issuer else {}
                 if revoked:
                     recs = []
                     for b in bundles.values():
@@ -356,6 +441,7 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                     "verify_case.py",
                     "verify.html",
                     "index.html",
+                    "verifier_manifest.json",
                 }
                 allowed |= {f"attestations/{rid}.json" for rid in attestations}
                 for vid in entries:
@@ -375,6 +461,14 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                     ):
                         continue  # media members — digest-checked upstream
                     failures.append(f"{name}: present but not in the signed manifest")
+                _tools_pin_check(
+                    z,
+                    names,
+                    trusted,
+                    f"site:{(manifest.get('site') or {}).get('id') or ''}",
+                    failures,
+                    notes,
+                )
                 mfail = _verify_manifest_signature(manifest, issuer, trusted)
                 if mfail:
                     failures.append(mfail)
@@ -408,7 +502,9 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                 )
                 from .ledger import revoked_issuer_keys, suspect_receipts
 
-                revoked = revoked_issuer_keys(kr_pool, issuer_key=issuer)
+                # Same gate as the manifest branch: no issuer anchor, no
+                # revocation authority — pool position never confers it.
+                revoked = revoked_issuer_keys(kr_pool, issuer_key=issuer) if issuer else {}
                 if revoked:
                     from .models import Receipt as _R
 
@@ -432,11 +528,20 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                     "index.html",
                     "redaction.json",
                     "key_rotations.json",
+                    "verifier_manifest.json",
                 }
                 for name in names:
                     if name.endswith("/") or name in allowed or name.startswith("media/"):
                         continue
                     failures.append(f"{name}: present but not in the signed manifest")
+                _tools_pin_check(
+                    z,
+                    names,
+                    _trusted_set(issuer, kr_pool) or {issuer},
+                    f"visit:{original['visit_id']}",
+                    failures,
+                    notes,
+                )
                 return {
                     "issuer": issuer,
                     "visits": visits,

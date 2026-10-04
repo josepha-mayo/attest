@@ -4,13 +4,15 @@
   "verdict": "ok",
   "detail_contains": [
     "suspect window",
-    "trust pivot"
+    "trust pivot",
+    "pinned"
   ],
   "js": {
     "bundle_ok": true,
     "trusted_count": 2,
     "suspect_count": 1,
-    "lifecycle_suspect_count": 1
+    "lifecycle_suspect_count": 1,
+    "verdict": "ok"
   },
   "note": "revocation annotates: records + the pivot receipt itself sit in the suspect window"
 }

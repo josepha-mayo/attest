@@ -3,13 +3,15 @@
   "pin": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=",
   "verdict": "ok",
   "detail_contains": [
-    "issuer keys linked via the signed rotation chain"
+    "issuer keys linked via the signed rotation chain",
+    "pinned"
   ],
   "js": {
     "bundle_ok": true,
     "trusted_count": 2,
     "suspect_count": 0,
-    "lifecycle_suspect_count": 0
+    "lifecycle_suspect_count": 0,
+    "verdict": "ok"
   },
   "note": "case pack spanning a signed rotation \u2014 predecessor pin verifies both eras"
 }

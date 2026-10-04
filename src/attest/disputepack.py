@@ -9,6 +9,7 @@ on any machine with plain Python; no attest install, no pip, no trust in us.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import zipfile
@@ -225,6 +226,59 @@ def check_bundle(bundle, key):
             return False, f"review {n}: not anchored to this original", n
         prev = r["payload_hash"]
     return True, "ok", n + 1
+
+
+_VERIFIER_TOOLS = ("verify_case.py", "verify_bundle.py", "verify.html", "index.html", "README.txt")
+
+
+def check_tools(pack_dir, trusted, scope):
+    """Enforce the signed verifier_manifest.json pin: the pack's tooling
+    members must byte-match the issuer-signed sha256 set. Without it a forged
+    always-green verifier script can ride a genuine pack — pack membership
+    whitelists names, never bytes. ``scope`` binds the receipt to this pack
+    (``visit:{id}`` or ``site:{id}``). Older packs without the member are
+    reported, not failed. Returns the pinned tool count or None."""
+    vm_path = Path(pack_dir) / "verifier_manifest.json"
+    if not vm_path.is_file():
+        return None
+    try:
+        vm = json.loads(vm_path.read_text(encoding="utf-8"))
+    except Exception:
+        sys.exit("FAIL verifier_manifest.json: not readable JSON")
+    payload = vm.get("payload") if isinstance(vm, dict) else None
+    if not isinstance(payload, dict) or payload.get("record_type") != "verifier_manifest":
+        sys.exit("FAIL verifier_manifest.json: not a verifier_manifest receipt")
+    if payload.get("scope") != scope:
+        sys.exit("FAIL verifier_manifest.json: signed for a different pack — grafted pin")
+    if vm.get("public_key") not in trusted:
+        sys.exit("FAIL verifier_manifest.json: signed outside the trusted issuer chain")
+    ok, why = check_receipt(vm, vm["public_key"])
+    if not ok:
+        sys.exit(f"FAIL verifier_manifest.json: {why}")
+    tools = payload.get("tools")
+    if not isinstance(tools, dict) or not tools:
+        sys.exit("FAIL verifier_manifest.json: tools map missing or malformed")
+    for name, want in tools.items():
+        if (
+            not isinstance(name, str)
+            or not isinstance(want, str)
+            or name not in _VERIFIER_TOOLS
+        ):
+            sys.exit(f"FAIL verifier_manifest.json: unsafe or unknown member {name!r}")
+        fp = Path(pack_dir) / name
+        if not fp.is_file():
+            sys.exit(f"FAIL {name}: pinned verifier tool missing from the pack")
+        if hashlib.sha256(fp.read_bytes()).hexdigest() != want:
+            sys.exit(
+                f"FAIL {name}: bytes differ from the issuer-signed pin — "
+                "a verifier script modified after export cannot be trusted"
+            )
+    for fp in Path(pack_dir).iterdir():
+        # A tool member that ISN'T pinned by the manifest is as suspect as a
+        # mismatched one — otherwise the forger just ships a doctored index.html.
+        if fp.is_file() and fp.name in _VERIFIER_TOOLS and fp.name not in tools:
+            sys.exit(f"FAIL {fp.name}: verifier tooling present but not covered by the signed pin")
+    return len(tools)
 
 
 def check_media(bundle, media_dir, withheld=None):
@@ -579,6 +633,7 @@ def main():
         "index.html",
         "redaction.json",
         "key_rotations.json",
+        "verifier_manifest.json",
     }
     markers = ("README.txt", "media", "verify.html", "index.html")
     if any((pack_dir / m).exists() for m in markers):
@@ -587,6 +642,7 @@ def main():
                 sys.exit(f"FAIL {p.name}: present but not part of the pack format")
             if p.is_dir() and p.name != "media":
                 sys.exit(f"FAIL {p.name}/: directory not part of the pack format")
+    pinned_tools = check_tools(pack_dir, trusted, f'visit:{bundle["original"]["visit_id"]}')
     redact_note = f", {held} withheld by redaction" if held else ""
     print(f"OK: {n} receipt(s) verified; {checked} media digests matched{redact_note}.")
     if len(trusted) > 1:
@@ -604,6 +660,9 @@ def main():
     if issuer_receipts:
         print(f"    (pinned via a deployment issuer document — {len(issuer_receipts)} "
               "lifecycle receipt(s); its authenticity rides on how it reached you)")
+    if pinned_tools:
+        print(f"    ({pinned_tools} verifier tool(s) pinned by issuer-signed manifest — "
+              "the pack's own scripts are proven unmodified)")
     print("Signature proves record integrity under the issuer key - not identity,")
     print("attendance, or absence.")
 
@@ -780,7 +839,14 @@ def main():
     # top-level file or extra member inside a visit dir would otherwise ride
     # inside a "VERIFIED" pack. Media members are digest-checked by
     # check_media against the signed evidence.
-    allowed_top = {"manifest.json", "README.txt", "verify_case.py", "verify.html", "index.html"}
+    allowed_top = {
+        "manifest.json",
+        "README.txt",
+        "verify_case.py",
+        "verify.html",
+        "index.html",
+        "verifier_manifest.json",
+    }
     for p in sorted(root.iterdir()):
         if p.is_file() and p.name not in allowed_top:
             print(f"FAIL {p.name}: present but not in the signed manifest")
@@ -801,10 +867,15 @@ def main():
     print(f"{'OK  ' if mok else 'FAIL'} manifest: {mwhy}")
     if not mok:
         failed += 1
+    site_id = (manifest.get("site") or {}).get("id") or ""
+    pinned_tools = check_tools(root, trusted, f"site:{site_id}")
     if failed:
         sys.exit(f"{failed} record(s) failed verification")
     print(f"OK: {len(visits)} visit records verified under issuer key")
     print(f"    {key[:16]}...")
+    if pinned_tools:
+        print(f"    ({pinned_tools} verifier tool(s) pinned by issuer-signed manifest — "
+              "the pack's own scripts are proven unmodified)")
     if len(trusted) > 1:
         # The pack spans a signed key rotation — the lineage is the pivot, not
         # a weaker check; say so plainly rather than hiding it behind one key.
@@ -931,10 +1002,14 @@ def build_pack(
     *,
     include_media: bool = True,
     redact_media: bool = False,
+    tools_receipt_fn=None,
 ) -> bytes:
     """Assemble the zip. Media is matched to evidence digests, not filenames.
     With ``redact_media`` the bytes are withheld and a redaction.json marker is
-    written — the signed digests stay verifiable, the footage stays private."""
+    written — the signed digests stay verifiable, the footage stays private.
+    ``tools_receipt_fn`` receives the sha256 map of the pack's verifier tooling
+    and returns a signed ``verifier_manifest`` receipt — the pin that proves
+    the pack's own scripts are byte-identical to what the issuer shipped."""
     from .verifyjs import VERIFY_HTML, case_index_html
 
     buf = io.BytesIO()
@@ -945,26 +1020,37 @@ def build_pack(
         # is the signed link that makes that legitimate instead of "different
         # key". Only written when rotations exist.
         rotations = [r.model_dump(mode="json") for r in store.receipts() if r.visit_id.startswith("key:")]
+        from datetime import UTC, datetime
+
+        index_html = case_index_html(
+            {
+                "schema": "attest.dispute-pack/1",
+                "site": bundle.original.payload.get("site") or {},
+                "generated_at": datetime.now(tz=UTC).isoformat(),
+                "issuer_key": bundle.original.public_key,
+                "media_redacted": redact_media,
+            },
+            [(bundle.original.visit_id, bundle_text)],
+            attestations=[(r["id"], json.dumps(r, indent=2, ensure_ascii=False)) for r in rotations],
+        )
         z.writestr("bundle.json", bundle_text)
         z.writestr("README.txt", _README)
         z.writestr("verify_bundle.py", _VERIFIER)
         z.writestr("verify.html", VERIFY_HTML)
-        from datetime import UTC, datetime
-
-        z.writestr(
-            "index.html",
-            case_index_html(
-                {
-                    "schema": "attest.dispute-pack/1",
-                    "site": bundle.original.payload.get("site") or {},
-                    "generated_at": datetime.now(tz=UTC).isoformat(),
-                    "issuer_key": bundle.original.public_key,
-                    "media_redacted": redact_media,
-                },
-                [(bundle.original.visit_id, bundle_text)],
-                attestations=[(r["id"], json.dumps(r, indent=2, ensure_ascii=False)) for r in rotations],
-            ),
-        )
+        z.writestr("index.html", index_html)
+        if tools_receipt_fn is not None:
+            tools = {
+                name: hashlib.sha256(body.encode()).hexdigest()
+                for name, body in {
+                    "verify_bundle.py": _VERIFIER,
+                    "verify.html": VERIFY_HTML,
+                    "index.html": index_html,
+                    "README.txt": _README,
+                }.items()
+            }
+            receipt = tools_receipt_fn(tools)
+            if receipt is not None:
+                z.writestr("verifier_manifest.json", receipt.model_dump_json(indent=2))
         if rotations:
             z.writestr(
                 "key_rotations.json",
@@ -985,14 +1071,18 @@ def build_pack(
 def _newest_issuer_key(entries, attestations) -> str | None:
     """The lineage tip to declare when no issuer_key is given: the signer of
     the newest packed receipt. Verifiers trust ancestors OF the declared key,
-    so the declaration must sit at the live end of the rotation chain."""
+    so the declaration must sit at the live end of the rotation chain. Order
+    by ``sequence`` — the chain's own position, which cannot regress — never
+    the signed wall-clock claim: a stepped-back clock could otherwise declare
+    a retired key while successor-signed records ride in the same pack, and
+    the whole export then fails verification for honest bytes."""
     newest = None
     for receipt in (
         [e[1].original for e in entries]
         + [r.receipt for e in entries for r in e[1].reviews]
         + list(attestations)
     ):
-        if newest is None or receipt.issued_at > newest.issued_at:
+        if newest is None or receipt.sequence > newest.sequence:
             newest = receipt
     return newest.public_key if newest is not None else None
 
@@ -1007,6 +1097,7 @@ def build_case_pack(
     redact_media: bool = False,
     manifest_signer=None,
     issuer_key: str | None = None,
+    tools_receipt_fn=None,
 ) -> bytes:
     """A whole-site export: every visit's signed bundle + media, one manifest of
     receipt hashes and worker stances, and a stdlib-only verifier that checks
@@ -1091,26 +1182,41 @@ def build_case_pack(
 
     bundle_texts = [(visit.id, bundle.model_dump_json(indent=2)) for visit, bundle, _ in entries]
     manifest_text = json.dumps(manifest, indent=2, ensure_ascii=False)
+    index_html = case_index_html(
+        {
+            "site": manifest["site"],
+            "generated_at": manifest["generated_at"],
+            "issuer_key": manifest["issuer_key"],
+            "media_redacted": redact_media,
+        },
+        bundle_texts,
+        manifest_text,
+        attestations=[(r.id, r.model_dump_json(indent=2)) for r in attestations],
+    )
+    # The verifier_manifest receipt pins the tooling BYTES — it can't ride in
+    # the manifest (index.html embeds the manifest, a circularity), so it is a
+    # signed member of its own, issued after every pinned byte exists.
+    vm = None
+    if tools_receipt_fn is not None:
+        tools = {
+            name: hashlib.sha256(body.encode()).hexdigest()
+            for name, body in {
+                "verify_case.py": _CASE_VERIFIER,
+                "verify.html": VERIFY_HTML,
+                "index.html": index_html,
+                "README.txt": _CASE_README,
+            }.items()
+        }
+        vm = tools_receipt_fn(tools)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("manifest.json", manifest_text)
         z.writestr("README.txt", _CASE_README)
         z.writestr("verify_case.py", _CASE_VERIFIER)
         z.writestr("verify.html", VERIFY_HTML)
-        z.writestr(
-            "index.html",
-            case_index_html(
-                {
-                    "site": manifest["site"],
-                    "generated_at": manifest["generated_at"],
-                    "issuer_key": manifest["issuer_key"],
-                    "media_redacted": redact_media,
-                },
-                bundle_texts,
-                manifest_text,
-                attestations=[(r.id, r.model_dump_json(indent=2)) for r in attestations],
-            ),
-        )
+        z.writestr("index.html", index_html)
+        if vm is not None:
+            z.writestr("verifier_manifest.json", vm.model_dump_json(indent=2))
         for r in attestations:
             z.writestr(f"attestations/{r.id}.json", r.model_dump_json(indent=2))
         for (vid, text), (visit, bundle, _) in zip(bundle_texts, entries, strict=True):

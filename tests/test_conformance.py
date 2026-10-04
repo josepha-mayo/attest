@@ -190,12 +190,34 @@ eval(src + `
       pinLinked=trusted!==null&&trusted.has(issuerKey);
     }
   }
+  // Full pack-driver pass: the same verifyFiles the browser runs — member
+  // whitelists, manifest consistency, media digests, the signed tool pin —
+  // not just the lib functions above. File shims replay the extracted zip.
+  let verdict=null;
+  if(job.members){
+    const files=job.members.map(n=>{
+      const buf=fs.readFileSync(dir+n);
+      return {name:n,
+        text:async()=>buf.toString('utf8'),
+        arrayBuffer:async()=>buf.buffer.slice(buf.byteOffset,buf.byteOffset+buf.length)};
+    });
+    if(job.issuer_doc){
+      /* Arm the pin exactly like the drop path: the doc's own parseKeep nodes
+         preserve canonical spellings for the lifecycle signatures. */
+      const dn=parseKeep(await read(job.issuer_doc)),d=toJS(dn)||{};
+      const kn=get(dn,'key_receipts');
+      issuerDoc={issuer_key:d.issuer_key,nodes:kn&&kn.t==='arr'?kn.v:[]};
+    }
+    const html=await verifyFiles(files);
+    verdict=html.includes('FAILED')?'fail':(html.includes('VERIFIED')?'ok':'?');
+  }
   console.log(JSON.stringify({
     bundles_ok:results.every(Boolean),
     trusted_count:trusted?trusted.size:0,
     suspect_count:suspect,
     lifecycle_suspect_count:suspectRecords(rotNodes,revoked).length,
     pin_linked:pinLinked,
+    verdict:verdict,
   }));
 })();`);
 """
@@ -208,23 +230,23 @@ def _js_job(zf: zipfile.ZipFile, tmp: Path, spec: dict, vec: Path) -> dict:
     if spec.get("issuer_doc"):
         job["issuer_doc"] = spec["issuer_doc"]
         (tmp / spec["issuer_doc"]).write_bytes((vec / spec["issuer_doc"]).read_bytes())
+    # The full pack-driver pass replays EVERY member — the same files a
+    # dropped zip would hand verifyFiles in the browser.
+    job["members"] = [n for n in names if not n.endswith("/")]
+    for n in job["members"]:
+        p = tmp / n
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(zf.read(n))
     if spec["kind"] == "case":
         job["manifest"] = "manifest.json"
-        (tmp / "manifest.json").write_bytes(zf.read("manifest.json"))
-        bundles = sorted(n for n in names if n.startswith("visits/") and n.endswith("bundle.json"))
-        job["bundles"] = bundles
-        atts = sorted(n for n in names if n.startswith("attestations/") and n.endswith(".json"))
-        job["attestation_files"] = atts
-        for n in ["manifest.json", *bundles, *atts]:
-            p = tmp / n
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_bytes(zf.read(n))
+        job["bundles"] = sorted(n for n in names if n.startswith("visits/") and n.endswith("bundle.json"))
+        job["attestation_files"] = sorted(
+            n for n in names if n.startswith("attestations/") and n.endswith(".json")
+        )
     else:
         job["bundles"] = ["bundle.json"]
-        (tmp / "bundle.json").write_bytes(zf.read("bundle.json"))
         if "key_rotations.json" in names:
             job["rotations_file"] = "key_rotations.json"
-            (tmp / "key_rotations.json").write_bytes(zf.read("key_rotations.json"))
     return job
 
 
@@ -260,3 +282,5 @@ def test_browser_lib_matches_oracle(vec: Path, tmp_path: Path):
         assert got["lifecycle_suspect_count"] == want["lifecycle_suspect_count"], f"{vec.name}: {got}"
     if "pin_linked" in want:
         assert got["pin_linked"] == want["pin_linked"], f"{vec.name}: {got}"
+    if "verdict" in want:
+        assert got["verdict"] == want["verdict"], f"{vec.name}: {got}"

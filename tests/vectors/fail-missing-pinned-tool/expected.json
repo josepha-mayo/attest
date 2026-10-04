@@ -1,0 +1,12 @@
+{
+  "kind": "case",
+  "pin": "declared",
+  "verdict": "fail",
+  "detail_contains": [
+    "pinned verifier tool missing"
+  ],
+  "js": {
+    "verdict": "fail"
+  },
+  "note": "a tool the signed pin names but the pack lacks fails \u2014 the pin binds both directions"
+}

@@ -64,8 +64,24 @@ def _pack_bytes(event) -> bytes:
 
 
 def _safe_names(zf: zipfile.ZipFile) -> bool:
-    """Reject zip-slip and absolute paths — the pack is untrusted input."""
-    return all(not n.startswith(("/", "\\")) and ".." not in n.split("/") for n in zf.namelist())
+    """Reject ambiguous member names — the pack is untrusted input. Mirrors
+    ``packdiff.check_member_names`` exactly (duplicates, ``..`` after
+    backslash normalization, absolute or drive-qualified paths): a duplicate
+    or shadowed member is ambiguous across extractors, and a name like
+    ``dir\\..\\x`` traverses on Windows even though ``split("/")`` misses it.
+    Kept as a local copy because the deployed zip ships only this file plus
+    the two pinned verifier scripts — no ``attest`` package import."""
+    seen = set()
+    for n in zf.namelist():
+        if n in seen:
+            return False
+        seen.add(n)
+        if n.endswith("/"):
+            continue
+        parts = n.replace("\\", "/").split("/")
+        if ".." in parts or n.startswith(("/", "\\")) or ":" in n:
+            return False
+    return True
 
 
 def handler(event, context):

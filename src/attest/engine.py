@@ -1154,6 +1154,55 @@ class VisitEngine:
         return receipt
 
     @atomic
+    def issue_verifier_manifest(self, scope: str, tools: dict[str, str]) -> Receipt:
+        """Sign the sha256 set of the verifier tooling an export writes —
+        ``verify_case.py``/``verify_bundle.py``, ``verify.html``, the README,
+        the record browser. Those members are otherwise unsigned pack content:
+        a forged always-green script riding a genuine pack is the strongest
+        social-engineering attack on offline verification, and nothing stopped
+        it. With a signed pin, every verifier surface can prove the tooling is
+        byte-identical to what this issuer shipped. ``scope`` binds the receipt
+        to the pack (``visit:{id}`` or ``site:{id}``); idempotent per identical
+        tool set via an ``export-tools:`` pseudo visit_id — a distinct prefix,
+        never ``export:{site.id}:``, so a site named ``tools`` cannot absorb
+        pin receipts into its attestation namespace."""
+        import hashlib
+        import json as _json
+
+        canonical = _json.dumps(
+            {"scope": scope, "tools": tools},
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        pseudo_id = f"export-tools:{hashlib.sha256(canonical.encode()).hexdigest()[:16]}"
+        existing = self.store.receipt_for_visit(pseudo_id)
+        if existing:
+            return existing
+        prev = self.store.latest_receipt()
+        receipt = self.signer.issue(
+            visit_id=pseudo_id,
+            sequence=prev.sequence + 1 if prev else 1,
+            prev_hash=prev.payload_hash if prev else None,
+            facts={
+                "record_type": "verifier_manifest",
+                "scope": scope,
+                "tools": dict(tools),
+                "boundary": (
+                    "The named files must byte-match these sha256 digests — a "
+                    "verifier inside a pack that doesn't match was modified "
+                    "after export and must not be trusted to report honestly."
+                ),
+                "journal_head": self.store.journal_head(),
+            },
+        )
+        try:
+            self.store.put_receipt(receipt)
+        except sqlite3.IntegrityError:
+            return self.store.receipt_for_visit(pseudo_id)
+        return receipt
+
+    @atomic
     def issue_verification_report(self, report: dict) -> Receipt:
         """Sign a verify-live sweep into the chain: 'this deployment ran the
         official-API checks at this time and these are the results.' An

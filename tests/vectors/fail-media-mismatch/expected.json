@@ -5,6 +5,9 @@
   "detail_contains": [
     "media"
   ],
-  "js": null,
+  "js": {
+    "bundle_ok": true,
+    "verdict": "fail"
+  },
   "note": "media bytes that don't hash to the signed digest are caught"
 }

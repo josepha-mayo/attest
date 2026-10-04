@@ -3,13 +3,15 @@
   "pin": "declared",
   "verdict": "ok",
   "detail_contains": [
-    "withheld"
+    "withheld",
+    "pinned"
   ],
   "js": {
     "bundle_ok": true,
     "trusted_count": 1,
     "suspect_count": 0,
-    "lifecycle_suspect_count": 0
+    "lifecycle_suspect_count": 0,
+    "verdict": "ok"
   },
   "note": "media bytes withheld by redaction; signed digests still verify"
 }

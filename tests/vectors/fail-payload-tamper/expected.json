@@ -6,7 +6,8 @@
     "hash"
   ],
   "js": {
-    "bundle_ok": false
+    "bundle_ok": false,
+    "verdict": "fail"
   },
   "note": "a flipped payload field breaks the signed hash"
 }

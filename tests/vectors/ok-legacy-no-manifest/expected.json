@@ -4,17 +4,17 @@
   "verdict": "ok",
   "detail_contains": [
     "verified",
-    "pinned"
+    "media"
   ],
   "detail_excludes": [
-    "suspect window"
+    "pinned by issuer-signed manifest"
   ],
   "js": {
     "bundle_ok": true,
-    "trusted_count": 2,
+    "trusted_count": 1,
     "suspect_count": 0,
     "lifecycle_suspect_count": 0,
     "verdict": "ok"
   },
-  "note": "a self-signed key_revocation grafted at sequence 0 cannot make itself the revocation root \u2014 the smear is inert"
+  "note": "a pre-pin pack still verifies \u2014 the manifest is optional when absent, mandatory when present"
 }

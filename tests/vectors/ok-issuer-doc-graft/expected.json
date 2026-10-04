@@ -3,14 +3,16 @@
   "issuer_doc": "issuer.json",
   "verdict": "ok",
   "detail_contains": [
-    "suspect window"
+    "suspect window",
+    "pinned"
   ],
   "js": {
     "bundle_ok": true,
     "trusted_count": 2,
     "pin_linked": true,
     "suspect_count": 1,
-    "lifecycle_suspect_count": 2
+    "lifecycle_suspect_count": 2,
+    "verdict": "ok"
   },
   "note": "a forged revocation inside the issuer document cannot smear the live key \u2014 the honest revocation still annotates"
 }

@@ -3,14 +3,16 @@
   "issuer_doc": "issuer.json",
   "verdict": "ok",
   "detail_contains": [
-    "issuer keys linked"
+    "issuer keys linked",
+    "pinned"
   ],
   "js": {
     "bundle_ok": true,
     "trusted_count": 2,
     "pin_linked": true,
     "suspect_count": 0,
-    "lifecycle_suspect_count": 0
+    "lifecycle_suspect_count": 0,
+    "verdict": "ok"
   },
   "note": "an OLDER document still verifies the rotated deployment's newer packs \u2014 the link runs the other direction through the pack's own lifecycle attestations"
 }
