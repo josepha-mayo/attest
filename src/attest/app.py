@@ -742,7 +742,21 @@ def create_app(
                     if slot["latest"] is None or r.issued_at > slot["latest"]:
                         slot["latest"], slot["rid"] = r.issued_at, r.id
             revoked = ledger.revoked_issuer_keys(receipts)
+            tsize, troot = engine.log_head()
+            checkpoints = [
+                r for r in receipts if r.payload.get("record_type") == "log_checkpoint"
+            ]
+            cp_size = int(checkpoints[-1].payload["tree_size"]) if checkpoints else None
             return {
+                "transparency": {
+                    "tree_size": tsize,
+                    "root_sha256": troot.hex(),
+                    "checkpoints": len(checkpoints),
+                    "checkpoint_size": cp_size,
+                    "leaves_since_checkpoint": tsize - (cp_size or 0),
+                    "latest": checkpoints[-1].id if checkpoints else None,
+                    "latest_at": checkpoints[-1].issued_at if checkpoints else None,
+                },
                 "stats": store.stats(),
                 "journal": store.verify_journal(),
                 "chain": ledger.verify_chain(receipts, public_key=signer.public_key_b64),
@@ -819,8 +833,22 @@ def create_app(
                         slot["latest"], slot["rid"] = r.issued_at, r.id
             journal = store.verify_journal()
             chain_ok, chain_why = ledger.verify_chain(receipts, public_key=signer.public_key_b64)
+            tsize, troot = engine.log_head()
+            checkpoints = [
+                r for r in receipts if r.payload.get("record_type") == "log_checkpoint"
+            ]
+            cp_size = int(checkpoints[-1].payload["tree_size"]) if checkpoints else None
             return {
                 "healthy": journal["intact"] and chain_ok and journal.get("untracked_rows", 0) == 0,
+                "transparency": {
+                    "tree_size": tsize,
+                    "root_sha256": troot.hex(),
+                    "checkpoints": len(checkpoints),
+                    "checkpoint_size": cp_size,
+                    "leaves_since_checkpoint": tsize - (cp_size or 0),
+                    "latest": checkpoints[-1].id if checkpoints else None,
+                    "latest_at": checkpoints[-1].issued_at.isoformat() if checkpoints else None,
+                },
                 "issuer": signer.public_key_b64,
                 "issuer_lineage": len(
                     {

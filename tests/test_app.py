@@ -1141,7 +1141,16 @@ def test_integrity_page_renders_self_audit(api, household, t0):
     assert "Signing key" in page.text and "local key file" in page.text
     assert "Watching evidence per site" in page.text
     assert "Webhook intake" in page.text and "HMAC-verified" in page.text
+    assert "Transparency log" in page.text  # the Merkle head is part of posture
     assert "doesn't prove" in page.text  # the claims boundary stays on the page
+
+    # The transparency card reports the live Merkle head and checkpoint count.
+    engine = api.attest_state.engine
+    engine.issue_log_checkpoint()
+    page = api.get("/integrity")
+    assert "signed checkpoint(s)" in page.text
+    tsize, _ = engine.log_head()
+    assert f"{tsize} receipts in the Merkle tree" in page.text
 
     # Tamper out-of-band — the page must flip to attention, not stay green.
     store = api.attest_state.store
@@ -1169,6 +1178,10 @@ def test_integrity_json_mirrors_the_page(api, household, t0):
     assert "max_age_s" in data["webhook"]
     assert site.id in data["sites"]
     assert data["stats"]["visits"]["total"] >= 1
+    # The machine-readable audit carries the transparency head too — a CI
+    # gate can pin the deployment's log without scraping HTML.
+    assert data["transparency"]["tree_size"] == api.attest_state.engine.log_head()[0]
+    assert len(data["transparency"]["root_sha256"]) == 64
 
     store = api.attest_state.store
     store._conn.execute("UPDATE visits SET body=? WHERE id=?", ('{"forged":true}', vid))
