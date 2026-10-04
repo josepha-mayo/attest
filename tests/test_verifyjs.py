@@ -1682,3 +1682,129 @@ const run=async(head,cp,size,root)=>{
     assert "loopback: warn" in out, out  # http on loopback proceeds to fetch, gets 404
     assert "oversize: bad" in out, out
     assert "down: warn" in out, out
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_js_checkpoint_doc_verifies_packed_witness_anchors(engine, store, household, schedule, t0, tmp_path):
+    """The browser verifier audits cosig_anchors against the canonical node
+    map — a real packed anchor counts, and every malformed variant fails
+    closed with a named lie (Python check_cosig_anchors parity)."""
+    from attest import logmonitor
+    from attest.disputepack import log_member
+    from attest.store import Store
+    from attest.transparency import inclusion_path, leaf_hashes, root
+
+    w_store = Store(":memory:")
+    w_signer = Signer.ephemeral()
+    r1 = engine.signer.issue(visit_id="vis_anchor", sequence=1, prev_hash=None, facts={"record_type": "note"})
+    store.put_receipt(r1)
+    cp = engine.issue_log_checkpoint()
+    issuer_doc = {
+        "schema": "attest.issuer/1",
+        "issuer_key": engine.signer.public_key_b64,
+        "key_receipts": [],
+    }
+    status, out = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": issuer_doc, "checkpoint": cp.model_dump(mode="json")}
+    )
+    assert status == 200
+    cosig = out["cosignature"]
+
+    leaves = leaf_hashes(w_store.receipts())
+    w_cp = w_signer.issue(
+        visit_id="log:wcp",
+        sequence=99,
+        prev_hash=None,
+        facts={
+            "record_type": "log_checkpoint",
+            "tree_size": len(leaves),
+            "root_sha256": root(leaves).hex(),
+        },
+    )
+    w_store.put_receipt(w_cp)
+    idx = leaves.index(bytes.fromhex(cosig["payload_hash"]))
+    anchor = {
+        "checkpoint": w_cp.model_dump(mode="json"),
+        "proof": {"leaf_index": idx, "path": [p.hex() for p in inclusion_path(leaves, idx)]},
+    }
+    doc = log_member(engine, [r1], cosign_fn=lambda _cp: ([cosig], {cosig["id"]: anchor}))
+    assert doc["checkpoint"]["id"] == cp.id
+
+    (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
+    (tmp_path / "doc.json").write_text(json.dumps(doc), encoding="utf-8")
+    driver = """
+const fs=require('fs');
+let src=fs.readFileSync(process.argv[2],'utf8').replace(/const dz=[\\s\\S]*$/,'');
+const doc=JSON.parse(fs.readFileSync(process.argv[3],'utf8'));
+const META=JSON.parse(process.argv[4]);
+eval(src + `
+(async()=>{
+  const run=async d=>{
+    const bads=[],oks=[];
+    await checkLog({"log_checkpoint.json":{text:async()=>JSON.stringify(d)}},
+      new Set([META.issuer]),META.refs,m=>bads.push(m),m=>oks.push(m));
+    return {bads,oks};
+  };
+  const tag=(n,r)=>console.log(n+':',JSON.stringify(r));
+  tag('valid',await run(doc));
+  const ghost=JSON.parse(JSON.stringify(doc));
+  ghost.cosig_anchors={rcpt_ghost:ghost.cosig_anchors[Object.keys(ghost.cosig_anchors)[0]]};
+  tag('ghost',await run(ghost));
+  const wrongkey=JSON.parse(JSON.stringify(doc));
+  wrongkey.cosig_anchors[Object.keys(wrongkey.cosig_anchors)[0]].checkpoint=wrongkey.checkpoint;
+  tag('wrongkey',await run(wrongkey));
+  const badproof=JSON.parse(JSON.stringify(doc));
+  badproof.cosig_anchors[Object.keys(badproof.cosig_anchors)[0]].proof.path=['00'.repeat(32)];
+  tag('badproof',await run(badproof));
+  const nocp=JSON.parse(JSON.stringify(doc));
+  delete nocp.cosig_anchors[Object.keys(nocp.cosig_anchors)[0]].checkpoint;
+  tag('nocp',await run(nocp));
+  const astr=JSON.parse(JSON.stringify(doc));astr.cosig_anchors='bogus';
+  tag('astr',await run(astr));
+  /* --include receipts: verify under the lineage + a working proof */
+  const emb=JSON.parse(JSON.stringify(doc));emb.receipts=[META.r1];
+  tag('emb',await run(emb));
+  const embTam=JSON.parse(JSON.stringify(doc));
+  embTam.receipts=[JSON.parse(JSON.stringify(META.r1))];
+  embTam.receipts[0].payload.record_type='tampered';
+  tag('embTam',await run(embTam));
+  const embForeign=JSON.parse(JSON.stringify(doc));embForeign.receipts=[META.cosig];
+  tag('embForeign',await run(embForeign));
+  const embNoProof=JSON.parse(JSON.stringify(doc));
+  embNoProof.receipts=[JSON.parse(JSON.stringify(META.r1))];
+  delete embNoProof.proofs[embNoProof.receipts[0].payload_hash];
+  tag('embNoProof',await run(embNoProof));
+  const embStr=JSON.parse(JSON.stringify(doc));embStr.receipts='bogus';
+  tag('embStr',await run(embStr));
+})();`);
+"""
+    meta = {
+        "issuer": engine.signer.public_key_b64,
+        "refs": [{"id": r1.id, "payload_hash": r1.payload_hash, "public_key": r1.public_key}],
+        "r1": r1.model_dump(mode="json"),
+        "cosig": cosig,
+    }
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "verify.js", "doc.json", json.dumps(meta)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout
+    assert 'valid: {"bads":[]' in out, out
+    assert "anchored in the witness's own published log" in out, out
+    assert "anchors a cosignature" in out, out  # ghost
+    assert "own witness key" in out, out  # wrongkey
+    assert "does not reach" in out, out  # badproof
+    assert "not a " in out and "log_checkpoint" in out, out  # nocp
+    # a non-object cosig_anchors is absent, not hostile — still cosigned
+    assert 'astr: {"bads":[]' in out, out
+    # embedded --include receipts: real one counts, every forgery fails
+    assert 'emb: {"bads":[]' in out, out
+    assert re.search(r"embTam.*payload hash mismatch", out), out
+    assert "signed outside the issuer lineage" in out, out  # embForeign (witness key)
+    assert "no working inclusion proof" in out, out  # embNoProof
+    assert "at most 2048" in out, out  # embStr

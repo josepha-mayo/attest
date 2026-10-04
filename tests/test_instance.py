@@ -125,10 +125,10 @@ def test_every_documented_writer_locks_and_readers_never_do():
         )
     for fn in readers:
         src = inspect.getsource(fn)
-        # _journal/--retention/--deliveries/_verify_live lock only inside the
-        # mutating flag branch — that's intentional; unconditional readers
-        # must never take it at all.
-        if fn in (cli._journal, cli._retention, cli._deliveries, cli._verify_live):
+        # _journal/--retention/--deliveries/_verify_live/_monitor lock only
+        # inside the mutating flag branch — that's intentional; unconditional
+        # readers must never take it at all.
+        if fn in (cli._journal, cli._retention, cli._deliveries, cli._verify_live, cli._monitor):
             continue
         assert "acquire_instance_lock" not in src, (
             f"{fn.__name__} is read-only but takes the writer lock — "

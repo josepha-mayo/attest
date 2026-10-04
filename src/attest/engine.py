@@ -1351,6 +1351,48 @@ class VisitEngine:
             return self.store.receipt_for_visit(pseudo_id)
         return receipt
 
+    @atomic
+    def issue_monitor_observation(self, observation: dict) -> Receipt:
+        """Sign one monitor cycle into the chain: 'at this instant an outside
+        watcher was served this material and reached this verdict.' The trail
+        is the evidence — an alert cycle commits the contradictory signed
+        objects themselves, so a fork caught in the act is independently
+        re-verifiable, and a steady trail attests continuous watching (a gap
+        is a gap, not an assumption). Idempotent per identical observation
+        via a ``monitor:`` pseudo visit_id."""
+        import hashlib
+        import json as _json
+
+        canonical = _json.dumps(observation, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        digest = hashlib.sha256(canonical.encode()).hexdigest()
+        pseudo_id = f"monitor:{digest[:16]}"
+        existing = self.store.receipt_for_visit(pseudo_id)
+        if existing:
+            return existing
+        prev = self.store.latest_receipt()
+        receipt = self.signer.issue(
+            visit_id=pseudo_id,
+            sequence=prev.sequence + 1 if prev else 1,
+            prev_hash=prev.payload_hash if prev else None,
+            facts={
+                "record_type": "monitor_observation",
+                **observation,
+                "boundary": (
+                    "A signed statement about the material this observer was "
+                    "served at this instant — what the issuer and witness SAID, "
+                    "never what physically happened. A 'diverged' or 'dishonest' "
+                    "outcome means two signed views contradict each other; it "
+                    "does not say which view, if either, is honest."
+                ),
+                "journal_head": self.store.journal_head(),
+            },
+        )
+        try:
+            self.store.put_receipt(receipt)
+        except sqlite3.IntegrityError:
+            return self.store.receipt_for_visit(pseudo_id)
+        return receipt
+
     @contextmanager
     def signing_barrier(self):
         """Hold the store write lock across a multi-step signing sequence.

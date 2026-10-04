@@ -159,7 +159,22 @@ def check(
             "cannot produce the consistency proof"
         )
         return new_state, True, lines
-    old_size, old_root = int(state["tree_size"]), state["root_sha256"]
+    try:
+        old_size, old_root = int(state["tree_size"]), str(state["root_sha256"])
+        old_root_bytes = bytes.fromhex(old_root)
+        if not isinstance(state["tree_size"], int) or isinstance(state["tree_size"], bool):
+            raise ValueError("tree_size must be an int")
+        if len(old_root_bytes) != 32:
+            raise ValueError("root must be 32 bytes")
+    except (KeyError, TypeError, ValueError):
+        return (
+            None,
+            False,
+            [
+                "the pinned monitor state is corrupt — malformed local pin; "
+                "remove the state file to repin rather than paper over it"
+            ],
+        )
     if size == old_size and root_hex == old_root:
         lines.append(f"head unchanged — checkpoint still commits to {size} leaves")
         return new_state, True, lines
@@ -183,7 +198,7 @@ def check(
     # which is almost always ahead of the newest signed head.
     from .transparency import verify_consistency, verify_extends
 
-    embedded = verify_extends(payload, first=old_size, first_root=bytes.fromhex(old_root))
+    embedded = verify_extends(payload, first=old_size, first_root=old_root_bytes)
     if embedded is True:
         lines.append(
             f"log extended {old_size} → {size} — the checkpoint's own signed "
@@ -226,7 +241,7 @@ def check(
         )
     try:
         nodes = [bytes.fromhex(h) for h in proof["proof"]]
-        bridges = verify_consistency(bytes.fromhex(old_root), old_size, bytes.fromhex(root_hex), size, nodes)
+        bridges = verify_consistency(old_root_bytes, old_size, bytes.fromhex(root_hex), size, nodes)
     except (TypeError, ValueError):
         return None, False, ["ALERT: consistency proof carries malformed nodes"]
     if not bridges:
@@ -412,8 +427,11 @@ def witness_cosign(store, signer, body: dict) -> tuple[int, dict]:
             # Find the NEWEST family-member legacy pin (two historical
             # claims can each leave a slot): continuity must apply to the
             # furthest head the witness attested, or the upgrade window
-            # would launder a rewrite past a stale slot.
-            legacy_slot, legacy_pin = None, None
+            # would launder a rewrite past a stale slot. Read-only here:
+            # the tombstone writes below live strictly on the success
+            # path — a REFUSED offer must leave every slot untouched or a
+            # fork offer could burn the pin it was refused for.
+            legacy_pin = None
             for slot_name, legacy in store.settings_by_prefix("witness:").items():
                 if (
                     slot_name != f"witness:{canonical}"
@@ -423,26 +441,21 @@ def witness_cosign(store, signer, body: dict) -> tuple[int, dict]:
                     and isinstance(legacy.get("tree_size"), int)
                     and (legacy_pin is None or legacy["tree_size"] > legacy_pin["tree_size"])
                 ):
-                    legacy_slot, legacy_pin = slot_name, legacy
+                    legacy_pin = legacy
             if legacy_pin is not None:
                 state = legacy_pin
-                # Tombstone the claimed-key slot: the canonical slot gets
-                # repinned below, and a stale second pin must not keep
-                # publishing an old head from /api/witness/heads.
-                store.put_setting(
-                    legacy_slot,
-                    {
-                        "schema": "attest.witness-pin-migrated/1",
-                        "issuer_key": legacy_pin.get("issuer_key"),
-                        "migrated_to": canonical,
-                    },
-                )
         if state and state.get("schema") != WITNESS_SCHEMA:
             return 500, {"error": "witness pin state is corrupt — refusing to repin"}
         old_size = state.get("tree_size")
         old_root = state.get("root_sha256")
-        if old_size is not None and not (isinstance(old_size, int) and isinstance(old_root, str)):
-            return 500, {"error": "witness pin fields are corrupt — refusing to repin"}
+        if old_size is not None:
+            try:
+                if not isinstance(old_size, int) or isinstance(old_size, bool):
+                    raise ValueError("size must be an int")
+                if not isinstance(old_root, str) or len(bytes.fromhex(old_root)) != 32:
+                    raise ValueError("root must be 32-byte hex")
+            except ValueError:
+                return 500, {"error": "witness pin fields are corrupt — refusing to repin"}
         if old_size is not None:
             if size < int(old_size) or (size == int(old_size) and root_hex != old_root):
                 return 409, {
@@ -545,6 +558,26 @@ def witness_cosign(store, signer, body: dict) -> tuple[int, dict]:
             "cosignature_id": cosig.id,
         }
         store.put_setting(f"witness:{canonical}", new_state)
+        # Success only: fold every OTHER family-member slot into tombstones —
+        # the migrated winner, losing aliases from earlier claims, and slots
+        # minted under a later tip while the canonical one already existed.
+        # Left alive they'd keep publishing stale heads from
+        # /api/witness/heads as if they were independent issuer views.
+        for slot_name, other in store.settings_by_prefix("witness:").items():
+            if (
+                slot_name != f"witness:{canonical}"
+                and isinstance(other, dict)
+                and other.get("schema") == WITNESS_SCHEMA
+                and other.get("issuer_key") in trusted
+            ):
+                store.put_setting(
+                    slot_name,
+                    {
+                        "schema": "attest.witness-pin-migrated/1",
+                        "issuer_key": other.get("issuer_key"),
+                        "migrated_to": canonical,
+                    },
+                )
         return 200, {"cosignature": cosig.model_dump(mode="json"), "pinned": new_state}
 
 
@@ -818,6 +851,11 @@ def compare_views(
                 )
 
             def _bridge(f_sz, f_root, t_sz, t_root) -> bool:
+                # The served consistency proof is UNSIGNED auxiliary
+                # material: a fetch failure, malformed body, or a proof
+                # that doesn't verify can only leave the anchor's claim
+                # unproven — it cannot convict the witness of a lie the
+                # way a signed contradiction can.
                 proof = fetch_wconsistency(f_sz, t_sz) if fetch_wconsistency else None
                 try:
                     nodes = [bytes.fromhex(h) for h in (proof or {}).get("proof") or []]
@@ -826,22 +864,35 @@ def compare_views(
                 return bool(nodes) and verify_consistency(f_root, f_sz, t_root, t_sz, nodes)
 
             if anchored_size == wp_size:
-                same_log = a_root == wp_root
+                same_log = a_root == wp_root  # signed heads at one size — a mismatch is a proven fork
+                provable_lie = same_log is False
             elif anchored_size > wp_size:
-                # the anchor must provably extend the head we pinned
+                # the anchor must provably extend the head we pinned —
+                # its own embedded `extends` is signed: failing is a lie.
                 ext = verify_extends(ap, first=wp_size, first_root=wp_root)
+                provable_lie = ext is False
                 same_log = ext if ext is not None else _bridge(wp_size, wp_root, anchored_size, a_root)
             else:
                 # our pin moved past the anchor — append-only means the
                 # published log must provably contain the anchor's tree
+                provable_lie = False
                 same_log = _bridge(anchored_size, a_root, wp_size, wp_root)
-            if not same_log:
+            if provable_lie:
                 return (
                     "dishonest",
                     "the pin's witness_anchor cannot be reconciled with the "
                     "witness log head this monitor pinned — a checkpoint over "
                     "a private per-victim fork verifies in isolation and is "
                     "exactly what this check exists to catch",
+                )
+            if not same_log:
+                return (
+                    "unverifiable",
+                    "the pin's witness_anchor could not be bridged to the "
+                    "witness log head this monitor pinned — the served "
+                    "consistency material is missing or fails, so the "
+                    "anchor's 'published log' claim is unproven, not proven "
+                    "false",
                 )
             anchor_note = (
                 f"; the cosig sits inside the witness's published log at size "
@@ -1029,7 +1080,7 @@ def check_cosig_anchors(doc: dict) -> tuple[int, list[str]]:
     cosig_list = doc.get("cosignatures")
     for raw in cosig_list if isinstance(cosig_list, list) else []:
         if isinstance(raw, dict) and isinstance(raw.get("id"), str):
-            cosigs[raw["id"]] = raw
+            cosigs.setdefault(raw["id"], raw)  # first-wins: the counting path counts the first id
     anchored, errors = 0, []
     for cid, anchor in anchors.items():
         cosig = cosigs.get(cid)

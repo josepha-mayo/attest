@@ -181,17 +181,25 @@ def _rotation_hop(receipts: list[Receipt], new_key: str) -> Receipt | None:
     the hop additionally requires a ``key_adoption`` receipt countersigned by
     ``new_key`` naming this exact rotation — without successor consent a
     claimed predecessor is a graft, not a handoff."""
-    for r in receipts:
-        p = r.payload
+    candidates = [
+        r
+        for r in receipts
         if (
-            p.get("record_type") == "key_rotation"
-            and p.get("new_key") == new_key
-            and p.get("previous_key") == r.public_key
+            r.payload.get("record_type") == "key_rotation"
+            and r.payload.get("new_key") == new_key
+            and r.payload.get("previous_key") == r.public_key
             and verify_receipt(r, public_key=r.public_key)[0]
             and _adoption_consent(receipts, r, new_key)
-        ):
-            return r
-    return None
+        )
+    ]
+    if not candidates:
+        return None
+    # Deterministic pick: a requester controls the pool's ORDER, so an
+    # issuer could order a multi-predecessor lineage to yield whichever
+    # root it prefers (a second canonical identity for witness pins).
+    # previous_key is the one ordering relation the requester cannot
+    # re-arrange — always follow the smallest predecessor.
+    return min(candidates, key=lambda r: str(r.payload["previous_key"]))
 
 
 def trusted_issuer_keys(issuer_key: str, key_receipts: list[Receipt], *, max_hops: int = 32) -> set[str]:

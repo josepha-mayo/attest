@@ -296,6 +296,13 @@ def check_tools(pack_dir, trusted, scope):
     return len(tools)
 
 
+def _is_int(x):
+    """A JSON int, strictly — True/False are ints to isinstance() but not to
+    a verifier (JS Number.isInteger rejects them); the bool-shaped proof is
+    a crafted doc, not a proof."""
+    return isinstance(x, int) and not isinstance(x, bool)
+
+
 def _merkle_inclusion(leaf_hex, size, index, path_hex, root_hex):
     """RFC 6962 audit-path verification, stdlib-only (see transparency.py)."""
     try:
@@ -303,7 +310,7 @@ def _merkle_inclusion(leaf_hex, size, index, path_hex, root_hex):
         root_b = bytes.fromhex(root_hex)
     except (TypeError, ValueError):
         return False
-    if not isinstance(size, int) or not isinstance(index, int):
+    if not _is_int(size) or not _is_int(index):
         return False
     if index < 0 or index >= size or size < 1:
         return False
@@ -362,7 +369,7 @@ def check_log(pack_dir, trusted, receipts):
         sys.exit(f"FAIL log_checkpoint.json: {why}")
     size = payload.get("tree_size")
     root_hex = payload.get("root_sha256")
-    if not isinstance(size, int) or size < 1 or not isinstance(root_hex, str):
+    if not _is_int(size) or size < 1 or not isinstance(root_hex, str):
         sys.exit("FAIL log_checkpoint.json: malformed tree head")
     proven = 0
     for r in receipts:
@@ -388,6 +395,42 @@ def check_log(pack_dir, trusted, receipts):
                 f"{r.get('id') or ph[:16]} does not reach the signed tree head"
             )
         proven += 1
+    # Embedded evidence receipts (`attest checkpoint --include monitor:`):
+    # each must verify under the issuer lineage AND carry a proof that
+    # reaches the signed head — CLI _verify_log_doc parity, fail closed.
+    embedded = doc.get("receipts")
+    if embedded is not None:
+        if not isinstance(embedded, list) or len(embedded) > 2048:
+            sys.exit("FAIL log_checkpoint.json: 'receipts' must be a list of at most 2048")
+        seen_ids = set()
+        for raw in embedded:
+            if not isinstance(raw, dict):
+                sys.exit("FAIL log_checkpoint.json: embedded receipt malformed")
+            rid = str(raw.get("id") or "?")
+            if rid in seen_ids:
+                sys.exit(f"FAIL log_checkpoint.json: embedded receipt {rid[:24]}… listed twice")
+            seen_ids.add(rid)
+            if raw.get("public_key") not in trusted:
+                sys.exit(
+                    f"FAIL log_checkpoint.json: embedded receipt {rid[:24]}… "
+                    "signed outside the issuer lineage"
+                )
+            ok, why = check_receipt(raw, raw["public_key"])
+            if not ok:
+                sys.exit(f"FAIL log_checkpoint.json: embedded receipt {rid[:24]}… invalid: {why}")
+            p = proofs.get(raw.get("payload_hash"))
+            if not isinstance(p, dict) or not _merkle_inclusion(
+                raw.get("payload_hash"),
+                size,
+                p.get("leaf_index", -1),
+                p.get("path") or [],
+                root_hex,
+            ):
+                sys.exit(
+                    f"FAIL log_checkpoint.json: embedded receipt {rid[:24]}… "
+                    "carries no working inclusion proof"
+                )
+            proven += 1
     cosigs, _ = _cosig_count(doc, cp, size, root_hex, issuer_keys=trusted)
     # Packed self-anchors: the witness's own signed head + the cosig's
     # inclusion path. Auxiliary like the cosig count — but a present one
@@ -408,7 +451,7 @@ def _cosig_anchors(doc):
     cosig_list = doc.get("cosignatures")
     for raw in cosig_list if isinstance(cosig_list, list) else []:
         if isinstance(raw, dict) and isinstance(raw.get("id"), str):
-            cosigs[raw["id"]] = raw
+            cosigs.setdefault(raw["id"], raw)  # first-wins: the counting path counts the first id
     anchored = 0
     for cid, anchor in anchors.items():
         cosig = cosigs.get(cid)
@@ -458,6 +501,7 @@ def _cosig_count(doc, cp, size, root_hex, issuer_keys=None):
             continue
         if (
             p.get("subject_checkpoint") != cp.get("id")
+            or not _is_int(p.get("subject_tree_size"))
             or p.get("subject_tree_size") != size
             or p.get("subject_root_sha256") != root_hex
         ):
@@ -469,7 +513,10 @@ def _cosig_count(doc, cp, size, root_hex, issuer_keys=None):
         pk = raw.get("public_key")
         if raw.get("id") in seen_ids or pk in seen_keys or pk in self_keys:
             continue
-        ok, _why = check_receipt(raw, pk)
+        try:
+            ok, _why = check_receipt(raw, pk)
+        except (KeyError, TypeError, ValueError, AttributeError):
+            continue  # malformed envelope — it can't vouch, it just doesn't count
         if ok:
             seen_ids.add(raw.get("id"))
             seen_keys.add(pk)
@@ -1389,6 +1436,7 @@ def build_case_pack(
         or r.visit_id.startswith(f"export:{site.id}:")
         or r.visit_id.startswith("verify:")
         or r.visit_id.startswith("key:")
+        or r.visit_id.startswith("monitor:")
     ]
     manifest = {
         "schema": "attest.case-pack/1",

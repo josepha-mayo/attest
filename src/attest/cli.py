@@ -1463,7 +1463,55 @@ def _verify_log_doc(
                         kind="log_checkpoint",
                     )
                 proven += 1
+        # Embedded evidence receipts (e.g. `attest checkpoint --out doc
+        # --include monitor:`): each must verify under a key inside the
+        # issuer's lineage AND carry an inclusion proof — the two checks
+        # together prove 'this signed observation sits inside this signed
+        # head' with no store access needed.
+        receipts = data.get("receipts")
+        if receipts is not None:
+            if not isinstance(receipts, list) or len(receipts) > 2048:
+                fail(
+                    "checkpoint document: 'receipts' must be a list of at most 2048",
+                    kind="log_checkpoint",
+                )
+            allowed = {cp.public_key}
+            if pinned_key:
+                allowed = {pinned_key}
+                if known_rotations is not None:
+                    allowed = ledger.trusted_issuer_keys(pinned_key, known_rotations) | (
+                        ledger.descendant_issuer_keys(pinned_key, known_rotations)
+                    )
+            seen_ids: set[str] = set()
+            for raw in receipts:
+                try:
+                    r = Receipt.model_validate(raw)
+                except Exception as exc:  # noqa: BLE001
+                    fail(f"embedded receipt malformed: {exc}", kind="log_checkpoint")
+                if r.id in seen_ids:
+                    fail(f"embedded receipt {r.id[:24]}… listed twice", kind="log_checkpoint")
+                seen_ids.add(r.id)
+                if r.public_key not in allowed:
+                    fail(
+                        f"embedded receipt {r.id[:24]}… signed by a key outside the "
+                        "issuer lineage — pin the lineage with --issuer-url to "
+                        "cover rotation, or this receipt doesn't belong",
+                        kind="log_checkpoint",
+                    )
+                ok, why = ledger.verify_receipt(r, public_key=r.public_key)
+                if not ok:
+                    fail(f"embedded receipt {r.id[:24]}… invalid: {why}", kind="log_checkpoint")
+                if not isinstance(proofs, dict) or r.payload_hash not in proofs:
+                    fail(
+                        f"embedded receipt {r.id[:24]}… carries no inclusion "
+                        "proof — 'inside the signed head' is unproven",
+                        kind="log_checkpoint",
+                    )
+            detail_extra = f" — {len(receipts)} embedded receipt(s) verified inside the signed head"
+        else:
+            detail_extra = ""
         detail = f"signed transparency head: tree size {size}, root {cp.payload['root_sha256'][:16]}…"
+        detail += detail_extra
         if proven is not None:
             detail += f" — {proven} packed inclusion proof(s) verified"
         # The checkpoint's own signed continuity claim: verify_extends with
@@ -1650,21 +1698,28 @@ def _pack_key_pool(z, names) -> list:
     if "manifest.json" in names:
         try:
             manifest = json.loads(z.read("manifest.json"))
-            for a in manifest.get("attestations") or []:
-                rid = a.get("receipt_id") if isinstance(a, dict) else None
-                if not rid or f"attestations/{rid}.json" not in names:
-                    continue
+        except Exception:  # noqa: BLE001 — manifest itself already failed the verify pass
+            manifest = {}
+        for a in manifest.get("attestations") or []:
+            rid = a.get("receipt_id") if isinstance(a, dict) else None
+            if not rid or f"attestations/{rid}.json" not in names:
+                continue
+            try:
                 att = Receipt.model_validate(json.loads(z.read(f"attestations/{rid}.json")))
-                if att.payload.get("record_type") in ("key_rotation", "key_adoption", "key_revocation"):
-                    pool.append(att)
-        except Exception:  # noqa: BLE001
-            pass
+            except Exception:  # noqa: BLE001 — skip the member, not the pool
+                continue
+            if att.payload.get("record_type") in ("key_rotation", "key_adoption", "key_revocation"):
+                pool.append(att)
     if "key_rotations.json" in names:
         try:
             kr = json.loads(z.read("key_rotations.json"))
-            pool += [Receipt.model_validate(r) for r in kr.get("rotations") or []]
         except Exception:  # noqa: BLE001
-            pass
+            kr = {}
+        for r in kr.get("rotations") or []:
+            try:
+                pool.append(Receipt.model_validate(r))
+            except Exception:  # noqa: BLE001
+                continue
     return pool
 
 
@@ -2332,6 +2387,33 @@ def _checkpoint(args: argparse.Namespace) -> None:
                     print(f"witness {base}: {line}")
                 else:
                     print(f"witness {base}: {line}", file=sys.stderr)
+        include = getattr(args, "include", None) or []
+        if include:
+            # Embed the matching receipts plus an inclusion proof each —
+            # the doc then proves 'these signed observations are inside
+            # this signed head' on its own, no store access needed. The
+            # checkpoint already commits them (it heads the whole log);
+            # a receipt outside the tree has no path — refuse, don't
+            # silently drop evidence the operator asked for.
+            embedded = [r for r in store.receipts() if any(r.visit_id.startswith(p) for p in include)]
+            from .transparency import inclusion_path
+
+            leaves = engine.log_leaves()[: int(p["tree_size"])]
+            proofs = {}
+            for r in embedded:
+                try:
+                    idx = leaves.index(bytes.fromhex(r.payload_hash))
+                except ValueError:
+                    sys.exit(f"--include: receipt {r.id} is not inside the committed tree")
+                proofs[r.payload_hash] = {
+                    "leaf_index": idx,
+                    "path": [n.hex() for n in inclusion_path(leaves, idx)],
+                }
+            if embedded:
+                out["receipts"] = [r.model_dump(mode="json") for r in embedded]
+                out["proofs"] = proofs
+            else:
+                print(f"note: --include {include} matched no receipts", file=sys.stderr)
         if getattr(args, "timestamp", False) and not args.out:
             sys.exit("--timestamp needs --out — the notarized proof rides next to the checkpoint file")
         if args.out:
@@ -2431,6 +2513,22 @@ def _monitor(args: argparse.Namespace) -> None:
     state_path = args.state or f"attest-monitor-{hashlib.sha256(base.encode()).hexdigest()[:12]}.json"
     issuer_src = args.issuer or base
 
+    # --journal turns detection into evidence: every cycle mints a signed
+    # monitor_observation receipt into this runtime's transparency log, so
+    # a caught fork is itself an exportable, third-party-verifiable fact.
+    # Mutating, so the runtime's single-writer lock applies — unlike the
+    # default lock-free monitor.
+    j_engine = None
+    if getattr(args, "journal", False):
+        from .instance import acquire_instance_lock
+        from .store import Store
+
+        acquire_instance_lock(settings.data_dir)
+        db = settings.data_dir / "attest.sqlite3"
+        if not db.exists():
+            print(f"note: initializing monitor journal at {db}", file=sys.stderr)
+        j_engine = _cli_engine(Store(db))
+
     def cycle() -> tuple[bool, list[str], dict | None, bool]:
         state = logmonitor.state_load(state_path)
         try:
@@ -2465,6 +2563,9 @@ def _monitor(args: argparse.Namespace) -> None:
         # one of the two views sits on a fork, and pinning commits us to the
         # possibly-forked one — a human must reconcile that by hand.
         repin = True
+        verdict = None
+        pin = None
+        wbase = None
         if ok and new_state is not None and getattr(args, "witness", None):
             wbase = _https_base(args.witness, "witness")
             try:
@@ -2573,6 +2674,57 @@ def _monitor(args: argparse.Namespace) -> None:
                         repin = False
                     elif verdict == "unverifiable":
                         ok = False
+        if j_engine is not None:
+            alert = verdict in ("diverged", "dishonest") or any(str(ln).startswith("ALERT") for ln in lines)
+            served_head = None
+            _cp = (head or {}).get("checkpoint") if isinstance(head, dict) else None
+            _p = _cp.get("payload") if isinstance(_cp, dict) else None
+            if isinstance(_p, dict):
+                served_head = {
+                    "checkpoint_id": _cp.get("id"),
+                    "tree_size": _p.get("tree_size"),
+                    "root_sha256": _p.get("root_sha256"),
+                }
+
+            def _pin_fields(s):
+                if not isinstance(s, dict):
+                    return None
+                return {k: s.get(k) for k in ("issuer_key", "tree_size", "root_sha256", "checkpoint_id")}
+
+            if ok:
+                if state is None:
+                    outcome = "pinned"
+                elif _pin_fields(new_state) != _pin_fields(state):
+                    outcome = "advanced"
+                else:
+                    outcome = "steady"
+            elif alert:
+                outcome = verdict if verdict in ("diverged", "dishonest") else "alert"
+            else:
+                outcome = "unverifiable"
+            observation = {
+                "observed_at": datetime.now(tz=UTC).isoformat(),
+                "subject": {"url": base, "issuer_key": (doc or {}).get("issuer_key")},
+                "outcome": outcome,
+                "served_head": served_head,
+                "pin_before": _pin_fields(state),
+                "pin_after": _pin_fields(new_state),
+                "witness_view": (
+                    {"url": wbase, "verdict": verdict, "pin_issuer_key": (pin or {}).get("issuer_key")}
+                    if wbase
+                    else None
+                ),
+                # On an alert the served material itself is the evidence —
+                # verbatim, so the signed contradiction is re-checkable.
+                "served_doc": head if alert else None,
+                "served_witness_pin": pin if alert and pin else None,
+            }
+            try:
+                obs_receipt = j_engine.issue_monitor_observation(observation)
+                lines.append(f"journaled observation {obs_receipt.id[:24]}… ({outcome})")
+            except Exception as exc:  # noqa: BLE001 — a failed journal write
+                # must not silence the watch; the trail records the gap.
+                lines.append(f"journal write failed: {exc}")
         return ok, lines, new_state, repin
 
     while True:
@@ -3980,6 +4132,18 @@ def main(argv: list[str] | None = None) -> None:
         "counter-sign the checkpoint — repeatable; the witness only signs a "
         "head it can prove extends its own pin, so a forked log can't collect",
     )
+    s.add_argument(
+        "--include",
+        action="append",
+        default=[],
+        metavar="PREFIX",
+        help=(
+            "embed receipts whose visit_id starts with PREFIX plus their "
+            "inclusion proofs in the written doc (repeatable) — e.g. "
+            "--include monitor: exports the signed monitor trail as one "
+            "self-verifying evidence file"
+        ),
+    )
     s.set_defaults(fn=_checkpoint)
 
     s = sub.add_parser(
@@ -4019,6 +4183,16 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--interval", type=int, default=60, help="seconds between checks (default: 60)")
     s.add_argument("--once", action="store_true", help="run one check and exit — the CI-gate mode")
     s.add_argument("--json", action="store_true", help="emit each cycle's verdict as one JSON object")
+    s.add_argument(
+        "--journal",
+        action="store_true",
+        help=(
+            "sign every cycle into this runtime's transparency log as a "
+            "monitor_observation receipt — detection becomes exportable "
+            "evidence (mutating; takes the runtime's writer lock). Export "
+            "the trail with `attest checkpoint --out doc.json --include monitor:`"
+        ),
+    )
     s.add_argument(
         "--witness",
         default=None,

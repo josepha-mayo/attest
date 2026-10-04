@@ -2003,17 +2003,21 @@ def test_compare_views_binds_anchor_to_the_watched_witness_log(engine, store, ho
     )
     assert verdict3 == "agree" and "verified against our own pin" in line3
 
-    # Same size claim, fake root — the bridge closes sizes but can't reach
-    # a root that was never the witness's tree.
+    # Pin BEHIND the anchor with a root the real prefix never had: the
+    # served consistency proof can't reach it — but a failed UNSIGNED
+    # proof can't convict either. No signed material contradicts the pin
+    # at a non-checkpoint size, so this is 'unverifiable', not 'dishonest'
+    # (a same-size root mismatch or the anchor's own signed `extends`
+    # disagreeing are the provable lies, covered above).
     fake = {"tree_size": len(leaves) - 1, "root_sha256": "11" * 32}
-    verdict4, _ = logmonitor.compare_views(
+    verdict4, line4 = logmonitor.compare_views(
         mine,
         pin,
         {w_signer.public_key_b64},
         witness_pin=fake,
         fetch_wconsistency=fetch,
     )
-    assert verdict4 == "dishonest"
+    assert verdict4 == "unverifiable" and "unproven" in line4
 
 
 def test_check_cosig_anchors_verifies_a_packed_witness_anchor(engine, store, household, schedule, t0):
@@ -2307,3 +2311,417 @@ def test_compare_views_reports_dishonest_for_signed_lies(engine, store, househol
         {w_signer.public_key_b64},
     )
     assert verdict == "unverifiable" and "monitor's own pin" in line
+
+
+def test_monitor_journal_signs_each_cycle_and_exports_evidence(tmp_path, monkeypatch, capsys):
+    """`monitor --journal` mints a signed monitor_observation per cycle into
+    the local runtime's transparency log; `checkpoint --include monitor:`
+    exports the trail as one self-verifying evidence doc."""
+    import argparse
+    import contextlib
+    import io
+
+    from attest import cli, logmonitor
+    from attest.store import Store
+
+    monkeypatch.setattr(cli.settings, "data_dir", tmp_path)
+    monkeypatch.setattr(cli.settings, "kms_key_id", None)
+    state_file = tmp_path / "mon.json"
+    doc = {"schema": "attest.issuer/1", "issuer_key": "K" * 43, "key_receipts": []}
+    cp = {
+        "id": "rcpt_cp",
+        "visit_id": "log:7:ab",
+        "sequence": 7,
+        "payload_hash": "cd" * 32,
+        "signature": "s",
+        "public_key": doc["issuer_key"],
+        "payload": {"record_type": "log_checkpoint", "tree_size": 7, "root_sha256": "ab" * 32},
+    }
+    head = {"tree_size": 7, "root_sha256": "ab" * 32, "checkpoint": cp}
+    monkeypatch.setattr(cli, "_fetch_issuer_doc", lambda url: doc)
+    monkeypatch.setattr(logmonitor, "fetch_json", lambda url, client=None: head)
+
+    def fake_check(state, doc_, head_, fc, at):
+        return (
+            {
+                "schema": logmonitor.STATE_SCHEMA,
+                "issuer_key": doc_["issuer_key"],
+                "tree_size": 7,
+                "root_sha256": "ab" * 32,
+                "checkpoint_id": "rcpt_cp",
+                "checked_at": at,
+            },
+            True,
+            ["pinned checkpoint rcpt_cp…"],
+        )
+
+    monkeypatch.setattr(logmonitor, "check", fake_check)
+    ns = argparse.Namespace(
+        url="https://deploy.example",
+        issuer=None,
+        state=str(state_file),
+        interval=60,
+        once=True,
+        json=False,
+        witness=None,
+        journal=True,
+    )
+    buf = io.StringIO()
+    with pytest.raises(SystemExit) as excinfo:
+        with contextlib.redirect_stdout(buf):
+            cli._monitor(ns)
+    assert excinfo.value.code == 0
+    assert "journaled observation" in buf.getvalue()
+
+    store = Store(tmp_path / "attest.sqlite3")
+    obs = [r for r in store.receipts() if r.payload.get("record_type") == "monitor_observation"]
+    assert len(obs) == 1
+    assert obs[0].payload["outcome"] == "pinned"
+    assert obs[0].payload["subject"]["url"] == "https://deploy.example"
+    assert obs[0].payload["served_head"]["tree_size"] == 7
+    assert obs[0].payload["served_doc"] is None  # steady-state stays lean
+    # Idempotent: re-journaling the identical observation reuses the receipt.
+    from attest.engine import VisitEngine  # noqa: F401 — shape check only
+
+    store.close()
+
+    # --include monitor: embeds the trail + proofs in the checkpoint doc.
+    out = tmp_path / "evidence.json"
+    with contextlib.redirect_stdout(io.StringIO()):
+        cli._checkpoint(argparse.Namespace(out=str(out), timestamp=False, witness=[], include=["monitor:"]))
+    evdoc = json.loads(out.read_text(encoding="utf-8"))
+    assert len(evdoc["receipts"]) == 1
+    assert evdoc["receipts"][0]["payload"]["record_type"] == "monitor_observation"
+    assert evdoc["receipts"][0]["payload_hash"] in evdoc["proofs"]
+
+    def verify_doc(**kw):
+        v = argparse.Namespace(
+            **{
+                "key": None,
+                "issuer_url": None,
+                "json": True,
+                "checkpoint": None,
+                "against": None,
+                "witness_url": None,
+                "witness_key": None,
+                "witness_threshold": 1,
+                **kw,
+            }
+        )
+        b = io.StringIO()
+        with contextlib.redirect_stdout(b):
+            cli._verify(v)
+        return json.loads(b.getvalue())
+
+    verdict = verify_doc(bundle=str(out))
+    assert verdict["ok"] and verdict["kind"] == "log_checkpoint"
+    assert "1 embedded receipt(s)" in verdict["detail"]
+
+    # A tampered embedded receipt fails closed — payload hash no longer
+    # matches its signature.
+    bad = json.loads(out.read_text(encoding="utf-8"))
+    bad["receipts"][0]["payload"]["outcome"] = "diverged"
+    bad_path = tmp_path / "bad-evidence.json"
+    bad_path.write_text(json.dumps(bad))
+    with pytest.raises(SystemExit) as excinfo:
+        buf2 = io.StringIO()
+        with contextlib.redirect_stdout(buf2):
+            cli._verify(
+                argparse.Namespace(
+                    bundle=str(bad_path),
+                    key=None,
+                    issuer_url=None,
+                    json=True,
+                    checkpoint=None,
+                    against=None,
+                    witness_url=None,
+                    witness_key=None,
+                    witness_threshold=1,
+                )
+            )
+    assert excinfo.value.code == 1
+
+    # An embedded receipt without an inclusion proof fails closed too —
+    # 'inside the log' must be proven, not implied.
+    noproof = json.loads(out.read_text(encoding="utf-8"))
+    noproof["proofs"] = {}
+    noproof_path = tmp_path / "noproof.json"
+    noproof_path.write_text(json.dumps(noproof))
+    with pytest.raises(SystemExit) as excinfo:
+        buf3 = io.StringIO()
+        with contextlib.redirect_stdout(buf3):
+            cli._verify(
+                argparse.Namespace(
+                    bundle=str(noproof_path),
+                    key=None,
+                    issuer_url=None,
+                    json=True,
+                    checkpoint=None,
+                    against=None,
+                    witness_url=None,
+                    witness_key=None,
+                    witness_threshold=1,
+                )
+            )
+    assert excinfo.value.code == 1
+
+    # A receipt signed by a foreign key must not ride the issuer's doc —
+    # lineage membership is checked before the signature.
+    from attest.ledger import Signer
+
+    foreign = Signer.ephemeral().issue(
+        visit_id="monitor:foreign",
+        sequence=1,
+        prev_hash=None,
+        facts={"record_type": "monitor_observation", "outcome": "diverged"},
+    )
+    grafted = json.loads(out.read_text(encoding="utf-8"))
+    grafted["receipts"].append(foreign.model_dump(mode="json"))
+    grafted_path = tmp_path / "grafted.json"
+    grafted_path.write_text(json.dumps(grafted))
+    with pytest.raises(SystemExit) as excinfo:
+        buf4 = io.StringIO()
+        with contextlib.redirect_stdout(buf4):
+            cli._verify(
+                argparse.Namespace(
+                    bundle=str(grafted_path),
+                    key=None,
+                    issuer_url=None,
+                    json=True,
+                    checkpoint=None,
+                    against=None,
+                    witness_url=None,
+                    witness_key=None,
+                    witness_threshold=1,
+                )
+            )
+    assert excinfo.value.code == 1
+
+
+def test_monitor_observation_mints_and_is_idempotent(engine):
+    """The journal receipt chains like every other receipt and dedups on
+    identical observation content."""
+    obs = {
+        "observed_at": "2026-01-01T00:00:00+00:00",
+        "subject": {"url": "https://deploy.example", "issuer_key": "K"},
+        "outcome": "steady",
+        "served_head": {"tree_size": 3, "root_sha256": "ab" * 32, "checkpoint_id": "x"},
+    }
+    r1 = engine.issue_monitor_observation(dict(obs))
+    r2 = engine.issue_monitor_observation(dict(obs))
+    assert r1.id == r2.id
+    assert r1.visit_id.startswith("monitor:")
+    assert r1.payload["record_type"] == "monitor_observation"
+    assert r1.payload["outcome"] == "steady"
+    other = engine.issue_monitor_observation({**obs, "outcome": "alert"})
+    assert other.id != r1.id
+
+
+def test_monitor_journal_mints_alert_outcome_with_served_material(tmp_path, monkeypatch, capsys):
+    """An ALERT cycle embeds the verbatim served doc — the signed
+    contradiction is the evidence, and it rides inside the receipt."""
+    import argparse
+    import contextlib
+    import io
+
+    from attest import cli, logmonitor
+    from attest.store import Store
+
+    monkeypatch.setattr(cli.settings, "data_dir", tmp_path)
+    monkeypatch.setattr(cli.settings, "kms_key_id", None)
+    state_file = tmp_path / "mon.json"
+    # Pre-seed a pin so the cycle has prior state to contradict.
+    state_file.write_text(
+        json.dumps(
+            {
+                "schema": logmonitor.STATE_SCHEMA,
+                "issuer_key": "K" * 43,
+                "tree_size": 9,
+                "root_sha256": "ef" * 32,
+                "checkpoint_id": "rcpt_old",
+                "checked_at": "t",
+            }
+        ),
+        encoding="utf-8",
+    )
+    doc = {"schema": "attest.issuer/1", "issuer_key": "K" * 43, "key_receipts": []}
+    cp = {
+        "id": "rcpt_new",
+        "visit_id": "log:7:cd",
+        "sequence": 7,
+        "payload_hash": "ab" * 32,
+        "signature": "s",
+        "public_key": doc["issuer_key"],
+        "payload": {"record_type": "log_checkpoint", "tree_size": 7, "root_sha256": "cd" * 32},
+    }
+    head = {"tree_size": 7, "root_sha256": "cd" * 32, "checkpoint": cp}
+    monkeypatch.setattr(cli, "_fetch_issuer_doc", lambda url: doc)
+    monkeypatch.setattr(logmonitor, "fetch_json", lambda url, client=None: head)
+    monkeypatch.setattr(
+        logmonitor,
+        "check",
+        lambda state, d, h, fc, at: (
+            None,
+            False,
+            ["ALERT: signed head regressed — was 9 leaves, now 7"],
+        ),
+    )
+    ns = argparse.Namespace(
+        url="https://deploy.example",
+        issuer=None,
+        state=str(state_file),
+        interval=60,
+        once=True,
+        json=False,
+        witness=None,
+        journal=True,
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        with contextlib.redirect_stdout(io.StringIO()):
+            cli._monitor(ns)
+    assert excinfo.value.code == 1  # the watch failed — but the evidence wrote
+
+    store = Store(tmp_path / "attest.sqlite3")
+    obs = [r for r in store.receipts() if r.payload.get("record_type") == "monitor_observation"]
+    assert len(obs) == 1
+    assert obs[0].payload["outcome"] == "alert"
+    assert obs[0].payload["served_doc"]["checkpoint"]["id"] == "rcpt_new"
+    assert obs[0].payload["pin_before"]["tree_size"] == 9
+    store.close()
+
+
+def test_witness_refusal_never_touches_a_migrating_legacy_pin(engine, store, household, schedule, t0):
+    """HIGH audit fix: the legacy→canonical migration scan is read-only until
+    the offer is PROVEN. A refused offer must leave every slot untouched —
+    otherwise a fork offer could burn the very pin that refused it, and the
+    retry would sail through on a wiped slate."""
+    from attest import logmonitor
+
+    w_store, w_signer = _witness_deployment()
+    k_old = engine.signer.public_key_b64
+    _seed(engine, household[0], t0)
+    cp_small = engine.issue_log_checkpoint()
+
+    k_new, receipts = _rotated_issuer(engine, store)
+    doc_v2 = {"schema": "attest.issuer/1", "issuer_key": k_new, "key_receipts": receipts}
+
+    # Pre-fix debris: a pin minted under the CLAIMED tip (pre-canonical
+    # builds keyed on issuer_key as presented). It attests a LARGER tree
+    # than the head about to be offered — the offer must be refused.
+    legacy = {
+        "schema": logmonitor.WITNESS_SCHEMA,
+        "issuer_key": k_new,
+        "tree_size": cp_small.payload["tree_size"] + 5,
+        "root_sha256": "aa" * 32,
+        "checkpoint_id": "rcpt_stale",
+    }
+    w_store.put_setting(f"witness:{k_new}", legacy)
+    assert w_store.setting(f"witness:{k_old}") is None  # canonical slot empty
+
+    status, _ = logmonitor.witness_cosign(
+        w_store,
+        w_signer,
+        {"issuer_doc": doc_v2, "checkpoint": cp_small.model_dump(mode="json")},
+    )
+    assert status == 409
+    # The refused offer wrote NOTHING: no canonical repin, no tombstone —
+    # the migrated-candidate pin survives to refuse the retry.
+    assert w_store.setting(f"witness:{k_new}") == legacy
+    assert w_store.setting(f"witness:{k_old}") is None
+
+
+def test_witness_success_tombstones_every_family_alias_slot(engine, store, household, schedule, t0):
+    """MEDIUM audit fix: two historical claims can each leave a legacy slot.
+    Migration binds the NEWEST family pin — the furthest head the witness
+    attested — and a success tombstones EVERY losing alias, or the stale
+    slots would keep publishing old heads as if independent issuers."""
+    from attest import logmonitor
+
+    w_store, w_signer = _witness_deployment()
+    k_old = engine.signer.public_key_b64
+
+    _seed(engine, household[0], t0)
+    cp1 = engine.issue_log_checkpoint()
+    k_mid, _ = _rotated_issuer(engine, store)
+    _seed(engine, household[0], t0 - timedelta(hours=1), n=2)
+    cp2 = engine.issue_log_checkpoint()
+    k_new, receipts = _rotated_issuer(engine, store)
+
+    w_store.put_setting(
+        f"witness:{k_mid}",
+        {
+            "schema": logmonitor.WITNESS_SCHEMA,
+            "issuer_key": k_mid,
+            "tree_size": cp1.payload["tree_size"],
+            "root_sha256": cp1.payload["root_sha256"],
+            "checkpoint_id": cp1.id,
+        },
+    )
+    w_store.put_setting(
+        f"witness:{k_new}",
+        {
+            "schema": logmonitor.WITNESS_SCHEMA,
+            "issuer_key": k_new,
+            "tree_size": cp2.payload["tree_size"],
+            "root_sha256": cp2.payload["root_sha256"],
+            "checkpoint_id": cp2.id,
+        },
+    )
+
+    doc_v3 = {"schema": "attest.issuer/1", "issuer_key": k_new, "key_receipts": receipts}
+    _seed(engine, household[0], t0 - timedelta(hours=2), n=3)
+    cp3 = engine.issue_log_checkpoint()
+    status, out = logmonitor.witness_cosign(
+        w_store,
+        w_signer,
+        {"issuer_doc": doc_v3, "checkpoint": cp3.model_dump(mode="json")},
+    )
+    assert status == 200
+    # The newest legacy won: continuity bridged from cp2's head — pinned
+    # under the lineage root, not either claimed alias.
+    assert out["pinned"]["issuer_key"] == k_old
+    assert w_store.setting(f"witness:{k_old}")["tree_size"] == cp3.payload["tree_size"]
+    # Every losing family slot is a tombstone now — neither publishes a
+    # stale head from /api/witness/heads again.
+    for slot in (k_mid, k_new):
+        dead = w_store.setting(f"witness:{slot}")
+        assert dead["schema"] == "attest.witness-pin-migrated/1"
+        assert dead["migrated_to"] == k_old
+
+
+def test_lineage_root_is_deterministic_under_a_reordered_merge(engine):
+    """MEDIUM audit fix: the requester orders the key_receipts pool. Two
+    predecessors consent-rotating into the SAME successor is a merge — the
+    walk must pick the same hop every time, or an issuer could order its
+    pool to yield whichever 'canonical' pin slot it prefers."""
+    from attest.ledger import Signer, lineage_root
+
+    sa, sb, sn = Signer.ephemeral(), Signer.ephemeral(), Signer.ephemeral()
+    receipts = []
+    for retiring in (sa, sb):
+        rot = retiring.issue(
+            visit_id="key:rot",
+            sequence=1,
+            prev_hash=None,
+            facts={
+                "record_type": "key_rotation",
+                "previous_key": retiring.public_key_b64,
+                "new_key": sn.public_key_b64,
+            },
+        )
+        adopt = sn.issue(
+            visit_id="key:adopt",
+            sequence=len(receipts) + 2,
+            prev_hash=None,
+            facts={
+                "record_type": "key_adoption",
+                "rotation_receipt": {"id": rot.id, "hash": rot.payload_hash},
+                "previous_key": retiring.public_key_b64,
+                "new_key": sn.public_key_b64,
+            },
+        )
+        receipts += [rot, adopt]
+
+    expected = min(sa.public_key_b64, sb.public_key_b64)
+    assert lineage_root(sn.public_key_b64, receipts) == expected
+    assert lineage_root(sn.public_key_b64, list(reversed(receipts))) == expected

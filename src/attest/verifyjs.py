@@ -747,6 +747,29 @@ async function checkLog(byName,trustedSet,refs,bad,ok){
         +"does not reach the signed tree head");continue;}
     proven++;
   }
+  /* Embedded evidence receipts (`attest checkpoint --include monitor:`):
+     each must verify under the issuer lineage AND carry a proof reaching
+     the signed head — CLI _verify_log_doc parity, every failure fatal. */
+  if(doc.receipts!==undefined){
+    if(!Array.isArray(doc.receipts)||doc.receipts.length>2048){
+      bad("log_checkpoint.json: 'receipts' must be a list of at most 2048");return;}
+    const rsec=get(dn,"receipts"),rNodes=rsec&&rsec.t==="arr"?rsec.v:[];
+    const seenIds=new Set();
+    for(let i=0;i<doc.receipts.length;i++){
+      const r=doc.receipts[i]||{};
+      const rid=String(r.id||"?").slice(0,24);
+      if(seenIds.has(r.id)){bad(`log_checkpoint.json: embedded receipt ${esc(rid)}… listed twice`);return;}
+      seenIds.add(r.id);
+      if(!trustedSet||!trustedSet.has(r.public_key)){
+        bad(`log_checkpoint.json: embedded receipt ${esc(rid)}… signed outside the issuer lineage`);return;}
+      const rc=await checkReceipt(rNodes[i]);
+      if(!rc.ok){bad(`log_checkpoint.json: embedded receipt ${esc(rid)}… ${esc(rc.why)}`);return;}
+      const pr=proofs[r.payload_hash];
+      if(!pr||typeof pr!=="object"||!await _incOk(r.payload_hash,size,pr.leaf_index,pr.path||[],rootHex)){
+        bad(`log_checkpoint.json: embedded receipt ${esc(rid)}… carries no working inclusion proof`);return;}
+      proven++;
+    }
+  }
   /* witness counter-signatures ride the checkpoint doc — verify each under
      its own signer's key and count only those whose subject binds THIS head;
      auxiliary attestation, never the gate. The count tracks INDEPENDENT
@@ -775,9 +798,13 @@ async function checkLog(byName,trustedSet,refs,bad,ok){
      a present one that fails is a lie, not a downgrade (logmonitor
      check_cosig_anchors parity). */
   let anchored=0;
-  const asec=get(dn,"cosig_anchors"),aNodes=asec&&asec.t==="obj"?asec.v:{};
-  for(const cid of Object.keys(doc.cosig_anchors||{})){
-    const anchor=(doc.cosig_anchors||{})[cid];
+  const asec=get(dn,"cosig_anchors");
+  /* Python parity: a non-object cosig_anchors is absent, not hostile — but
+     a present-and-broken anchor entry is a lie and fails closed. */
+  const anchorsObj=(doc.cosig_anchors&&typeof doc.cosig_anchors==="object"
+    &&!Array.isArray(doc.cosig_anchors))?doc.cosig_anchors:{};
+  for(const cid of Object.keys(anchorsObj)){
+    const anchor=anchorsObj[cid];
     const cosig=(doc.cosignatures||[]).find(c=>c&&c.id===cid);
     if(!cosig){
       bad(`log_checkpoint.json: cosig_anchors ${esc(cid)} anchors a cosignature `
@@ -789,8 +816,8 @@ async function checkLog(byName,trustedSet,refs,bad,ok){
     if(acp.public_key!==cosig.public_key){
       bad(`log_checkpoint.json: cosig_anchors ${esc(cid)}: anchor head not `
         +"signed by the cosig's own witness key");continue;}
-    const anode=aNodes[cid];
-    const arc=anode?await checkReceipt(anode.v&&anode.v.checkpoint)
+    const anode=get(asec,cid);
+    const arc=anode?await checkReceipt(get(anode,"checkpoint"))
       :{ok:false,why:"anchor checkpoint missing from canonical map"};
     if(!arc.ok){bad(`log_checkpoint.json: cosig_anchors ${esc(cid)}: ${arc.why}`);continue;}
     const proof=anchor.proof||{};
