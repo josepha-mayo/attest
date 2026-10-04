@@ -419,7 +419,24 @@ def test_packs_embed_browser_verifier(engine, store, household, schedule, t0, tm
 
 
 def test_verify_html_is_self_contained():
-    assert "http://" not in VERIFY_HTML and "https://" not in VERIFY_HTML  # no CDN
+    # No external resource loads — the page is self-contained crypto.
+    # (URL literals are fine: the live cross-check fetches deployment URLs.)
+    for pat in (
+        'src="http',
+        "src='http",
+        'href="http',
+        "href='http",
+        'src="',
+        "src='",
+        "url(http",
+        "@import",
+        "<link",
+        "<img",
+        "fetch('http",
+        'fetch("http',
+        "import(",
+    ):
+        assert pat not in VERIFY_HTML, f"external resource reference {pat!r} in verifier"
     assert "crypto.subtle" in VERIFY_HTML  # real hashing, not a stub
     assert "BigInt" in VERIFY_HTML or "n<<" in VERIFY_HTML  # BigInt ed25519
 
@@ -1549,3 +1566,107 @@ const arm=dt=>{const dn=parseKeep(dt),o=toJS(dn)||{},kn=get(dn,'key_receipts');
     )
     assert proc.returncode == 0, proc.stderr
     assert "forward: true true true" in proc.stdout, proc.stdout
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_js_live_check_against_stubbed_deployment(engine, store, household, schedule, t0, tmp_path):
+    """The browser live cross-check is logmonitor.live_check ported, not a
+    lookalike: under a stubbed fetch serving the deployment's issuer doc and
+    signed head, every verdict branch — same head, embedded extends bridge,
+    fetched consistency proof, same-size fork, postdating pack — lands the
+    verdict the Python path reaches."""
+    from datetime import timedelta
+
+    from attest.ledger import issuer_document
+
+    site = household[0]
+    for i in range(2):
+        engine.issue_coverage_attestation(site, t0 - timedelta(hours=9 - i), t0 - timedelta(hours=8 - i))
+    cp1 = engine.issue_log_checkpoint()  # tree size 2
+    for i in range(2):
+        engine.issue_coverage_attestation(site, t0 - timedelta(hours=5 - i), t0 - timedelta(hours=4 - i))
+    cp2 = engine.issue_log_checkpoint()  # tree size 4, extends first=2
+    for i in range(2):
+        engine.issue_coverage_attestation(site, t0 - timedelta(hours=3 - i), t0 - timedelta(hours=2 - i))
+    cp3 = engine.issue_log_checkpoint()  # tree size 6, extends first=4
+
+    base = "https://dep.example"
+    issuer = issuer_document(engine.signer.public_key_b64, store.receipts())
+
+    def head(cp):
+        return {
+            "tree_size": int(cp.payload["tree_size"]),
+            "root_sha256": cp.payload["root_sha256"],
+            "checkpoint": cp.model_dump(mode="json"),
+        }
+
+    fork_cp = engine.signer.issue(
+        visit_id="log:fork",
+        sequence=99,
+        prev_hash=None,
+        facts={"record_type": "log_checkpoint", "tree_size": 2, "root_sha256": "ab" * 32},
+    )
+    bridge = engine.consistency_proof(2, 6)
+    responses = {
+        f"{base}/.well-known/attest-issuer.json": json.dumps(issuer),
+        f"{base}/api/log/consistency?first=2&size=6": json.dumps(bridge),
+    }
+    scenario = {
+        "pack_cp": cp1.model_dump(mode="json"),
+        "pack_size": 2,
+        "pack_root": cp1.payload["root_sha256"],
+        "responses": responses,
+        "heads": {
+            "same": head(cp1),
+            "embedded": head(cp2),  # extends.first == 2 names the pack's head
+            "fetched": head(cp3),  # extends.first == 4 — different ancestry
+            "fork": head(fork_cp),
+            "behind": head(cp1),  # used with pack=cp3 below
+        },
+    }
+    (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
+    (tmp_path / "scene.json").write_text(json.dumps(scenario), encoding="utf-8")
+    driver = r"""
+const fs=require('fs');
+let src=fs.readFileSync(process.argv[2],'utf8').replace(/const dz=[\s\S]*$/,'');
+const sc=JSON.parse(fs.readFileSync(process.argv[3],'utf8'));
+eval(src + `
+const RESP=sc.responses;
+globalThis.fetch=async(u)=>(u in RESP)?{ok:true,text:async()=>RESP[u]}
+  :{ok:false,status:404,text:async()=>'{}'};
+const run=async(head,cp,size,root)=>{
+  RESP['https://dep.example/api/log/head']=JSON.stringify(head);
+  packStash={node:parseKeep(JSON.stringify(cp)),size,root};
+  const rows=[];await liveCheck('https://dep.example',(c,m)=>rows.push(c));
+  return rows[rows.length-1];
+};
+(async()=>{
+  console.log('same:',await run(sc.heads.same,sc.pack_cp,sc.pack_size,sc.pack_root));
+  console.log('embedded:',await run(sc.heads.embedded,sc.pack_cp,sc.pack_size,sc.pack_root));
+  console.log('fetched:',await run(sc.heads.fetched,sc.pack_cp,sc.pack_size,sc.pack_root));
+  console.log('fork:',await run(sc.heads.fork,sc.pack_cp,sc.pack_size,sc.pack_root));
+  const cp3=sc.heads.fetched.checkpoint;
+  console.log('behind:',await run(sc.heads.same,cp3,6,cp3.payload.root_sha256));
+  packStash={node:parseKeep(JSON.stringify(sc.pack_cp)),size:2,root:sc.pack_root};
+  const r2=[];await liveCheck('notaurl',(c,m)=>r2.push(c));console.log('badurl:',r2[0]);
+  globalThis.fetch=async()=>{throw new Error('conn refused')};
+  const r3=[];await liveCheck('https://dep.example',(c,m)=>r3.push(c));console.log('down:',r3[r3.length-1]);
+})();`);
+"""
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "verify.js", "scene.json"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    out = proc.stdout
+    assert "same: ok" in out, out
+    assert "embedded: ok" in out, out
+    assert "fetched: ok" in out, out
+    assert "fork: bad" in out, out
+    assert "behind: warn" in out, out
+    assert "badurl: bad" in out, out
+    assert "down: warn" in out, out

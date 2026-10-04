@@ -408,6 +408,15 @@ def create_app(
             "img-src 'self' data:; connect-src 'self'; font-src 'self'; "
             "form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
         )
+        # Verification reads are meant to be fetched cross-origin — a verifier
+        # page (the pack's embedded verify.html on file://, a hosted copy)
+        # cross-checks the pack's signed head against the live one. GETs only;
+        # writes still refuse cross-site origins in `authorize`, and nothing
+        # credentialed serves on these paths.
+        if request.method in ("GET", "HEAD") and request.url.path.startswith(
+            ("/api/log/", "/api/witness/heads", "/.well-known/")
+        ):
+            response.headers["Access-Control-Allow-Origin"] = "*"
         return response
 
     app.state.store, app.state.engine, app.state.ring, app.state.signer = (

@@ -33,6 +33,20 @@ signed lifecycle bridges pre-rotation exports.</small></div>
 <p id="trysample-wrap" hidden><button id="trysample" type="button">Verify the bundled
 sample pack — one click, fetched from this site</button></p>
 <div id="out" role="status" aria-live="polite"></div>
+<div id="live-wrap" hidden>
+<h2>Is this still the log the deployment serves?</h2>
+<p><small>The pack proves membership in <em>a</em> signed log — a hostile deployment
+could keep a second, forked log it shows only to you, and every proof above would
+still close. Cross-check the pack's signed tree head against the head the deployment
+serves <em>everyone</em> right now:
+<input id="liveurl" type="url" size="34" placeholder="https://attest.example.com"
+aria-label="Deployment base URL">
+<button id="livego" type="button">Cross-check the live log</button></small></p>
+<div id="liveout" role="status" aria-live="polite"></div>
+<p><small>This reads <code>/.well-known/attest-issuer.json</code>,
+<code>/api/log/head</code>, and <code>/api/log/consistency</code> — the only
+network step this page takes; everything else ran fully offline.</small></p>
+</div>
 <h2>What this does and does not establish</h2>
 <p><small>A green result proves the signed records are intact and were issued under the pinned
 issuer key — integrity, not physical truth. It does not prove anyone was present, absent, or
@@ -476,6 +490,10 @@ function deriveStance(js){
    verification to the deployment's current issuer and supplies the signed
    lifecycle receipts that extend trust across rotations. */
 let issuerDoc=null;
+/* The pack's validated signed tree head — stashed by checkLog so the
+   optional live cross-check (verify --issuer-url parity) can compare it
+   against the head the deployment serves NOW. */
+let packStash=null;
 const _TOOLNAMES=new Set(["verify_case.py","verify_bundle.py","verify.html","index.html","README.txt"]);
 async function checkTools(byName,trustedSet,scope,bad,ok){
   /* verifier_manifest.json pins the pack's tooling BYTES to the issuer —
@@ -531,6 +549,139 @@ async function _incOk(leafHex,size,index,pathHex,rootHex){
   }
   return sn===0&&r===rootHex;
 }
+/* RFC 6962 §2.1.2 consistency verification (transparency.py parity): the
+   proof that newRoot's tree extends oldRoot's. When the older size is an
+   exact power of two the minimal proof omits the old root — the verifier
+   knows it, so it is prepended. */
+async function _conOk(oldRootHex,oldSize,newRootHex,newSize,pathHex){
+  if(oldSize===newSize)return(!pathHex||!pathHex.length)&&oldRootHex===newRootHex;
+  if(!Number.isInteger(oldSize)||!Number.isInteger(newSize)||oldSize<1
+    ||oldSize>=newSize||!pathHex||!pathHex.length)return false;
+  const cat=(...a)=>{const n=a.reduce((t,x)=>t+x.length,0);const o=new Uint8Array(n);let p=0;
+    for(const x of a){o.set(x,p);p+=x.length;}return o;};
+  const path=(oldSize&(oldSize-1))===0?[oldRootHex,...pathHex]:pathHex.slice();
+  let fn=oldSize-1,sn=newSize-1;
+  while(fn&1){fn>>=1;sn>>=1;}
+  let fr=path[0],sr=path[0];
+  for(let i=1;i<path.length;i++){
+    const c=path[i];
+    if(!/^[0-9a-f]{64}$/i.test(c)||sn===0)return false;
+    if((fn&1)||fn===sn){
+      fr=await sha256hex(cat(new Uint8Array([1]),hex2b(c),hex2b(fr)));
+      sr=await sha256hex(cat(new Uint8Array([1]),hex2b(c),hex2b(sr)));
+      while(fn&&!(fn&1)){fn>>=1;sn>>=1;}
+    }else sr=await sha256hex(cat(new Uint8Array([1]),hex2b(sr),hex2b(c)));
+    fn>>=1;sn>>=1;
+  }
+  return sn===0&&fr===oldRootHex&&sr===newRootHex;
+}
+/* A checkpoint's embedded `extends` bridge — the issuer's signed attestation
+   that this head extends the predecessor it names. Mirrors verify_extends:
+   true/false when a bridge resolves, null when absent, malformed, or
+   bridging a different ancestry than the caller asks about. */
+async function _extOk(p,firstSize,firstRootHex){
+  const ext=p&&p.extends;
+  if(!ext||typeof ext!=="object")return null;
+  const ef=ext.first,er=ext.first_root_sha256,size=p.tree_size,root=p.root_sha256;
+  if(!Number.isInteger(ef)||typeof er!=="string"||!/^[0-9a-f]{64}$/i.test(er)
+    ||!Number.isInteger(size)||typeof root!=="string"||!/^[0-9a-f]{64}$/i.test(root)
+    ||!Array.isArray(ext.proof))return null;
+  if(firstSize!=null&&ef!==firstSize)return null;
+  if(firstRootHex!=null&&er.toLowerCase()!==String(firstRootHex).toLowerCase())return false;
+  return await _conOk(er,ef,root,size,ext.proof);
+}
+/* A signed tree head — signature, lineage, and head shape. Mirrors
+   logmonitor._check_sth: returns [payload|null, why|null]. */
+async function _sthCheck(node,trustedSet){
+  const cp=node?toJS(node):null;
+  if(!cp||typeof cp!=="object")return[null,"checkpoint missing"];
+  const p=cp.payload||{};
+  if(p.record_type!=="log_checkpoint")return[null,"not a log_checkpoint receipt"];
+  if(!trustedSet||!trustedSet.has(cp.public_key))
+    return[null,"signed outside the issuer's certified lineage"];
+  const rc=await checkReceipt(node);
+  if(!rc.ok)return[null,"checkpoint signature invalid: "+rc.why];
+  const size=p.tree_size,root=p.root_sha256;
+  if(!Number.isInteger(size)||size<1||typeof root!=="string"||!/^[0-9a-f]{64}$/i.test(root))
+    return[null,"malformed tree head"];
+  return[p,null];
+}
+/* The live fork cross-check (logmonitor.live_check parity): the pack proves
+   membership in A signed log — this asks whether that log is the one the
+   deployment still serves everyone. Fetches the deployment's issuer doc and
+   live head, verifies BOTH checkpoints under the live lineage, then compares:
+   same head → agree; same size different root → an unforgeable fork; the
+   live head ahead → its own signed `extends` bridge or a fetched consistency
+   proof must bridge from the pack's head — a forked history cannot produce
+   one. The only online step this page ever takes; say(cls,msg) renders. */
+async function liveCheck(base,say){
+  if(!packStash){say("bad","no checkpoint in this pack to cross-check");return;}
+  base=String(base||"").trim().replace(/[/]+$/,"");
+  if(!/^https?:[/][/]/i.test(base)){say("bad","enter the deployment URL (https://… or http://…)");return;}
+  say("","fetching the deployment's issuer document and live log head…");
+  let docDn,headDn;
+  try{
+    const dr=await fetch(base+"/.well-known/attest-issuer.json");
+    if(!dr.ok)throw new Error("issuer doc HTTP "+dr.status);
+    docDn=parseKeep(await dr.text());
+    const hr=await fetch(base+"/api/log/head");
+    if(!hr.ok)throw new Error("log head HTTP "+hr.status);
+    headDn=parseKeep(await hr.text());
+  }catch(e){
+    say("warn","live check unreachable ("+esc(e.message)+") — the offline "
+      +"verification above still holds; the fork question just can't be "
+      +"answered without the deployment");return;
+  }
+  const d=toJS(docDn)||{};
+  if(d.schema!=="attest.issuer/1"||typeof d.issuer_key!=="string"){
+    say("bad","live issuer document is not attest.issuer/1");return;}
+  const kn=get(docDn,"key_receipts"),inodes=kn&&kn.t==="arr"?kn.v:[];
+  const liveTrusted=new Set([d.issuer_key,
+    ...(await trustedKeys(d.issuer_key,inodes)),
+    ...(await descendantKeys(d.issuer_key,inodes))]);
+  /* Both heads are verified under the LIVE lineage — a pack checkpoint from
+     some other issuer fails here, and so does a live head outside its own
+     certified chain. */
+  const pcErr=(await _sthCheck(packStash.node,liveTrusted))[1];
+  if(pcErr){say("bad","pack checkpoint fails under the live lineage: "+esc(pcErr));return;}
+  const liveCpNode=get(headDn,"checkpoint");
+  if(!liveCpNode){say("warn","deployment serves no signed head — cannot cross-check");return;}
+  const [lpay,lerr]=await _sthCheck(liveCpNode,liveTrusted);
+  if(lerr){say("warn","live checkpoint does not validate ("+esc(lerr)
+    +") — cannot cross-check");return;}
+  const ps=packStash.size,pr=packStash.root,ls=lpay.tree_size,lr=lpay.root_sha256;
+  if(ps===ls){
+    if(pr===lr)say("ok",`pack's signed head IS the live head — tree size ${ps}: `
+      +"the log this pack proves membership in is the one the deployment still serves");
+    else say("bad",`FORK: pack and live heads both sign tree size ${ps} with different `
+      +"roots — the deployment served this auditor a different log");
+    return;
+  }
+  if(ps<ls){
+    const emb=await _extOk(lpay,ps,pr);
+    if(emb===true){say("ok",`live checkpoint's own signed bridge extends the pack's `
+      +`head (${ps} → ${ls} leaves) — the pack's log is the one still served`);return;}
+    if(emb===false){say("bad","FORK: the live checkpoint signs a bridge claiming the "
+      +"pack's tree size but starting from a different root — split-view log");return;}
+    let proof=null;
+    try{
+      const cr=await fetch(`${base}/api/log/consistency?first=${ps}&size=${ls}`);
+      if(cr.ok)proof=toJS(parseKeep(await cr.text()));
+    }catch(e){proof=null;}
+    if(!proof||!Array.isArray(proof.proof)){
+      say("bad","live head cannot bridge from the pack's head — the deployment cannot "
+        +"show the pack's log inside the one it serves now");return;
+    }
+    if(await _conOk(pr,ps,lr,ls,proof.proof))
+      say("ok",`live log provably extends the pack's head (${ps} → ${ls} leaves) — `
+        +"the pack's log is the one still served");
+    else say("bad","FORK: the deployment's live log does not extend the head this "
+      +"pack signed — the bridging consistency proof cannot be produced");
+    return;
+  }
+  say("warn",`pack's signed head (size ${ps}) postdates the live head (${ls}) — the `
+    +"pack may come from a newer or different log instance");
+}
 async function checkLog(byName,trustedSet,refs,bad,ok){
   /* log_checkpoint.json turns 'each receipt verifies' into 'each receipt was
      committed to the deployment's published log' — a signed tree head plus an
@@ -554,6 +705,9 @@ async function checkLog(byName,trustedSet,refs,bad,ok){
   const size=p.tree_size,rootHex=p.root_sha256;
   if(!Number.isInteger(size)||size<1||typeof rootHex!=="string"||!/^[0-9a-f]{64}$/i.test(rootHex)){
     bad("log_checkpoint.json: malformed tree head");return;}
+  /* Validated signed head — the live cross-check compares it against the
+     head the deployment serves now. */
+  packStash={node:cpNode,size,root:rootHex};
   let proven=0;
   for(const ref of refs||[]){
     if(!ref||!ref.payload_hash)continue;
@@ -583,6 +737,9 @@ async function checkLog(byName,trustedSet,refs,bad,ok){
     if(!cp2||cp2.record_type!=="witness_cosignature")continue;
     if(cp2.subject_checkpoint!==cp.id||cp2.subject_tree_size!==size
       ||cp2.subject_root_sha256!==rootHex)continue;
+    /* the cosig must name THIS issuer — attesting another deployment's
+       head never counts here (logmonitor parity) */
+    if(trustedSet&&!trustedSet.has(cp2.subject_issuer))continue;
     const pk=raw.public_key;
     if(seenCosig.has(raw.id)||seenKeys.has(pk)||(trustedSet&&trustedSet.has(pk)))continue;
     const rc=await checkReceipt(coNodes[i]);
@@ -993,6 +1150,7 @@ async function go(fileList){
   const out=document.getElementById("out");
   try{
     let files=[...fileList];if(!files.length)return;
+    packStash=null;  /* a fresh drop re-arms the live check's subject */
     /* A fresh doc replaces the armed pin; the pin persists across drops so a
        reviewer can arm it once and check several packs. */
     let freshDoc=null,multiDoc=false;
@@ -1036,6 +1194,10 @@ async function go(fileList){
     });
     out.innerHTML="<p>verifying "+files.length+" file(s)…</p>";
     out.innerHTML=await verifyFiles(files);
+    /* A pack with a validated signed head can answer the fork question —
+       reveal the live cross-check; a checkpoint-less pack cannot. */
+    const lw=document.getElementById("live-wrap");
+    if(lw)lw.hidden=!packStash;
   }catch(e){out.innerHTML="<div class='row bad'>verifier error: "+esc(e.message)+"</div>";}}
 const dz=document.getElementById("drop");
 dz.ondragover=e=>{e.preventDefault();dz.classList.add("over");};
@@ -1043,10 +1205,19 @@ dz.ondragleave=()=>dz.classList.remove("over");
 dz.ondrop=e=>{e.preventDefault();dz.classList.remove("over");go(e.dataTransfer.files);};
 document.getElementById("pick").onchange=e=>go(e.target.files);
 document.getElementById("pickdir").onchange=e=>go(e.target.files);
+const _lgo=document.getElementById("livego");
+if(_lgo)_lgo.onclick=()=>liveCheck(document.getElementById("liveurl").value,
+  (c,m)=>{document.getElementById("liveout").innerHTML="<div class='row "+c+"'>"+m+"</div>";});
 /* Hosted copies (Pages, a deployment's /verify-pack) sit next to
    sample-pack.zip — offer one-click verification. file:// embedded copies
    can't fetch; the button stays hidden. */
 if(location.protocol.indexOf("http")===0){
+  /* Served by a deployment (its /verify-pack page), the base URL is already
+     known — prefill it so the cross-check is one click. A hosted copy (Pages)
+     isn't a deployment: the probe 404s and the field stays a placeholder. */
+  fetch("/.well-known/attest-issuer.json",{method:"HEAD"}).then(r=>{
+    if(r.ok)document.getElementById("liveurl").value=location.origin;
+  }).catch(()=>{});
   fetch("sample-pack.zip",{method:"HEAD"}).then(r=>{
     if(!r.ok)return;
     document.getElementById("trysample-wrap").hidden=false;
