@@ -1066,6 +1066,34 @@ def _verify(args: argparse.Namespace) -> None:
         if args.issuer_url.startswith(("http://", "https://")):
             live_base = urlsplit(args.issuer_url)._replace(path="", query="", fragment="").geturl()
 
+    # Named-witness policy resolution: --witness-key names raw keys;
+    # --witness-url names DEPLOYMENTS — each one's issuer document resolves
+    # to its certified lineage, so "vouched by https://witness.example" means
+    # the whole rotation-aware identity, not one frozen key. A witness that
+    # can't be identified can't vouch — an unreachable doc fails loudly.
+    required_witnesses = set(getattr(args, "witness_key", None) or [])
+    witness_names: dict[str, str] = {}
+    for _wurl in getattr(args, "witness_url", None) or []:
+        from . import logmonitor as _lmw
+
+        _wdoc = _fetch_issuer_doc(_wurl)
+        _host = urlsplit(_wurl).netloc if "://" in _wurl else _wurl
+        for _k in _lmw._trusted_set(_wdoc):
+            witness_names.setdefault(_k, _host or _wurl)
+            required_witnesses.add(_k)
+        print(
+            f"requiring a counter-signature from witness {_host or _wurl} "
+            f"({len(_lmw._trusted_set(_wdoc))} key(s) in its certified lineage)",
+            file=sys.stderr if json_mode else sys.stdout,
+        )
+    witness_threshold = int(getattr(args, "witness_threshold", 1) or 1)
+    if witness_threshold < 1:
+        fail("--witness-threshold must be at least 1")
+    if required_witnesses:
+        required_witnesses = sorted(required_witnesses)
+    else:
+        required_witnesses = []
+
     path = Path(args.bundle)
     remote = args.bundle.startswith(("http://", "https://"))
     # --issuer-url pins the artifact to a DEPLOYMENT's discovery document
@@ -1102,7 +1130,9 @@ def _verify(args: argparse.Namespace) -> None:
             json_mode=json_mode,
             live_base=live_base,
             issuer_doc=issuer_doc,
-            required_witnesses=getattr(args, "witness_key", None),
+            required_witnesses=required_witnesses,
+            witness_names=witness_names,
+            witness_threshold=witness_threshold,
         )
         return
     try:
@@ -1212,7 +1242,17 @@ def _verify(args: argparse.Namespace) -> None:
         or ("proof" in data and "first" in data)
         or ("path" in data and "leaf_index" in data)
     ):
-        _verify_log_doc(data, args, pinned_key, known_rotations, fail, json_mode=json_mode)
+        _verify_log_doc(
+            data,
+            args,
+            pinned_key,
+            known_rotations,
+            fail,
+            json_mode=json_mode,
+            required_witnesses=required_witnesses,
+            witness_names=witness_names,
+            witness_threshold=witness_threshold,
+        )
         return
 
     try:
@@ -1283,6 +1323,9 @@ def _verify_log_doc(
     fail,
     *,
     json_mode: bool = False,
+    required_witnesses: list | None = None,
+    witness_names: dict | None = None,
+    witness_threshold: int = 1,
 ) -> None:
     """Offline check for the CLI's transparency artifacts: a checkpoint doc
     (``attest checkpoint --out`` / a pack's ``log_checkpoint.json``), an
@@ -1416,16 +1459,25 @@ def _verify_log_doc(
             detail += (
                 f" — cosigned by {n_cosig} witness(es) ({', '.join(k[:12] + '…' for k in cosigners[:3])})"
             )
-        required_witnesses = getattr(args, "witness_key", None) or []
         if required_witnesses:
             matched = [k for k in cosigners if k in required_witnesses]
-            if not matched:
+            if len(matched) < witness_threshold:
                 fail(
-                    f"no counter-signature from a required witness — "
-                    f"{len(required_witnesses)} named key(s), {n_cosig} valid cosig(s) from none of them",
+                    f"counter-signatures from required witnesses insufficient — "
+                    f"{len(matched)} of {witness_threshold} required matched "
+                    f"({len(required_witnesses)} named key(s); {n_cosig} valid cosig(s) total)",
                     kind="log_checkpoint",
                 )
-            detail += f" — vouched by required witness {matched[0][:12]}…"
+
+            def _wname(k: str) -> str:
+                return (witness_names or {}).get(k) or (k[:12] + "…")
+
+            detail += (
+                f" — vouched by required witness {_wname(matched[0])}"
+                if witness_threshold == 1
+                else f" — vouched by {len(matched)} required witnesses "
+                f"({', '.join(_wname(k) for k in matched)})"
+            )
         # --against pins the earlier head: the checkpoint must bridge FROM
         # that exact signed head, offline, no consistency endpoint needed.
         if getattr(args, "against", None):
@@ -1544,6 +1596,8 @@ def _verify_zip(
     live_base: str | None = None,
     issuer_doc: dict | None = None,
     required_witnesses: list | None = None,
+    witness_names: dict | None = None,
+    witness_threshold: int = 1,
 ) -> None:
     """Verify a dispute pack or case pack zip in place — same checks as the
     embedded verify_case.py and the /verify page. Without --key the pack's own
@@ -1634,13 +1688,20 @@ def _verify_zip(
             cpdoc, _cp["id"], int(_p["tree_size"]), _p["root_sha256"], issuer_keys=_lineage
         )
         matched = [k for k in signers if k in required_witnesses]
-        if not matched:
+        if len(matched) < witness_threshold:
             fail(
-                f"no counter-signature from a required witness — "
-                f"{len(required_witnesses)} named key(s), {len(signers)} valid cosig(s) from none of them",
+                f"counter-signatures from required witnesses insufficient — "
+                f"{len(matched)} of {witness_threshold} required matched "
+                f"({len(required_witnesses)} named key(s); {len(signers)} valid cosig(s) total)",
                 kind=kind,
             )
-        detail += f" — vouched by required witness {matched[0][:12]}…"
+        names = witness_names or {}
+        _wname = lambda k: names.get(k) or (k[:12] + "…")  # noqa: E731
+        detail += (
+            f" — vouched by required witness {_wname(matched[0])}"
+            if witness_threshold == 1
+            else f" — vouched by {len(matched)} required witnesses ({', '.join(_wname(k) for k in matched)})"
+        )
     if json_mode:
         extra: dict = {}
         if "log_checkpoint.json" in names:
@@ -3563,6 +3624,23 @@ def main(argv: list[str] | None = None) -> None:
         help="require a counter-signature from at least one of these witness keys "
         "(repeatable) — sigsum-style named-witness policy: 'cosigned by N witnesses' "
         "counts anyone, this gates on the witnesses YOU trust",
+    )
+    s.add_argument(
+        "--witness-url",
+        action="append",
+        default=None,
+        metavar="URL",
+        help="require a counter-signature from the named witness deployment "
+        "(repeatable) — its own issuer document resolves the certified key "
+        "lineage, so the requirement survives the witness's key rotations",
+    )
+    s.add_argument(
+        "--witness-threshold",
+        type=int,
+        default=1,
+        metavar="N",
+        help="require counter-signatures from at least N of the named witnesses "
+        "(k-of-n policy — a single cooperating witness can't vouch alone)",
     )
     s.add_argument(
         "--checkpoint",

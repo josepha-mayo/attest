@@ -1085,7 +1085,7 @@ def test_verify_witness_key_gates_on_named_witnesses(
     other = Signer.ephemeral().public_key_b64
     with pytest.raises(SystemExit) as e:
         run([other])
-    assert "no counter-signature from a required witness" in str(e.value.code)
+    assert "required witnesses insufficient" in str(e.value.code)
 
     # k-of-n: the named witness among several required keys still satisfies.
     out = run([other, w_signer.public_key_b64])
@@ -1544,3 +1544,132 @@ def test_monitor_repin_survives_witness_outage_but_not_divergence(tmp_path, monk
     code, out = run({"pins": [pin]})
     assert code == 1 and "[diverged]" in out
     assert not state_file.exists()  # never repinned onto the possibly-forked head
+
+
+def test_verify_witness_url_resolves_deployments_and_threshold(
+    engine, store, household, schedule, t0, tmp_path, capsys, monkeypatch
+):
+    """--witness-url names DEPLOYMENTS, not raw keys: the witness's own issuer
+    document resolves its certified lineage, so 'vouched by https://w.example'
+    survives the witness's key rotations. --witness-threshold makes it k-of-n —
+    one cooperating witness can't satisfy a two-witness policy alone."""
+    import argparse
+    import contextlib
+    import io
+
+    from attest import cli, logmonitor
+    from attest.disputepack import build_case_pack, log_member
+    from attest.reviews import ReviewService, countersign_status
+    from tests.test_regressions import event
+
+    visit = engine.ingest(event(household[2], t0)).visit
+    engine.close_for_review(visit.id)
+    bundle = ReviewService(store, engine.signer, engine.clock).bundle(visit.id)
+    site = store.sites()[0]
+
+    w1_store, w1_signer = _witness_deployment()
+    w2_store, w2_signer = _witness_deployment()
+    issuer_doc = _doc_for(engine)
+
+    def log_with_cosigs(rs):
+        doc = log_member(engine, rs)
+        doc["cosignatures"] = []
+        for w_store, w_signer in ((w1_store, w1_signer), (w2_store, w2_signer)):
+            status, out = logmonitor.witness_cosign(
+                w_store, w_signer, {"issuer_doc": issuer_doc, "checkpoint": doc["checkpoint"]}
+            )
+            assert status == 200
+            doc["cosignatures"].append(out["cosignature"])
+        return doc
+
+    data = build_case_pack(
+        store,
+        tmp_path / "media",
+        site,
+        [(visit, bundle, countersign_status(bundle))],
+        manifest_signer=lambda m: engine.issue_export_manifest(site, m),
+        tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"site:{site.id}", t),
+        log_fn=log_with_cosigs,
+    )
+    pack = tmp_path / "case.zip"
+    pack.write_bytes(data)
+
+    w1_doc = {
+        "schema": "attest.issuer/1",
+        "issuer_key": w1_signer.public_key_b64,
+        "key_receipts": [],
+    }
+    w2_doc = {
+        "schema": "attest.issuer/1",
+        "issuer_key": w2_signer.public_key_b64,
+        "key_receipts": [],
+    }
+    monkeypatch.setattr(
+        cli,
+        "_fetch_issuer_doc",
+        lambda url: {"https://w1.example": w1_doc, "https://w2.example": w2_doc}[str(url)],
+    )
+
+    def run(witness_urls, threshold=1):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            cli._verify(
+                argparse.Namespace(
+                    bundle=str(pack),
+                    key=None,
+                    issuer_url=None,
+                    json=False,
+                    checkpoint=None,
+                    against=None,
+                    witness_key=None,
+                    witness_url=witness_urls,
+                    witness_threshold=threshold,
+                )
+            )
+        return buf.getvalue()
+
+    # A named deployment vouches — reported by host, not an opaque key prefix.
+    out = run(["https://w1.example"])
+    assert "vouched by required witness w1.example" in out
+
+    # k-of-n: two named witnesses, threshold 2 — both cosigs present, passes.
+    out = run(["https://w1.example", "https://w2.example"], threshold=2)
+    assert "vouched by 2 required witnesses" in out
+
+    # One witness missing from the named set fails the threshold.
+    only_w1 = tmp_path / "case-w1.zip"
+    data1 = build_case_pack(
+        store,
+        tmp_path / "media2",
+        site,
+        [(visit, bundle, countersign_status(bundle))],
+        manifest_signer=lambda m: engine.issue_export_manifest(site, m),
+        tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"site:{site.id}", t),
+        log_fn=lambda rs: {
+            **log_member(engine, rs),
+            "cosignatures": [
+                logmonitor.witness_cosign(
+                    w1_store,
+                    w1_signer,
+                    {"issuer_doc": issuer_doc, "checkpoint": log_member(engine, rs)["checkpoint"]},
+                )[1]["cosignature"]
+            ],
+        },
+    )
+    only_w1.write_bytes(data1)
+    with pytest.raises(SystemExit) as e:
+        with contextlib.redirect_stdout(io.StringIO()):
+            cli._verify(
+                argparse.Namespace(
+                    bundle=str(only_w1),
+                    key=None,
+                    issuer_url=None,
+                    json=False,
+                    checkpoint=None,
+                    against=None,
+                    witness_key=None,
+                    witness_url=["https://w1.example", "https://w2.example"],
+                    witness_threshold=2,
+                )
+            )
+    assert "1 of 2 required" in str(e.value.code)
