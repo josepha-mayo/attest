@@ -1023,6 +1023,12 @@ def _parse_issuer_doc(raw: bytes, source: str) -> dict:
         sys.exit(f"{source} did not serve a valid attest.issuer/1 document")
     if not isinstance(doc.get("key_receipts") or [], list):
         sys.exit(f"{source}: issuer document key_receipts is not a list")
+    # The lineage walk verifies a signature per candidate per hop — bound
+    # the pool the same way the witness endpoint does (64 entries is far
+    # past any real lifecycle), so a hostile named deployment can't serve
+    # a CPU denial-of-service amplifier as its identity document.
+    if len(doc.get("key_receipts") or []) > 64:
+        sys.exit(f"{source}: issuer document key_receipts exceeds the 64-entry bound")
     return doc
 
 
@@ -1078,7 +1084,18 @@ def _verify(args: argparse.Namespace) -> None:
 
         _wdoc = _fetch_issuer_doc(_wurl)
         _host = urlsplit(_wurl).netloc if "://" in _wurl else _wurl
-        for _k in _lmw._trusted_set(_wdoc):
+        # A revoked lineage key can still SIGN — it just can't vouch: the
+        # revocation is the issuer declaring the key suspect, so it is
+        # excluded from the named requirement (windowing by the cosig's own
+        # issued_at can't work — the suspect key signs that field too).
+        _wreceipts = []
+        for _x in _wdoc.get("key_receipts") or []:
+            try:
+                _wreceipts.append(Receipt.model_validate(_x))
+            except Exception:  # noqa: BLE001 — malformed entries just can't revoke
+                continue
+        _wrevoked = set(ledger.revoked_issuer_keys(_wreceipts, issuer_key=_wdoc["issuer_key"]))
+        for _k in _lmw._trusted_set(_wdoc) - _wrevoked:
             witness_names.setdefault(_k, _host or _wurl)
             required_witnesses.add(_k)
         print(
@@ -1460,23 +1477,25 @@ def _verify_log_doc(
                 f" — cosigned by {n_cosig} witness(es) ({', '.join(k[:12] + '…' for k in cosigners[:3])})"
             )
         if required_witnesses:
-            matched = [k for k in cosigners if k in required_witnesses]
-            if len(matched) < witness_threshold:
+            # Threshold counts distinct witness IDENTITIES, not keys: every
+            # lineage key of one --witness-url maps to that deployment's
+            # name, so a rotated witness signing with old+new keys still
+            # counts once — k-of-n really means k cooperating parties.
+            identities = sorted(
+                {(witness_names or {}).get(k, k) for k in cosigners if k in required_witnesses}
+            )
+            shown = [i if len(i) <= 40 else i[:12] + "…" for i in identities]
+            if len(identities) < witness_threshold:
                 fail(
                     f"counter-signatures from required witnesses insufficient — "
-                    f"{len(matched)} of {witness_threshold} required matched "
+                    f"{len(identities)} distinct witness(es) of {witness_threshold} required "
                     f"({len(required_witnesses)} named key(s); {n_cosig} valid cosig(s) total)",
                     kind="log_checkpoint",
                 )
-
-            def _wname(k: str) -> str:
-                return (witness_names or {}).get(k) or (k[:12] + "…")
-
             detail += (
-                f" — vouched by required witness {_wname(matched[0])}"
+                f" — vouched by required witness {shown[0]}"
                 if witness_threshold == 1
-                else f" — vouched by {len(matched)} required witnesses "
-                f"({', '.join(_wname(k) for k in matched)})"
+                else f" — vouched by {len(identities)} required witnesses ({', '.join(shown)})"
             )
         # --against pins the earlier head: the checkpoint must bridge FROM
         # that exact signed head, offline, no consistency endpoint needed.
@@ -1687,20 +1706,21 @@ def _verify_zip(
         _, signers = logmonitor.check_cosignatures(
             cpdoc, _cp["id"], int(_p["tree_size"]), _p["root_sha256"], issuer_keys=_lineage
         )
-        matched = [k for k in signers if k in required_witnesses]
-        if len(matched) < witness_threshold:
+        # Distinct witness identities, not keys — a rotated witness's two
+        # lineage keys resolve to the same deployment name and count once.
+        identities = sorted({(witness_names or {}).get(k, k) for k in signers if k in required_witnesses})
+        shown = [i if len(i) <= 40 else i[:12] + "…" for i in identities]
+        if len(identities) < witness_threshold:
             fail(
                 f"counter-signatures from required witnesses insufficient — "
-                f"{len(matched)} of {witness_threshold} required matched "
+                f"{len(identities)} distinct witness(es) of {witness_threshold} required "
                 f"({len(required_witnesses)} named key(s); {len(signers)} valid cosig(s) total)",
                 kind=kind,
             )
-        names = witness_names or {}
-        _wname = lambda k: names.get(k) or (k[:12] + "…")  # noqa: E731
         detail += (
-            f" — vouched by required witness {_wname(matched[0])}"
+            f" — vouched by required witness {shown[0]}"
             if witness_threshold == 1
-            else f" — vouched by {len(matched)} required witnesses ({', '.join(_wname(k) for k in matched)})"
+            else f" — vouched by {len(identities)} required witnesses ({', '.join(shown)})"
         )
     if json_mode:
         extra: dict = {}
@@ -2394,6 +2414,41 @@ def _monitor(args: argparse.Namespace) -> None:
                     lines.append("witness heads response is malformed — cannot compare views")
                 else:
                     wtrusted = logmonitor._trusted_set(wdoc)
+                    # Pin the WITNESS's own log head too: a served
+                    # witness_anchor only means 'in the published log' when
+                    # it provably reconciles with the head THIS monitor
+                    # pins — an anchor over a private per-victim fork
+                    # verifies in isolation and means nothing.
+                    wlog_state = None
+
+                    def _wconsistency(first: int, size: int):
+                        try:
+                            return logmonitor.fetch_json(
+                                f"{wbase}/api/log/consistency?first={first}&size={size}"
+                            )
+                        except ValueError:
+                            return None
+
+                    try:
+                        whead = logmonitor.fetch_json(f"{wbase}/api/log/head")
+                    except ValueError as exc:
+                        ok = False
+                        lines.append(f"witness log head unreachable: {exc}")
+                    else:
+                        prev_wlog = None
+                        if isinstance(state, dict):
+                            prev_wlog = (state.get("witness_logs") or {}).get(wbase)
+                        wlog_state, wok, wlines = logmonitor.check(
+                            prev_wlog,
+                            wdoc,
+                            whead,
+                            _wconsistency,
+                            datetime.now(tz=UTC).isoformat(),
+                        )
+                        for _wl in wlines:
+                            lines.append(f"witness log: {_wl}")
+                        if not wok:
+                            ok = False
                     pin = next(
                         (
                             p
@@ -2402,8 +2457,22 @@ def _monitor(args: argparse.Namespace) -> None:
                         ),
                         None,
                     )
-                    verdict, line = logmonitor.compare_views(new_state, pin, wtrusted)
+                    verdict, line = logmonitor.compare_views(
+                        new_state,
+                        pin,
+                        wtrusted,
+                        witness_pin=wlog_state,
+                        fetch_wconsistency=_wconsistency,
+                    )
                     lines.append(f"witness cross-view [{verdict}]: {line}")
+                    if wlog_state is not None and new_state is not None:
+                        # The monitor's own witness-log pin rides the state
+                        # file alongside the issuer pin — persisted through
+                        # the same repin discipline. Copied: an identity
+                        # share between the two states would be circular.
+                        new_state.setdefault("witness_logs", {})[wbase] = {
+                            k: v for k, v in wlog_state.items() if k != "witness_logs"
+                        }
                     if verdict == "diverged":
                         ok = False
                         repin = False

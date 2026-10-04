@@ -202,7 +202,15 @@ def check(
                 "deployment cannot show the pinned head inside its current tree"
             ],
         )
-    if int(proof.get("first") or -1) != old_size or int(proof.get("tree_size") or -1) != size:
+    try:
+        proof_first, proof_size = int(proof.get("first")), int(proof.get("tree_size"))
+    except (TypeError, ValueError):
+        return (
+            None,
+            False,
+            ["ALERT: consistency proof is for different tree sizes than the head claims"],
+        )
+    if proof_first != old_size or proof_size != size:
         return (
             None,
             False,
@@ -436,6 +444,15 @@ def witness_cosign(store, signer, body: dict) -> tuple[int, dict]:
             cosig = None
             pseudo_id = f"witness:{issuer_key[:24]}:{cp.id}:{root_hex[:16]}"
             cosig = store.receipt_for_visit(pseudo_id)
+            if cosig is not None and (
+                cosig.payload.get("subject_tree_size") != size
+                or cosig.payload.get("subject_root_sha256") != root_hex
+            ):
+                # A 64-bit root-prefix collision landed a different
+                # attestation under the qualified pseudo — never reuse it;
+                # fall deeper so the fresh cosig still stores uniquely.
+                cosig = None
+                pseudo_id = f"witness:{issuer_key[:24]}:{cp.id}:{root_hex}"
         if cosig is None:
             prev = store.latest_receipt()
             cosig = signer.issue(
@@ -552,7 +569,10 @@ def anchor_published_pins(store, heads: dict) -> dict:
     )
     if latest_cp is None:
         return heads
-    size = int(latest_cp.payload["tree_size"])
+    try:
+        size = int(latest_cp.payload["tree_size"])
+    except (TypeError, ValueError):
+        return heads  # a malformed own-checkpoint just can't anchor anything
     from .transparency import inclusion_proof, leaf_hashes
 
     leaves = leaf_hashes(receipts)  # compute once, not per pin
@@ -573,7 +593,12 @@ def anchor_published_pins(store, heads: dict) -> dict:
 
 
 def compare_views(
-    mine: dict | None, theirs: dict | None, witness_trusted: set | None = None
+    mine: dict | None,
+    theirs: dict | None,
+    witness_trusted: set | None = None,
+    *,
+    witness_pin: dict | None = None,
+    fetch_wconsistency=None,
 ) -> tuple[str, str]:
     """Cross-check two independent pins of the same issuer's log — mine (the
     monitor's last verified head) against a witness's published pin.
@@ -593,7 +618,17 @@ def compare_views(
     a forked history and no bridge can reconcile equal-size distinct roots.
     Different sizes stay honestly undecidable: cosign cadence lags behind
     log growth, so ahead/behind alone never proves a fork — it only names
-    which observer saw further. Returns (verdict, human line)."""
+    which observer saw further. Returns (verdict, human line).
+
+    ``witness_pin`` is THIS monitor's own pinned head of the WITNESS's log
+    (``{tree_size, root_sha256}``): a served witness_anchor only binds
+    'the attestation is in the witness's published log' when the anchor's
+    checkpoint provably extends — or is provably extended by — that pinned
+    head. Without it the anchor verifies in isolation: still genuine
+    crypto, but over a tree the witness could mint per victim.
+    ``fetch_wconsistency(first, size)`` pulls consistency proofs off the
+    witness's own log for the bridging cases the anchor's embedded
+    `extends` doesn't already name."""
     if theirs is None:
         return "unseen", "the witness has never cosigned this issuer — no second view exists"
     if mine is None:
@@ -673,12 +708,68 @@ def compare_views(
                 "the pin's witness_anchor does not verify — the cosig does not "
                 "sit inside the witness's own published log as claimed",
             )
-    anchor_note = (
-        f"; the cosig itself sits inside the witness's published log at size "
-        f"{anchored_size} — the attestation is publicly anchored"
-        if anchored_size is not None
-        else ""
-    )
+    elif anchor is not None:
+        return (
+            "unverifiable",
+            "the pin's witness_anchor is malformed — not a checkpoint+proof "
+            "document; a served anchor is either verifiable or a lie",
+        )
+    if anchored_size is not None:
+        anchor_note = (
+            f"; the cosig itself sits inside the witness's published log at "
+            f"size {anchored_size} — the attestation is publicly anchored"
+        )
+        if witness_pin is not None:
+            # Bind the anchor to the head THIS monitor pins of the witness's
+            # own log — verified in isolation, an anchor could be a checkpoint
+            # the witness minted over a per-victim private fork. Bridged to
+            # our pin, 'published log' becomes provable rather than claimed.
+            from .transparency import verify_consistency, verify_extends
+
+            try:
+                wp_size = int(witness_pin["tree_size"])
+                wp_root = bytes.fromhex(witness_pin["root_sha256"])
+                a_root = bytes.fromhex(ap["root_sha256"])
+            except (KeyError, TypeError, ValueError):
+                return (
+                    "unverifiable",
+                    "the monitor's own pin of the witness log is malformed — "
+                    "the anchor can't be bound to a broken pin",
+                )
+
+            def _bridge(f_sz, f_root, t_sz, t_root) -> bool:
+                proof = fetch_wconsistency(f_sz, t_sz) if fetch_wconsistency else None
+                try:
+                    nodes = [bytes.fromhex(h) for h in (proof or {}).get("proof") or []]
+                except (TypeError, ValueError):
+                    return False
+                return bool(nodes) and verify_consistency(f_root, f_sz, t_root, t_sz, nodes)
+
+            if anchored_size == wp_size:
+                same_log = a_root == wp_root
+            elif anchored_size > wp_size:
+                # the anchor must provably extend the head we pinned
+                ext = verify_extends(ap, first=wp_size, first_root=wp_root)
+                same_log = ext if ext is not None else _bridge(wp_size, wp_root, anchored_size, a_root)
+            else:
+                # our pin moved past the anchor — append-only means the
+                # published log must provably contain the anchor's tree
+                same_log = _bridge(anchored_size, a_root, wp_size, wp_root)
+            if not same_log:
+                return (
+                    "unverifiable",
+                    "the pin's witness_anchor cannot be reconciled with the "
+                    "witness log head this monitor pinned — a checkpoint over "
+                    "a private per-victim fork verifies in isolation and is "
+                    "exactly what this check exists to catch",
+                )
+            anchor_note = (
+                f"; the cosig sits inside the witness's published log at size "
+                f"{anchored_size} — verified against our own pin of that log, "
+                "so double-speak would fork it publicly"
+            )
+    else:
+        anchor_note = ""
     # From here the comparison runs on the SIGNED subject fields — the only
     # view the witness actually attested.
     my_size, my_root = int(mine["tree_size"]), str(mine["root_sha256"])
@@ -787,6 +878,12 @@ def check_cosignatures(
                 or int(p.get("subject_tree_size") or -1) != size
                 or p.get("subject_root_sha256") != root_hex
             ):
+                continue
+            # The cosig must name THIS issuer — one attesting another
+            # deployment's head never counts here (compare_views parity).
+            # Only gated when the caller computed a lineage — without it the
+            # issuer family can't be told apart from a foreign one.
+            if issuer_keys and p.get("subject_issuer") not in self_keys:
                 continue
             if cosig.id in seen_ids or cosig.public_key in seen_keys:
                 continue

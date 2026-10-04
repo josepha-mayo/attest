@@ -413,6 +413,10 @@ def _cosig_count(doc, cp, size, root_hex, issuer_keys=None):
             or p.get("subject_root_sha256") != root_hex
         ):
             continue
+        # The cosig must name THIS issuer — one attesting another
+        # deployment's head never counts here (logmonitor parity).
+        if issuer_keys and p.get("subject_issuer") not in self_keys:
+            continue
         pk = raw.get("public_key")
         if raw.get("id") in seen_ids or pk in seen_keys or pk in self_keys:
             continue

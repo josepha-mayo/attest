@@ -1672,7 +1672,7 @@ def test_verify_witness_url_resolves_deployments_and_threshold(
                     witness_threshold=2,
                 )
             )
-    assert "1 of 2 required" in str(e.value.code)
+    assert "1 distinct witness(es) of 2 required" in str(e.value.code)
 
 
 def test_witness_heads_anchor_attestations_in_the_witness_log(engine, store, household, schedule, t0):
@@ -1735,3 +1735,274 @@ def test_witness_heads_anchor_attestations_in_the_witness_log(engine, store, hou
     }
     verdict, _ = logmonitor.compare_views(mine, forged, {w_signer.public_key_b64})
     assert verdict == "unverifiable"
+
+
+def test_verify_threshold_counts_witness_identities_not_lineage_keys(
+    engine, store, household, schedule, t0, tmp_path, capsys, monkeypatch
+):
+    """A rotated witness is ONE witness for k-of-n: its two lineage keys both
+    resolve to the same deployment name, so cosigs minted under old AND new
+    keys still count once — the gate can't be satisfied by one cooperating
+    witness alone (audit: the gate counted signer KEYS)."""
+    import argparse
+    import contextlib
+    import io
+
+    from attest import cli, logmonitor
+    from attest.disputepack import build_case_pack, log_member
+    from attest.ledger import Signer
+    from attest.reviews import ReviewService, countersign_status
+    from tests.test_regressions import event
+
+    visit = engine.ingest(event(household[2], t0)).visit
+    engine.close_for_review(visit.id)
+    bundle = ReviewService(store, engine.signer, engine.clock).bundle(visit.id)
+    site = store.sites()[0]
+
+    # A rotated witness: consented rotation pair makes both keys lineage.
+    w_store, w_old = _witness_deployment()
+    w_new = Signer.ephemeral()
+    rot = w_old.issue(
+        visit_id="key:rot",
+        sequence=1,
+        prev_hash=None,
+        facts={
+            "record_type": "key_rotation",
+            "previous_key": w_old.public_key_b64,
+            "new_key": w_new.public_key_b64,
+        },
+    )
+    adop = w_new.issue(
+        visit_id="key:adopt",
+        sequence=2,
+        prev_hash=rot.payload_hash,
+        facts={
+            "record_type": "key_adoption",
+            "previous_key": w_old.public_key_b64,
+            "rotation_receipt": {"id": rot.id, "hash": rot.payload_hash},
+        },
+    )
+    w_doc = {
+        "schema": "attest.issuer/1",
+        "issuer_key": w_new.public_key_b64,
+        "key_receipts": [rot.model_dump(mode="json"), adop.model_dump(mode="json")],
+    }
+    assert logmonitor._trusted_set(w_doc) == {w_old.public_key_b64, w_new.public_key_b64}
+
+    def log_with_cosigs(rs):
+        doc = log_member(engine, rs)
+        cpd = doc["checkpoint"]  # the head that actually ships in this pack
+        facts = {
+            "record_type": "witness_cosignature",
+            "subject_checkpoint": cpd["id"],
+            "subject_tree_size": cpd["payload"]["tree_size"],
+            "subject_root_sha256": cpd["payload"]["root_sha256"],
+            "subject_issuer": engine.signer.public_key_b64,
+        }
+        # One cooperating witness, two signatures — one under each lineage key.
+        c_old = w_old.issue(visit_id="wit:o", sequence=3, prev_hash=adop.payload_hash, facts=facts)
+        c_new = w_new.issue(visit_id="wit:n", sequence=4, prev_hash=c_old.payload_hash, facts=facts)
+        doc["cosignatures"] = [c_old.model_dump(mode="json"), c_new.model_dump(mode="json")]
+        return doc
+
+    data = build_case_pack(
+        store,
+        tmp_path / "media",
+        site,
+        [(visit, bundle, countersign_status(bundle))],
+        manifest_signer=lambda m: engine.issue_export_manifest(site, m),
+        tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"site:{site.id}", t),
+        log_fn=log_with_cosigs,
+    )
+    pack = tmp_path / "case.zip"
+    pack.write_bytes(data)
+
+    monkeypatch.setattr(cli, "_fetch_issuer_doc", lambda url: w_doc)
+
+    def run(threshold):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            cli._verify(
+                argparse.Namespace(
+                    bundle=str(pack),
+                    key=None,
+                    issuer_url=None,
+                    json=False,
+                    checkpoint=None,
+                    against=None,
+                    witness_key=None,
+                    witness_url=["https://w1.example"],
+                    witness_threshold=threshold,
+                )
+            )
+        return buf.getvalue()
+
+    # Two cosigs, but ONE witness — threshold 1 passes, threshold 2 must not.
+    assert "vouched by required witness w1.example" in run(1)
+    with pytest.raises(SystemExit) as e:
+        with contextlib.redirect_stdout(io.StringIO()):
+            cli._verify(
+                argparse.Namespace(
+                    bundle=str(pack),
+                    key=None,
+                    issuer_url=None,
+                    json=False,
+                    checkpoint=None,
+                    against=None,
+                    witness_key=None,
+                    witness_url=["https://w1.example"],
+                    witness_threshold=2,
+                )
+            )
+    assert "1 distinct witness(es) of 2 required" in str(e.value.code)
+
+
+def test_monitor_survives_malformed_consistency_proof(engine, store, household, schedule, t0):
+    """A hostile deployment can serve non-integer first/tree_size in its
+    consistency response — int() used to raise outside the guard and crash
+    the monitor, stalling fork-detection until restart (audit)."""
+    from attest import logmonitor
+
+    _seed(engine, household[0], t0)
+    cp1 = engine.issue_log_checkpoint()
+    state, ok, _ = logmonitor.check(
+        None, _doc_for(engine), _head(engine, cp1), _consistency_fetch(engine), "t1"
+    )
+    assert ok
+
+    _seed(engine, household[0], t0 - timedelta(hours=6), n=2)
+    size, root = engine.log_head()
+    cp2 = engine.signer.issue(  # legacy shape: no embedded extends → fetch path
+        visit_id=f"log:{size}:{root.hex()[:16]}",
+        sequence=store.receipts()[-1].sequence + 1,
+        prev_hash=store.receipts()[-1].payload_hash,
+        facts={"record_type": "log_checkpoint", "tree_size": size, "root_sha256": root.hex()},
+    )
+    store.put_receipt(cp2)
+
+    def bad_fetch(first, size):
+        return {"first": "abc", "tree_size": "zzz", "proof": []}
+
+    state2, ok2, lines = logmonitor.check(state, _doc_for(engine), _head(engine, cp2), bad_fetch, "t2")
+    assert not ok2 and state2 is None
+    assert any("different tree sizes" in line for line in lines)
+
+
+def test_check_cosignatures_binds_subject_issuer(engine, store, household, schedule, t0):
+    """A cosig attesting THIS head but naming a DIFFERENT issuer must not
+    count — compare_views already enforces the binding; the counting path
+    now matches (audit)."""
+    from attest import logmonitor
+
+    _seed(engine, household[0], t0)
+    cp = engine.issue_log_checkpoint()
+    w_store, w_signer = _witness_deployment()
+    issuer_doc = _doc_for(engine)
+    status, out = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": issuer_doc, "checkpoint": cp.model_dump(mode="json")}
+    )
+    assert status == 200
+
+    doc = {"checkpoint": cp.model_dump(mode="json"), "cosignatures": [out["cosignature"]]}
+    lineage = {engine.signer.public_key_b64}
+    n, signers = logmonitor.check_cosignatures(
+        doc, cp.id, cp.payload["tree_size"], cp.payload["root_sha256"], issuer_keys=lineage
+    )
+    assert n == 1 and signers == [w_signer.public_key_b64]
+
+    # Same cosig, foreign subject_issuer — valid signature, wrong context.
+    foreign = dict(out["cosignature"])
+    foreign["payload"] = dict(foreign["payload"], subject_issuer="AAAA" + "A" * 40)
+    doc2 = {"checkpoint": cp.model_dump(mode="json"), "cosignatures": [foreign]}
+    n2, signers2 = logmonitor.check_cosignatures(
+        doc2, cp.id, cp.payload["tree_size"], cp.payload["root_sha256"], issuer_keys=lineage
+    )
+    assert n2 == 0 and signers2 == []
+
+
+def test_compare_views_binds_anchor_to_the_watched_witness_log(engine, store, household, schedule, t0):
+    """A served witness_anchor verified in isolation is only as strong as
+    the tree it names — a witness minting per-victim anchor checkpoints
+    would pass. Bound to the monitor's own pin of the witness log, the
+    anchor must provably reconcile with the watched head (audit)."""
+    from attest import logmonitor
+    from attest.transparency import leaf_hashes, root
+
+    w_store, w_signer = _witness_deployment()
+    # One content leaf before the cosig so the 'pin behind the anchor'
+    # case has a real non-empty prefix to bridge from.
+    w_store.put_receipt(
+        w_signer.issue(visit_id="w:seed", sequence=1, prev_hash=None, facts={"record_type": "note"})
+    )
+    _seed(engine, household[0], t0)
+    cp = engine.issue_log_checkpoint()
+    issuer_doc = _doc_for(engine)
+    status, out = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": issuer_doc, "checkpoint": cp.model_dump(mode="json")}
+    )
+    assert status == 200
+
+    # The witness checkpoints its own ledger (anchor time).
+    leaves = leaf_hashes(w_store.receipts())
+    w_cp = w_signer.issue(
+        visit_id="log:anchor",
+        sequence=99,
+        prev_hash=None,
+        facts={
+            "record_type": "log_checkpoint",
+            "tree_size": len(leaves),
+            "root_sha256": root(leaves).hex(),
+        },
+    )
+    w_store.put_receipt(w_cp)
+    heads = logmonitor.anchor_published_pins(
+        w_store, logmonitor.witness_heads(w_store, w_signer.public_key_b64)
+    )
+    pin = heads["pins"][0]
+    wpin = {"tree_size": len(leaves), "root_sha256": root(leaves).hex()}
+
+    issuer = issuer_doc["issuer_key"]
+    mine = {
+        "issuer_key": issuer,
+        "tree_size": cp.payload["tree_size"],
+        "root_sha256": cp.payload["root_sha256"],
+    }
+    verdict, line = logmonitor.compare_views(mine, pin, {w_signer.public_key_b64}, witness_pin=wpin)
+    assert verdict == "agree" and "verified against our own pin" in line
+
+    # A witness pinning a DIFFERENT log than the anchor names — fork caught.
+    other = {"tree_size": len(leaves), "root_sha256": "00" * 32}
+    verdict2, line2 = logmonitor.compare_views(mine, pin, {w_signer.public_key_b64}, witness_pin=other)
+    assert verdict2 == "unverifiable" and "reconciled" in line2
+
+    # Our pin BEHIND the anchor — a real earlier head the anchor provably
+    # extends: the served consistency proof bridges prefix → anchor.
+    from attest.transparency import consistency_nodes
+
+    behind = {
+        "tree_size": len(leaves) - 1,
+        "root_sha256": root(leaves[: len(leaves) - 1]).hex(),
+    }
+    fetch = lambda f, s: {  # noqa: E731
+        "proof": [h.hex() for h in consistency_nodes(leaves, f)]
+    }
+    verdict3, line3 = logmonitor.compare_views(
+        mine,
+        pin,
+        {w_signer.public_key_b64},
+        witness_pin=behind,
+        fetch_wconsistency=fetch,
+    )
+    assert verdict3 == "agree" and "verified against our own pin" in line3
+
+    # Same size claim, fake root — the bridge closes sizes but can't reach
+    # a root that was never the witness's tree.
+    fake = {"tree_size": len(leaves) - 1, "root_sha256": "11" * 32}
+    verdict4, _ = logmonitor.compare_views(
+        mine,
+        pin,
+        {w_signer.public_key_b64},
+        witness_pin=fake,
+        fetch_wconsistency=fetch,
+    )
+    assert verdict4 == "unverifiable"
