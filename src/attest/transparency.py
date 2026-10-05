@@ -29,10 +29,76 @@ fork must still be published in public time.
 from __future__ import annotations
 
 import hashlib
+import re
 
 _LEAF = b"\x00"
 _NODE = b"\x01"
 _EMPTY_ROOT = hashlib.sha256(b"").digest()
+
+# The largest tree size any verifier surface will process: the browser
+# verifier's proof arithmetic uses 32-bit bitwise ops (fn >>= 1), exact
+# only below 2**31 — a signed head claiming a bigger tree would verify
+# in Python and miscompute in JS, one payload two verdicts. 2**31 - 1
+# receipts is ~2 billion, far beyond any real deployment; a head beyond
+# it is malformed on every surface identically.
+MAX_TREE_SIZE = 0x7FFFFFFF
+
+_STRICT_HEX = re.compile(r"[0-9a-fA-F]+")
+
+
+def json_is_int(v) -> bool:
+    """The JSON-integer check every verifier surface can agree on.
+
+    ``Number.isInteger(5.0)`` is true — after ``JSON.parse`` the spelling
+    ``5.0`` is indistinguishable from ``5``, so the browser verifier CANNOT
+    reject integral floats; for the same bytes to get the same verdict,
+    Python must accept them too. Bools stay out on both surfaces
+    (``isinstance(True, float)`` is False, ``Number.isInteger(true)`` is
+    false)."""
+    return (isinstance(v, int) and not isinstance(v, bool)) or (isinstance(v, float) and v.is_integer())
+
+
+# ASCII digits only — Python's \d accepts Unicode digits (int("٥") == 5)
+# where the JS mirror's \d does not; one signed string, two verdicts.
+_COERCIBLE_INT = re.compile(r"\s*[+-]?[0-9]+\s*")
+
+
+def coerce_int(v) -> int:
+    """``int()`` with the JS mirror's exact acceptance — used where signed
+    material is *evaluated* rather than schema-checked (``verify_extends``):
+    numbers truncate (``Math.trunc``), bools become 0/1, digit strings
+    (signed, whitespace-padded) parse; anything else raises. Python's bare
+    ``int()`` is looser on strings (``"5_0"`` parses) and explodes on
+    inf — both would diverge from the browser path."""
+    import math
+
+    if isinstance(v, bool):
+        return int(v)
+    if isinstance(v, int):
+        return v
+    if isinstance(v, float):
+        if not math.isfinite(v):
+            raise ValueError("not a finite number")
+        return int(v)
+    if isinstance(v, str) and _COERCIBLE_INT.fullmatch(v):
+        return int(v)
+    raise ValueError("not a coercible integer")
+
+
+def hex_bytes(s, *, length: int | None = None) -> bytes:
+    """``bytes.fromhex`` at the JS verifier's strictness: contiguous hex only.
+
+    Python's ``fromhex`` silently skips ASCII whitespace, so a spaced
+    spelling (``"aa bb…"``) decodes here while the browser verifier's regex
+    rejects it — one signed payload, two verdicts. Every served/packed hex
+    field on every surface must spell the same way, so whitespace is
+    rejected rather than skipped."""
+    if not isinstance(s, str) or not _STRICT_HEX.fullmatch(s):
+        raise ValueError("not contiguous hex")
+    b = bytes.fromhex(s)
+    if length is not None and len(b) != length:
+        raise ValueError(f"hex decodes to {len(b)} bytes, expected {length}")
+    return b
 
 
 def _largest_pow2_lt(n: int) -> int:
@@ -94,7 +160,7 @@ def verify_inclusion(
     leaf_data: bytes, tree_size: int, leaf_index: int, path: list[bytes], expected_root: bytes
 ) -> bool:
     """RFC 6962 §2.1.1 audit-path verification."""
-    if leaf_index >= tree_size or leaf_index < 0 or tree_size < 1:
+    if leaf_index >= tree_size or leaf_index < 0 or tree_size < 1 or tree_size > MAX_TREE_SIZE:
         return False
     if tree_size == 1:
         return path == [] and leaf_hash(leaf_data) == expected_root
@@ -148,6 +214,8 @@ def verify_consistency(
     proof: list[bytes],
 ) -> bool:
     """RFC 6962 §2.1.2 consistency-proof verification."""
+    if old_size > MAX_TREE_SIZE or new_size > MAX_TREE_SIZE:
+        return False
     if old_size == new_size:
         return proof == [] and old_root == new_root
     if not 0 < old_size < new_size or not proof:
@@ -249,11 +317,11 @@ def verify_extends(
     if not isinstance(ext, dict):
         return None
     try:
-        ext_first = int(ext["first"])
-        ext_first_root = bytes.fromhex(ext["first_root_sha256"])
-        size = int(payload["tree_size"])
-        root = bytes.fromhex(payload["root_sha256"])
-        nodes = [bytes.fromhex(h) for h in ext["proof"]]
+        ext_first = coerce_int(ext["first"])
+        ext_first_root = hex_bytes(ext["first_root_sha256"])
+        size = coerce_int(payload["tree_size"])
+        root = hex_bytes(payload["root_sha256"])
+        nodes = [hex_bytes(h) for h in ext["proof"]]
     except (KeyError, TypeError, ValueError):
         return None
     if first is not None and ext_first != first:

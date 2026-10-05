@@ -1730,7 +1730,10 @@ def test_witness_heads_anchor_attestations_in_the_witness_log(engine, store, hou
         "root_sha256": cp.payload["root_sha256"],
     }
     verdict, line = logmonitor.compare_views(mine, pin, {w_signer.public_key_b64})
-    assert verdict == "agree" and "publicly anchored" in line
+    # With no pin on the witness's own log the anchor is honest about its
+    # reach: verified in isolation, NOT claimed as publicly anchored — a
+    # per-victim fork can't be excluded without the reconciliation.
+    assert verdict == "agree" and "verified in isolation" in line
 
     # A tampered anchor is a served falsehood — 'dishonest', not ignored:
     # the anchor claims inclusion the math can't prove.
@@ -3340,6 +3343,42 @@ def test_check_sth_rejects_short_hex_roots(engine, store, household, schedule, t
         )
         payload, err = logmonitor._check_sth(bad_cp.model_dump(mode="json"), {engine.signer.public_key_b64})
         assert payload is None and err == "checkpoint carries a malformed tree head"
+
+
+def test_check_sth_rejects_oversize_and_accepts_integral_float_sizes(engine, store, household, schedule, t0):
+    """Cross-surface size parity: the browser verifier's proof arithmetic is
+    32-bit (bitwise ops), so a signed head past MAX_TREE_SIZE (2**31-1) would
+    verify in Python and miscompute in JS — both surfaces bound identically.
+    Integral floats are the inverse parity edge: JSON.parse can't tell 5.0
+    from 5, so Python must accept them exactly like Number.isInteger."""
+    from attest import logmonitor
+    from attest.transparency import MAX_TREE_SIZE
+
+    _seed(engine, household[0], t0)
+    prev = store.latest_receipt()
+    cases = [
+        (MAX_TREE_SIZE + 1, True),  # signed head past the bitwise bound — malformed
+        (2**63, True),  # absurd size — same malformed verdict
+        (float(MAX_TREE_SIZE), False),  # integral float AT the bound — valid head
+        (5.0, False),  # integral float — valid (JS can't reject it)
+        (5.5, True),  # non-integral float — malformed everywhere
+    ]
+    for i, (size, bad) in enumerate(cases):
+        cp = engine.signer.issue(
+            visit_id=f"monitor:sz:{i}",
+            sequence=(prev.sequence + 100 + i) if prev else 100 + i,
+            prev_hash=None,
+            facts={
+                "record_type": "log_checkpoint",
+                "tree_size": size,
+                "root_sha256": "ab" * 32,
+            },
+        )
+        payload, err = logmonitor._check_sth(cp.model_dump(mode="json"), {engine.signer.public_key_b64})
+        if bad:
+            assert payload is None and err == "checkpoint carries a malformed tree head", size
+        else:
+            assert payload is not None and err is None, size
 
 
 def test_compare_views_survives_non_dict_wconsistency(engine, store, household, schedule, t0):

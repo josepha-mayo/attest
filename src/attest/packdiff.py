@@ -209,7 +209,7 @@ def check_log_pin(
         return None, None
     from .ledger import verify_receipt
     from .models import Receipt
-    from .transparency import verify_inclusion
+    from .transparency import MAX_TREE_SIZE, hex_bytes, json_is_int, verify_inclusion
 
     try:
         doc = json.loads(raw)
@@ -233,10 +233,11 @@ def check_log_pin(
         return None, f"log_checkpoint.json: {why}"
     size = payload.get("tree_size")
     root_hex = payload.get("root_sha256")
-    if not isinstance(size, int) or isinstance(size, bool) or size < 1 or not isinstance(root_hex, str):
+    if not json_is_int(size) or size < 1 or size > MAX_TREE_SIZE or not isinstance(root_hex, str):
         return None, "log_checkpoint.json: malformed tree head"
+    size = int(size)
     try:
-        root_b = bytes.fromhex(root_hex)
+        root_b = hex_bytes(root_hex, length=32)
     except ValueError:
         return None, "log_checkpoint.json: malformed tree head"
     proven = 0
@@ -256,19 +257,15 @@ def check_log_pin(
                 "never committed to the deployment log"
             )
         try:
-            path = [bytes.fromhex(h) for h in p.get("path") or []]
+            path = [hex_bytes(h, length=32) for h in p.get("path") or []]
         except (TypeError, ValueError):
             return None, f"log_checkpoint.json: malformed proof for receipt {rid}"
         idx = p.get("leaf_index")
         try:
-            leaf_b = bytes.fromhex(ph)
+            leaf_b = hex_bytes(ph, length=32)
         except (TypeError, ValueError):
             return None, f"log_checkpoint.json: malformed receipt hash for {rid}"
-        if (
-            not isinstance(idx, int)
-            or isinstance(idx, bool)
-            or not verify_inclusion(leaf_b, size, idx, path, root_b)
-        ):
+        if not json_is_int(idx) or not verify_inclusion(leaf_b, size, int(idx), path, root_b):
             return None, (
                 f"log_checkpoint.json: inclusion proof for receipt {rid} does not reach the signed tree head"
             )
@@ -304,16 +301,12 @@ def check_log_pin(
                     f"log_checkpoint.json: embedded receipt {er.id[:24]}… carries no working inclusion proof"
                 )
             try:
-                path = [bytes.fromhex(h) for h in p.get("path") or []]
+                path = [hex_bytes(h, length=32) for h in p.get("path") or []]
                 idx = p.get("leaf_index")
-                leaf_b = bytes.fromhex(er.payload_hash)
+                leaf_b = hex_bytes(er.payload_hash, length=32)
             except (TypeError, ValueError):
                 return None, f"log_checkpoint.json: malformed proof for receipt {er.id[:24]}…"
-            if (
-                not isinstance(idx, int)
-                or isinstance(idx, bool)
-                or not verify_inclusion(leaf_b, size, idx, path, root_b)
-            ):
+            if not json_is_int(idx) or not verify_inclusion(leaf_b, size, int(idx), path, root_b):
                 return None, (
                     f"log_checkpoint.json: embedded receipt {er.id[:24]}… carries no working inclusion proof"
                 )
@@ -328,16 +321,12 @@ def check_log_pin(
         if not isinstance(p, dict):
             return None, "log_checkpoint.json: unreferenced inclusion proof is malformed"
         try:
-            path = [bytes.fromhex(h) for h in p.get("path") or []]
+            path = [hex_bytes(h, length=32) for h in p.get("path") or []]
             idx = p.get("leaf_index")
-            leaf_b = bytes.fromhex(ph)
+            leaf_b = hex_bytes(ph, length=32)
         except (TypeError, ValueError):
             return None, "log_checkpoint.json: unreferenced inclusion proof is malformed"
-        if (
-            not isinstance(idx, int)
-            or isinstance(idx, bool)
-            or not verify_inclusion(leaf_b, size, idx, path, root_b)
-        ):
+        if not json_is_int(idx) or not verify_inclusion(leaf_b, size, int(idx), path, root_b):
             return None, (
                 "log_checkpoint.json: unreferenced inclusion proof does not reach the signed tree head"
             )
@@ -934,8 +923,10 @@ def _log_head_verdict(a: dict, b: dict) -> tuple[str, str] | None:
     a head is too malformed to judge (the pack verify loop already flags
     malformed checkpoints; this only sees ones that parsed)."""
     try:
+        from .transparency import hex_bytes
+
         sa, sb = int(a["tree_size"]), int(b["tree_size"])
-        ra, rb = bytes.fromhex(a["root_sha256"]), bytes.fromhex(b["root_sha256"])
+        ra, rb = hex_bytes(a["root_sha256"], length=32), hex_bytes(b["root_sha256"], length=32)
     except (KeyError, TypeError, ValueError):
         return None
     if sa == sb:

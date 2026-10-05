@@ -297,10 +297,15 @@ def check_tools(pack_dir, trusted, scope):
 
 
 def _is_int(x):
-    """A JSON int, strictly — True/False are ints to isinstance() but not to
-    a verifier (JS Number.isInteger rejects them); the bool-shaped proof is
-    a crafted doc, not a proof."""
-    return isinstance(x, int) and not isinstance(x, bool)
+    """A JSON int per JS Number.isInteger parity — the browser verifier
+    cannot tell `5` from `5.0` post-parse, so every surface accepts an
+    integral float; bools and strings are never ints on either side. A
+    bool-shaped proof is a crafted doc, not a proof."""
+    if isinstance(x, bool):
+        return False
+    if isinstance(x, int):
+        return True
+    return isinstance(x, float) and x.is_integer()
 
 
 def _merkle_inclusion(leaf_hex, size, index, path_hex, root_hex):
@@ -312,8 +317,9 @@ def _merkle_inclusion(leaf_hex, size, index, path_hex, root_hex):
         return False
     if not _is_int(size) or not _is_int(index):
         return False
-    if index < 0 or index >= size or size < 1:
-        return False
+    size, index = int(size), int(index)
+    if index < 0 or index >= size or size < 1 or size > 2147483647:
+        return False  # 2**31-1: the JS verifier's bitwise-op bound
     r = hashlib.sha256(b"\\x00" + leaf).digest()
     if size == 1:
         return not path_hex and r == root_b
@@ -369,7 +375,12 @@ def check_log(pack_dir, trusted, receipts):
         sys.exit(f"FAIL log_checkpoint.json: {why}")
     size = payload.get("tree_size")
     root_hex = payload.get("root_sha256")
-    if not _is_int(size) or size < 1 or not isinstance(root_hex, str):
+    if (
+        not _is_int(size)
+        or size < 1
+        or size > 2147483647  # MAX_TREE_SIZE — JS bitwise-op bound
+        or not isinstance(root_hex, str)
+    ):
         sys.exit("FAIL log_checkpoint.json: malformed tree head")
     proven = 0
     verified_ph = set()
@@ -503,7 +514,7 @@ def _cosig_anchors(doc):
             aroot_b = bytes.fromhex(aroot) if isinstance(aroot, str) else b""
         except ValueError:
             aroot_b = b""
-        if not _is_int(asize) or asize < 1 or len(aroot_b) != 32:
+        if not _is_int(asize) or asize < 1 or asize > 2147483647 or len(aroot_b) != 32:
             sys.exit(f"FAIL log_checkpoint.json: cosig_anchors {scid}… "
                      "anchor checkpoint carries a malformed tree head")
         proof = anchor.get("proof")
@@ -667,18 +678,54 @@ def _adoption_consent(receipts, rotation, new_key):
     endorsement is self-serve — any key can claim any successor — so consent
     is what separates a real handoff from a grafted "predecessor"."""
     for r in receipts:
+        if not isinstance(r, dict):
+            continue
         p = r.get("payload", {})
-        link = p.get("rotation_receipt") or {}
+        if not isinstance(p, dict):
+            continue
+        link = p.get("rotation_receipt")
+        if not isinstance(link, dict):
+            link = {}
         if (
             p.get("record_type") == "key_adoption"
             and link.get("id") == rotation.get("id")
             and link.get("hash") == rotation.get("payload_hash")
             and r.get("public_key") == new_key
         ):
-            ok, _ = check_receipt(r, new_key)
+            try:
+                ok, _ = check_receipt(r, new_key)
+            except Exception:  # noqa: BLE001 — unverifiable material can't consent
+                continue
             if ok:
                 return True
     return False
+
+
+def _ancestor_hop(key_receipts, cur):
+    """The predecessor hop the main ledger picks for ancestor/root walks:
+    EVERY consented rotation endorsing ``cur``, then min(previous_key) —
+    the pool order is attacker-controlled, so only a key-ordered pick is
+    deterministic across verifier surfaces."""
+    cands = []
+    for r in key_receipts:
+        if not isinstance(r, dict):
+            continue
+        p = r.get("payload", {})
+        if not isinstance(p, dict) or not isinstance(r.get("public_key"), str):
+            continue
+        if (
+            p.get("record_type") == "key_rotation"
+            and p.get("new_key") == cur
+            and r.get("public_key") == p.get("previous_key")
+            and isinstance(p.get("previous_key"), str)
+        ):
+            try:
+                ok, _ = check_receipt(r, r["public_key"])
+            except Exception:  # noqa: BLE001 — unverifiable can't hop
+                continue
+            if ok and _adoption_consent(key_receipts, r, cur):
+                cands.append(p["previous_key"])
+    return min(cands) if cands else None
 
 
 def trusted_keys(issuer_key, rotation_receipts, max_hops=32):
@@ -690,18 +737,7 @@ def trusted_keys(issuer_key, rotation_receipts, max_hops=32):
     trusted = {issuer_key}
     cur = issuer_key
     for _ in range(max_hops):
-        nxt = None
-        for r in rotation_receipts:
-            p = r.get("payload", {})
-            if (
-                p.get("record_type") == "key_rotation"
-                and p.get("new_key") == cur
-                and r.get("public_key") == p.get("previous_key")
-            ):
-                ok, _ = check_receipt(r, r["public_key"])
-                if ok and _adoption_consent(rotation_receipts, r, cur):
-                    nxt = p["previous_key"]
-                    break
+        nxt = _ancestor_hop(rotation_receipts, cur)
         if nxt is None:
             break
         cur = nxt
@@ -715,22 +751,39 @@ def descendant_keys(root_key, rotation_receipts, max_hops=32):
     successor reachable through signed rotations. Each hop needs BOTH
     signatures: the retiring key's endorsement and the successor's
     key_adoption consent — an orphaned rotation (crashed before adoption)
-    is a dead branch, not a trusted descendant."""
+    is a dead branch, not a trusted descendant. Competing rotations resolve
+    deterministically — the highest-sequence CONSENTED hop wins, matching
+    the main verifier exactly."""
     trusted = {root_key}
     cur = root_key
     for _ in range(max_hops):
-        nxt = None
+        cands = []
         for r in rotation_receipts:
+            if not isinstance(r, dict):
+                continue
             p = r.get("payload", {})
+            if (
+                not isinstance(p, dict)
+                or not isinstance(p.get("new_key"), str)
+                or not _is_int(r.get("sequence"))
+            ):
+                continue
             if (
                 p.get("record_type") == "key_rotation"
                 and p.get("previous_key") == cur
                 and r.get("public_key") == cur
             ):
-                ok, _ = check_receipt(r, cur)
-                if ok and _adoption_consent(rotation_receipts, r, p["new_key"]):
-                    nxt = p["new_key"]
-                    break
+                try:
+                    ok, _ = check_receipt(r, cur)
+                except Exception:  # noqa: BLE001 — unverifiable can't hop
+                    continue
+                if ok:
+                    cands.append(r)
+        nxt = None
+        for r in sorted(cands, key=lambda x: x["sequence"], reverse=True):
+            if _adoption_consent(rotation_receipts, r, r["payload"]["new_key"]):
+                nxt = r["payload"]["new_key"]
+                break
         if nxt is None:
             break
         cur = nxt
@@ -746,18 +799,7 @@ def _lineage_root(issuer_key, key_receipts):
     root. Anchoring inside the verified lineage keeps that graft inert."""
     cur = issuer_key
     for _ in range(32):
-        nxt = None
-        for r in key_receipts:
-            p = r.get("payload", {})
-            if (
-                p.get("record_type") == "key_rotation"
-                and p.get("new_key") == cur
-                and r.get("public_key") == p.get("previous_key")
-            ):
-                ok, _ = check_receipt(r, r["public_key"])
-                if ok and _adoption_consent(key_receipts, r, cur):
-                    nxt = p["previous_key"]
-                    break
+        nxt = _ancestor_hop(key_receipts, cur)
         if nxt is None:
             break
         cur = nxt
@@ -776,7 +818,11 @@ def revoked_keys(key_receipts, issuer_key=None):
     also counts only for a key the lineage has already produced: a retired
     key smearing a successor that hasn't pivoted in yet is just as inert
     as a foreign key."""
-    ordered = sorted(key_receipts, key=lambda x: x.get("sequence", 0))
+    def _seq(r):
+        s = r.get("sequence") if isinstance(r, dict) else None
+        return int(s) if _is_int(s) else -1
+
+    ordered = sorted(key_receipts, key=_seq)
     revoked = {}
     if issuer_key is not None:
         in_effect = _lineage_root(issuer_key, ordered)
@@ -784,7 +830,12 @@ def revoked_keys(key_receipts, issuer_key=None):
         in_effect = None
     seen = {in_effect} if in_effect is not None else set()
     for r in ordered:
-        ok, _ = check_receipt(r, in_effect or r.get("public_key"))
+        if not isinstance(r, dict):
+            continue
+        try:
+            ok, _ = check_receipt(r, in_effect or r.get("public_key"))
+        except Exception:  # noqa: BLE001 — unverifiable material can't pivot
+            continue
         if not ok:
             continue
         if in_effect is None:

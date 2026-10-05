@@ -391,3 +391,85 @@ def test_verify_extends_applicability_and_expectations():
     assert tr.verify_extends({}) is None
     assert tr.verify_extends({"extends": "garbage"}) is None
     assert tr.verify_extends({"extends": {"first": "x"}}) is None
+
+
+def test_json_integer_semantics_match_js_number_isinteger():
+    """Cross-surface parity: JSON.parse leaves `5` and `5.0` indistinguishable
+    in the browser, so every verifier must judge them identically — integral
+    floats count, strings and bools never do."""
+    from attest.transparency import json_is_int
+
+    for good in (0, 5, 2**60, 5.0, -3.0):
+        assert json_is_int(good), good
+    for bad in (True, False, "5", "5.0", 5.5, -0.5, float("inf"), float("nan"), None, [], {}):
+        assert not json_is_int(bad), bad
+
+
+def test_coerce_int_matches_the_js_pyint_mirror():
+    """verify_extends evaluates whatever int() CAN read — signed material is
+    judged, not schema-rejected. Python's bare int() is looser on strings
+    ("5_0" parses) and explodes on inf; both would diverge from the browser."""
+    from attest.transparency import coerce_int
+
+    assert coerce_int(5) == coerce_int("5") == coerce_int(5.7) == coerce_int(" 5 ") == 5
+    assert coerce_int(True) == 1 and coerce_int(False) == 0
+    for bad in ("5_0", "۵", "0x5", "5.0", "abc", "", None, [], {}, float("inf"), float("nan")):
+        with pytest.raises(ValueError):
+            coerce_int(bad)
+
+
+def test_hex_bytes_is_strict_like_the_browser_regex():
+    """fromhex silently skips whitespace — a spaced spelling decodes in
+    Python where the JS verifier rejects it. hex_bytes is the shared rule."""
+    from attest.transparency import hex_bytes
+
+    assert hex_bytes("aa" * 32) == b"\xaa" * 32
+    assert hex_bytes("AA" * 32, length=32) == b"\xaa" * 32  # case-insensitive
+    for bad in ("aa bb", " aa" * 32, "aa " * 32, "zz" * 32, "", "abc", 5, None, b"\xaa" * 32):
+        with pytest.raises(ValueError):
+            hex_bytes(bad)
+    with pytest.raises(ValueError):
+        hex_bytes("aa" * 16, length=32)  # wrong byte count
+
+
+def test_tree_size_bound_matches_the_browser_bitwise_limit():
+    """JS proof arithmetic uses 32-bit bitwise ops — a signed head past
+    2**31-1 would verify in Python and miscompute in JS. Both bound the
+    same way: the proof fails, identically, on every surface."""
+    from attest.transparency import MAX_TREE_SIZE, verify_consistency, verify_inclusion
+
+    leaves = _leaves(4)
+    r, path = root(leaves), inclusion_path(leaves, 1)
+    assert verify_inclusion(leaves[1], 4, 1, path, r)
+    assert not verify_inclusion(leaves[1], MAX_TREE_SIZE + 1, 1, path, r)
+    assert not verify_inclusion(leaves[1], 4, MAX_TREE_SIZE + 1, path, r)
+    # Equal sizes past the bound — the shortcut can't bypass it either.
+    assert not verify_consistency(r, MAX_TREE_SIZE + 1, r, MAX_TREE_SIZE + 1, [])
+    assert verify_consistency(root(leaves[:2]), 2, r, 4, consistency_nodes(leaves, 2))
+
+
+def test_verify_extends_coerces_signed_bridge_fields():
+    """A signed `extends` carrying int()-readable fields still gets judged —
+    matching the JS _extOk/_pyInt mirror, where a coercible bridge is
+    evaluated rather than silently absent."""
+    from attest import transparency as tr
+
+    leaves = _leaves(7)
+    nodes = tr.consistency_nodes(leaves, 4)
+    ext = {
+        "first": 4,
+        "first_root_sha256": tr.root(leaves[:4]).hex(),
+        "checkpoint_id": "cp1",
+        "proof": [n.hex() for n in nodes],
+    }
+    payload = {"tree_size": 7, "root_sha256": tr.root(leaves).hex(), "extends": ext}
+    assert tr.verify_extends(payload) is True
+    # String spellings coerce — a signed "4" is the claim 4.
+    str_payload = {**payload, "extends": {**ext, "first": "4"}}
+    assert tr.verify_extends(str_payload, first=4, first_root=tr.root(leaves[:4])) is True
+    # A spaced hex node is malformed — Python's fromhex leniency is gone.
+    spaced = {
+        **payload,
+        "extends": {**ext, "proof": [" ".join(n.hex()[i : i + 2] for i in range(0, 64, 2)) for n in nodes]},
+    }
+    assert tr.verify_extends(spaced) is None

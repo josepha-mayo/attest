@@ -160,7 +160,9 @@ def _adoption_consent(receipts: list[Receipt], rotation: Receipt, new_key: str) 
     payload hash): consent the attacker cannot forge."""
     for r in receipts:
         p = r.payload
-        link = p.get("rotation_receipt") or {}
+        link = p.get("rotation_receipt")
+        if not isinstance(link, dict):
+            link = {}
         if (
             p.get("record_type") == "key_adoption"
             and link.get("id") == rotation.id
@@ -256,6 +258,7 @@ def descendant_issuer_keys(root_key: str, rotations: list[Receipt], *, max_hops:
             r
             for r in rotations
             if r.payload.get("record_type") == "key_rotation"
+            and isinstance(r.payload.get("new_key"), str)
             and r.payload.get("previous_key") == cur
             and r.public_key == cur
             and verify_receipt(r, public_key=cur)[0]

@@ -362,6 +362,22 @@ async function adoptedBy(keyReceipts,rotation,newKey){
     }
   }
   return false;}
+async function _ancHop(keyNodes,cur){
+  /* The deterministic predecessor pick (ledger._rotation_hop parity):
+     EVERY consented rotation endorsing cur, then min(previous_key) — the
+     pool order is attacker-controlled, so only a key-ordered pick yields
+     the same lineage on every verifier surface. */
+  let best=null;
+  for(const rn of keyNodes){
+    const r=toJS(rn)||{},p=r.payload||{};
+    if(p.record_type==="key_rotation"&&p.new_key===cur
+      &&typeof p.previous_key==="string"&&r.public_key===p.previous_key){
+      const c=await checkReceipt(rn);
+      if(c.ok&&await adoptedBy(keyNodes,rn,cur)&&(best===null||p.previous_key<best))
+        best=p.previous_key;
+    }
+  }
+  return best;}
 async function trustedKeys(issuerKey,rotationNodes,maxHops=32){
   /* The keys a case-pack verification may trust: the manifest issuer plus
      every ancestor reachable through signed key_rotation receipts that the
@@ -369,14 +385,7 @@ async function trustedKeys(issuerKey,rotationNodes,maxHops=32){
      is a graft attempt — it never lands in the set. */
   const trusted=new Set([issuerKey]);let cur=issuerKey;
   for(let i=0;i<maxHops;i++){
-    let nxt=null;
-    for(const rn of rotationNodes){
-      const r=toJS(rn)||{},p=r.payload||{};
-      if(p.record_type==="key_rotation"&&p.new_key===cur&&r.public_key===p.previous_key){
-        const c=await checkReceipt(rn);
-        if(c.ok&&await adoptedBy(rotationNodes,rn,cur)){nxt=p.previous_key;break;}
-      }
-    }
+    const nxt=await _ancHop(rotationNodes,cur);
     if(nxt===null)break;
     cur=nxt;trusted.add(cur);
   }
@@ -386,16 +395,24 @@ async function descendantKeys(rootKey,rotationNodes,maxHops=32){
      original, so a bundle legitimately carries keys the signed rotations
      endorse — the root key plus every verified successor. Each hop needs
      BOTH signatures (retiring endorsement + successor key_adoption): an
-     orphaned rotation is a dead branch, not a trusted descendant. */
+     orphaned rotation is a dead branch, not a trusted descendant.
+     Competing rotations resolve deterministically — the highest-sequence
+     CONSENTED hop wins, matching the Python verifiers exactly. */
   const trusted=new Set([rootKey]);let cur=rootKey;
   for(let i=0;i<maxHops;i++){
-    let nxt=null;
+    const cands=[];
     for(const rn of rotationNodes){
       const r=toJS(rn)||{},p=r.payload||{};
-      if(p.record_type==="key_rotation"&&p.previous_key===cur&&r.public_key===cur){
+      if(p.record_type==="key_rotation"&&p.previous_key===cur&&r.public_key===cur
+        &&typeof p.new_key==="string"&&Number.isInteger(r.sequence)){
         const c=await checkReceipt(rn);
-        if(c.ok&&await adoptedBy(rotationNodes,rn,p.new_key)){nxt=p.new_key;break;}
+        if(c.ok)cands.push([rn,r]);  /* adoptedBy takes the RAW node */
       }
+    }
+    cands.sort((a,b)=>b[1].sequence-a[1].sequence);
+    let nxt=null;
+    for(const [rn,r] of cands){
+      if(await adoptedBy(rotationNodes,rn,r.payload.new_key)){nxt=r.payload.new_key;break;}
     }
     if(nxt===null)break;
     cur=nxt;trusted.add(cur);
@@ -408,14 +425,7 @@ async function lineageRoot(issuerKey,keyNodes){
      self-signed key_revocation at sequence 0 must not make itself the root. */
   let cur=issuerKey;
   for(let i=0;i<32;i++){
-    let nxt=null;
-    for(const rn of keyNodes){
-      const r=toJS(rn)||{},p=r.payload||{};
-      if(p.record_type==="key_rotation"&&p.new_key===cur&&r.public_key===p.previous_key){
-        const c=await checkReceipt(rn);
-        if(c.ok&&await adoptedBy(keyNodes,rn,cur)){nxt=p.previous_key;break;}
-      }
-    }
+    const nxt=await _ancHop(keyNodes,cur);
     if(nxt===null)break;
     cur=nxt;}
   return cur;}
@@ -429,7 +439,10 @@ async function revokedKeys(keyNodes,issuerKey){
      not pool order, and a revocation counts only for a key the lineage has
      already produced — a grafted foreign key or a retired key smearing a
      successor that hasn't pivoted in yet are both inert. */
-  const ord=[...keyNodes].sort((a,b)=>((toJS(a)||{}).sequence||0)-((toJS(b)||{}).sequence||0));
+  /* Malformed sequence sorts as -1 — an attacker controls this unsigned
+     field, and a NaN comparator would order differently than Python. */
+  const _seq=n=>{const s=(toJS(n)||{}).sequence;return Number.isInteger(s)?s:-1;};
+  const ord=[...keyNodes].sort((a,b)=>_seq(a)-_seq(b));
   let inEffect=issuerKey?await lineageRoot(issuerKey,ord):null;
   const seen=new Set();if(inEffect)seen.add(inEffect);
   const out={};
@@ -533,7 +546,14 @@ async function checkTools(byName,trustedSet,scope,bad,ok){
 /* RFC 6962 audit-path verification (transparency.py/check_log parity):
    leaf = sha256(0x00||payload_hash bytes), interior = sha256(0x01||l||r). */
 async function _incOk(leafHex,size,index,pathHex,rootHex){
-  if(!Number.isInteger(size)||!Number.isInteger(index)||index<0||index>=size||size<1)return false;
+  /* 2147483647 = MAX_TREE_SIZE: JS proof arithmetic uses 32-bit bitwise
+     ops — sizes at/past 2**31 would miscompute here while Python's
+     arbitrary precision verifies, so both surfaces bound identically. */
+  if(!Number.isInteger(size)||!Number.isInteger(index)||index<0||index>=size
+    ||size<1||size>2147483647)return false;
+  if(typeof leafHex!=="string"||!/^[0-9a-f]{64}$/i.test(leafHex)
+    ||typeof rootHex!=="string"||!/^[0-9a-f]{64}$/i.test(rootHex))return false;
+  rootHex=rootHex.toLowerCase();  /* Python compares decoded bytes — case-insensitive */
   const cat=(...a)=>{const n=a.reduce((t,x)=>t+x.length,0);const o=new Uint8Array(n);let p=0;
     for(const x of a){o.set(x,p);p+=x.length;}return o;};
   let r=await sha256hex(cat(new Uint8Array([0]),hex2b(leafHex)));
@@ -554,9 +574,13 @@ async function _incOk(leafHex,size,index,pathHex,rootHex){
    exact power of two the minimal proof omits the old root — the verifier
    knows it, so it is prepended. */
 async function _conOk(oldRootHex,oldSize,newRootHex,newSize,pathHex){
+  if(typeof oldRootHex!=="string"||!/^[0-9a-f]{64}$/i.test(oldRootHex)
+    ||typeof newRootHex!=="string"||!/^[0-9a-f]{64}$/i.test(newRootHex))return false;
+  oldRootHex=oldRootHex.toLowerCase();newRootHex=newRootHex.toLowerCase();
+  if(!Number.isInteger(oldSize)||!Number.isInteger(newSize)
+    ||oldSize>2147483647||newSize>2147483647)return false;
   if(oldSize===newSize)return(!pathHex||!pathHex.length)&&oldRootHex===newRootHex;
-  if(!Number.isInteger(oldSize)||!Number.isInteger(newSize)||oldSize<1
-    ||oldSize>=newSize||!pathHex||!pathHex.length)return false;
+  if(oldSize<1||oldSize>=newSize||!pathHex||!pathHex.length)return false;
   const cat=(...a)=>{const n=a.reduce((t,x)=>t+x.length,0);const o=new Uint8Array(n);let p=0;
     for(const x of a){o.set(x,p);p+=x.length;}return o;};
   const path=(oldSize&(oldSize-1))===0?[oldRootHex,...pathHex]:pathHex.slice();
@@ -575,6 +599,24 @@ async function _conOk(oldRootHex,oldSize,newRootHex,newSize,pathHex){
   }
   return sn===0&&fr===oldRootHex&&sr===newRootHex;
 }
+/* Python coercion parity: verify_extends evaluates whatever int()/fromhex()
+   CAN interpret — a signed `first:"5"` still gets judged (and a bad proof
+   convicts), never silently dropped to the fallback path the way a
+   type-strict read would. Only truly unparseable material is absent. */
+function _pyInt(v){
+  if(typeof v==="boolean")return v?1:0;
+  if(typeof v==="number"&&Number.isInteger(v))return v;
+  if(typeof v==="string"&&/^\s*[+-]?\d+\s*$/.test(v))return parseInt(v,10);
+  if(typeof v==="number"&&isFinite(v))return Math.trunc(v);
+  return null;
+}
+/* Contiguous-hex decode matching transparency.hex_bytes — a spaced
+   spelling must fail on EVERY surface the same way (the strictest
+   spelling wins), so whitespace is rejected, never skipped. */
+function _pyHex(s){
+  if(typeof s!=="string"||!/^[0-9a-fA-F]+$/.test(s)||s.length%2)return null;
+  return s.toLowerCase();
+}
 /* A checkpoint's embedded `extends` bridge — the issuer's signed attestation
    that this head extends the predecessor it names. Mirrors verify_extends:
    true/false when a bridge resolves, null when absent, malformed, or
@@ -582,13 +624,14 @@ async function _conOk(oldRootHex,oldSize,newRootHex,newSize,pathHex){
 async function _extOk(p,firstSize,firstRootHex){
   const ext=p&&p.extends;
   if(!ext||typeof ext!=="object")return null;
-  const ef=ext.first,er=ext.first_root_sha256,size=p.tree_size,root=p.root_sha256;
-  if(!Number.isInteger(ef)||typeof er!=="string"||!/^[0-9a-f]{64}$/i.test(er)
-    ||!Number.isInteger(size)||typeof root!=="string"||!/^[0-9a-f]{64}$/i.test(root)
-    ||!Array.isArray(ext.proof))return null;
+  const ef=_pyInt(ext.first),er=_pyHex(ext.first_root_sha256),
+    size=_pyInt(p&&p.tree_size),root=_pyHex(p&&p.root_sha256);
+  if(ef===null||er===null||size===null||root===null||!Array.isArray(ext.proof))return null;
+  const nodes=ext.proof.map(h=>_pyHex(h));
+  if(nodes.some(h=>h===null))return null;
   if(firstSize!=null&&ef!==firstSize)return null;
-  if(firstRootHex!=null&&er.toLowerCase()!==String(firstRootHex).toLowerCase())return false;
-  return await _conOk(er,ef,root,size,ext.proof);
+  if(firstRootHex!=null&&er!==String(firstRootHex).toLowerCase())return false;
+  return await _conOk(er,ef,root,size,nodes);
 }
 /* A signed tree head — signature, lineage, and head shape. Mirrors
    logmonitor._check_sth: returns [payload|null, why|null]. */
@@ -602,7 +645,8 @@ async function _sthCheck(node,trustedSet){
   const rc=await checkReceipt(node);
   if(!rc.ok)return[null,"checkpoint signature invalid: "+rc.why];
   const size=p.tree_size,root=p.root_sha256;
-  if(!Number.isInteger(size)||size<1||typeof root!=="string"||!/^[0-9a-f]{64}$/i.test(root))
+  if(!Number.isInteger(size)||size<1||size>2147483647
+    ||typeof root!=="string"||!/^[0-9a-f]{64}$/i.test(root))
     return[null,"malformed tree head"];
   return[p,null];
 }

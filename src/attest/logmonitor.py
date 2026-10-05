@@ -18,6 +18,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from .transparency import MAX_TREE_SIZE, json_is_int
+
 STATE_SCHEMA = "attest.log-monitor/1"
 
 
@@ -71,11 +73,12 @@ def _check_sth(cp_raw: dict, trusted: set) -> tuple[dict | None, str | None]:
     if not ok:
         return None, f"checkpoint signature invalid: {why}"
     size, root_hex = payload.get("tree_size"), payload.get("root_sha256")
-    if not isinstance(size, int) or isinstance(size, bool) or size < 1 or not isinstance(root_hex, str):
+    if not json_is_int(size) or size < 1 or size > MAX_TREE_SIZE or not isinstance(root_hex, str):
         return None, "checkpoint carries a malformed tree head"
     try:
-        if len(bytes.fromhex(root_hex)) != 32:
-            return None, "checkpoint carries a malformed tree head"
+        from .transparency import hex_bytes
+
+        hex_bytes(root_hex, length=32)
     except ValueError:
         return None, "checkpoint carries a malformed tree head"
     return payload, None
@@ -101,6 +104,8 @@ def check(
     tip can never bridge to the checkpoint the pin tracks. Returns
     (new_state, ok, human lines).
     """
+    from .transparency import hex_bytes, verify_consistency, verify_extends
+
     lines: list[str] = []
     if state is not None and not isinstance(state, dict):
         return None, False, ["the pinned monitor state is not a JSON object — corrupt local pin"]
@@ -112,7 +117,7 @@ def check(
         # failure mode for a continuity watcher.
         return None, False, ["log head is not a JSON object — cannot evaluate this cycle"]
     live_size = head.get("tree_size")
-    if not isinstance(live_size, int) or isinstance(live_size, bool) or live_size < 0:
+    if not json_is_int(live_size) or live_size < 0 or live_size > MAX_TREE_SIZE:
         return None, False, ["log head did not report a usable tree_size"]
     if not isinstance(issuer_doc, dict) or not isinstance(issuer_doc.get("issuer_key"), str):
         return (
@@ -179,11 +184,9 @@ def check(
         return new_state, True, lines
     try:
         old_size, old_root = int(state["tree_size"]), str(state["root_sha256"])
-        old_root_bytes = bytes.fromhex(old_root)
-        if not isinstance(state["tree_size"], int) or isinstance(state["tree_size"], bool):
+        old_root_bytes = hex_bytes(old_root, length=32)
+        if not json_is_int(state["tree_size"]):
             raise ValueError("tree_size must be an int")
-        if len(old_root_bytes) != 32:
-            raise ValueError("root must be 32 bytes")
     except (KeyError, TypeError, ValueError):
         return (
             None,
@@ -214,8 +217,6 @@ def check(
     # a bridge from a different ancestor than our pin), fall back to a
     # served proof bounded at the CHECKPOINT's size — not the live tip,
     # which is almost always ahead of the newest signed head.
-    from .transparency import verify_consistency, verify_extends
-
     embedded = verify_extends(payload, first=old_size, first_root=old_root_bytes)
     if embedded is True:
         lines.append(
@@ -244,14 +245,12 @@ def check(
             ],
         )
     proof_first, proof_size = proof.get("first"), proof.get("tree_size")
-    # Strict ints — a served "5" or true isn't the number 5 (the JS
-    # verifier's === agrees); loose int() coercion would bridge a proof
-    # the browser check rejects.
+    # JSON-integer typing — a served "5" or true isn't the number 5; the
+    # browser's Number.isInteger rule is the shared one (integral floats
+    # count, strings and bools never do).
     if (
-        not isinstance(proof_first, int)
-        or isinstance(proof_first, bool)
-        or not isinstance(proof_size, int)
-        or isinstance(proof_size, bool)
+        not json_is_int(proof_first)
+        or not json_is_int(proof_size)
         or proof_first != old_size
         or proof_size != size
     ):
@@ -261,8 +260,8 @@ def check(
             ["ALERT: consistency proof is for different tree sizes than the head claims"],
         )
     try:
-        nodes = [bytes.fromhex(h) for h in proof["proof"]]
-        bridges = verify_consistency(old_root_bytes, old_size, bytes.fromhex(root_hex), size, nodes)
+        nodes = [hex_bytes(h, length=32) for h in proof["proof"]]
+        bridges = verify_consistency(old_root_bytes, old_size, hex_bytes(root_hex), size, nodes)
     except (TypeError, ValueError):
         return None, False, ["ALERT: consistency proof carries malformed nodes"]
     if not bridges:
@@ -331,9 +330,9 @@ def live_check(
         # pack's head as its ancestor, no separate proof fetch is needed —
         # and a bridge that claims our size but can't reach our root is a
         # signed self-contradiction, a hard fork rather than a soft one.
-        from .transparency import verify_extends
+        from .transparency import hex_bytes, verify_extends
 
-        embedded = verify_extends(live_payload, first=pack_size, first_root=bytes.fromhex(pack_root))
+        embedded = verify_extends(live_payload, first=pack_size, first_root=hex_bytes(pack_root))
         if embedded is True:
             return True, (
                 f"live checkpoint's own signed bridge extends the pack's head "
@@ -350,15 +349,14 @@ def live_check(
                 "live head cannot bridge from the pack's head — the deployment "
                 "cannot show the pack's log inside the one it serves now"
             )
+        from .transparency import hex_bytes, verify_consistency
+
         try:
-            nodes = [bytes.fromhex(h) for h in proof["proof"]]
+            nodes = [hex_bytes(h, length=32) for h in proof["proof"]]
         except (TypeError, ValueError):
             return False, "live consistency proof carries malformed nodes"
-        from .transparency import verify_consistency
 
-        if verify_consistency(
-            bytes.fromhex(pack_root), pack_size, bytes.fromhex(live_root), live_size, nodes
-        ):
+        if verify_consistency(hex_bytes(pack_root), pack_size, hex_bytes(live_root), live_size, nodes):
             return True, (
                 f"live log provably extends the pack's head ({pack_size} → "
                 f"{live_size} leaves) — the pack's log is the one still served"
@@ -463,7 +461,7 @@ def witness_cosign(store, signer, body: dict) -> tuple[int, dict]:
                     and isinstance(legacy, dict)
                     and legacy.get("schema") == WITNESS_SCHEMA
                     and legacy.get("issuer_key") in trusted
-                    and isinstance(legacy.get("tree_size"), int)
+                    and json_is_int(legacy.get("tree_size"))
                     and (
                         legacy_pin is None
                         or legacy["tree_size"] > legacy_pin["tree_size"]
@@ -486,10 +484,11 @@ def witness_cosign(store, signer, body: dict) -> tuple[int, dict]:
         old_root = state.get("root_sha256")
         if old_size is not None:
             try:
-                if not isinstance(old_size, int) or isinstance(old_size, bool):
+                from .transparency import coerce_int, hex_bytes
+
+                if not json_is_int(old_size):
                     raise ValueError("size must be an int")
-                if not isinstance(old_root, str) or len(bytes.fromhex(old_root)) != 32:
-                    raise ValueError("root must be 32-byte hex")
+                hex_bytes(old_root, length=32)
             except ValueError:
                 return 500, {"error": "witness pin fields are corrupt — refusing to repin"}
         if old_size is not None:
@@ -503,20 +502,20 @@ def witness_cosign(store, signer, body: dict) -> tuple[int, dict]:
                     },
                 }
             if size != int(old_size):
-                bridge = verify_extends(payload, first=int(old_size), first_root=bytes.fromhex(old_root))
+                bridge = verify_extends(payload, first=int(old_size), first_root=hex_bytes(old_root))
                 if bridge is None:
                     cons = body.get("consistency")
                     try:
                         bridge = (
                             isinstance(cons, dict)
-                            and int(cons.get("first") or -1) == int(old_size)
-                            and int(cons.get("tree_size") or -1) == size
+                            and coerce_int(cons.get("first") or -1) == int(old_size)
+                            and coerce_int(cons.get("tree_size") or -1) == size
                             and verify_consistency(
-                                bytes.fromhex(old_root),
+                                hex_bytes(old_root),
                                 int(old_size),
-                                bytes.fromhex(root_hex),
+                                hex_bytes(root_hex),
                                 size,
-                                [bytes.fromhex(h) for h in cons["proof"]],
+                                [hex_bytes(h, length=32) for h in cons["proof"]],
                             )
                         )
                     except (KeyError, TypeError, ValueError):
@@ -637,7 +636,7 @@ def witness_heads(store, issuer_key: str) -> dict:
         if (
             state.get("schema") != WITNESS_SCHEMA
             or not isinstance(state.get("issuer_key"), str)
-            or not isinstance(state.get("tree_size"), int)
+            or not json_is_int(state.get("tree_size"))
             or not isinstance(state.get("root_sha256"), str)
             or cosig is None
         ):
@@ -807,8 +806,7 @@ def compare_views(
     p = cosig.payload
     if (
         p.get("record_type") != "witness_cosignature"
-        or not isinstance(p.get("subject_tree_size"), int)
-        or isinstance(p.get("subject_tree_size"), bool)
+        or not json_is_int(p.get("subject_tree_size"))
         or p.get("subject_tree_size") != theirs.get("tree_size")
         or not isinstance(p.get("subject_root_sha256"), str)
         or p.get("subject_root_sha256") != theirs.get("root_sha256")
@@ -839,39 +837,57 @@ def compare_views(
     # the attestation itself is publicly committed — the witness can't
     # double-speak without forking its own log too. A served anchor that
     # doesn't verify is a lie like any other served falsehood.
-    from .transparency import verify_inclusion
+    from .transparency import hex_bytes, verify_inclusion
 
     anchor = theirs.get("witness_anchor")
     anchored_size: int | None = None
     if isinstance(anchor, dict):
+        # Split the wrapper's failure modes: material that can't even be
+        # PARSED (a checkpoint that isn't a receipt, an unparseable proof)
+        # is malformed served junk — unverifiable, never a provable lie.
+        # Material that parses but VERIFIABLY fails (bad signature, foreign
+        # signer, wrong record type, failing inclusion path) is signed
+        # evidence of a false claim — dishonest, repin frozen. The shape
+        # of the unsigned wrapper must not be able to choose between them.
         try:
             acp = Receipt.model_validate(anchor.get("checkpoint"))
-            ap = acp.payload
-            aproof = anchor.get("proof") or {}
-            anchored = (
-                ap.get("record_type") == "log_checkpoint"
-                and (witness_trusted is None or acp.public_key in witness_trusted)
-                and verify_receipt(acp, public_key=acp.public_key)[0]
-                and isinstance(ap.get("tree_size"), int)
-                and isinstance(ap.get("root_sha256"), str)
-                and verify_inclusion(
-                    bytes.fromhex(cosig.payload_hash),
-                    int(ap["tree_size"]),
-                    int(aproof["leaf_index"]),
-                    [bytes.fromhex(h) for h in aproof["path"]],
-                    bytes.fromhex(ap["root_sha256"]),
-                )
+        except Exception:  # noqa: BLE001 — pydantic raises several types
+            return (
+                "unverifiable",
+                "the pin's witness_anchor checkpoint is not a receipt — "
+                "malformed served material, not a provable lie",
             )
-        except Exception:  # noqa: BLE001 — any malformed anchor is a lie, not None
-            anchored = False
-        if anchored:
-            anchored_size = int(ap["tree_size"])
-        else:
+        ap = acp.payload
+        aproof = anchor.get("proof")
+        try:
+            leaf_index = aproof["leaf_index"]
+            if not json_is_int(leaf_index):
+                raise ValueError("leaf_index is not an integer")
+            leaf_index = int(leaf_index)
+            nodes = [hex_bytes(h, length=32) for h in (aproof.get("path") or [])]
+            a_size = int(ap["tree_size"])
+            a_root = hex_bytes(ap["root_sha256"], length=32)
+        except (AttributeError, KeyError, TypeError, ValueError):
+            return (
+                "unverifiable",
+                "the pin's witness_anchor proof can't be parsed — "
+                "malformed served material, not a provable lie",
+            )
+        if (
+            ap.get("record_type") != "log_checkpoint"
+            or not json_is_int(ap.get("tree_size"))
+            or not isinstance(ap.get("root_sha256"), str)
+            or len(a_root) != 32
+            or (witness_trusted is not None and acp.public_key not in witness_trusted)
+            or not verify_receipt(acp, public_key=acp.public_key)[0]
+            or not verify_inclusion(hex_bytes(cosig.payload_hash), a_size, leaf_index, nodes, a_root)
+        ):
             return (
                 "dishonest",
                 "the pin's witness_anchor does not verify — the cosig does not "
                 "sit inside the witness's own published log as claimed",
             )
+        anchored_size = a_size
     elif anchor is not None:
         return (
             "unverifiable",
@@ -879,11 +895,17 @@ def compare_views(
             "document; a served anchor is either verifiable or a lie",
         )
     if anchored_size is not None:
-        anchor_note = (
-            f"; the cosig itself sits inside the witness's published log at "
-            f"size {anchored_size} — the attestation is publicly anchored"
-        )
-        if witness_pin is not None:
+        if witness_pin is None:
+            # Verified in isolation the anchor only proves the witness signed
+            # it — a checkpoint over a private per-victim fork verifies the
+            # same way. Without our own pin on the witness's log, 'publicly
+            # committed' is claimed, not proven.
+            anchor_note = (
+                f"; the cosig sits inside a witness-signed log at size "
+                f"{anchored_size} — verified in isolation (no pin on the "
+                "witness's own log, so a per-victim fork is not excluded)"
+            )
+        else:
             # Bind the anchor to the head THIS monitor pins of the witness's
             # own log — verified in isolation, an anchor could be a checkpoint
             # the witness minted over a per-victim private fork. Bridged to
@@ -892,8 +914,8 @@ def compare_views(
 
             try:
                 wp_size = int(witness_pin["tree_size"])
-                wp_root = bytes.fromhex(witness_pin["root_sha256"])
-                a_root = bytes.fromhex(ap["root_sha256"])
+                wp_root = hex_bytes(witness_pin["root_sha256"], length=32)
+                a_root = hex_bytes(ap["root_sha256"], length=32)
             except (KeyError, TypeError, ValueError):
                 return (
                     "unverifiable",
@@ -910,7 +932,7 @@ def compare_views(
                 proof = fetch_wconsistency(f_sz, t_sz) if fetch_wconsistency else None
                 try:
                     nodes = (
-                        [bytes.fromhex(h) for h in (proof.get("proof") or [])]
+                        [hex_bytes(h, length=32) for h in (proof.get("proof") or [])]
                         if isinstance(proof, dict)
                         else []
                     )
@@ -960,8 +982,10 @@ def compare_views(
     # view the witness actually attested. Served fields that can't even
     # coerce are a served lie: the witness signed this receipt, so a
     # malformed subject is its own attestation, not a transient error.
+    from .transparency import coerce_int
+
     try:
-        my_size, my_root = int(mine["tree_size"]), str(mine["root_sha256"])
+        my_size, my_root = coerce_int(mine["tree_size"]), str(mine["root_sha256"])
     except (KeyError, TypeError, ValueError):
         return (
             "unverifiable",
@@ -969,7 +993,7 @@ def compare_views(
             "not a witness verdict; repin locally and rerun",
         )
     try:
-        w_size, w_root = int(p["subject_tree_size"]), str(p["subject_root_sha256"])
+        w_size, w_root = coerce_int(p["subject_tree_size"]), str(p["subject_root_sha256"])
     except (KeyError, TypeError, ValueError):
         return (
             "dishonest",
@@ -1086,9 +1110,9 @@ def check_cosignatures(
                 p.get("subject_checkpoint") != cp_id
                 # Strict comparison — a stringified "5" doesn't bind head 5
                 # (the JS verifier's !== agrees), a bool aliases int 0/1,
-                # and a malformed field just can't bind.
-                or not isinstance(p.get("subject_tree_size"), int)
-                or isinstance(p.get("subject_tree_size"), bool)
+                # and a malformed field just can't bind. Integral floats
+                # count — JS can't distinguish 5.0 from 5 post-parse.
+                or not json_is_int(p.get("subject_tree_size"))
                 or p.get("subject_tree_size") != size
                 or p.get("subject_root_sha256") != root_hex
             ):
@@ -1128,7 +1152,7 @@ def check_cosig_anchors(doc: dict) -> tuple[int, list[str]]:
     names the cosig. Absent anchors and absent cosigs just don't count."""
     from .ledger import verify_receipt
     from .models import Receipt
-    from .transparency import verify_inclusion
+    from .transparency import hex_bytes, verify_inclusion
 
     anchors = doc.get("cosig_anchors")
     if not isinstance(anchors, dict):
@@ -1159,22 +1183,17 @@ def check_cosig_anchors(doc: dict) -> tuple[int, list[str]]:
             if not ok:
                 raise ValueError(f"anchor checkpoint: {why}")
             size = p.get("tree_size")
-            if not isinstance(size, int) or isinstance(size, bool) or size < 1:
+            if not json_is_int(size) or size < 1 or size > MAX_TREE_SIZE:
                 raise ValueError("anchor checkpoint carries a malformed tree head")
-            root = bytes.fromhex(str(p["root_sha256"]))
-            if len(root) != 32:
-                raise ValueError("anchor checkpoint carries a malformed tree head")
-            leaf = bytes.fromhex(str(cosig["payload_hash"]))
+            size = int(size)
+            root = hex_bytes(str(p["root_sha256"]), length=32)
+            leaf = hex_bytes(str(cosig["payload_hash"]), length=32)
             proof = anchor.get("proof")
             if not isinstance(proof, dict):
                 raise ValueError("anchor proof is not an object")
-            path = [bytes.fromhex(h) for h in proof.get("path") or []]
+            path = [hex_bytes(h, length=32) for h in proof.get("path") or []]
             idx = proof.get("leaf_index")
-            if (
-                not isinstance(idx, int)
-                or isinstance(idx, bool)
-                or not verify_inclusion(leaf, size, idx, path, root)
-            ):
+            if not json_is_int(idx) or not verify_inclusion(leaf, size, int(idx), path, root):
                 raise ValueError("the cosig does not reach the anchor's signed tree head")
             anchored += 1
         except (KeyError, TypeError, ValueError) as exc:
@@ -1194,7 +1213,7 @@ def state_load(path) -> dict | None:
         return None
     try:
         doc = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, ValueError, RecursionError) as exc:
         return {"schema": f"unreadable state: {exc}"}
     return doc if isinstance(doc, dict) else {"schema": "state is not an object"}
 
@@ -1246,7 +1265,7 @@ def fetch_json(url: str, client=None, *, bound: int = 4 * 1024 * 1024) -> Any:
         raise ValueError(f"{url} malformed: {exc}") from exc
     try:
         return json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (UnicodeDecodeError, ValueError, RecursionError) as exc:
         raise ValueError(f"{url} did not serve JSON: {exc}") from exc
 
 
@@ -1259,26 +1278,36 @@ def post_json(url: str, body: dict, client=None, *, bound: int = 4 * 1024 * 1024
     never forge."""
     import httpx
 
-    post = client.post if client is not None else httpx.post
     try:
-        r = post(url, json=body, timeout=15)
+        if client is not None:
+            # Injected clients honor the .post contract; the byte bound
+            # still applies, just not incrementally.
+            r = client.post(url, json=body, timeout=15)
+            status_code, raw = r.status_code, r.content
+            if len(raw) > bound:
+                raise ValueError(f"{url} response exceeds the 4 MB bound")
+        else:
+            with httpx.stream("POST", url, json=body, timeout=15) as r:
+                status_code = r.status_code
+                raw = bytearray()
+                for chunk in r.iter_bytes(1 << 16):
+                    raw.extend(chunk)
+                    if len(raw) > bound:
+                        raise ValueError(f"{url} response exceeds the 4 MB bound")
     except httpx.HTTPError as exc:
         raise ValueError(f"{url} unreachable: {exc}") from exc
     except httpx.InvalidURL as exc:
         raise ValueError(f"{url} malformed: {exc}") from exc
-    raw = r.content
-    if len(raw) > bound:
-        raise ValueError(f"{url} response exceeds the 4 MB bound")
     try:
-        doc = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        doc = json.loads(bytes(raw).decode("utf-8"))
+    except (UnicodeDecodeError, ValueError, RecursionError) as exc:
         raise ValueError(f"{url} did not serve JSON: {exc}") from exc
     if not isinstance(doc, dict):
-        return {"status": r.status_code, "body": doc}
+        return {"status": status_code, "body": doc}
     # A "status" key in the body must never overwrite the real HTTP status —
     # a witness serving {"status": 200, ...} on an error response would
     # spoof the accepted path. The transport verdict wins; keep the body's
     # copy under its own key so nothing is lost.
     if "status" in doc:
         doc["body_status"] = doc.pop("status")
-    return {"status": r.status_code, **doc}
+    return {"status": status_code, **doc}

@@ -1012,7 +1012,7 @@ def _parse_issuer_doc(raw: bytes, source: str) -> dict:
     traceback."""
     try:
         doc = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
         sys.exit(f"issuer document is not valid JSON: {exc}")
     if (
         not isinstance(doc, dict)
@@ -1181,7 +1181,7 @@ def _verify(args: argparse.Namespace) -> None:
         data = json.loads(raw.decode("utf-8"))
     except UnicodeDecodeError:
         fail(f"not a JSON artifact: {path.name}\n  a .zip pack verifies directly — pass the zip itself.")
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, RecursionError) as exc:
         fail(f"not valid JSON: {exc}")
     pinned = " (against the pinned issuer key)" if pinned_key else ""
     trust_note = (
@@ -1385,7 +1385,7 @@ def _verify_log_doc(
             fail(f"this artifact needs a signed head to check against — pass --{label} FILE")
         try:
             doc = json.loads(Path(path_str).read_bytes())
-        except (OSError, json.JSONDecodeError) as exc:
+        except (OSError, json.JSONDecodeError, RecursionError) as exc:
             fail(f"--{label}: unreadable checkpoint document ({exc})")
         raw_cp = doc.get("checkpoint") if isinstance(doc, dict) else None
         if not isinstance(raw_cp, dict):
@@ -1399,8 +1399,12 @@ def _verify_log_doc(
         if not ok:
             fail(f"--{label}: checkpoint receipt invalid ({why})")
         try:
-            return cp, int(cp.payload["tree_size"]), bytes.fromhex(cp.payload["root_sha256"])
-        except (KeyError, ValueError) as exc:
+            return (
+                cp,
+                int(cp.payload["tree_size"]),
+                transparency.hex_bytes(cp.payload["root_sha256"], length=32),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
             fail(f"--{label}: checkpoint payload malformed ({exc})")
 
     def trusted(cp: Receipt, label: str) -> None:
@@ -1436,10 +1440,10 @@ def _verify_log_doc(
             fail(f"checkpoint signature invalid: {why}", kind="log_checkpoint")
         try:
             size = int(cp.payload["tree_size"])
-            root = bytes.fromhex(cp.payload["root_sha256"])
-        except (KeyError, ValueError) as exc:
+            root = transparency.hex_bytes(cp.payload["root_sha256"], length=32)
+        except (KeyError, TypeError, ValueError) as exc:
             fail(f"checkpoint payload malformed: {exc}", kind="log_checkpoint")
-        if len(root) != 32 or size < 0:
+        if size < 0 or size > transparency.MAX_TREE_SIZE:
             fail("checkpoint carries a malformed root or size", kind="log_checkpoint")
         proven = None
         proofs = data.get("proofs")
@@ -1447,12 +1451,17 @@ def _verify_log_doc(
             proven = 0
             for ph, p in proofs.items():
                 try:
-                    good = transparency.verify_inclusion(
-                        bytes.fromhex(ph),
-                        size,
-                        int(p["leaf_index"]),
-                        [bytes.fromhex(b) for b in p["path"]],
-                        root,
+                    idx = p["leaf_index"]
+                    good = (
+                        isinstance(p, dict)
+                        and transparency.json_is_int(idx)
+                        and transparency.verify_inclusion(
+                            transparency.hex_bytes(ph, length=32),
+                            size,
+                            int(idx),
+                            [transparency.hex_bytes(b, length=32) for b in p["path"]],
+                            root,
+                        )
                     )
                 except (KeyError, ValueError, TypeError):
                     good = False
@@ -1630,8 +1639,8 @@ def _verify_log_doc(
         if new_cp.public_key != old_cp.public_key:
             fail("--against and --checkpoint heads are signed by different issuers", kind="consistency_proof")
         try:
-            first = int(data["first"])
-            nodes = [bytes.fromhex(b) for b in data["proof"]]
+            first = transparency.coerce_int(data["first"])
+            nodes = [transparency.hex_bytes(b, length=32) for b in data["proof"]]
         except (ValueError, TypeError) as exc:
             fail(f"consistency bridge malformed: {exc}", kind="consistency_proof")
         if first != old_size:
@@ -1640,7 +1649,11 @@ def _verify_log_doc(
                 f"{old_size} — pair each head with its own file",
                 kind="consistency_proof",
             )
-        if int(data.get("tree_size", new_size)) != new_size:
+        try:
+            bridge_size = transparency.coerce_int(data.get("tree_size", new_size))
+        except (ValueError, TypeError):
+            fail("consistency bridge malformed: tree_size is not an integer", kind="consistency_proof")
+        if bridge_size != new_size:
             fail(
                 f"bridge was emitted for a tree of size {data.get('tree_size')} "
                 f"but --checkpoint signs {new_size}",
@@ -1662,12 +1675,19 @@ def _verify_log_doc(
     # Inclusion proof doc: {tree_size, leaf_index, leaf, path}.
     _, size, root = head_doc(getattr(args, "checkpoint", None), "checkpoint")
     try:
-        index = int(data["leaf_index"])
-        leaf = bytes.fromhex(data["leaf"])
-        path_nodes = [bytes.fromhex(b) for b in data["path"]]
-    except (ValueError, TypeError) as exc:
+        index = data["leaf_index"]
+        if not transparency.json_is_int(index):
+            raise ValueError("leaf_index is not a JSON integer")
+        index = int(index)
+        leaf = transparency.hex_bytes(data["leaf"], length=32)
+        path_nodes = [transparency.hex_bytes(b, length=32) for b in data["path"]]
+    except (ValueError, TypeError, KeyError) as exc:
         fail(f"inclusion proof malformed: {exc}", kind="inclusion_proof")
-    if int(data.get("tree_size", size)) != size:
+    try:
+        proof_size = transparency.coerce_int(data.get("tree_size", size))
+    except (ValueError, TypeError):
+        fail("inclusion proof malformed: tree_size is not an integer", kind="inclusion_proof")
+    if proof_size != size:
         fail(
             f"proof was computed at tree size {data.get('tree_size')} but --checkpoint signs {size} — "
             "it reaches a different root",
@@ -2547,6 +2567,8 @@ def _monitor(args: argparse.Namespace) -> None:
         head,
         doc,
         whead=None,
+        crash=False,
+        crash_pin=None,
     ) -> None:
         """Mint one monitor_observation for the cycle — including cycles that
         never reached the deployment, so an outage is durable evidence rather
@@ -2594,11 +2616,12 @@ def _monitor(args: argparse.Namespace) -> None:
                 if wbase
                 else None
             ),
-            # On an alert the served material itself is the evidence —
-            # verbatim, so the signed contradiction is re-checkable.
-            "served_doc": head if alert else None,
-            "served_witness_pin": pin if alert and pin else None,
-            "served_witness_head": whead if alert and whead else None,
+            # On an alert — or a crash mid-evaluation — the served material
+            # itself is the evidence, verbatim, so the signed record can be
+            # re-checked against exactly what broke the verifier.
+            "served_doc": head if (alert or crash) else None,
+            "served_witness_pin": (pin if alert else None) or crash_pin,
+            "served_witness_head": whead if (alert or crash) and whead else None,
         }
         try:
             obs_receipt = j_engine.issue_monitor_observation(observation)
@@ -2644,10 +2667,12 @@ def _monitor(args: argparse.Namespace) -> None:
             return False, lines, state, False
 
         def fetch_consistency(first: int, size: int):
-            try:
-                return logmonitor.fetch_json(f"{base}/api/log/consistency?first={first}&size={size}")
-            except ValueError:
-                return None
+            # NOT swallowed: a transport failure must not read as "the
+            # deployment served no proof" — that mints a signed ALERT for a
+            # DNS blip. The ValueError propagates through check() to the
+            # cycle guard, which journals an unverifiable observation
+            # naming the fetch failure instead of a false contradiction.
+            return logmonitor.fetch_json(f"{base}/api/log/consistency?first={first}&size={size}")
 
         try:
             new_state, ok, lines = logmonitor.check(
@@ -2669,6 +2694,7 @@ def _monitor(args: argparse.Namespace) -> None:
                 wbase=None,
                 head=head,
                 doc=doc,
+                crash=True,
             )
             return False, lines, state, False
         # check() rebuilds the state fresh each cycle — carry forward the
@@ -2697,6 +2723,8 @@ def _monitor(args: argparse.Namespace) -> None:
         pin = None
         wbase = None
         whead = None
+        crash = False
+        crash_pin = None
         if ok and new_state is not None and getattr(args, "witness", None):
             wbase = _https_base(args.witness, "witness")
             try:
@@ -2716,30 +2744,46 @@ def _monitor(args: argparse.Namespace) -> None:
                     ok = False
                     lines.append("witness heads response is malformed — cannot compare views")
                 else:
-                    wtrusted = logmonitor._trusted_set(wdoc)
-                    # A revoked WITNESS key can still sign — it just can't
-                    # vouch: the revocation is the deployment declaring the
-                    # key suspect, so its attestations don't count as an
-                    # independent second view (same discipline as
-                    # --witness-url's named-requirement set).
-                    from . import ledger as _ledger
-                    from .models import Receipt as _Rc
+                    wlog_state = None
+                    try:
+                        wtrusted = logmonitor._trusted_set(wdoc)
+                        # A revoked WITNESS key can still sign — it just can't
+                        # vouch: the revocation is the deployment declaring the
+                        # key suspect, so its attestations don't count as an
+                        # independent second view (same discipline as
+                        # --witness-url's named-requirement set).
+                        from . import ledger as _ledger
+                        from .models import Receipt as _Rc
 
-                    _wrecs = []
-                    for _x in wdoc.get("key_receipts") or []:
-                        try:
-                            _wrecs.append(_Rc.model_validate(_x))
-                        except Exception:  # noqa: BLE001 — malformed entries can't revoke
-                            continue
-                    wtrusted -= set(_ledger.revoked_issuer_keys(_wrecs, issuer_key=wdoc["issuer_key"]))
+                        _wrecs = []
+                        for _x in wdoc.get("key_receipts") or []:
+                            try:
+                                _wrecs.append(_Rc.model_validate(_x))
+                            except Exception:  # noqa: BLE001 — malformed entries can't revoke
+                                continue
+                        wtrusted -= set(_ledger.revoked_issuer_keys(_wrecs, issuer_key=wdoc["issuer_key"]))
+                    except Exception as exc:  # noqa: BLE001 — hostile witness
+                        # lifecycle material fails the cycle closed; it must
+                        # not kill the watch or its journal.
+                        ok = False
+                        wtrusted = None
+                        lines.append(f"witness lineage evaluation failed: {exc}")
+
                     # Pin the WITNESS's own log head too: a served
                     # witness_anchor only means 'in the published log' when
                     # it provably reconciles with the head THIS monitor
                     # pins — an anchor over a private per-victim fork
-                    # verifies in isolation and means nothing.
-                    wlog_state = None
+                    # verifies in isolation and means nothing. The fetch
+                    # budget is capped per cycle: a witness answering with
+                    # thousands of pins that each demand a consistency proof
+                    # stalls the watch for days — beyond the cap the anchor
+                    # reads unverifiable, never silently trusted.
+                    _wfetch_budget = {"n": 8}
 
                     def _wconsistency(first: int, size: int):
+                        if _wfetch_budget["n"] <= 0:
+                            return None
+                        _wfetch_budget["n"] -= 1
                         try:
                             return logmonitor.fetch_json(
                                 f"{wbase}/api/log/consistency?first={first}&size={size}"
@@ -2778,55 +2822,90 @@ def _monitor(args: argparse.Namespace) -> None:
                             lines.append(f"witness log: {_wl}")
                         if not wok:
                             ok = False
-                    # Pins key on the issuer's canonical LINEAGE identity —
-                    # match any key inside the lineage we track, not just
-                    # the tip our issuer doc happens to claim. A non-string
-                    # issuer_key can never be a member (and would crash the
-                    # hash lookup); unhashable served pins are skipped.
-                    _ilineage = logmonitor._trusted_set(doc)
-                    # No truncation either — the response is already
-                    # byte-capped, and slicing could hide the one
-                    # contradictory pin behind 64 agreeable decoys.
-                    cand_pins = [
-                        p
-                        for p in heads["pins"]
-                        if isinstance(p, dict)
-                        and isinstance(p.get("issuer_key"), str)
-                        and p["issuer_key"] in _ilineage
-                    ]
-                    # EVERY matching pin is compared — a witness publishing
-                    # two live pins for our lineage (one canonical identity
-                    # can map to two slots across a rotation) gets its worst
-                    # view reported: skipping a contradictory second pin
-                    # would hide a fork behind an agreeable first.
-                    _rank = {"agree": 0, "unseen": 1, "unverifiable": 2, "diverged": 3, "dishonest": 4}
-                    if not cand_pins:
-                        verdict, line, pin = (
-                            "unseen",
-                            "the witness has never cosigned this issuer — no second view exists",
-                            None,
-                        )
-                    else:
-                        verdict, line, pin = "agree", "views agree", cand_pins[0]
-                        for cand in cand_pins:
-                            try:
-                                v, ln = logmonitor.compare_views(
-                                    new_state,
-                                    cand,
-                                    wtrusted,
-                                    witness_pin=wlog_state,
-                                    fetch_wconsistency=_wconsistency,
-                                    issuer_lineage=_ilineage,
-                                )
-                            except Exception as exc:  # noqa: BLE001 — the witness
-                                # view is remote input: a crash shape is an
-                                # unverifiable view, never a dead watch.
-                                v, ln = "unverifiable", f"cross-view crashed: {exc}"
-                            if _rank.get(v, 2) > _rank.get(verdict, 2):
-                                verdict, line, pin = v, ln, cand
-                            if _rank.get(verdict, 2) == 4:
-                                break  # 'dishonest' is terminal — nothing worse to find
-                    lines.append(f"witness cross-view [{verdict}]: {line}")
+                    if wtrusted is not None:
+                        # Pins key on the issuer's canonical LINEAGE identity —
+                        # match any key inside the lineage we track, not just
+                        # the tip our issuer doc happens to claim. A non-string
+                        # issuer_key can never be a member (and would crash the
+                        # hash lookup); unhashable served pins are skipped.
+                        _ilineage = logmonitor._trusted_set(doc)
+                        cand_pins = [
+                            p
+                            for p in heads["pins"]
+                            if isinstance(p, dict)
+                            and isinstance(p.get("issuer_key"), str)
+                            and p["issuer_key"] in _ilineage
+                        ]
+                        # The witness controls serving order, so evaluation
+                        # order is chosen HERE, deterministically: pins whose
+                        # unsigned fields already hint at a fork (same size,
+                        # different root) go first — agreeable decoys can't
+                        # bury them past an evaluation cap — then a stable
+                        # id key breaks every other tie so same-rank picks
+                        # never depend on wire order.
+                        _ours = new_state if isinstance(new_state, dict) else {}
+
+                        def _porder(p: dict):
+                            fork_hint = (
+                                _ours.get("tree_size") is not None
+                                and p.get("tree_size") == _ours["tree_size"]
+                                and p.get("root_sha256") != _ours["root_sha256"]
+                            )
+                            return (not fork_hint, str(p.get("checkpoint_id") or p.get("id") or ""))
+
+                        cand_pins.sort(key=_porder)
+                        # Every pin whose unsigned fields hint at a fork is
+                        # always compared; beyond that a witness has ≤2
+                        # legitimate live pins per lineage, so 64 examined
+                        # slots is generous — the remainder is REPORTED, not
+                        # silently dropped. Combined with the fetch budget
+                        # above, a 4 MB wall of pins can't stall the watch.
+                        _rank = {
+                            "agree": 0,
+                            "unseen": 1,
+                            "unverifiable": 2,
+                            "diverged": 3,
+                            "dishonest": 4,
+                        }
+                        if not cand_pins:
+                            verdict, line, pin = (
+                                "unseen",
+                                "the witness has never cosigned this issuer — no second view exists",
+                                None,
+                            )
+                        else:
+                            verdict, line, pin = "agree", "views agree", cand_pins[0]
+                            examined = 0
+                            agree_ln = None
+                            for cand in cand_pins:
+                                if examined >= 64:
+                                    break
+                                examined += 1
+                                try:
+                                    v, ln = logmonitor.compare_views(
+                                        new_state,
+                                        cand,
+                                        wtrusted,
+                                        witness_pin=wlog_state,
+                                        fetch_wconsistency=_wconsistency,
+                                        issuer_lineage=_ilineage,
+                                    )
+                                except Exception as exc:  # noqa: BLE001 — the witness
+                                    # view is remote input: a crash shape is an
+                                    # unverifiable view, never a dead watch.
+                                    v, ln = "unverifiable", f"cross-view crashed: {exc}"
+                                    crash, crash_pin = True, cand
+                                if v == "agree":
+                                    agree_ln = ln
+                                if _rank.get(v, 2) > _rank.get(verdict, 2):
+                                    verdict, line, pin = v, ln, cand
+                                if _rank.get(verdict, 2) == 4:
+                                    break  # 'dishonest' is terminal — nothing worse to find
+                            if verdict == "agree" and agree_ln:
+                                line = agree_ln
+                            if len(cand_pins) > examined:
+                                line += f" (+{len(cand_pins) - examined} further pin(s) unexamined)"
+                        lines.append(f"witness cross-view [{verdict}]: {line}")
                     if wlog_state is not None and new_state is not None:
                         # The monitor's own witness-log pin rides the state
                         # file alongside the issuer pin — persisted through
@@ -2855,6 +2934,8 @@ def _monitor(args: argparse.Namespace) -> None:
             head=head,
             doc=doc,
             whead=whead,
+            crash=crash,
+            crash_pin=crash_pin,
         )
         return ok, lines, new_state, repin
 
