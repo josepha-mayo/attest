@@ -1,0 +1,13 @@
+{
+  "kind": "case",
+  "pin": "declared",
+  "verdict": "fail",
+  "detail_contains": [
+    "does not reach the signed tree head"
+  ],
+  "js": {
+    "bundle_ok": true,
+    "verdict": "fail"
+  },
+  "note": "leaf_index true \u2014 bool is an int subclass in Python but not an integer in JSON; Number.isInteger parity rejects it"
+}

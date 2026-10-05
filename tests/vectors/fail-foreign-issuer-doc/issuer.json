@@ -3,7 +3,7 @@
   "issuer_key": "NLTZBDFWy23PC+sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y=",
   "key_receipts": [
     {
-      "id": "rcpt_27d28d1fd22c4492ac5d7bbffb40742c",
+      "id": "rcpt_0a0c0faaa5114e1dad02d04657a9ff6d",
       "visit_id": "key:rot",
       "sequence": 1,
       "prev_hash": null,
@@ -15,37 +15,37 @@
         "sequence": 1,
         "prev_hash": null,
         "visit_id": "key:rot",
-        "receipt_id": "rcpt_27d28d1fd22c4492ac5d7bbffb40742c",
-        "issued_at": "2026-10-04T18:21:52.200776+00:00"
+        "receipt_id": "rcpt_0a0c0faaa5114e1dad02d04657a9ff6d",
+        "issued_at": "2026-10-05T13:54:14.152977+00:00"
       },
-      "payload_hash": "ad65dfcf9a7ac7c4cbc13760fde25a6bd628f2ef7b3b0647e567b90dc9509d56",
-      "signature": "40tSVEsujUtHPnGE1BnSPcmF8TLbjm7mvrwmVM3f3XmUF30h9nsmJJTw3Ri+KDcmg0PNLgEuYjvzfVsh21wbCA==",
+      "payload_hash": "4acc4a54df25b38ae1a28afaef77f0fd5b645bf344238835fc473af2eb2320d9",
+      "signature": "oETy3k+PAE6SoI8uE/xmjk/NM3vPu7Ur2lVg7b3lruicrTwM2SxHEozyPGhoxEGt5uZjokSbZ9AdY9s9SIUsDw==",
       "public_key": "NLTZBDFWy23PC+sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y=",
-      "issued_at": "2026-10-04T18:21:52.200776Z"
+      "issued_at": "2026-10-05T13:54:14.152977Z"
     },
     {
-      "id": "rcpt_06bf1c6d5c4048f5a1a620722742a8e3",
+      "id": "rcpt_a7e40fa1c1544f68a8aa0881d7813449",
       "visit_id": "key:adopt",
       "sequence": 2,
-      "prev_hash": "ad65dfcf9a7ac7c4cbc13760fde25a6bd628f2ef7b3b0647e567b90dc9509d56",
+      "prev_hash": "4acc4a54df25b38ae1a28afaef77f0fd5b645bf344238835fc473af2eb2320d9",
       "payload": {
         "record_type": "key_adoption",
         "previous_key": "NLTZBDFWy23PC+sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y=",
         "rotation_receipt": {
-          "id": "rcpt_27d28d1fd22c4492ac5d7bbffb40742c",
-          "hash": "ad65dfcf9a7ac7c4cbc13760fde25a6bd628f2ef7b3b0647e567b90dc9509d56"
+          "id": "rcpt_0a0c0faaa5114e1dad02d04657a9ff6d",
+          "hash": "4acc4a54df25b38ae1a28afaef77f0fd5b645bf344238835fc473af2eb2320d9"
         },
         "schema": "attest.receipt/2",
         "sequence": 2,
-        "prev_hash": "ad65dfcf9a7ac7c4cbc13760fde25a6bd628f2ef7b3b0647e567b90dc9509d56",
+        "prev_hash": "4acc4a54df25b38ae1a28afaef77f0fd5b645bf344238835fc473af2eb2320d9",
         "visit_id": "key:adopt",
-        "receipt_id": "rcpt_06bf1c6d5c4048f5a1a620722742a8e3",
-        "issued_at": "2026-10-04T18:21:52.201051+00:00"
+        "receipt_id": "rcpt_a7e40fa1c1544f68a8aa0881d7813449",
+        "issued_at": "2026-10-05T13:54:14.153245+00:00"
       },
-      "payload_hash": "7e212f4e9855a3bcd02ec346a9af9569a30664e6d90b6a2dc25b740b3620f7a4",
-      "signature": "kt5/xlCaxkuKI05tBLojJwCmzaKYj9BL0ZRZW9+qVO1lEwTwf37Im/WgkCRta5H70pE9Kbw98/Z+gnFFQX+fDQ==",
+      "payload_hash": "492493d0cceff9af892ed0370038c8929d46bbbd8d9249c3a34f6bba1b0e885c",
+      "signature": "jyflFgq08atiA2Vs3k6MRO+8Y5UPtgEiw4iOAIyVNzWgIcGAqMizxArohYfnUKuJzQNtGh8P/kC7rX9YgMAfBw==",
       "public_key": "yFOtDwzSthmuqSzuxP1Wok1kmdWEznklfkXP2BObYKc=",
-      "issued_at": "2026-10-04T18:21:52.201051Z"
+      "issued_at": "2026-10-05T13:54:14.153245Z"
     }
   ]
 }

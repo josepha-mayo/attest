@@ -1,0 +1,13 @@
+{
+  "kind": "case",
+  "pin": "declared",
+  "verdict": "fail",
+  "detail_contains": [
+    "malformed tree head"
+  ],
+  "js": {
+    "bundle_ok": true,
+    "verdict": "fail"
+  },
+  "note": "a properly SIGNED head claiming tree_size 2^40 \u2014 valid signature, impossible size: JS bitwise ops die past 2^31, so every surface rejects it rather than diverging"
+}

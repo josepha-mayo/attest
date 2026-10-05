@@ -1,0 +1,13 @@
+{
+  "kind": "case",
+  "pin": "declared",
+  "verdict": "fail",
+  "detail_contains": [
+    "does not reach the signed tree head"
+  ],
+  "js": {
+    "bundle_ok": true,
+    "verdict": "fail"
+  },
+  "note": "leaf_index as a quoted string \u2014 JSON-typed fields must not pass through Python's permissive int() where JS === rejects"
+}

@@ -308,12 +308,26 @@ def _is_int(x):
     return isinstance(x, float) and x.is_integer()
 
 
+def _hex32(s):
+    """Strict 32-byte hex decode — bytes.fromhex tolerates ASCII whitespace
+    the browser verifier's regex rejects; identical bytes must get identical
+    verdicts on every surface, so the strictest spelling wins."""
+    if not isinstance(s, str):
+        return None
+    try:
+        b = bytes.fromhex(s)
+    except (TypeError, ValueError):
+        return None
+    if len(b) != 32 or b.hex() != s.lower():
+        return None
+    return b
+
+
 def _merkle_inclusion(leaf_hex, size, index, path_hex, root_hex):
     """RFC 6962 audit-path verification, stdlib-only (see transparency.py)."""
-    try:
-        leaf = bytes.fromhex(leaf_hex)
-        root_b = bytes.fromhex(root_hex)
-    except (TypeError, ValueError):
+    leaf = _hex32(leaf_hex)
+    root_b = _hex32(root_hex)
+    if leaf is None or root_b is None:
         return False
     if not _is_int(size) or not _is_int(index):
         return False
@@ -325,11 +339,8 @@ def _merkle_inclusion(leaf_hex, size, index, path_hex, root_hex):
         return not path_hex and r == root_b
     fn, sn = index, size - 1
     for ph in path_hex:
-        try:
-            p = bytes.fromhex(ph)
-        except (TypeError, ValueError):
-            return False
-        if len(p) != 32 or sn == 0:
+        p = _hex32(ph)
+        if p is None or sn == 0:
             return False
         if (fn & 1) or fn == sn:
             r = hashlib.sha256(b"\\x01" + p + r).digest()
@@ -510,11 +521,8 @@ def _cosig_anchors(doc):
             sys.exit(f"FAIL log_checkpoint.json: cosig_anchors {scid}… {why}")
         asize = ap.get("tree_size")
         aroot = ap.get("root_sha256")
-        try:
-            aroot_b = bytes.fromhex(aroot) if isinstance(aroot, str) else b""
-        except ValueError:
-            aroot_b = b""
-        if not _is_int(asize) or asize < 1 or asize > 2147483647 or len(aroot_b) != 32:
+        aroot_b = _hex32(aroot)
+        if not _is_int(asize) or asize < 1 or asize > 2147483647 or aroot_b is None:
             sys.exit(f"FAIL log_checkpoint.json: cosig_anchors {scid}… "
                      "anchor checkpoint carries a malformed tree head")
         proof = anchor.get("proof")

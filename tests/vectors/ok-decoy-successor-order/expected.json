@@ -1,0 +1,18 @@
+{
+  "kind": "bundle",
+  "pin": "declared",
+  "verdict": "ok",
+  "detail_contains": [
+    "verified",
+    "pinned",
+    "transparency log"
+  ],
+  "js": {
+    "bundle_ok": true,
+    "trusted_count": 2,
+    "suspect_count": 0,
+    "lifecycle_suspect_count": 0,
+    "verdict": "ok"
+  },
+  "note": "a consented decoy successor listed FIRST in key_rotations.json \u2014 only the highest-sequence consented pivot (K_A->K_B) may inherit trust; a first-match-in-pool verifier would pick the attacker and fail this pack"
+}

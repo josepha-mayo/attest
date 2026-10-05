@@ -1,0 +1,14 @@
+{
+  "kind": "case",
+  "pin": "declared",
+  "verdict": "ok",
+  "detail_contains": [
+    "pinned",
+    "transparency log"
+  ],
+  "js": {
+    "bundle_ok": true,
+    "verdict": "ok"
+  },
+  "note": "a properly SIGNED head claiming tree_size 5.0 \u2014 the signature verifies on the literal bytes, and Number.isInteger parity means integral floats verify identically everywhere"
+}

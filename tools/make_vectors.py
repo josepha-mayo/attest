@@ -36,7 +36,7 @@ from attest.disputepack import build_case_pack, build_pack, log_member  # noqa: 
 from attest.engine import VisitEngine  # noqa: E402
 from attest.ledger import Signer, issuer_document  # noqa: E402
 from attest.media import MediaStore  # noqa: E402
-from attest.models import Role, Schedule, Site, Worker  # noqa: E402
+from attest.models import ReviewInput, Role, Schedule, Site, Worker  # noqa: E402
 from attest.reviews import ReviewService, countersign_status  # noqa: E402
 from attest.store import Store  # noqa: E402
 from attest.summarize import TemplateSummarizer  # noqa: E402
@@ -876,9 +876,7 @@ def main() -> None:
         # spot and returns the cosig's inclusion proof — 'the witness
         # attested this' is committed the moment it is served.
         w_cp = w_engine.issue_log_checkpoint()
-        proof = w_engine.inclusion_proof(
-            _Receipt.model_validate(cosig), size=int(w_cp.payload["tree_size"])
-        )
+        proof = w_engine.inclusion_proof(_Receipt.model_validate(cosig), size=int(w_cp.payload["tree_size"]))
         anchors = {}
         if proof is not None:
             anchors[cosig["id"]] = {"checkpoint": w_cp.model_dump(mode="json"), "proof": proof}
@@ -1037,6 +1035,297 @@ def main() -> None:
             "every proofs entry must verify; unexplained material is a lie, "
             "not decoration",
         },
+    )
+
+    # --- cross-surface JSON-typing conformance: a verifier that treats these
+    # edge spellings differently from its siblings hands an attacker two
+    # verdicts for the same bytes. These vectors pin the contract end-to-end.
+    def _edit_first_proof(mutate):
+        def f(doc: dict) -> dict:
+            key = sorted(doc["proofs"])[0]
+            mutate(doc["proofs"][key])
+            return doc
+
+        return f
+
+    def _float_index(p: dict) -> None:
+        p["leaf_index"] = float(p["leaf_index"])
+
+    def _fractional_index(p: dict) -> None:
+        p["leaf_index"] = p["leaf_index"] + 0.5
+
+    def _string_index(p: dict) -> None:
+        p["leaf_index"] = str(p["leaf_index"])
+
+    _write_vector(
+        "ok-float-leaf-index",
+        _log_edit(embedded_pack, _edit_first_proof(_float_index)),
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "ok",
+            "detail_contains": ["pinned", "transparency log"],
+            "js": {"bundle_ok": True, "verdict": "ok"},
+            "note": "leaf_index spelled 5.0 — JSON keeps no int/float "
+            "distinction, so Number.isInteger parity means every verifier "
+            "accepts integral floats identically",
+        },
+    )
+
+    _write_vector(
+        "fail-fractional-leaf-index",
+        _log_edit(embedded_pack, _edit_first_proof(_fractional_index)),
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "fail",
+            "detail_contains": ["does not reach the signed tree head"],
+            "js": {"bundle_ok": True, "verdict": "fail"},
+            "note": "leaf_index 5.5 — non-integral indices are not integers "
+            "on any surface; Python must not silently truncate where JS rejects",
+        },
+    )
+
+    _write_vector(
+        "fail-string-leaf-index",
+        _log_edit(embedded_pack, _edit_first_proof(_string_index)),
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "fail",
+            "detail_contains": ["does not reach the signed tree head"],
+            "js": {"bundle_ok": True, "verdict": "fail"},
+            "note": "leaf_index as a quoted string — JSON-typed fields must "
+            "not pass through Python's permissive int() where JS === rejects",
+        },
+    )
+
+    _write_vector(
+        "fail-bool-leaf-index",
+        _log_edit(embedded_pack, _edit_first_proof(lambda p: p.__setitem__("leaf_index", True))),
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "fail",
+            "detail_contains": ["does not reach the signed tree head"],
+            "js": {"bundle_ok": True, "verdict": "fail"},
+            "note": "leaf_index true — bool is an int subclass in Python but "
+            "not an integer in JSON; Number.isInteger parity rejects it",
+        },
+    )
+
+    def _space_hex(doc: dict) -> dict:
+        key = sorted(doc["proofs"])[0]
+        node = doc["proofs"][key]["path"][0]
+        doc["proofs"][key]["path"][0] = " ".join(node[i : i + 2] for i in range(0, len(node), 2))
+        return doc
+
+    _write_vector(
+        "fail-spaced-hex-proof",
+        _log_edit(embedded_pack, _space_hex),
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "fail",
+            "detail_contains": ["log_checkpoint.json:", "proof"],
+            "js": {"bundle_ok": True, "verdict": "fail"},
+            "note": "a proof node spelled with spaces between byte pairs — "
+            "Python bytes.fromhex tolerates whitespace where strict hex "
+            "rejects; every surface now fails closed identically",
+        },
+    )
+
+    def _crafted_head(tree_size_fn):
+        """Swap the checkpoint for a fresh signed head with a doctored
+        tree_size — the signature stays valid, so the vector isolates the
+        tree-head type/bounds check rather than signature rejection."""
+
+        def _log_fn(rs):
+            doc = log_member(engine, rs)
+            payload = doc["checkpoint"]["payload"]
+            n = payload["tree_size"]
+            cp = engine.signer.issue(
+                visit_id=f"log:{n}:crafted-head",
+                sequence=doc["checkpoint"]["sequence"] + 1,
+                prev_hash=doc["checkpoint"]["payload_hash"],
+                facts={
+                    "record_type": "log_checkpoint",
+                    "tree_size": tree_size_fn(n),
+                    "root_sha256": payload["root_sha256"],
+                    "leaf_input": payload.get("leaf_input"),
+                    "journal_head": payload.get("journal_head"),
+                },
+            )
+            doc["checkpoint"] = cp.model_dump(mode="json")
+            return doc
+
+        return _log_fn
+
+    _write_vector(
+        "ok-float-tree-size",
+        _case_pack(store, engine, site, [v1], tmp / "d1", log_fn=_crafted_head(float)),
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "ok",
+            "detail_contains": ["pinned", "transparency log"],
+            "js": {"bundle_ok": True, "verdict": "ok"},
+            "note": "a properly SIGNED head claiming tree_size 5.0 — the "
+            "signature verifies on the literal bytes, and Number.isInteger "
+            "parity means integral floats verify identically everywhere",
+        },
+    )
+
+    _write_vector(
+        "fail-oversize-tree-size",
+        _case_pack(store, engine, site, [v1], tmp / "d1", log_fn=_crafted_head(lambda n: 2**40)),
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "fail",
+            "detail_contains": ["malformed tree head"],
+            "js": {"bundle_ok": True, "verdict": "fail"},
+            "note": "a properly SIGNED head claiming tree_size 2^40 — valid "
+            "signature, impossible size: JS bitwise ops die past 2^31, so "
+            "every surface rejects it rather than diverging",
+        },
+    )
+
+    # --- deterministic lineage picks: a second deployment without the
+    # revocation noise, rotated A->B cleanly, lets the ordering vectors show
+    # that pool position must never decide who is trusted ---
+    store3, engine3, site3, cam3, t03, world3 = _deployment(tmp / "d3", KEY_A)
+    v3a = _visit(engine3, cam3, t03, world3)
+
+    # A competing CONSENTED successor committed to the log FIRST: K_A really
+    # did sign a rotation to the attacker's key, and the attacker really did
+    # countersign — an abandoned draft rotation is real history. Its lower
+    # sequence loses to the honest pivot on every correct verifier; a
+    # first-match-in-pool implementation picks the attacker and fails here.
+    latest3 = store3.latest_receipt()
+    decoy_rot = KEY_A.issue(
+        visit_id=f"key:{KEY_A.public_key_b64[:12]}:{ATTACKER.public_key_b64[:12]}",
+        sequence=latest3.sequence + 1,
+        prev_hash=latest3.payload_hash,
+        facts={
+            "record_type": "key_rotation",
+            "previous_key": KEY_A.public_key_b64,
+            "new_key": ATTACKER.public_key_b64,
+            "reason": "abandoned draft rotation — never the lineage",
+        },
+    )
+    store3.put_receipt(decoy_rot)
+    decoy_adopt = ATTACKER.issue(
+        visit_id=f"key:{KEY_A.public_key_b64[:12]}:{ATTACKER.public_key_b64[:12]}:adopted",
+        sequence=decoy_rot.sequence + 1,
+        prev_hash=decoy_rot.payload_hash,
+        facts={
+            "record_type": "key_adoption",
+            "previous_key": KEY_A.public_key_b64,
+            "rotation_receipt": {"id": decoy_rot.id, "hash": decoy_rot.payload_hash},
+        },
+    )
+    store3.put_receipt(decoy_adopt)
+
+    rotation3 = engine3.issue_key_rotation(KEY_B.public_key_b64, "planned rotation")
+    engine3.signer = KEY_B
+    engine3.issue_key_adoption(KEY_A.public_key_b64, rotation3)
+    # A review appended after the pivot signs under K_B on a K_A original —
+    # exactly the case descendant_keys() exists for.
+    ReviewService(store3, KEY_B, engine3.clock).coordinator_review(
+        v3a.id,
+        ReviewInput(decision="confirm", statement="Coordinator note appended after the key rotation"),
+    )
+    bundle_a = ReviewService(store3, KEY_B, engine3.clock).bundle(v3a.id)
+
+    _write_vector(
+        "ok-decoy-successor-order",
+        _dispute_pack(store3, engine3, tmp / "d3" / "media", bundle_a),
+        {
+            "kind": "bundle",
+            "pin": "declared",
+            "verdict": "ok",
+            "detail_contains": ["verified", "pinned", "transparency log"],
+            "js": {
+                "bundle_ok": True,
+                "trusted_count": 2,
+                "suspect_count": 0,
+                "lifecycle_suspect_count": 0,
+                "verdict": "ok",
+            },
+            "note": "a consented decoy successor listed FIRST in "
+            "key_rotations.json — only the highest-sequence consented "
+            "pivot (K_A->K_B) may inherit trust; a first-match-in-pool "
+            "verifier would pick the attacker and fail this pack",
+        },
+    )
+
+    # The mirror image for the ANCESTOR walk: a clean A->B deployment (the
+    # losing predecessor's receipts must not ride the pack — they'd be
+    # foreign to the winning lineage), then an issuer document claiming a
+    # SECOND consented predecessor. A < ATK lexicographically, so the pinned
+    # predecessor is K_A; the doc lists the attacker's pair first.
+    store4, engine4, site4, cam4, t04, world4 = _deployment(tmp / "d4", KEY_A)
+    v4a = _visit(engine4, cam4, t04, world4)
+    rotation4 = engine4.issue_key_rotation(KEY_B.public_key_b64, "planned rotation")
+    engine4.signer = KEY_B
+    adoption4 = engine4.issue_key_adoption(KEY_A.public_key_b64, rotation4)
+    pred_rot = ATTACKER.issue(
+        visit_id=f"key:{ATTACKER.public_key_b64[:12]}:{KEY_B.public_key_b64[:12]}",
+        sequence=1,
+        prev_hash=None,
+        facts={
+            "record_type": "key_rotation",
+            "previous_key": ATTACKER.public_key_b64,
+            "new_key": KEY_B.public_key_b64,
+            "reason": "decoy predecessor — countersigned by K_B, never the lineage",
+        },
+    )
+    pred_adopt = KEY_B.issue(
+        visit_id=f"key:{ATTACKER.public_key_b64[:12]}:{KEY_B.public_key_b64[:12]}:adopted",
+        sequence=2,
+        prev_hash=None,
+        facts={
+            "record_type": "key_adoption",
+            "previous_key": ATTACKER.public_key_b64,
+            "rotation_receipt": {"id": pred_rot.id, "hash": pred_rot.payload_hash},
+        },
+    )
+    issuer_doc_minpick = {
+        "schema": "attest.issuer/1",
+        # A is the lexicographically smaller predecessor — the pinned side.
+        "issuer_key": KEY_A.public_key_b64,
+        # The decoy pair rides the doc FIRST: a first-match-in-pool verifier
+        # resolves K_B's ancestor as the attacker and rejects the pin.
+        "key_receipts": [
+            pred_rot.model_dump(mode="json"),
+            pred_adopt.model_dump(mode="json"),
+            rotation4.model_dump(mode="json"),
+            adoption4.model_dump(mode="json"),
+        ],
+    }
+    case4_pack = _case_pack(store4, engine4, site4, [v4a], tmp / "d4")
+    _write_vector(
+        "ok-min-predecessor",
+        case4_pack,
+        {
+            "kind": "case",
+            "issuer_doc": "issuer.json",
+            "verdict": "ok",
+            "detail_contains": ["pinned", "transparency log"],
+            "js": {
+                "bundle_ok": True,
+                "trusted_count": 2,
+                "pin_linked": True,
+                "suspect_count": 0,
+                "lifecycle_suspect_count": 0,
+                "verdict": "ok",
+            },
+            "note": "two consented predecessors claim K_B — the issuer doc "
+            "lists the wrong one first, but the min-key pick must still "
+            "resolve the pinned predecessor; order can never grant trust",
+        },
+        extras={"issuer.json": json.dumps(issuer_doc_minpick, indent=2).encode()},
     )
 
     _write_readme()

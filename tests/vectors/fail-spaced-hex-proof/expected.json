@@ -1,0 +1,14 @@
+{
+  "kind": "case",
+  "pin": "declared",
+  "verdict": "fail",
+  "detail_contains": [
+    "log_checkpoint.json:",
+    "proof"
+  ],
+  "js": {
+    "bundle_ok": true,
+    "verdict": "fail"
+  },
+  "note": "a proof node spelled with spaces between byte pairs \u2014 Python bytes.fromhex tolerates whitespace where strict hex rejects; every surface now fails closed identically"
+}

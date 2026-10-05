@@ -1,0 +1,18 @@
+{
+  "kind": "case",
+  "issuer_doc": "issuer.json",
+  "verdict": "ok",
+  "detail_contains": [
+    "pinned",
+    "transparency log"
+  ],
+  "js": {
+    "bundle_ok": true,
+    "trusted_count": 2,
+    "pin_linked": true,
+    "suspect_count": 0,
+    "lifecycle_suspect_count": 0,
+    "verdict": "ok"
+  },
+  "note": "two consented predecessors claim K_B \u2014 the issuer doc lists the wrong one first, but the min-key pick must still resolve the pinned predecessor; order can never grant trust"
+}

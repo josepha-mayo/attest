@@ -1,0 +1,14 @@
+{
+  "kind": "case",
+  "pin": "declared",
+  "verdict": "ok",
+  "detail_contains": [
+    "pinned",
+    "transparency log"
+  ],
+  "js": {
+    "bundle_ok": true,
+    "verdict": "ok"
+  },
+  "note": "leaf_index spelled 5.0 \u2014 JSON keeps no int/float distinction, so Number.isInteger parity means every verifier accepts integral floats identically"
+}

@@ -3,7 +3,7 @@
   "issuer_key": "oJql9HpnWYAv+VX43C0qFKXJnSO+l/hkEn/5ODRVpPA=",
   "key_receipts": [
     {
-      "id": "rcpt_a43f6f5bb9aa47c08c1e37cb125aed73",
+      "id": "rcpt_d848092fb99e4119a65c57b479eae9a2",
       "visit_id": "key:graft",
       "sequence": 0,
       "prev_hash": null,
@@ -16,94 +16,94 @@
         "sequence": 0,
         "prev_hash": null,
         "visit_id": "key:graft",
-        "receipt_id": "rcpt_a43f6f5bb9aa47c08c1e37cb125aed73",
-        "issued_at": "2026-10-04T18:21:52.104561+00:00"
+        "receipt_id": "rcpt_d848092fb99e4119a65c57b479eae9a2",
+        "issued_at": "2026-10-05T13:54:14.078727+00:00"
       },
-      "payload_hash": "45a0a07d91cd3e30931156b153a19782b6921aa5189cc9bd3aab48954da673ca",
-      "signature": "AZTs9Lm/WKJMrN8DNcaJUmPYf8x6w+3OU38t7H3bOqriadJtRAcXmWPGQhBZuzgNjEIPNU95TNa3pr/Mbk7sBg==",
+      "payload_hash": "46bd62932388422c0e0f03028cb40d0ba9ae76c61275b36e128e32e33377ca47",
+      "signature": "VR2AocpsjlxwnWKJiaZ3gedgyrWZM1mq20KkUTptCJQ69TIvUCe3Xj9L56drgfLf9ht80wdjqoioKsw0XID2Bw==",
       "public_key": "NLTZBDFWy23PC+sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y=",
-      "issued_at": "2026-10-04T18:21:52.104561Z"
+      "issued_at": "2026-10-05T13:54:14.078727Z"
     },
     {
-      "id": "rcpt_eed587e06b164525920480658ef3f370",
+      "id": "rcpt_6d3b737a104647b39e8067fb4f3be37b",
       "visit_id": "key:0EqyMnQrtKs6:oJql9HpnWYAv",
       "sequence": 9,
-      "prev_hash": "d7ecd32ca58146b1fb4e2f9ff604517a87636fdcc1f9359532c9fe718f3e5f04",
+      "prev_hash": "38c9f2cbba2a7d5767ec1da53f1af11ed483729a891eca57717380f70fcfb834",
       "payload": {
         "record_type": "key_rotation",
         "previous_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=",
         "new_key": "oJql9HpnWYAv+VX43C0qFKXJnSO+l/hkEn/5ODRVpPA=",
         "reason": "planned rotation",
         "boundary": "A signed statement that the issuer retired the signing key named here and adopted the successor \u2014 extends pinned-key trust across the transition; never proves either key was or stayed uncompromised.",
-        "journal_head": "846a1f7da39cff266bbc3ee880568f98a47f8056b424f192a7b94266e251681c",
+        "journal_head": "b1d551453a9045bb8b4749e05a7aca03dbc792303dec82a751f092396304d13e",
         "schema": "attest.receipt/2",
         "sequence": 9,
-        "prev_hash": "d7ecd32ca58146b1fb4e2f9ff604517a87636fdcc1f9359532c9fe718f3e5f04",
+        "prev_hash": "38c9f2cbba2a7d5767ec1da53f1af11ed483729a891eca57717380f70fcfb834",
         "visit_id": "key:0EqyMnQrtKs6:oJql9HpnWYAv",
-        "receipt_id": "rcpt_eed587e06b164525920480658ef3f370",
-        "issued_at": "2026-10-04T18:21:52.023316+00:00"
+        "receipt_id": "rcpt_6d3b737a104647b39e8067fb4f3be37b",
+        "issued_at": "2026-10-05T13:54:14.009811+00:00"
       },
-      "payload_hash": "e01a9081e7679ade3a664b27916468bfd7f7f4e7886e3e90ea06c4851ba69bb3",
-      "signature": "mmKLeBA1XM0KYDML0gZtIl3y9OAqNXSEYIyHe76r9nQKRaww64eE4NYtcezGSOMUtguqWvFx38r4OF0WSzPmAA==",
+      "payload_hash": "3b122f0b414219aba04dc31840416f79c6cf223af73eaa8c9b51f832fc4e2e78",
+      "signature": "Rj7FHZQZOKexZ/TY4no0c1Xt5LxsgCvrz2S0cdFW8QYREp4XDHM5oMkXQzXcYDKB4qVcZ6E87dR8gULZRKLEAw==",
       "public_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=",
-      "issued_at": "2026-10-04T18:21:52.023316Z"
+      "issued_at": "2026-10-05T13:54:14.009811Z"
     },
     {
-      "id": "rcpt_fc2caff8d281498993bfd72d8fb2eff2",
+      "id": "rcpt_9ee4d68b4ce943608a064884655cd16a",
       "visit_id": "key:0EqyMnQrtKs6:oJql9HpnWYAv:adopted",
       "sequence": 10,
-      "prev_hash": "e01a9081e7679ade3a664b27916468bfd7f7f4e7886e3e90ea06c4851ba69bb3",
+      "prev_hash": "3b122f0b414219aba04dc31840416f79c6cf223af73eaa8c9b51f832fc4e2e78",
       "payload": {
         "record_type": "key_adoption",
         "previous_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=",
         "rotation_receipt": {
-          "id": "rcpt_eed587e06b164525920480658ef3f370",
-          "hash": "e01a9081e7679ade3a664b27916468bfd7f7f4e7886e3e90ea06c4851ba69bb3"
+          "id": "rcpt_6d3b737a104647b39e8067fb4f3be37b",
+          "hash": "3b122f0b414219aba04dc31840416f79c6cf223af73eaa8c9b51f832fc4e2e78"
         },
         "boundary": "A signed statement that the holder of the new signing key executed the named rotation \u2014 together with the retiring key's endorsement it binds both sides of the transition.",
-        "journal_head": "21ca48f3604f43634106392c2b640f70f0dbdd14aedd926976c534f5f168525d",
+        "journal_head": "3fdca172de557c64bde6449c9f3c714b94876d0982f78c6a0c5e8955431aac02",
         "schema": "attest.receipt/2",
         "sequence": 10,
-        "prev_hash": "e01a9081e7679ade3a664b27916468bfd7f7f4e7886e3e90ea06c4851ba69bb3",
+        "prev_hash": "3b122f0b414219aba04dc31840416f79c6cf223af73eaa8c9b51f832fc4e2e78",
         "visit_id": "key:0EqyMnQrtKs6:oJql9HpnWYAv:adopted",
-        "receipt_id": "rcpt_fc2caff8d281498993bfd72d8fb2eff2",
-        "issued_at": "2026-10-04T18:21:52.025212+00:00"
+        "receipt_id": "rcpt_9ee4d68b4ce943608a064884655cd16a",
+        "issued_at": "2026-10-05T13:54:14.010934+00:00"
       },
-      "payload_hash": "04830f4173856f6e4e75e7fe3c0c321f80e2a5e5c87167ddee1043b1bda3d8e3",
-      "signature": "TUTiz4nmrGEJfk6rhxGO/E5rureO0bu0Aizw0nrBSzdA94d/foFUadG6Ms1DcS6QdLAJwmJEWUE7sPxyuS+zBw==",
+      "payload_hash": "e49fe9fdecdf8483d6509bc7f4beb80f980dd6ad697ba51080d758874ff0b2a0",
+      "signature": "Pc3BaXXZHPg8ailonpfiOhQgX65W3ojwTgR7XyttvPNRpApfOEz6OoSSb7qTFMHKTP0UYjR51yhDAi3LJMe3Ag==",
       "public_key": "oJql9HpnWYAv+VX43C0qFKXJnSO+l/hkEn/5ODRVpPA=",
-      "issued_at": "2026-10-04T18:21:52.025212Z"
+      "issued_at": "2026-10-05T13:54:14.010934Z"
     },
     {
-      "id": "rcpt_a6853fc6f4a54e5b9c4c4255b17b7435",
+      "id": "rcpt_4d9bf013905548c1bdada07262bee273",
       "visit_id": "key:revoked:0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=",
       "sequence": 17,
-      "prev_hash": "c57569be831ff96299965c86637b5261257b617773db6fdd97b68c6f041aa218",
+      "prev_hash": "55ada85e3e5f1d9434be880095771522641469eea3c45502c6bf69d74bd236d1",
       "payload": {
         "record_type": "key_revocation",
         "revoked_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=",
-        "suspect_after": "2026-10-04T18:21:50.934135+00:00",
+        "suspect_after": "2026-10-05T13:54:12.942418+00:00",
         "reason": "demo compromise",
         "boundary": "A signed statement that the issuer declares the named key's signatures suspect for records timestamped after the given instant \u2014 a trust annotation, never proof the records are false, and it never erases them.",
-        "journal_head": "a92d85eae9c2009d45f911d368b833888c6ed2767bd4284ee37c8dcbe13aeccc",
+        "journal_head": "6548c13cbaa1cf23d7394cce96aa247961af6e6ce30cdad9216d13f47f6a074d",
         "schema": "attest.receipt/2",
         "sequence": 17,
-        "prev_hash": "c57569be831ff96299965c86637b5261257b617773db6fdd97b68c6f041aa218",
+        "prev_hash": "55ada85e3e5f1d9434be880095771522641469eea3c45502c6bf69d74bd236d1",
         "visit_id": "key:revoked:0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=",
-        "receipt_id": "rcpt_a6853fc6f4a54e5b9c4c4255b17b7435",
-        "issued_at": "2026-10-04T18:21:52.146031+00:00"
+        "receipt_id": "rcpt_4d9bf013905548c1bdada07262bee273",
+        "issued_at": "2026-10-05T13:54:14.112910+00:00"
       },
-      "payload_hash": "8e929d6eda6e2f687b8d450ec0483baa63b38baabfbc8cafe31e4f231e46a006",
-      "signature": "ErrxzxKqbaT9enixgsxg3XYDPYBW1eirGX2WV9UdEEuVQK1qpUrDYmExDXTwSuyewJZbgAU4cxYIYliGumYvDw==",
+      "payload_hash": "2c510469d7b89f5bc073d1be76beef43f1920d55fce7af9bdf9ed896294493c2",
+      "signature": "WapdNGo1kWYsYXg2XTckxN9jBFAVjMFn9p4FABWcTOBwGoy61S+//9cyulfvry2kIAHR+8sX1tdmaGwMN4gvAw==",
       "public_key": "oJql9HpnWYAv+VX43C0qFKXJnSO+l/hkEn/5ODRVpPA=",
-      "issued_at": "2026-10-04T18:21:52.146031Z"
+      "issued_at": "2026-10-05T13:54:14.112910Z"
     }
   ],
   "chain_tip": {
-    "receipt_id": "rcpt_f18bf091d8284806b7b3d1c56734ef51",
+    "receipt_id": "rcpt_49b4bbac33144db1919748af4e731a66",
     "sequence": 20,
-    "payload_hash": "50a582066cafc0a09d588f4c7930d1b1a54a05ac34abe1d971fa49ad4f349fd7"
+    "payload_hash": "d4849a85776ed282280d56019d4c1195e74f6c20abae35b3a96ce6198f9bf296"
   },
-  "served_at": "2026-10-04T18:21:52.184745+00:00",
+  "served_at": "2026-10-05T13:54:14.141587+00:00",
   "boundary": "issuer_key's authenticity is only as strong as the channel that served this document \u2014 over the deployment's own HTTPS it is trust-on-first-use; pin --key for out-of-band assurance"
 }
