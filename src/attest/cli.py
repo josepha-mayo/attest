@@ -3484,6 +3484,29 @@ def _attack_demo(args: argparse.Namespace) -> None:
             inbox.close()
 
 
+def _split_demo(args: argparse.Namespace) -> None:
+    """The fork a single observer can never catch: one issuer key signs two
+    histories, a witness pins one, the monitor pins the other — and the
+    cross-view reports the one verdict no honest log can produce. Runs in
+    scratch space (no runtime touched, no lock needed); only the emitted
+    evidence document is real output."""
+    from pathlib import Path
+
+    from .splitdemo import run
+
+    story = run(Path(args.out) if args.out else None)
+    print(
+        f"\ndivergence proven: the witness signed size {story['fork_head']['tree_size']} root "
+        f"{story['fork_head']['root_sha256'][:16]}…, the monitor pinned size "
+        f"{story['true_head']['tree_size']} root {story['true_head']['root_sha256'][:16]}… — "
+        "same issuer lineage, two histories, one caught fork."
+    )
+    print(
+        "boundary: the demo fabricates the fork; every signature, proof, and "
+        "the verdict itself is real — it shows detection, not which side lied."
+    )
+
+
 def _diff(args: argparse.Namespace) -> None:
     """Compare two exports (case pack, dispute pack, or bundle.json) — append-only
     drift is normal; vanished or altered records are anomalies."""
@@ -4132,6 +4155,21 @@ def main(argv: list[str] | None = None) -> None:
         "all rolled back",
     )
     s.set_defaults(fn=_attack_demo)
+
+    s = sub.add_parser(
+        "split-demo",
+        help="fabricate a split-view log fork in scratch space — a witness pins one "
+        "history, the monitor pins the other — and watch the cross-view catch it "
+        "as a signed divergence observation",
+    )
+    s.add_argument(
+        "--out",
+        metavar="DIR",
+        default=None,
+        help="write the self-verifying evidence document "
+        "(divergence-checkpoint.json — verify with `attest verify`) to DIR",
+    )
+    s.set_defaults(fn=_split_demo)
 
     s = sub.add_parser(
         "diff",

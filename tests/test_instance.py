@@ -108,6 +108,7 @@ def test_every_documented_writer_locks_and_readers_never_do():
         cli._prove,
         cli._consistency,
         cli._monitor,
+        cli._split_demo,  # scratch-space only — touches no runtime
         cli._cli_engine,  # shared loader — must stay lock-free (explain uses it)
     ]
     for fn in (cli._prove, cli._consistency):

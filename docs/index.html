@@ -60,7 +60,10 @@
   real watch trail — <code>monitor_observation</code> receipts from
   <code>monitor --journal</code> cycles (pinned → advanced → steady)
   signed into the record, so "someone was watching the log" is itself
-  signed evidence.</p>
+  signed evidence. <code>attest split-demo</code> fabricates the attack
+  no single observer can catch — one issuer key signs two divergent
+  histories, a witness pins the fork, a monitor pins the true log — and
+  emits the caught divergence as a self-verifying document.</p>
   <p>Or check our own claim: <a href="live-sweep-receipt.json">this signed
   receipt</a> is the <code>verify-live --sign</code> sweep run against the
   real <code>api.amazonvision.com</code> on 2026-09-30 — 5 pass, 3 fail
