@@ -2649,9 +2649,28 @@ def _monitor(args: argparse.Namespace) -> None:
             except ValueError:
                 return None
 
-        new_state, ok, lines = logmonitor.check(
-            state, doc, head, fetch_consistency, datetime.now(tz=UTC).isoformat()
-        )
+        try:
+            new_state, ok, lines = logmonitor.check(
+                state, doc, head, fetch_consistency, datetime.now(tz=UTC).isoformat()
+            )
+        except Exception as exc:  # noqa: BLE001 — a hostile payload must fail
+            # the cycle, not kill the watch: an unhandled shape inside
+            # check() is recorded as an unverifiable observation (the
+            # journal is exactly where 'the watch was attacked mid-cycle'
+            # belongs), the pin is untouched, and the loop continues.
+            lines = [f"monitor cycle crashed evaluating served material: {exc}"]
+            _journal(
+                False,
+                lines,
+                state=state,
+                new_state=state,
+                verdict=None,
+                pin=None,
+                wbase=None,
+                head=head,
+                doc=doc,
+            )
+            return False, lines, state, False
         # check() rebuilds the state fresh each cycle — carry forward the
         # witness-log pins, or any cycle that doesn't refresh them (witness
         # outage, failed wlog check) silently drops the view the anchor
@@ -2737,37 +2756,76 @@ def _monitor(args: argparse.Namespace) -> None:
                         prev_wlog = None
                         if isinstance(state, dict) and isinstance(state.get("witness_logs"), dict):
                             prev_wlog = state["witness_logs"].get(wbase)
-                        wlog_state, wok, wlines = logmonitor.check(
-                            prev_wlog,
-                            wdoc,
-                            whead,
-                            _wconsistency,
-                            datetime.now(tz=UTC).isoformat(),
-                        )
+                        if not isinstance(prev_wlog, dict):
+                            prev_wlog = None  # corrupt slot never enters the check
+                        try:
+                            wlog_state, wok, wlines = logmonitor.check(
+                                prev_wlog,
+                                wdoc,
+                                whead,
+                                _wconsistency,
+                                datetime.now(tz=UTC).isoformat(),
+                            )
+                        except Exception as exc:  # noqa: BLE001 — hostile
+                            # witness-log material fails the cycle closed; it
+                            # must not kill the watch or its journal.
+                            wlog_state, wok, wlines = (
+                                prev_wlog,
+                                False,
+                                [f"witness log check crashed: {exc}"],
+                            )
                         for _wl in wlines:
                             lines.append(f"witness log: {_wl}")
                         if not wok:
                             ok = False
                     # Pins key on the issuer's canonical LINEAGE identity —
                     # match any key inside the lineage we track, not just
-                    # the tip our issuer doc happens to claim.
+                    # the tip our issuer doc happens to claim. A non-string
+                    # issuer_key can never be a member (and would crash the
+                    # hash lookup); unhashable served pins are skipped.
                     _ilineage = logmonitor._trusted_set(doc)
-                    pin = next(
-                        (
-                            p
-                            for p in heads["pins"]
-                            if isinstance(p, dict) and p.get("issuer_key") in _ilineage
-                        ),
-                        None,
-                    )
-                    verdict, line = logmonitor.compare_views(
-                        new_state,
-                        pin,
-                        wtrusted,
-                        witness_pin=wlog_state,
-                        fetch_wconsistency=_wconsistency,
-                        issuer_lineage=_ilineage,
-                    )
+                    # No truncation either — the response is already
+                    # byte-capped, and slicing could hide the one
+                    # contradictory pin behind 64 agreeable decoys.
+                    cand_pins = [
+                        p
+                        for p in heads["pins"]
+                        if isinstance(p, dict)
+                        and isinstance(p.get("issuer_key"), str)
+                        and p["issuer_key"] in _ilineage
+                    ]
+                    # EVERY matching pin is compared — a witness publishing
+                    # two live pins for our lineage (one canonical identity
+                    # can map to two slots across a rotation) gets its worst
+                    # view reported: skipping a contradictory second pin
+                    # would hide a fork behind an agreeable first.
+                    _rank = {"agree": 0, "unseen": 1, "unverifiable": 2, "diverged": 3, "dishonest": 4}
+                    if not cand_pins:
+                        verdict, line, pin = (
+                            "unseen",
+                            "the witness has never cosigned this issuer — no second view exists",
+                            None,
+                        )
+                    else:
+                        verdict, line, pin = "agree", "views agree", cand_pins[0]
+                        for cand in cand_pins:
+                            try:
+                                v, ln = logmonitor.compare_views(
+                                    new_state,
+                                    cand,
+                                    wtrusted,
+                                    witness_pin=wlog_state,
+                                    fetch_wconsistency=_wconsistency,
+                                    issuer_lineage=_ilineage,
+                                )
+                            except Exception as exc:  # noqa: BLE001 — the witness
+                                # view is remote input: a crash shape is an
+                                # unverifiable view, never a dead watch.
+                                v, ln = "unverifiable", f"cross-view crashed: {exc}"
+                            if _rank.get(v, 2) > _rank.get(verdict, 2):
+                                verdict, line, pin = v, ln, cand
+                            if _rank.get(verdict, 2) == 4:
+                                break  # 'dishonest' is terminal — nothing worse to find
                     lines.append(f"witness cross-view [{verdict}]: {line}")
                     if wlog_state is not None and new_state is not None:
                         # The monitor's own witness-log pin rides the state

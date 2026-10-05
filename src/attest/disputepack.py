@@ -474,30 +474,50 @@ def _cosig_anchors(doc):
             cosigs.setdefault(raw["id"], raw)  # first-wins: the counting path counts the first id
     anchored = 0
     for cid, anchor in anchors.items():
+        scid = str(cid)[:24]
         cosig = cosigs.get(cid)
         if cosig is None:
-            sys.exit(f"FAIL log_checkpoint.json: cosig_anchors {cid[:24]}… "
+            sys.exit(f"FAIL log_checkpoint.json: cosig_anchors {scid}… "
                      "anchors a cosignature the doc doesn't carry")
-        acp = (anchor or {}).get("checkpoint")
+        if not isinstance(anchor, dict):
+            sys.exit(f"FAIL log_checkpoint.json: cosig_anchors {scid}… "
+                     "anchor is not an object")
+        acp = anchor.get("checkpoint")
         ap = (acp or {}).get("payload") if isinstance(acp, dict) else None
         if not isinstance(ap, dict) or ap.get("record_type") != "log_checkpoint":
-            sys.exit(f"FAIL log_checkpoint.json: cosig_anchors {cid[:24]}… "
+            sys.exit(f"FAIL log_checkpoint.json: cosig_anchors {scid}… "
                      "anchor is not a log_checkpoint receipt")
-        if acp.get("public_key") != cosig.get("public_key"):
-            sys.exit(f"FAIL log_checkpoint.json: cosig_anchors {cid[:24]}… "
+        if (
+            not isinstance(acp.get("public_key"), str)
+            or not isinstance(cosig.get("public_key"), str)
+            or acp["public_key"] != cosig["public_key"]
+        ):
+            sys.exit(f"FAIL log_checkpoint.json: cosig_anchors {scid}… "
                      "anchor head not signed by the cosig's own witness key")
         ok, why = check_receipt(acp, acp["public_key"])
         if not ok:
-            sys.exit(f"FAIL log_checkpoint.json: cosig_anchors {cid[:24]}… {why}")
-        proof = (anchor or {}).get("proof") or {}
-        if not _merkle_inclusion(
+            sys.exit(f"FAIL log_checkpoint.json: cosig_anchors {scid}… {why}")
+        asize = ap.get("tree_size")
+        aroot = ap.get("root_sha256")
+        try:
+            aroot_b = bytes.fromhex(aroot) if isinstance(aroot, str) else b""
+        except ValueError:
+            aroot_b = b""
+        if not _is_int(asize) or asize < 1 or len(aroot_b) != 32:
+            sys.exit(f"FAIL log_checkpoint.json: cosig_anchors {scid}… "
+                     "anchor checkpoint carries a malformed tree head")
+        proof = anchor.get("proof")
+        if not isinstance(proof, dict):
+            sys.exit(f"FAIL log_checkpoint.json: cosig_anchors {scid}… "
+                     "anchor proof is not an object")
+        if not _is_int(proof.get("leaf_index")) or not _merkle_inclusion(
             cosig.get("payload_hash"),
-            ap.get("tree_size"),
-            proof.get("leaf_index", -1),
+            asize,
+            proof["leaf_index"],
             proof.get("path") or [],
-            ap.get("root_sha256"),
+            aroot,
         ):
-            sys.exit(f"FAIL log_checkpoint.json: cosig_anchors {cid[:24]}… "
+            sys.exit(f"FAIL log_checkpoint.json: cosig_anchors {scid}… "
                      "the cosig does not reach the anchor's signed tree head")
         anchored += 1
     return anchored
@@ -527,18 +547,28 @@ def _cosig_count(doc, cp, size, root_hex, issuer_keys=None):
         ):
             continue
         # The cosig must name THIS issuer — one attesting another
-        # deployment's head never counts here (logmonitor parity).
-        if issuer_keys and p.get("subject_issuer") not in self_keys:
+        # deployment's head never counts here (logmonitor parity). The
+        # members below are set-membership tests: a crafted non-string
+        # subject_issuer/id/public_key is unhashable and would TypeError,
+        # so require strings before any `in` check.
+        si = p.get("subject_issuer")
+        if issuer_keys and (not isinstance(si, str) or si not in self_keys):
             continue
         pk = raw.get("public_key")
-        if raw.get("id") in seen_ids or pk in seen_keys or pk in self_keys:
+        if (
+            not isinstance(raw.get("id"), str)
+            or not isinstance(pk, str)
+            or raw["id"] in seen_ids
+            or pk in seen_keys
+            or pk in self_keys
+        ):
             continue
         try:
             ok, _why = check_receipt(raw, pk)
         except (KeyError, TypeError, ValueError, AttributeError):
             continue  # malformed envelope — it can't vouch, it just doesn't count
         if ok:
-            seen_ids.add(raw.get("id"))
+            seen_ids.add(raw["id"])
             seen_keys.add(pk)
             n += 1
             keys.append(pk)

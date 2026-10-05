@@ -32,7 +32,8 @@ def _doc_receipts(doc: dict) -> list:
     from .models import Receipt
 
     receipts = []
-    for r in doc.get("key_receipts") or []:
+    raw_pool = doc.get("key_receipts")
+    for r in raw_pool if isinstance(raw_pool, list) else []:
         try:
             receipts.append(Receipt.model_validate(r))
         except Exception:  # noqa: BLE001 — malformed entries just can't bridge
@@ -73,7 +74,8 @@ def _check_sth(cp_raw: dict, trusted: set) -> tuple[dict | None, str | None]:
     if not isinstance(size, int) or isinstance(size, bool) or size < 1 or not isinstance(root_hex, str):
         return None, "checkpoint carries a malformed tree head"
     try:
-        bytes.fromhex(root_hex)
+        if len(bytes.fromhex(root_hex)) != 32:
+            return None, "checkpoint carries a malformed tree head"
     except ValueError:
         return None, "checkpoint carries a malformed tree head"
     return payload, None
@@ -100,6 +102,8 @@ def check(
     (new_state, ok, human lines).
     """
     lines: list[str] = []
+    if state is not None and not isinstance(state, dict):
+        return None, False, ["the pinned monitor state is not a JSON object — corrupt local pin"]
     if state is not None and state.get("schema") != STATE_SCHEMA:
         return None, False, [f"monitor state {state.get('schema')!r} is not {STATE_SCHEMA}"]
     if not isinstance(head, dict):
@@ -230,7 +234,7 @@ def check(
             ],
         )
     proof = fetch_consistency(old_size, size)
-    if proof is None or not isinstance(proof.get("proof"), list):
+    if not isinstance(proof, dict) or not isinstance(proof.get("proof"), list):
         return (
             None,
             False,
@@ -239,15 +243,18 @@ def check(
                 "deployment cannot show the pinned head inside its current tree"
             ],
         )
-    try:
-        proof_first, proof_size = int(proof.get("first")), int(proof.get("tree_size"))
-    except (TypeError, ValueError):
-        return (
-            None,
-            False,
-            ["ALERT: consistency proof is for different tree sizes than the head claims"],
-        )
-    if proof_first != old_size or proof_size != size:
+    proof_first, proof_size = proof.get("first"), proof.get("tree_size")
+    # Strict ints — a served "5" or true isn't the number 5 (the JS
+    # verifier's === agrees); loose int() coercion would bridge a proof
+    # the browser check rejects.
+    if (
+        not isinstance(proof_first, int)
+        or isinstance(proof_first, bool)
+        or not isinstance(proof_size, int)
+        or isinstance(proof_size, bool)
+        or proof_first != old_size
+        or proof_size != size
+    ):
         return (
             None,
             False,
@@ -803,17 +810,19 @@ def compare_views(
         or not isinstance(p.get("subject_tree_size"), int)
         or isinstance(p.get("subject_tree_size"), bool)
         or p.get("subject_tree_size") != theirs.get("tree_size")
+        or not isinstance(p.get("subject_root_sha256"), str)
         or p.get("subject_root_sha256") != theirs.get("root_sha256")
+        or not isinstance(p.get("subject_checkpoint"), str)
         or p.get("subject_checkpoint") != theirs.get("checkpoint_id")
+        # A non-string subject_issuer can never name a lineage member — and
+        # could otherwise be mirrored by an equally-non-string issuer_key in
+        # the unsigned pin, skipping the lineage clause below entirely.
+        or not isinstance(p.get("subject_issuer"), str)
         or p.get("subject_issuer") != theirs.get("issuer_key")
         # The signed subject must name an issuer inside the lineage MY pin
         # tracks — a pin selected for a different issuer (or an attestation
         # naming a foreign lineage) can never yield an honest verdict.
-        or (
-            issuer_lineage is not None
-            and isinstance(p.get("subject_issuer"), str)
-            and p["subject_issuer"] not in issuer_lineage
-        )
+        or (issuer_lineage is not None and p["subject_issuer"] not in issuer_lineage)
         or (
             issuer_lineage is None
             and isinstance(mine.get("issuer_key"), str)
@@ -900,7 +909,11 @@ def compare_views(
                 # way a signed contradiction can.
                 proof = fetch_wconsistency(f_sz, t_sz) if fetch_wconsistency else None
                 try:
-                    nodes = [bytes.fromhex(h) for h in (proof or {}).get("proof") or []]
+                    nodes = (
+                        [bytes.fromhex(h) for h in (proof.get("proof") or [])]
+                        if isinstance(proof, dict)
+                        else []
+                    )
                 except (TypeError, ValueError):
                     return False
                 return bool(nodes) and verify_consistency(f_root, f_sz, t_root, t_sz, nodes)
@@ -1132,7 +1145,9 @@ def check_cosig_anchors(doc: dict) -> tuple[int, list[str]]:
             errors.append(f"cosig_anchors: {cid} — anchor for a cosignature the doc doesn't carry")
             continue
         try:
-            acp = Receipt.model_validate((anchor or {}).get("checkpoint"))
+            if not isinstance(anchor, dict):
+                raise ValueError("anchor is not an object")
+            acp = Receipt.model_validate(anchor.get("checkpoint"))
             p = acp.payload
             if p.get("record_type") != "log_checkpoint":
                 raise ValueError("anchor checkpoint is not a log_checkpoint")
@@ -1143,19 +1158,29 @@ def check_cosig_anchors(doc: dict) -> tuple[int, list[str]]:
             ok, why = verify_receipt(acp, public_key=acp.public_key)
             if not ok:
                 raise ValueError(f"anchor checkpoint: {why}")
-            size = int(p["tree_size"])
+            size = p.get("tree_size")
+            if not isinstance(size, int) or isinstance(size, bool) or size < 1:
+                raise ValueError("anchor checkpoint carries a malformed tree head")
             root = bytes.fromhex(str(p["root_sha256"]))
+            if len(root) != 32:
+                raise ValueError("anchor checkpoint carries a malformed tree head")
             leaf = bytes.fromhex(str(cosig["payload_hash"]))
-            proof = anchor.get("proof") or {}
+            proof = anchor.get("proof")
+            if not isinstance(proof, dict):
+                raise ValueError("anchor proof is not an object")
             path = [bytes.fromhex(h) for h in proof.get("path") or []]
             idx = proof.get("leaf_index")
-            if not isinstance(idx, int) or not verify_inclusion(leaf, size, idx, path, root):
+            if (
+                not isinstance(idx, int)
+                or isinstance(idx, bool)
+                or not verify_inclusion(leaf, size, idx, path, root)
+            ):
                 raise ValueError("the cosig does not reach the anchor's signed tree head")
             anchored += 1
         except (KeyError, TypeError, ValueError) as exc:
-            errors.append(f"cosig_anchors: {cid[:24]}… — {exc}")
+            errors.append(f"cosig_anchors: {str(cid)[:24]}… — {exc}")
         except Exception as exc:  # noqa: BLE001 — model_validate can raise broadly
-            errors.append(f"cosig_anchors: {cid[:24]}… — {exc}")
+            errors.append(f"cosig_anchors: {str(cid)[:24]}… — {exc}")
     return anchored, errors
 
 

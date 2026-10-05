@@ -3243,3 +3243,300 @@ def test_pack_doc_surfaces_never_crash_on_malformed_members(engine, store, house
         )
         assert isinstance(err, str)
         assert res is None
+
+
+def test_check_survives_non_dict_consistency_responses(engine, store, household, schedule, t0):
+    """The consistency endpoint's body is unsigned serving material — a
+    truthy non-dict response (5, "x", [], true) used to crash .get() mid-
+    cycle, killing the watch AND suppressing its journal. It must fail the
+    cycle honestly instead."""
+    from attest import logmonitor
+
+    _seed(engine, household[0], t0)
+    cp = engine.issue_log_checkpoint()
+    state = {
+        "schema": logmonitor.STATE_SCHEMA,
+        "issuer_key": engine.signer.public_key_b64,
+        "tree_size": cp.payload["tree_size"],
+        "root_sha256": cp.payload["root_sha256"],
+        "checkpoint_id": cp.id,
+    }
+    doc = _doc_for(engine)
+    # Grow the log and issue a legacy-shape checkpoint — no embedded
+    # `extends`, so the cycle MUST consult fetch_consistency to bridge.
+    _seed(engine, household[0], t0 - timedelta(hours=5))
+    size2, root2 = engine.log_head()
+    cp2 = engine.signer.issue(
+        visit_id=f"log:{size2}:{root2.hex()[:16]}",
+        sequence=store.receipts()[-1].sequence + 1,
+        prev_hash=store.receipts()[-1].payload_hash,
+        facts={"record_type": "log_checkpoint", "tree_size": size2, "root_sha256": root2.hex()},
+    )
+    store.put_receipt(cp2)
+    head2 = _head(engine, cp2)
+    for bad_proof in [None, True, 5, "x", [], [1, 2], {"proof": "x"}, {"proof": 5}]:
+        new_state, ok, lines = logmonitor.check(state, doc, head2, lambda f, s, b=bad_proof: b, "t")
+        assert isinstance(ok, bool) and new_state is None and ok is False
+        assert lines and all(isinstance(ln, str) for ln in lines)
+
+
+def test_check_rejects_string_or_bool_sized_consistency(engine, store, household, schedule, t0):
+    """A served consistency doc with "5"/true size fields is not a proof of
+    the head's continuity — the JS verifier's === agrees; int() coercion
+    would bridge a proof the browser check rejects."""
+    from attest import logmonitor
+
+    _seed(engine, household[0], t0)
+    cp = engine.issue_log_checkpoint()
+    state = {
+        "schema": logmonitor.STATE_SCHEMA,
+        "issuer_key": engine.signer.public_key_b64,
+        "tree_size": cp.payload["tree_size"],
+        "root_sha256": cp.payload["root_sha256"],
+        "checkpoint_id": cp.id,
+    }
+    doc = _doc_for(engine)
+    _seed(engine, household[0], t0 - timedelta(hours=5))
+    size2, root2 = engine.log_head()
+    cp2 = engine.signer.issue(
+        visit_id=f"log:{size2}:{root2.hex()[:16]}",
+        sequence=store.receipts()[-1].sequence + 1,
+        prev_hash=store.receipts()[-1].payload_hash,
+        facts={"record_type": "log_checkpoint", "tree_size": size2, "root_sha256": root2.hex()},
+    )
+    store.put_receipt(cp2)
+    head2 = _head(engine, cp2)
+    good = engine.consistency_proof(state["tree_size"], size2)
+    assert isinstance(good, dict)
+    for first, tsize in [
+        (str(state["tree_size"]), size2),
+        (True, size2),
+        (state["tree_size"], True),
+        (state["tree_size"], str(size2)),
+    ]:
+        bad = {**good, "first": first, "tree_size": tsize}
+        new_state, ok, lines = logmonitor.check(state, doc, head2, lambda f, s, b=bad: b, "t")
+        assert ok is False and new_state is None, f"loose-typed bridge accepted: {bad!r}"
+
+
+def test_check_sth_rejects_short_hex_roots(engine, store, household, schedule, t0):
+    """A signed checkpoint whose root decodes to fewer than 32 bytes is a
+    malformed tree head — hex alone is not a root. The witness pins such a
+    head verbatim; a short root would wedge every later comparison."""
+    from attest import logmonitor
+
+    _seed(engine, household[0], t0)
+    prev = store.latest_receipt()
+    for i, root_hex in enumerate(["ab" * 16, "ab" * 31, "ab" * 33, "", "zz"]):
+        bad_cp = engine.signer.issue(
+            visit_id=f"monitor:x:{i}",
+            sequence=(prev.sequence + 1 + i) if prev else 1 + i,
+            prev_hash=None,
+            facts={
+                "record_type": "log_checkpoint",
+                "tree_size": 4,
+                "root_sha256": root_hex,  # signed malformed — hex isn't a root
+            },
+        )
+        payload, err = logmonitor._check_sth(bad_cp.model_dump(mode="json"), {engine.signer.public_key_b64})
+        assert payload is None and err == "checkpoint carries a malformed tree head"
+
+
+def test_compare_views_survives_non_dict_wconsistency(engine, store, household, schedule, t0):
+    """The witness's own consistency endpoint is hostile too: a truthy
+    non-dict response inside _bridge used to raise AttributeError. The
+    anchor-reconciliation path must degrade to unverifiable, not die."""
+    from attest import logmonitor
+
+    _seed(engine, household[0], t0)
+    cp = engine.issue_log_checkpoint()
+    mine = {
+        "issuer_key": engine.signer.public_key_b64,
+        "tree_size": cp.payload["tree_size"],
+        "root_sha256": cp.payload["root_sha256"],
+        "checkpoint_id": cp.id,
+    }
+    w_store, w_signer = _witness_deployment()
+    status, _out = logmonitor.witness_cosign(
+        w_store,
+        w_signer,
+        {"issuer_doc": _doc_for(engine), "checkpoint": cp.model_dump(mode="json")},
+    )
+    assert status == 200
+    # Checkpoint the witness's own log so the served pin carries an anchor —
+    # fetch_wconsistency is only consulted while reconciling one.
+    from attest.transparency import leaf_hashes, root
+
+    leaves = leaf_hashes(w_store.receipts())
+    w_cp = w_signer.issue(
+        visit_id="log:wcp",
+        sequence=99,
+        prev_hash=None,
+        facts={
+            "record_type": "log_checkpoint",
+            "tree_size": len(leaves),
+            "root_sha256": root(leaves).hex(),
+        },
+    )
+    w_store.put_receipt(w_cp)
+    heads = logmonitor.anchor_published_pins(
+        w_store, logmonitor.witness_heads(w_store, w_signer.public_key_b64)
+    )
+    pin = heads["pins"][0]
+    assert "witness_anchor" in pin
+    wpin = {"tree_size": 1, "root_sha256": "00" * 32}
+    for bad in [None, True, 5, "x", [], {"proof": "x"}]:
+        verdict, line = logmonitor.compare_views(
+            mine,
+            pin,
+            {w_signer.public_key_b64},
+            witness_pin=wpin,
+            fetch_wconsistency=lambda f, s, b=bad: b,
+            issuer_lineage={engine.signer.public_key_b64},
+        )
+        assert verdict in (
+            "agree",
+            "diverged",
+            "dishonest",
+            "unverifiable",
+            "unseen",
+            "witness_behind",
+            "witness_ahead",
+        )
+        assert isinstance(line, str) and line
+
+
+def test_compare_views_rejects_mirrored_non_str_subject_issuer(engine, store, household, schedule, t0):
+    """The lineage clause used to require a str subject_issuer BEFORE it
+    could test membership — a witness signing subject_issuer=["x"] beside
+    an unsigned pin claiming issuer_key=["x"] skipped the clause entirely
+    and could pass the subject binding without ever naming a lineage key."""
+    from attest import logmonitor
+
+    _seed(engine, household[0], t0)
+    cp = engine.issue_log_checkpoint()
+    mine = {
+        "issuer_key": engine.signer.public_key_b64,
+        "tree_size": cp.payload["tree_size"],
+        "root_sha256": cp.payload["root_sha256"],
+        "checkpoint_id": cp.id,
+    }
+    w_store, w_signer = _witness_deployment()
+    prev = w_store.latest_receipt()
+    crafted = w_signer.issue(
+        visit_id="witness:x:crafted",
+        sequence=prev.sequence + 1 if prev else 1,
+        prev_hash=prev.payload_hash if prev else None,
+        facts={
+            "record_type": "witness_cosignature",
+            "subject_checkpoint": cp.id,
+            "subject_tree_size": cp.payload["tree_size"],
+            "subject_root_sha256": cp.payload["root_sha256"],
+            "subject_issuer": ["x"],  # signed by the witness, but not a key
+        },
+    )
+    pin = {
+        "issuer_key": ["x"],  # unsigned served field mirrors the crafted subject
+        "tree_size": cp.payload["tree_size"],
+        "root_sha256": cp.payload["root_sha256"],
+        "checkpoint_id": cp.id,
+        "cosignature": crafted.model_dump(mode="json"),
+    }
+    verdict, _ = logmonitor.compare_views(
+        mine, pin, {w_signer.public_key_b64}, issuer_lineage={engine.signer.public_key_b64}
+    )
+    assert verdict != "agree"  # the mirrored non-string must never bind
+
+
+def test_check_cosig_anchors_hardened_against_malformed_entries(engine, store, household, schedule, t0):
+    """Each anchor entry is pack-author JSON — a non-dict anchor/proof or
+    bool tree_size/leaf_index must become a named error, never a crash
+    (AttributeError inside the loop used to escape the except tuple)."""
+    from attest import logmonitor
+
+    _seed(engine, household[0], t0)
+    cp = engine.issue_log_checkpoint()
+    w_store, w_signer = _witness_deployment()
+    status, out = logmonitor.witness_cosign(
+        w_store,
+        w_signer,
+        {"issuer_doc": _doc_for(engine), "checkpoint": cp.model_dump(mode="json")},
+    )
+    assert status == 200
+    cosig = out["cosignature"]
+    anchor = out.get("witness_anchor") or {}
+    cid = cosig["id"]
+    base = {"checkpoint": cp.model_dump(mode="json"), "proofs": {}, "cosignatures": [cosig]}
+
+    cases = [
+        {"cosig_anchors": {cid: 5}},
+        {"cosig_anchors": {cid: "x"}},
+        {"cosig_anchors": {cid: []}},
+        {"cosig_anchors": {cid: {"checkpoint": anchor.get("checkpoint"), "proof": 5}}},
+        {"cosig_anchors": {cid: {"checkpoint": anchor.get("checkpoint"), "proof": "z"}}},
+        {
+            "cosig_anchors": {
+                cid: {"checkpoint": anchor.get("checkpoint"), "proof": {"leaf_index": True, "path": []}}
+            }
+        },
+    ]
+    if anchor.get("checkpoint"):
+        acp = json.loads(json.dumps(anchor["checkpoint"]))
+        acp["payload"]["tree_size"] = True  # bool tree head
+        cases.append({"cosig_anchors": {cid: {"checkpoint": acp, "proof": anchor.get("proof") or {}}}})
+        acp2 = json.loads(json.dumps(anchor["checkpoint"]))
+        acp2["payload"]["root_sha256"] = "ab" * 16  # short root
+        cases.append({"cosig_anchors": {cid: {"checkpoint": acp2, "proof": anchor.get("proof") or {}}}})
+    for extra in cases:
+        doc = {**base, **extra}
+        anchored, errors = logmonitor.check_cosig_anchors(doc)
+        assert anchored == 0
+        assert errors and all(isinstance(e, str) for e in errors)
+
+
+def test_embedded_cosig_helpers_survive_unhashable_fields(engine, store, household, schedule, t0):
+    """The pack-embedded verifier (_cosig_count/_cosig_anchors in
+    verify_case.py) reads the same hostile doc: a list subject_issuer,
+    id, or public_key TypeErrors on set membership in pure Python. Exec
+    the shipped library and prove it counts, never crashes."""
+    import io
+    from contextlib import redirect_stderr, redirect_stdout
+
+    from attest import disputepack, logmonitor
+
+    ns: dict = {}
+    exec(compile(disputepack._VERIFIER_LIB, "verify_case_lib", "exec"), ns)
+    _count, _anchors = ns["_cosig_count"], ns["_cosig_anchors"]
+
+    _seed(engine, household[0], t0)
+    cp = engine.issue_log_checkpoint()
+    cpd = cp.model_dump(mode="json")
+    size, root_hex = cpd["payload"]["tree_size"], cpd["payload"]["root_sha256"]
+    trusted = {engine.signer.public_key_b64}
+
+    w_store, w_signer = _witness_deployment()
+    status, out = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": _doc_for(engine), "checkpoint": cpd}
+    )
+    assert status == 200
+    real = out["cosignature"]
+
+    hostile = [
+        {**real, "payload": {**real["payload"], "subject_issuer": ["x"]}},
+        {**real, "id": ["x"]},
+        {**real, "public_key": ["x"]},
+        {**real, "payload": {**real["payload"], "subject_issuer": {"k": 1}}},
+    ]
+    for cosig in hostile:
+        doc = {"checkpoint": cpd, "proofs": {}, "cosignatures": [cosig]}
+        n, keys = _count(doc, cpd, size, root_hex, issuer_keys=trusted)
+        assert n == 0 and keys == []
+        n2, ids2 = logmonitor.check_cosignatures(doc, cpd["id"], size, root_hex, issuer_keys=trusted)
+        assert n2 == 0 and ids2 == []
+
+    # Embedded _cosig_anchors exits FAIL on a present-but-broken anchor —
+    # the contract is a clean SystemExit, never a traceback.
+    doc = {"checkpoint": cpd, "proofs": {}, "cosignatures": [real], "cosig_anchors": {real["id"]: 5}}
+    with pytest.raises(SystemExit):
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            _anchors(doc)

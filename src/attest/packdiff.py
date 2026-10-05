@@ -82,11 +82,17 @@ def _log_pin_check(z, names, trusted, member_ids, failures, notes):
     A validly-signed receipt never committed to the log now fails.
     Returns the validated checkpoint payload when the member verifies so
     the artifact can carry its head into cross-pack comparison."""
-    res, err = check_log_pin(
-        lambda n: z.read(n) if n in names else None,
-        member_ids,
-        trusted or set(),
-    )
+    try:
+        res, err = check_log_pin(
+            lambda n: z.read(n) if n in names else None,
+            member_ids,
+            trusted or set(),
+        )
+    except Exception as exc:  # noqa: BLE001 — a pack member is hostile input:
+        # an unhandled shape inside the checker must fail the diff closed,
+        # never kill the whole comparison.
+        failures.append(f"log_checkpoint.json: checker crashed on malformed pack data ({exc})")
+        return None
     if err:
         failures.append(err)
         return None
