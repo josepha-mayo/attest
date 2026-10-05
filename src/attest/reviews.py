@@ -144,7 +144,9 @@ class ReviewService:
         original = self.store.receipt_for_visit(visit_id)
         if original is None:
             raise ValueError("close the observation record before reviewing it")
-        return ReviewBundle(original=original, reviews=self.store.reviews_for(visit_id))
+        return ReviewBundle(
+            kind="attest.review_bundle/1", original=original, reviews=self.store.reviews_for(visit_id)
+        )
 
     def countersign(self, visit_id: str) -> dict:
         """Derived bilateral record state, including whether a worker link is outstanding."""

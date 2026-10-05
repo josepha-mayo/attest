@@ -177,6 +177,37 @@ def test_case_pack_verifier_rejects_traversal_visit_ids(case_pack, bad):
     assert "malformed visit_id" in result.stdout
 
 
+@pytest.mark.parametrize(
+    "bad",
+    ["../escape", "..\\escape", "/abs/path", "..", "", "a/b", "a\\b", 123, None],
+)
+def test_case_pack_verifier_rejects_traversal_receipt_ids(case_pack, bad):
+    """Same guard on the attestation side: receipt_id names a member under
+    attestations/, and "" used to slip past — it resolves to a planted
+    `attestations/.json` the native/JS verifiers refuse to read."""
+    manifest_path = case_pack / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.setdefault("attestations", []).append(
+        {"receipt_id": bad, "visit_id": "v", "payload_hash": "0" * 64, "record_type": "x"}
+    )
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    # The member the hostile id would name must be present for this to bite —
+    # but only plant it when it resolves INSIDE attestations/ (never write
+    # outside the pack dir for an absolute or dot-dot id).
+    if isinstance(bad, str):
+        adir = (case_pack / "attestations").resolve()
+        target = (adir / f"{bad}.json").resolve()
+        if target.is_relative_to(adir):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                target.write_text("{}", encoding="utf-8")
+            except OSError:
+                pass  # '..' etc. can't be files — still malformed on every surface
+    result = _run_case(case_pack)
+    assert result.returncode != 0
+    assert "malformed receipt_id" in result.stdout
+
+
 def test_pack_verifier_ignores_cwd_redaction_and_media(pack, tmp_path):
     """verify_bundle.py resolves redaction.json and media/ next to the
     bundle — never the caller's CWD — so a hostile redaction file beside the

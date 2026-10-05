@@ -22,6 +22,7 @@ from urllib.parse import urlsplit
 import httpx
 from ring_sandbox import RingClient
 
+from . import transparency
 from .config import settings
 from .models import Role, Schedule, Site, Worker
 
@@ -1011,7 +1012,7 @@ def _parse_issuer_doc(raw: bytes, source: str) -> dict:
     the file and HTTP fetch paths. Anything else fails closed, never a
     traceback."""
     try:
-        doc = json.loads(raw.decode("utf-8"))
+        doc = transparency.json_loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
         sys.exit(f"issuer document is not valid JSON: {exc}")
     if (
@@ -1178,7 +1179,7 @@ def _verify(args: argparse.Namespace) -> None:
         )
         return
     try:
-        data = json.loads(raw.decode("utf-8"))
+        data = transparency.json_loads(raw.decode("utf-8"))
     except UnicodeDecodeError:
         fail(f"not a JSON artifact: {path.name}\n  a .zip pack verifies directly — pass the zip itself.")
     except (json.JSONDecodeError, RecursionError) as exc:
@@ -1312,10 +1313,19 @@ def _verify(args: argparse.Namespace) -> None:
         # rotation verify under the successor — legitimate only through the
         # signed rotation+adoption links the pack ships next to the bundle.
         try:
-            rj = json.loads(kr_path.read_text(encoding="utf-8"))
-            rotations += [Receipt.model_validate(r) for r in rj.get("rotations") or []]
+            rj = transparency.json_loads(kr_path.read_text(encoding="utf-8"))
         except Exception as exc:  # noqa: BLE001
             fail(f"verification failed: key_rotations.json malformed ({exc})")
+        extra = rj.get("rotations") if isinstance(rj, dict) else None
+        if not isinstance(extra, list):
+            fail("verification failed: key_rotations.json malformed")
+        # Unsigned pool content: malformed members are inert-skipped — only
+        # signed, adoption-consented pivots can ever extend trust.
+        for r in extra:
+            try:
+                rotations.append(Receipt.model_validate(r))
+            except Exception:  # noqa: BLE001
+                continue
     if rotations:
         trusted = ledger.trusted_issuer_keys(key, rotations) | ledger.descendant_issuer_keys(key, rotations)
         ok, reason = reviews.verify_bundle(bundle, trusted_keys=trusted)
@@ -1384,7 +1394,7 @@ def _verify_log_doc(
         if not path_str:
             fail(f"this artifact needs a signed head to check against — pass --{label} FILE")
         try:
-            doc = json.loads(Path(path_str).read_bytes())
+            doc = transparency.json_loads(Path(path_str).read_bytes())
         except (OSError, json.JSONDecodeError, RecursionError) as exc:
             fail(f"--{label}: unreadable checkpoint document ({exc})")
         raw_cp = doc.get("checkpoint") if isinstance(doc, dict) else None
@@ -1399,9 +1409,14 @@ def _verify_log_doc(
         if not ok:
             fail(f"--{label}: checkpoint receipt invalid ({why})")
         try:
+            if not transparency.json_is_int(cp.payload.get("tree_size")):
+                fail(f"--{label}: checkpoint carries a malformed root or size")
+            size = int(cp.payload["tree_size"])
+            if size < 1 or size > transparency.MAX_TREE_SIZE:
+                fail(f"--{label}: checkpoint carries a malformed root or size")
             return (
                 cp,
-                int(cp.payload["tree_size"]),
+                size,
                 transparency.hex_bytes(cp.payload["root_sha256"], length=32),
             )
         except (KeyError, TypeError, ValueError) as exc:
@@ -1439,39 +1454,54 @@ def _verify_log_doc(
         if not ok:
             fail(f"checkpoint signature invalid: {why}", kind="log_checkpoint")
         try:
+            if not transparency.json_is_int(cp.payload.get("tree_size")):
+                fail("checkpoint carries a malformed root or size", kind="log_checkpoint")
             size = int(cp.payload["tree_size"])
             root = transparency.hex_bytes(cp.payload["root_sha256"], length=32)
         except (KeyError, TypeError, ValueError) as exc:
             fail(f"checkpoint payload malformed: {exc}", kind="log_checkpoint")
-        if size < 0 or size > transparency.MAX_TREE_SIZE:
+        if size < 1 or size > transparency.MAX_TREE_SIZE:
             fail("checkpoint carries a malformed root or size", kind="log_checkpoint")
         proven = None
         proofs = data.get("proofs")
-        if isinstance(proofs, dict):
-            proven = 0
-            for ph, p in proofs.items():
-                try:
-                    idx = p["leaf_index"]
-                    good = (
-                        isinstance(p, dict)
-                        and transparency.json_is_int(idx)
-                        and transparency.verify_inclusion(
-                            transparency.hex_bytes(ph, length=32),
-                            size,
-                            int(idx),
-                            [transparency.hex_bytes(b, length=32) for b in p["path"]],
-                            root,
-                        )
+        # `proofs` is an optional addition to a standalone checkpoint doc —
+        # `attest checkpoint --out` omits it unless --include embedded
+        # receipts. Absent means nothing to prove; present-but-not-an-object
+        # is a lie (Python `.items()` would crash where JS Object.entries
+        # iterates a list — same split the pack verifiers gate on). A doc
+        # with receipts and absent proofs still fails below: every embedded
+        # receipt must carry a working proof.
+        if proofs is None:
+            proofs = {}
+        elif not isinstance(proofs, dict):
+            fail("checkpoint document: 'proofs' must be an object", kind="log_checkpoint")
+        proven = 0
+        for ph, p in proofs.items():
+            try:
+                idx = p["leaf_index"]
+                path = p.get("path") if isinstance(p, dict) else None
+                good = (
+                    isinstance(p, dict)
+                    and transparency.json_is_int(idx)
+                    # path absent/null reads as an empty proof on every
+                    # surface; a non-list path must not iterate dict keys
+                    and (path is None or isinstance(path, list))
+                    and transparency.verify_inclusion(
+                        transparency.hex_bytes(ph, length=32),
+                        size,
+                        int(idx),
+                        [transparency.hex_bytes(b, length=32) for b in path or []],
+                        root,
                     )
-                except (KeyError, ValueError, TypeError):
-                    good = False
-                if not good:
-                    fail(
-                        f"inclusion proof for {ph[:16]}… fails against this "
-                        "signed head — never committed there",
-                        kind="log_checkpoint",
-                    )
-                proven += 1
+                )
+            except (KeyError, ValueError, TypeError):
+                good = False
+            if not good:
+                fail(
+                    f"inclusion proof for {ph[:16]}… fails against this signed head — never committed there",
+                    kind="log_checkpoint",
+                )
+            proven += 1
         # Embedded evidence receipts (e.g. `attest checkpoint --out doc
         # --include monitor:`): each must verify under a key inside the
         # issuer's lineage AND carry an inclusion proof — the two checks
@@ -1717,7 +1747,7 @@ def _pack_key_pool(z, names) -> list:
     pool: list = []
     if "manifest.json" in names:
         try:
-            manifest = json.loads(z.read("manifest.json"))
+            manifest = transparency.json_loads(z.read("manifest.json"))
         except Exception:  # noqa: BLE001 — manifest itself already failed the verify pass
             manifest = {}
         for a in manifest.get("attestations") or []:
@@ -1725,14 +1755,14 @@ def _pack_key_pool(z, names) -> list:
             if not rid or f"attestations/{rid}.json" not in names:
                 continue
             try:
-                att = Receipt.model_validate(json.loads(z.read(f"attestations/{rid}.json")))
+                att = Receipt.model_validate(transparency.json_loads(z.read(f"attestations/{rid}.json")))
             except Exception:  # noqa: BLE001 — skip the member, not the pool
                 continue
             if att.payload.get("record_type") in ("key_rotation", "key_adoption", "key_revocation"):
                 pool.append(att)
     if "key_rotations.json" in names:
         try:
-            kr = json.loads(z.read("key_rotations.json"))
+            kr = transparency.json_loads(z.read("key_rotations.json"))
         except Exception:  # noqa: BLE001
             kr = {}
         for r in kr.get("rotations") or []:
@@ -1782,10 +1812,12 @@ def _verify_zip(
         names = set(z.namelist())
         if "manifest.json" in names:
             kind = "case-pack"
-            declared = json.loads(z.read("manifest.json")).get("issuer_key")
+            declared = transparency.json_loads(z.read("manifest.json")).get("issuer_key")
         elif "bundle.json" in names:
             kind = "pack"
-            declared = ReviewBundle.model_validate(json.loads(z.read("bundle.json"))).original.public_key
+            declared = ReviewBundle.model_validate(
+                transparency.json_loads(z.read("bundle.json"))
+            ).original.public_key
         else:
             fail("zip contains no manifest.json or bundle.json — not an Attest pack")
     except zipfile.BadZipFile:
@@ -1806,7 +1838,7 @@ def _verify_zip(
         from . import logmonitor
 
         try:
-            cpdoc = json.loads(z.read("log_checkpoint.json"))
+            cpdoc = transparency.json_loads(z.read("log_checkpoint.json"))
             head = logmonitor.fetch_json(f"{live_base}/api/log/head")
             trusted_set = logmonitor._trusted_set(issuer_doc)
             verdict, live_line = logmonitor.live_check(
@@ -1835,7 +1867,7 @@ def _verify_zip(
                 "--witness-key requires a counter-signed transparency checkpoint — this pack carries none",
                 kind=kind,
             )
-        cpdoc = json.loads(z.read("log_checkpoint.json"))
+        cpdoc = transparency.json_loads(z.read("log_checkpoint.json"))
         _cp, _p = cpdoc["checkpoint"], cpdoc["checkpoint"]["payload"]
         # Self-vouch exclusion needs the WHOLE issuer family — the pack's
         # own lifecycle receipts name rotated issuer keys that
@@ -1868,7 +1900,7 @@ def _verify_zip(
             # just reports the commitment shape so a CI can gate on it too
             # (e.g. require the log to have grown since a prior export).
             try:
-                cp = json.loads(z.read("log_checkpoint.json"))
+                cp = transparency.json_loads(z.read("log_checkpoint.json"))
                 from . import logmonitor as _lm2
 
                 _p = cp["checkpoint"]["payload"]
@@ -3015,7 +3047,7 @@ def _tamper_demo(args: argparse.Namespace) -> None:
         if not row:
             sys.exit("no visits in this store — run `attest replay home_aide_visit` first")
         visit_id, body = row
-        forged = json.loads(body)
+        forged = transparency.json_loads(body)
         forged["state"] = "attended_verified"  # the claim the record must refuse to carry
 
         pre = store.verify_journal()
@@ -3443,7 +3475,9 @@ def _export(args: argparse.Namespace) -> None:
             receipt = store.receipt_for_visit(visit.id)
             if receipt is None:
                 continue  # open visits have no signed record to export
-            bundle = ReviewBundle(original=receipt, reviews=store.reviews_for(visit.id))
+            bundle = ReviewBundle(
+                kind="attest.review_bundle/1", original=receipt, reviews=store.reviews_for(visit.id)
+            )
             entries.append((visit, bundle, countersign_status(bundle)))
         if not entries:
             sys.exit(f"no signed records for {site.name} yet")

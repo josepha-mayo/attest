@@ -29,6 +29,7 @@ fork must still be published in public time.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 
 _LEAF = b"\x00"
@@ -46,6 +47,18 @@ MAX_TREE_SIZE = 0x7FFFFFFF
 _STRICT_HEX = re.compile(r"[0-9a-fA-F]+")
 
 
+def json_loads(s):
+    """``json.loads`` minus the bare ``NaN``/``Infinity``/``-Infinity``
+    literals — CPython accepts them but neither the browser parser nor a
+    strict reader does, so a signed payload spelling ``NaN`` could hash-
+    verify here and fail to parse there. ``parse_constant`` is the only
+    gate those three tokens flow through."""
+    return json.loads(
+        s,
+        parse_constant=lambda x: (_ for _ in ()).throw(ValueError(f"non-JSON literal: {x}")),
+    )
+
+
 def json_is_int(v) -> bool:
     """The JSON-integer check every verifier surface can agree on.
 
@@ -60,7 +73,13 @@ def json_is_int(v) -> bool:
 
 # ASCII digits only — Python's \d accepts Unicode digits (int("٥") == 5)
 # where the JS mirror's \d does not; one signed string, two verdicts.
-_COERCIBLE_INT = re.compile(r"\s*[+-]?[0-9]+\s*")
+# Whitespace is the JS-\s ∩ int()-strippable intersection: JS \s adds
+# ﻿ (which int() won't strip) and Python \s adds \x1c-\x1f/\x85 (which
+# JS \s won't match) — spelling the class out pins both sides identical.
+_COERCIBLE_INT = re.compile(
+    r"[ \t\n\r\x0b\f\xa0\u1680-\u200a\u2028\u2029\u202f\u205f\u3000]*[+-]?[0-9]+"
+    r"[ \t\n\r\x0b\f\xa0\u1680-\u200a\u2028\u2029\u202f\u205f\u3000]*"
+)
 
 
 def coerce_int(v) -> int:
@@ -160,6 +179,9 @@ def verify_inclusion(
     leaf_data: bytes, tree_size: int, leaf_index: int, path: list[bytes], expected_root: bytes
 ) -> bool:
     """RFC 6962 §2.1.1 audit-path verification."""
+    if not isinstance(path, (list, tuple)):
+        # a dict "path" would iterate keys — a non-list shape never proves
+        return False
     if leaf_index >= tree_size or leaf_index < 0 or tree_size < 1 or tree_size > MAX_TREE_SIZE:
         return False
     if tree_size == 1:
@@ -215,6 +237,8 @@ def verify_consistency(
 ) -> bool:
     """RFC 6962 §2.1.2 consistency-proof verification."""
     if old_size > MAX_TREE_SIZE or new_size > MAX_TREE_SIZE:
+        return False
+    if not isinstance(proof, (list, tuple)):
         return False
     if old_size == new_size:
         return proof == [] and old_root == new_root
@@ -314,7 +338,7 @@ def verify_extends(
     callers fall back to the serving API's consistency endpoint.
     """
     ext = payload.get("extends")
-    if not isinstance(ext, dict):
+    if not isinstance(ext, dict) or not isinstance(ext.get("proof"), list):
         return None
     try:
         ext_first = coerce_int(ext["first"])

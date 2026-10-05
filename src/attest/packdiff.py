@@ -9,9 +9,10 @@ be possible on an honest deployment.
 
 from __future__ import annotations
 
-import json
 import zipfile
 from pathlib import Path
+
+from . import transparency
 
 
 class BoundedZip:
@@ -21,6 +22,26 @@ class BoundedZip:
 
     def __init__(self, z, *, per_file: int = 64 * 1024 * 1024, total: int = 256 * 1024 * 1024):
         self._z, self.per_file, self.total, self.seen = z, per_file, total, 0
+        # The browser verifier implements stored/deflate only — a member
+        # compressed another way (bzip2, lzma) must fail here too, never
+        # verify on one surface and vanish on another. ZIP64 is likewise
+        # outside the shared envelope: extract_version is the same
+        # version-needed field the JS reader checks, and any member
+        # genuinely needing it is definitionally over the bounds below.
+        for i in z.infolist():
+            if i.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+                raise ValueError(
+                    f"unsupported compression method {i.compress_type} for member {i.filename!r}"
+                )
+            if (
+                i.extract_version >= zipfile.ZIP64_VERSION
+                or i.file_size == 0xFFFFFFFF
+                or i.compress_size == 0xFFFFFFFF
+            ):
+                # The browser reader rejects the 0xFFFFFFFF sentinels outright;
+                # zipfile would decode a smuggled ZIP64 extra field even when
+                # version-needed stays under 45 — one rule on both surfaces.
+                raise ValueError(f"ZIP64 member {i.filename!r} exceeds the verification envelope")
 
     def namelist(self):
         return self._z.namelist()
@@ -145,7 +166,7 @@ def check_tools_pin(read_member, names, trusted: set, scope: str) -> tuple[int |
     from .models import Receipt
 
     try:
-        vm = json.loads(raw)
+        vm = transparency.json_loads(raw)
     except Exception:  # noqa: BLE001
         return None, "verifier_manifest.json: not readable JSON"
     try:
@@ -209,10 +230,16 @@ def check_log_pin(
         return None, None
     from .ledger import verify_receipt
     from .models import Receipt
-    from .transparency import MAX_TREE_SIZE, hex_bytes, json_is_int, verify_inclusion
+    from .transparency import (
+        MAX_TREE_SIZE,
+        hex_bytes,
+        json_is_int,
+        verify_extends,
+        verify_inclusion,
+    )
 
     try:
-        doc = json.loads(raw)
+        doc = transparency.json_loads(raw)
     except Exception:  # noqa: BLE001
         return None, "log_checkpoint.json: not readable JSON"
     cp_raw = doc.get("checkpoint") if isinstance(doc, dict) else None
@@ -240,6 +267,11 @@ def check_log_pin(
         root_b = hex_bytes(root_hex, length=32)
     except ValueError:
         return None, "log_checkpoint.json: malformed tree head"
+    # The checkpoint's own signed continuity claim — a head whose embedded
+    # bridge fails is attesting a history it cannot prove (verify_extends
+    # self-check parity with the standalone checkpoint path).
+    if verify_extends(payload) is False:
+        return None, "log_checkpoint.json: extends bridge attests a history it cannot prove"
     proven = 0
     referenced_ph: set = set()
     for rid, ph, pub in receipt_ids:
@@ -256,8 +288,12 @@ def check_log_pin(
                 f"log_checkpoint.json: receipt {rid} has no inclusion proof — "
                 "never committed to the deployment log"
             )
+        path_v = p.get("path")
+        if path_v is not None and not isinstance(path_v, list):
+            # a dict path would iterate keys — reject outright on all surfaces
+            return None, f"log_checkpoint.json: malformed proof for receipt {rid}"
         try:
-            path = [hex_bytes(h, length=32) for h in p.get("path") or []]
+            path = [hex_bytes(h, length=32) for h in path_v or []]
         except (TypeError, ValueError):
             return None, f"log_checkpoint.json: malformed proof for receipt {rid}"
         idx = p.get("leaf_index")
@@ -357,7 +393,7 @@ def _key_pool(z, attestations: dict) -> list:
     pool = []
     for rid in attestations:
         try:
-            att = Receipt.model_validate(json.loads(z.read(f"attestations/{rid}.json")))
+            att = Receipt.model_validate(transparency.json_loads(z.read(f"attestations/{rid}.json")))
         except Exception:  # noqa: BLE001 — unreadable members fail in the verify loop
             continue
         if att.payload.get("record_type") in ("key_rotation", "key_adoption", "key_revocation"):
@@ -458,7 +494,7 @@ def _verify_attestation_files(
     failures = []
     for rid, entry in attestations.items():
         try:
-            att = Receipt.model_validate(json.loads(z.read(f"attestations/{rid}.json")))
+            att = Receipt.model_validate(transparency.json_loads(z.read(f"attestations/{rid}.json")))
         except Exception as exc:  # noqa: BLE001
             failures.append(f"attestation {rid}: missing or invalid ({exc})")
             continue
@@ -506,17 +542,23 @@ def _verify_manifest_signature(manifest: dict, issuer: str | None, trusted: set 
     # The signed export also names the exact visit↔hash set — a manifest whose
     # listed records disagree with what was signed is an altered export, not
     # an unsigned one. Mirrors _verify_case_pack's receipt_hashes check.
-    signed_hashes = sig["payload"].get("receipt_hashes")
-    if signed_hashes is not None:
-        # Guard like _manifest_consistency: a malformed visit entry must fail
-        # the comparison, never raise out of the verifier on a signed export.
-        listed = {
-            v["visit_id"]: v["payload_hash"]
-            for v in manifest.get("visits", [])
-            if isinstance(v, dict) and "visit_id" in v and "payload_hash" in v
-        }
-        if listed != signed_hashes:
-            return "manifest visit list disagrees with the signed export"
+    signed_hashes = sig["payload"].get("receipt_hashes", {})
+    # Guard like _manifest_consistency: a malformed visit entry must fail
+    # the comparison, never raise out of the verifier on a signed export.
+    listed = {
+        v["visit_id"]: v["payload_hash"]
+        for v in manifest.get("visits", [])
+        if isinstance(v, dict) and "visit_id" in v and "payload_hash" in v
+    }
+    # Homogeneous types before comparing — str->str JSON maps only, so a
+    # cross-type listed key/value can never bridge (True==1, 5 vs "5").
+    if (
+        not isinstance(signed_hashes, dict)
+        or any(not isinstance(k, str) or not isinstance(h, str) for k, h in signed_hashes.items())
+        or any(not isinstance(k, str) or not isinstance(h, str) for k, h in listed.items())
+        or listed != signed_hashes
+    ):
+        return "manifest visit list disagrees with the signed export"
     return None
 
 
@@ -565,7 +607,7 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
             z = BoundedZip(raw)
             names = set(z.namelist())
             if "manifest.json" in names:
-                manifest = json.loads(z.read("manifest.json"))
+                manifest = transparency.json_loads(z.read("manifest.json"))
                 if not isinstance(manifest, dict):
                     raise ValueError(f"{path}: manifest.json is not an object")
                 declared = manifest.get("issuer_key")
@@ -585,7 +627,7 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                 bundles = {}
                 for vid in entries:
                     try:
-                        bundles[vid] = json.loads(z.read(f"visits/{vid}/bundle.json"))
+                        bundles[vid] = transparency.json_loads(z.read(f"visits/{vid}/bundle.json"))
                     except KeyError:
                         failures.append(f"{vid}: bundle listed but missing from pack")
                         continue
@@ -683,7 +725,7 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                     member_ids += _bundle_receipt_ids(b)
                 for rid in attestations:
                     try:
-                        att = json.loads(z.read(f"attestations/{rid}.json"))
+                        att = transparency.json_loads(z.read(f"attestations/{rid}.json"))
                         if att.get("id") and att.get("payload_hash"):
                             member_ids.append((att["id"], att["payload_hash"], att.get("public_key")))
                     except Exception:  # noqa: BLE001 — flagged in the verify loop
@@ -693,7 +735,7 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                     member_ids.append((sr["id"], sr["payload_hash"], sr.get("public_key")))
                 if "verifier_manifest.json" in names:
                     try:
-                        vm = json.loads(z.read("verifier_manifest.json"))
+                        vm = transparency.json_loads(z.read("verifier_manifest.json"))
                         if vm.get("id") and vm.get("payload_hash"):
                             member_ids.append((vm["id"], vm["payload_hash"], vm.get("public_key")))
                     except Exception:  # noqa: BLE001 — flagged by check_tools_pin
@@ -712,7 +754,7 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                     "notes": notes,
                 }
             if "bundle.json" in names:
-                bundle = json.loads(z.read("bundle.json"))
+                bundle = transparency.json_loads(z.read("bundle.json"))
                 original = bundle.get("original") if isinstance(bundle, dict) else None
                 if not isinstance(original, dict) or not original.get("visit_id"):
                     raise ValueError(f"{path}: bundle.json lacks an 'original' receipt")
@@ -724,9 +766,20 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                     from .models import Receipt
 
                     try:
-                        kr = json.loads(z.read("key_rotations.json"))
-                        kr_member = [Receipt.model_validate(r) for r in kr.get("rotations") or []]
-                        kr_pool = list(kr_member)
+                        kr = transparency.json_loads(z.read("key_rotations.json"))
+                        raw_pool = kr.get("rotations") if isinstance(kr, dict) else None
+                        if not isinstance(raw_pool, list):
+                            failures.append("key_rotations.json: malformed")
+                        else:
+                            # Unsigned pool content: malformed members are
+                            # inert-skipped — only signed, consented pivots
+                            # extend trust (cli/app/embedded/JS parity).
+                            for r in raw_pool:
+                                try:
+                                    kr_member.append(Receipt.model_validate(r))
+                                except Exception:  # noqa: BLE001
+                                    continue
+                            kr_pool = list(kr_member)
                     except Exception as exc:  # noqa: BLE001
                         failures.append(f"key_rotations.json: malformed ({exc})")
                 kr_pool += list(extra_key_receipts or [])
@@ -782,7 +835,7 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                 member_ids += [(r.id, r.payload_hash, r.public_key) for r in kr_member]
                 if "verifier_manifest.json" in names:
                     try:
-                        vm = json.loads(z.read("verifier_manifest.json"))
+                        vm = transparency.json_loads(z.read("verifier_manifest.json"))
                         if vm.get("id") and vm.get("payload_hash"):
                             member_ids.append((vm["id"], vm["payload_hash"], vm.get("public_key")))
                     except Exception:  # noqa: BLE001 — flagged by check_tools_pin
@@ -804,7 +857,7 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                     "notes": notes,
                 }
             raise ValueError(f"{path}: zip contains neither manifest.json nor bundle.json")
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = transparency.json_loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError(f"{path}: not a pack artifact (expected a JSON object)")
     if "original" in data:

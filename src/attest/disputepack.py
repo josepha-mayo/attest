@@ -90,8 +90,22 @@ checked against files inside the pack.
 import base64
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
+
+
+def _loads(s):
+    """``json.loads`` minus the bare NaN/Infinity/-Infinity literals CPython
+    accepts — no other verifier surface parses them; one payload, one
+    verdict."""
+    return json.loads(
+        s,
+        parse_constant=lambda x: (_ for _ in ()).throw(
+            ValueError("non-JSON literal: " + x)
+        ),
+    )
+
 
 # --- Ed25519 verification (RFC 8032), pure Python ---------------------------
 q = 2**255 - 19
@@ -161,38 +175,115 @@ def canonical(payload):
     ).encode()
 
 
+# The instant spelling every verifier surface agrees on — identical grammar
+# to models.ISO_INSTANT_RE and the browser's ISO gate. (Digit/dot classes
+# spelled out because this source ships inside a non-raw string literal.)
+_ISO_INSTANT = re.compile(
+    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}"
+    r"([T ]([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9]([.][0-9]+)?)?"
+    r"(Z|[+-]([01][0-9]|2[0-3]):?[0-5][0-9])?)?$"
+)
+
+
+def _iso_instant(v):
+    """Shared-grammar instant parse; returns a datetime or None. Naive vs
+    aware inequality falls out of datetime.__eq__ (mirrors the browser's
+    explicit awareness flag)."""
+    from datetime import datetime as _d
+
+    if isinstance(v, _d):
+        return v
+    if not isinstance(v, str) or not _ISO_INSTANT.fullmatch(v):
+        return None
+    try:
+        return _d.fromisoformat(v.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _py_model_int(v):
+    """Strict JSON-int gate for model-typed envelope fields — mirrors
+    ``models._json_int`` / ``Number.isInteger``: int non-bool or finite
+    integral float; strings and bools reject."""
+    import math
+
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, int):
+        return v
+    if isinstance(v, float):
+        return int(v) if math.isfinite(v) and v.is_integer() else None
+    return None
+
+
+def _unb64(s):
+    """``atob``-parity base64 for envelope fields: ASCII whitespace
+    tolerated, non-alphabet bytes fatal, missing padding forgiven — bare
+    ``b64decode`` silently drops junk where the browser throws."""
+    ws = frozenset(" " + chr(9) + chr(10) + chr(12) + chr(13))
+    s = "".join(c for c in s if c not in ws)
+    return base64.b64decode(s + "=" * (-len(s) % 4), validate=True)
+
+
 def check_receipt(r, key):
+    if not isinstance(r, dict):
+        return False, "malformed receipt"
     if r.get("public_key") != key:
         return False, "signed by a different key than this issuer"
-    payload = r["payload"]
+    # Envelope fields must carry their model types — a pool member spelling
+    # `sequence` as a dict or `visit_id` as a number is malformed on the
+    # native surface (model_validate rejects), never a lenient pass here.
+    if (
+        not isinstance(r.get("id"), str)
+        or not isinstance(r.get("visit_id"), str)
+        or not isinstance(r.get("public_key"), str)
+        or not isinstance(r.get("payload_hash"), str)
+        or not isinstance(r.get("signature"), str)
+        # prev_hash is required-nullable: absent fails the model (and the
+        # JS guard — undefined !== null), explicit null is the chain head.
+        or "prev_hash" not in r
+        or not (r["prev_hash"] is None or isinstance(r["prev_hash"], str))
+    ):
+        return False, "malformed receipt"
+    # issued_at is model-gated at intake on native surfaces: key absent →
+    # default_factory fills it; present → must be an ISO-grammar instant
+    # (Receipt's BeforeValidator raises on anything else — including null).
+    # This applies on EVERY schema, not just the /2 instant-compare below.
+    if "issued_at" in r and _iso_instant(r["issued_at"]) is None:
+        return False, "malformed receipt"
+    env_seq = _py_model_int(r.get("sequence"))
+    if env_seq is None:
+        return False, "malformed receipt"
+    payload = r.get("payload")
+    if not isinstance(payload, dict):
+        return False, "malformed receipt"
     digest = hashlib.sha256(canonical(payload)).hexdigest()
     if digest != r["payload_hash"]:
         return False, "payload hash mismatch (payload was altered)"
-    if payload.get("sequence") != r["sequence"] or payload.get("prev_hash") != r["prev_hash"]:
+    if payload.get("sequence") != env_seq or payload.get("prev_hash") != r["prev_hash"]:
         return False, "envelope fields disagree with signed payload"
     if payload.get("visit_id") != r["visit_id"]:
         return False, "visit id disagrees with signed payload"
     if payload.get("schema") == "attest.receipt/2":
         # issued_at serializes as "...Z" in the envelope but "+00:00" in the signed
-        # payload — compare parsed instants, not strings.
-        from datetime import datetime as _dt
-
-        same_instant = (
-            _dt.fromisoformat(payload.get("issued_at", ""))
-            == _dt.fromisoformat(r["issued_at"])
-        )
+        # payload — compare parsed instants under the shared ISO grammar.
+        p_issued = _iso_instant(payload.get("issued_at", ""))
+        e_issued = _iso_instant(r.get("issued_at"))
+        same_instant = p_issued is not None and e_issued is not None and p_issued == e_issued
         if payload.get("receipt_id") != r["id"] or not same_instant:
             return False, "receipt envelope identity disagrees with signed payload"
     elif payload.get("schema") != "attest.receipt/1":
         return False, "unsupported receipt schema"
     if not ed25519_verify(
-        base64.b64decode(r["signature"]), bytes.fromhex(r["payload_hash"]), base64.b64decode(key)
+        _unb64(r["signature"]), bytes.fromhex(r["payload_hash"]), _unb64(key)
     ):
         return False, "signature invalid"
     return True, "ok"
 
 
 def _member_check(r, allowed):
+    if not isinstance(r, dict):
+        return False, "malformed receipt"
     if r.get("public_key") not in allowed:
         return False, "signed by a key outside the trusted issuer chain"
     return check_receipt(r, r["public_key"])
@@ -207,37 +298,54 @@ def check_bundle(bundle, key):
     # ReviewBundle is extra="forbid": honest files carry exactly kind,
     # original, reviews. Any other top-level key (e.g. a forged
     # countersign_status) is unsigned attacker content — fail, don't render it.
+    if not isinstance(bundle, dict):
+        return False, "bundle is not an object", 0
     allowed = {key} if isinstance(key, str) else set(key)
     if bundle.get("kind") != "attest.review_bundle/1":
         return False, "unrecognized bundle kind", 0
     extra = set(bundle) - {"kind", "original", "reviews"}
     if extra:
         return False, f"unsigned extra field in bundle: {sorted(extra)[0]}", 0
-    original = bundle["original"]
+    original = bundle.get("original")
     ok, why = _member_check(original, allowed)
     if not ok:
         return False, f"original: {why}", 0
     prev = original["payload_hash"]
     n = 0
-    for n, entry in enumerate(bundle.get("reviews", []), 1):
-        r = entry["receipt"]
+    reviews = bundle.get("reviews", [])
+    # ReviewBundle caps at max_length=500 and requires a list — malformed
+    # shape is a clean fail here exactly as model_validate fails natively.
+    if not isinstance(reviews, list):
+        return False, "reviews is not a list", n
+    if len(reviews) > 500:
+        return False, "review chain exceeds the 500-entry cap", n
+    for n, entry in enumerate(reviews, 1):
+        if not isinstance(entry, dict):
+            return False, f"review {n}: malformed entry", n
+        r = entry.get("receipt")
         ok, why = _member_check(r, allowed)
         if not ok:
             return False, f"review {n}: {why}", n
         if (
-            entry["id"] != r["id"]
+            not isinstance(entry.get("id"), str)
+            or not isinstance(entry.get("visit_id"), str)
+            or entry["id"] != r["id"]
             or entry["visit_id"] != original["visit_id"]
             or r["visit_id"] != original["visit_id"]
         ):
             return False, f"review {n}: identity does not match original", n
-        if entry["revision"] != n or r["sequence"] != n or r["prev_hash"] != prev:
-            return False, f"review {n}: sequence or previous hash mismatch", n
-        anchor = r["payload"].get("original_receipt") or {}
         if (
-            r["payload"].get("record_type") != "review"
-            or anchor.get("id") != original["id"]
-            or anchor.get("hash") != original["payload_hash"]
+            _py_model_int(entry.get("revision")) != n
+            or _py_model_int(r.get("sequence")) != n
+            or r.get("prev_hash") != prev
         ):
+            return False, f"review {n}: sequence or previous hash mismatch", n
+        # reviews.py requires original_receipt to be exactly {"id","hash"} —
+        # extra keys mean a payload the signer committed that no surface may
+        # silently accept; non-dict anchors reject by inequality, not a crash.
+        if r["payload"].get("record_type") != "review" or r["payload"].get(
+            "original_receipt"
+        ) != {"id": original["id"], "hash": original["payload_hash"]}:
             return False, f"review {n}: not anchored to this original", n
         prev = r["payload_hash"]
     return True, "ok", n + 1
@@ -257,7 +365,7 @@ def check_tools(pack_dir, trusted, scope):
     if not vm_path.is_file():
         return None
     try:
-        vm = json.loads(vm_path.read_text(encoding="utf-8"))
+        vm = _loads(vm_path.read_text(encoding="utf-8"))
     except Exception:
         sys.exit("FAIL verifier_manifest.json: not readable JSON")
     payload = vm.get("payload") if isinstance(vm, dict) else None
@@ -323,12 +431,119 @@ def _hex32(s):
     return b
 
 
+_HEXANY_RE = re.compile(r"[0-9a-fA-F]+")
+
+
+def _hexany(s):
+    """transparency.hex_bytes without a length pin — contiguous hex of any
+    even length. Extends-bridge material takes it: verify_extends calls
+    hex_bytes unbounded, so the bridge fields must too."""
+    if not isinstance(s, str) or not _HEXANY_RE.fullmatch(s):
+        return None
+    try:
+        return bytes.fromhex(s)
+    except (TypeError, ValueError):
+        return None
+
+
+_WS_COERCE = "".join(
+    chr(c)
+    for c in (
+        [0x20, 0x09, 0x0A, 0x0D, 0x0B, 0x0C, 0xA0]
+        + list(range(0x1680, 0x200B))
+        + [0x2028, 0x2029, 0x202F, 0x205F, 0x3000]
+    )
+)
+
+
+def _coerce_int(v):
+    """transparency.coerce_int mirror: bools -> 0/1, floats truncate,
+    whitespace-padded digit strings parse; anything else raises. Used where
+    signed material is evaluated (extends), not schema-checked."""
+    if isinstance(v, bool):
+        return int(v)
+    if isinstance(v, int):
+        return v
+    if isinstance(v, float):
+        if v != v or v in (float("inf"), float("-inf")):
+            raise ValueError("not a finite number")
+        return int(v)
+    if isinstance(v, str):
+        t = v.strip(_WS_COERCE)
+        if t and re.fullmatch(r"[+-]?[0-9]+", t):
+            return int(t)
+    raise ValueError("not a coercible integer")
+
+
+def _merkle_consistency(old_root, old_size, new_root, new_size, nodes):
+    """RFC 6962 sec. 2.1.2 consistency-proof verification — the
+    transparency.verify_consistency mirror, stdlib-only."""
+    if not isinstance(nodes, list):
+        return False  # a dict proof would iterate keys — never a proof
+    if old_size > 2147483647 or new_size > 2147483647:
+        return False
+    if old_size == new_size:
+        return nodes == [] and old_root == new_root
+    if not (0 < old_size < new_size) or not nodes:
+        return False
+    path = list(nodes)
+    # RFC 9162 sec. 2.1.4.2 step 2: a power-of-two older size omits the old
+    # root itself — the verifier knows it, so it is prepended here.
+    if old_size & (old_size - 1) == 0:
+        path = [old_root] + path
+    fn, sn = old_size - 1, new_size - 1
+    while fn & 1:
+        fn >>= 1
+        sn >>= 1
+    fr = sr = path[0]
+    for c in path[1:]:
+        if sn == 0:
+            return False
+        if (fn & 1) or fn == sn:
+            fr = hashlib.sha256(b"\\x01" + c + fr).digest()
+            sr = hashlib.sha256(b"\\x01" + c + sr).digest()
+            while fn and not (fn & 1):
+                fn >>= 1
+                sn >>= 1
+        else:
+            sr = hashlib.sha256(b"\\x01" + sr + c).digest()
+        fn >>= 1
+        sn >>= 1
+    return sn == 0 and fr == old_root and sr == new_root
+
+
+def _extends_ok(payload):
+    """transparency.verify_extends(payload) mirror — the checkpoint's
+    self-contained continuity claim with no caller expectations. True/False
+    when the embedded bridge resolves; None when absent or malformed (the
+    head's own signature still authenticates, so callers treat None as
+    absent rather than failed)."""
+    ext = payload.get("extends")
+    if not isinstance(ext, dict) or not isinstance(ext.get("proof"), list):
+        return None
+    try:
+        ext_first = _coerce_int(ext["first"])
+        ext_first_root = _hexany(ext["first_root_sha256"])
+        size = _coerce_int(payload["tree_size"])
+        root = _hexany(payload["root_sha256"])
+        if ext_first_root is None or root is None:
+            return None
+        nodes = [_hexany(h) for h in ext["proof"]]
+        if any(n is None for n in nodes):
+            return None
+    except (KeyError, TypeError, ValueError):
+        return None
+    return _merkle_consistency(ext_first_root, ext_first, root, size, nodes)
+
+
 def _merkle_inclusion(leaf_hex, size, index, path_hex, root_hex):
     """RFC 6962 audit-path verification, stdlib-only (see transparency.py)."""
     leaf = _hex32(leaf_hex)
     root_b = _hex32(root_hex)
     if leaf is None or root_b is None:
         return False
+    if not isinstance(path_hex, list):
+        return False  # a dict path would iterate keys — never a proof
     if not _is_int(size) or not _is_int(index):
         return False
     size, index = int(size), int(index)
@@ -369,7 +584,7 @@ def check_log(pack_dir, trusted, receipts):
     if not cp_path.is_file():
         return None
     try:
-        doc = json.loads(cp_path.read_text(encoding="utf-8"))
+        doc = _loads(cp_path.read_text(encoding="utf-8"))
     except Exception:
         sys.exit("FAIL log_checkpoint.json: not readable JSON")
     cp = doc.get("checkpoint") if isinstance(doc, dict) else None
@@ -393,6 +608,14 @@ def check_log(pack_dir, trusted, receipts):
         or not isinstance(root_hex, str)
     ):
         sys.exit("FAIL log_checkpoint.json: malformed tree head")
+    # The checkpoint's own signed continuity claim: a head whose embedded
+    # bridge fails is attesting a history it cannot prove — verify_extends
+    # self-check parity with the standalone checkpoint path (convicts
+    # False, absent/malformed bridges pass through as None).
+    if _extends_ok(payload) is False:
+        sys.exit(
+            "FAIL log_checkpoint.json: extends bridge attests a history it cannot prove"
+        )
     proven = 0
     verified_ph = set()
     for r in receipts:
@@ -637,7 +860,7 @@ def redaction_for(bundle, pack_dir="."):
     marker = Path(pack_dir) / "redaction.json"
     if not marker.is_file():
         return None
-    data = json.loads(marker.read_text(encoding="utf-8"))
+    data = _loads(marker.read_text(encoding="utf-8"))
     digests = set(data.get("withheld_digests", []))
     signed = {
         e.get("media_sha256")
@@ -675,7 +898,21 @@ def check_manifest(manifest, key):
         for v in manifest.get("visits", [])
         if isinstance(v, dict) and "visit_id" in v and "payload_hash" in v
     }
-    if listed != signed_hashes:
+    # Homogeneous types before comparing: JSON receipt_hashes is always
+    # str->str, so a non-str listed key (JS stringifies int keys — 5 vs "5")
+    # or a cross-type value (Python True==1 bridges where === never can)
+    # must fail, not silently collide.
+    if (
+        not isinstance(signed_hashes, dict)
+        or any(
+            not isinstance(k, str) or not isinstance(h, str)
+            for k, h in signed_hashes.items()
+        )
+        or any(
+            not isinstance(k, str) or not isinstance(h, str) for k, h in listed.items()
+        )
+        or listed != signed_hashes
+    ):
         return False, "manifest visit list disagrees with the signed export"
     return True, f"export signed: {len(listed)} record(s)"
 
@@ -861,7 +1098,8 @@ def revoked_keys(key_receipts, issuer_key=None):
             continue
         if (
             p.get("record_type") == "key_revocation"
-            and p.get("revoked_key") in seen
+            and isinstance(p.get("revoked_key"), str)
+            and p["revoked_key"] in seen
             and r.get("public_key") == in_effect
         ):
             revoked[p["revoked_key"]] = p.get("suspect_after") or ""
@@ -903,7 +1141,7 @@ def load_issuer_doc(path):
     rotation. Its authenticity is only as strong as how you got the file —
     --key remains the out-of-band pin."""
     try:
-        doc = json.loads(Path(path).read_text(encoding="utf-8"))
+        doc = _loads(Path(path).read_text(encoding="utf-8"))
     except Exception as exc:
         sys.exit(f"FAIL issuer document unreadable: {exc}")
     if (
@@ -916,6 +1154,10 @@ def load_issuer_doc(path):
     receipts = doc.get("key_receipts") or []
     if not isinstance(receipts, list):
         sys.exit("FAIL issuer document: key_receipts is not a list")
+    # Same bound the CLI puts on the served document — the lineage walk is
+    # one signature verification per candidate per hop.
+    if len(receipts) > 64:
+        sys.exit("FAIL issuer document: key_receipts exceeds the 64-entry bound")
     return doc["issuer_key"], receipts
 '''
 
@@ -939,7 +1181,7 @@ def main():
             sys.exit("FAIL pass --key or --issuer, not both")
         key, issuer_receipts = load_issuer_doc(args[i + 1])
         del args[i : i + 2]
-    bundle = json.loads(Path(args[0]).read_text(encoding="utf-8"))
+    bundle = _loads(Path(args[0]).read_text(encoding="utf-8"))
     pack_dir = Path(args[0]).resolve().parent
     key = key or bundle["original"]["public_key"]
     # Reviews appended after a key rotation verify under the successor —
@@ -954,7 +1196,7 @@ def main():
     rot_path = pack_dir / "key_rotations.json"
     if rot_path.is_file():
         try:
-            rj = json.loads(rot_path.read_text(encoding="utf-8"))
+            rj = _loads(rot_path.read_text(encoding="utf-8"))
             extra = rj.get("rotations") if isinstance(rj, dict) else None
         except Exception:
             extra = None
@@ -1008,7 +1250,7 @@ def main():
         trusted,
         [bundle["original"]]
         + pack_lifecycle
-        + ([json.loads((pack_dir / "verifier_manifest.json").read_text(encoding="utf-8"))]
+        + ([_loads((pack_dir / "verifier_manifest.json").read_text(encoding="utf-8"))]
            if (pack_dir / "verifier_manifest.json").is_file() else []),
     )
     redact_note = f", {held} withheld by redaction" if held else ""
@@ -1076,7 +1318,7 @@ def main():
         del args[i : i + 2]
     root = Path(args[0]) if args else Path(".")
     try:
-        manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+        manifest = _loads((root / "manifest.json").read_text(encoding="utf-8"))
     except Exception as exc:
         sys.exit(f"FAIL manifest.json unreadable: {exc}")
     declared = manifest.get("issuer_key")
@@ -1087,12 +1329,15 @@ def main():
     # keys legitimately. Rotation receipts that don't parse or don't verify
     # are ignored here and fail in the attestation loop below.
     rotations = list(issuer_receipts)
-    for a in manifest.get("attestations", []):
-        rid = a.get("receipt_id")
-        if not isinstance(rid, str) or "/" in rid or chr(92) in rid or ".." in rid:
+    attestations = manifest.get("attestations", [])
+    if not isinstance(attestations, list):
+        sys.exit("FAIL manifest: attestations is not a list")
+    for a in attestations:
+        rid = a.get("receipt_id") if isinstance(a, dict) else None
+        if not isinstance(rid, str) or not rid or "/" in rid or chr(92) in rid or ".." in rid:
             continue  # a receipt_id that walks out of attestations/ is malformed
         try:
-            r = json.loads((root / "attestations" / f"{rid}.json").read_text(encoding="utf-8"))
+            r = _loads((root / "attestations" / f"{rid}.json").read_text(encoding="utf-8"))
         except Exception:
             continue
         if r.get("payload", {}).get("record_type") in ("key_rotation", "key_adoption", "key_revocation"):
@@ -1128,9 +1373,15 @@ def main():
             print(f"FAIL manifest: malformed visit_id {vid!r}")
             failed += 1
             continue
+        if vid in listed_vids:
+            # packdiff flags a duplicate listing — a vid that names the same
+            # bundle twice double-counts on every surface, so all reject it
+            print(f"FAIL manifest: visit_id {vid} listed twice")
+            failed += 1
+            continue
         listed_vids.add(vid)
         try:
-            bundle = json.loads((root / "visits" / vid / "bundle.json").read_text(encoding="utf-8"))
+            bundle = _loads((root / "visits" / vid / "bundle.json").read_text(encoding="utf-8"))
         except Exception as exc:
             print(f"FAIL {vid}: bundle listed but missing or unreadable ({exc})")
             failed += 1
@@ -1171,8 +1422,8 @@ def main():
         print(f"OK   {vid}: {v.get('state', '?')} — {cs}"
               f" ({n} receipt(s), {checked} media digest(s){redact_note})")
     for a in manifest.get("attestations", []):
-        rid = a.get("receipt_id", "?")
-        if not isinstance(rid, str) or "/" in rid or chr(92) in rid or ".." in rid:
+        rid = a.get("receipt_id") if isinstance(a, dict) else None
+        if not isinstance(rid, str) or not rid or "/" in rid or chr(92) in rid or ".." in rid:
             print(f"FAIL attestation: malformed receipt_id {rid!r}")
             failed += 1
             continue
@@ -1182,7 +1433,7 @@ def main():
             failed += 1
             continue
         try:
-            ar = json.loads(apath.read_text(encoding="utf-8"))
+            ar = _loads(apath.read_text(encoding="utf-8"))
         except Exception as exc:
             print(f"FAIL attestation {rid}: unreadable ({exc})")
             failed += 1
@@ -1194,6 +1445,9 @@ def main():
         aok, awhy = check_receipt(ar, ar["public_key"])
         if not aok:
             print(f"FAIL attestation {rid}: {awhy}")
+            failed += 1
+        elif ar.get("id") != rid:
+            print(f"FAIL attestation {rid}: filename disagrees with the signed receipt id")
             failed += 1
         elif ar["payload_hash"] != a.get("payload_hash") or ar["visit_id"] != a.get("visit_id"):
             print(f"FAIL attestation {rid}: disagrees with the signed manifest")
@@ -1247,7 +1501,10 @@ def main():
     print(f"{'OK  ' if mok else 'FAIL'} manifest: {mwhy}")
     if not mok:
         failed += 1
-    site_id = (manifest.get("site") or {}).get("id") or ""
+    _site = manifest.get("site")
+    # A non-dict site (e.g. 5) has no .get — the browser computes "site:"
+    # for the same input, so degrade to "" rather than crash.
+    site_id = (_site.get("id") if isinstance(_site, dict) else None) or ""
     pinned_tools = check_tools(root, trusted, f"site:{site_id}")
     sr = manifest.get("signature_receipt")
     if isinstance(sr, dict):
@@ -1255,7 +1512,7 @@ def main():
     if (root / "verifier_manifest.json").is_file():
         try:
             log_receipts.append(
-                json.loads((root / "verifier_manifest.json").read_text(encoding="utf-8")))
+                _loads((root / "verifier_manifest.json").read_text(encoding="utf-8")))
         except Exception:
             pass  # a malformed pin already failed in check_tools
     logged = check_log(root, trusted, log_receipts)

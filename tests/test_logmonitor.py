@@ -1995,7 +1995,9 @@ def test_compare_views_binds_anchor_to_the_watched_witness_log(engine, store, ho
         "root_sha256": root(leaves[: len(leaves) - 1]).hex(),
     }
     fetch = lambda f, s: {  # noqa: E731
-        "proof": [h.hex() for h in consistency_nodes(leaves, f)]
+        "first": f,
+        "tree_size": s,
+        "proof": [h.hex() for h in consistency_nodes(leaves, f)],
     }
     verdict3, line3 = logmonitor.compare_views(
         mine,

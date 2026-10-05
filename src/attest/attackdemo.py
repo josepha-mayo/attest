@@ -357,7 +357,9 @@ def run(store: Store, media_root: Path | None = None, inbox=None, engine=None) -
             receipt = store.receipt_for_visit(visit.id)
             if receipt is None:
                 continue
-            bundle = ReviewBundle(original=receipt, reviews=store.reviews_for(visit.id))
+            bundle = ReviewBundle(
+                kind="attest.review_bundle/1", original=receipt, reviews=store.reviews_for(visit.id)
+            )
             entries.append((visit, bundle, countersign_status(bundle)))
         if not entries:
             return None, "no signed records to export"
@@ -577,7 +579,7 @@ def run(store: Store, media_root: Path | None = None, inbox=None, engine=None) -
             )
         ]
         chain_ok, _ = verify_bundle(
-            ReviewBundle(original=original, reviews=entries),
+            ReviewBundle(kind="attest.review_bundle/1", original=original, reviews=entries),
             public_key=original.public_key,
         )
         return (j_hit or not chain_ok), (

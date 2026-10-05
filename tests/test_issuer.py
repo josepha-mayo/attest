@@ -254,7 +254,11 @@ def test_remote_artifact_ignores_cwd_key_rotations(tmp_path, monkeypatch, capsys
         prev_hash=None,
         facts={"record_type": "review", "summary": "ok"},
     )
-    bundle = {"original": orig.model_dump(mode="json"), "reviews": []}
+    bundle = {
+        "kind": "attest.review_bundle/1",
+        "original": orig.model_dump(mode="json"),
+        "reviews": [],
+    }
     blob = json.dumps(bundle).encode()
 
     class _Resp:

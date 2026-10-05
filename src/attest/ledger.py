@@ -11,6 +11,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import uuid
 from pathlib import Path
 from typing import Any
@@ -37,7 +38,15 @@ def _b64(b: bytes) -> str:
 
 
 def _unb64(s: str) -> bytes:
-    return base64.b64decode(s)
+    """``atob``-parity base64 for verifier-facing envelope fields.
+
+    The browser verifier decodes ``signature``/``public_key`` with ``atob`` —
+    ASCII whitespace tolerated, non-alphabet bytes fatal, missing padding
+    forgiven. Bare ``b64decode`` silently drops junk bytes (``"sig!junk"``
+    yields identical bytes) where ``atob`` throws — an attacker-editable
+    envelope field must not accept here what the browser rejects."""
+    s = re.sub(r"[ \t\n\r\f]", "", s)
+    return base64.b64decode(s + "=" * (-len(s) % 4), validate=True)
 
 
 class Signer:
@@ -130,10 +139,17 @@ def verify_receipt(receipt: Receipt | dict[str, Any], *, public_key: str | None 
 
         raw_issued = r.payload.get("issued_at")
         try:
+            from .models import ISO_INSTANT_RE
+
+            # Same grammar the browser/envelope checks apply — fromisoformat's
+            # extra spellings (compact dates, week dates) must not pass here
+            # where a stricter surface rejects them.
             payload_issued = (
                 raw_issued
                 if isinstance(raw_issued, datetime)
                 else datetime.fromisoformat(str(raw_issued).replace("Z", "+00:00"))
+                if isinstance(raw_issued, str) and ISO_INSTANT_RE.fullmatch(raw_issued)
+                else None
             )
         except ValueError:
             return False, "receipt envelope identity disagrees with signed payload"
@@ -413,7 +429,8 @@ def revoked_issuer_keys(receipts: list[Receipt], *, issuer_key: str | None = Non
             continue
         if (
             p.get("record_type") == "key_revocation"
-            and p.get("revoked_key") in seen
+            and isinstance(p.get("revoked_key"), str)
+            and p["revoked_key"] in seen
             and r.public_key == in_effect
         ):
             revoked[p["revoked_key"]] = p.get("suspect_after") or ""

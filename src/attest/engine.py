@@ -1233,6 +1233,10 @@ class VisitEngine:
         ``log:`` pseudo visit_id: re-issuing an unchanged head returns the
         existing checkpoint."""
         leaves = self.log_leaves()
+        if not leaves:
+            # Every verifier surface requires tree_size >= 1 — a size-0
+            # checkpoint would be a signed artifact that can never verify.
+            raise ValueError("cannot checkpoint an empty log")
         from .transparency import consistency_nodes, root
 
         head = root(leaves)

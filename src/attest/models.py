@@ -27,6 +27,40 @@ def utcnow() -> datetime:
     return datetime.now(tz=UTC)
 
 
+import re  # noqa: E402
+
+# The instant spelling every verifier surface agrees on — dashed ISO 8601
+# date, optional [T ]HH:MM[:SS[.frac]] time, optional Z/±HH:?MM offset,
+# bounded field ranges. Broader parsers (fromisoformat compact/week forms,
+# Date.parse RFC-2822 spellings, pydantic epoch coercion) would let a
+# signed envelope pass on one surface and fail on another — one payload,
+# one verdict requires one grammar.
+ISO_INSTANT_RE = re.compile(
+    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}"
+    r"([T ]([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9]([.][0-9]+)?)?"
+    r"(Z|[+-]([01][0-9]|2[0-3]):?[0-5][0-9])?)?$"
+)
+
+
+def _iso_or_datetime(v) -> datetime:
+    if isinstance(v, datetime) or (isinstance(v, str) and ISO_INSTANT_RE.fullmatch(v)):
+        return v
+    raise ValueError("issued_at must be an ISO-8601 instant string or datetime")
+
+
+def _json_int(v) -> int:
+    """Mirror the verifiers' integer gate (json_is_int / Number.isInteger):
+    int non-bool or integral float. Pydantic's lax int would also accept
+    digit strings ("5") that the embedded and browser verifiers reject."""
+    if isinstance(v, bool):
+        raise ValueError("must be a JSON integer")
+    if isinstance(v, int):
+        return v
+    if isinstance(v, float) and v.is_integer():
+        return int(v)
+    raise ValueError("must be a JSON integer")
+
+
 class Role(StrEnum):
     HOME_HEALTH_AIDE = "home_health_aide"
     CLEANER = "cleaner"
@@ -276,13 +310,18 @@ class Receipt(BaseModel):
 
     id: str = Field(default_factory=lambda: _id("rcpt"))
     visit_id: str
-    sequence: int
+    # Strict-int gate before pydantic coercion — embedded/JS verifiers require
+    # a real JSON integer here, so "5"/True spellings must reject natively too.
+    sequence: Annotated[int, BeforeValidator(_json_int)]
     prev_hash: str | None
     payload: dict
     payload_hash: str
     signature: str  # base64 Ed25519 over payload_hash bytes
     public_key: str  # base64 raw Ed25519 public key
-    issued_at: datetime = Field(default_factory=utcnow)
+    # Gate BEFORE pydantic's datetime coercion — lax mode also accepts
+    # epoch numbers/digit-strings and ISO forms the other verifiers'
+    # grammars reject, so the accepted spelling must be pinned here.
+    issued_at: Annotated[datetime, BeforeValidator(_iso_or_datetime)] = Field(default_factory=utcnow)
 
 
 def _reason_known(v: str | None) -> str | None:
@@ -373,12 +412,14 @@ class FamilyGrant(BaseModel):
 class ReviewEntry(BaseModel):
     id: str
     visit_id: str
-    revision: int
+    revision: Annotated[int, BeforeValidator(_json_int)]
     receipt: Receipt
 
 
 class ReviewBundle(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["attest.review_bundle/1"] = "attest.review_bundle/1"
+    # Required (no default): the embedded and browser verifiers reject a
+    # bundle that omits kind, so the model cannot silently supply it.
+    kind: Literal["attest.review_bundle/1"]
     original: Receipt
     reviews: list[ReviewEntry] = Field(default_factory=list, max_length=500)

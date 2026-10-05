@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from . import transparency
 from .transparency import MAX_TREE_SIZE, json_is_int
 
 STATE_SCHEMA = "attest.log-monitor/1"
@@ -344,7 +345,18 @@ def live_check(
                 "tree size but starting from a different root — split-view log"
             )
         proof = fetch_consistency(pack_size, live_size)
-        if not isinstance(proof, dict) or not isinstance(proof.get("proof"), list):
+        # Same served-doc contract check() enforces: first/tree_size headers
+        # must be real JSON integers naming exactly the sizes requested —
+        # a proof body that bridges while the headers lie (or are absent)
+        # must not claim "extends".
+        if (
+            not isinstance(proof, dict)
+            or not isinstance(proof.get("proof"), list)
+            or not json_is_int(proof.get("first"))
+            or not json_is_int(proof.get("tree_size"))
+            or proof["first"] != pack_size
+            or proof["tree_size"] != live_size
+        ):
             return False, (
                 "live head cannot bridge from the pack's head — the deployment "
                 "cannot show the pack's log inside the one it serves now"
@@ -484,7 +496,7 @@ def witness_cosign(store, signer, body: dict) -> tuple[int, dict]:
         old_root = state.get("root_sha256")
         if old_size is not None:
             try:
-                from .transparency import coerce_int, hex_bytes
+                from .transparency import hex_bytes
 
                 if not json_is_int(old_size):
                     raise ValueError("size must be an int")
@@ -508,8 +520,11 @@ def witness_cosign(store, signer, body: dict) -> tuple[int, dict]:
                     try:
                         bridge = (
                             isinstance(cons, dict)
-                            and coerce_int(cons.get("first") or -1) == int(old_size)
-                            and coerce_int(cons.get("tree_size") or -1) == size
+                            and isinstance(cons.get("proof"), list)
+                            and json_is_int(cons.get("first"))
+                            and json_is_int(cons.get("tree_size"))
+                            and cons["first"] == int(old_size)
+                            and cons["tree_size"] == size
                             and verify_consistency(
                                 hex_bytes(old_root),
                                 int(old_size),
@@ -928,14 +943,23 @@ def compare_views(
                 # material: a fetch failure, malformed body, or a proof
                 # that doesn't verify can only leave the anchor's claim
                 # unproven — it cannot convict the witness of a lie the
-                # way a signed contradiction can.
+                # way a signed contradiction can. Header strictness mirrors
+                # check(): first/tree_size must be JSON integers answering
+                # exactly the bridge requested.
                 proof = fetch_wconsistency(f_sz, t_sz) if fetch_wconsistency else None
+                from .transparency import json_is_int
+
+                if not (
+                    isinstance(proof, dict)
+                    and isinstance(proof.get("proof"), list)
+                    and json_is_int(proof.get("first"))
+                    and json_is_int(proof.get("tree_size"))
+                    and proof["first"] == f_sz
+                    and proof["tree_size"] == t_sz
+                ):
+                    return False
                 try:
-                    nodes = (
-                        [hex_bytes(h, length=32) for h in (proof.get("proof") or [])]
-                        if isinstance(proof, dict)
-                        else []
-                    )
+                    nodes = [hex_bytes(h, length=32) for h in proof["proof"]]
                 except (TypeError, ValueError):
                     return False
                 return bool(nodes) and verify_consistency(f_root, f_sz, t_root, t_sz, nodes)
@@ -1212,7 +1236,7 @@ def state_load(path) -> dict | None:
     if not p.is_file():
         return None
     try:
-        doc = json.loads(p.read_text(encoding="utf-8"))
+        doc = transparency.json_loads(p.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, ValueError, RecursionError) as exc:
         return {"schema": f"unreadable state: {exc}"}
     return doc if isinstance(doc, dict) else {"schema": "state is not an object"}
@@ -1264,7 +1288,7 @@ def fetch_json(url: str, client=None, *, bound: int = 4 * 1024 * 1024) -> Any:
     except httpx.InvalidURL as exc:
         raise ValueError(f"{url} malformed: {exc}") from exc
     try:
-        return json.loads(raw.decode("utf-8"))
+        return transparency.json_loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, ValueError, RecursionError) as exc:
         raise ValueError(f"{url} did not serve JSON: {exc}") from exc
 
@@ -1299,7 +1323,7 @@ def post_json(url: str, body: dict, client=None, *, bound: int = 4 * 1024 * 1024
     except httpx.InvalidURL as exc:
         raise ValueError(f"{url} malformed: {exc}") from exc
     try:
-        doc = json.loads(bytes(raw).decode("utf-8"))
+        doc = transparency.json_loads(bytes(raw).decode("utf-8"))
     except (UnicodeDecodeError, ValueError, RecursionError) as exc:
         raise ValueError(f"{url} did not serve JSON: {exc}") from exc
     if not isinstance(doc, dict):

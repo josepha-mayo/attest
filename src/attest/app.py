@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
 import logging
 import secrets
 import sqlite3
@@ -25,7 +24,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 from ring_sandbox import RingAPIError, RingClient, webhooks
 
-from . import ledger, retention, taxonomy
+from . import ledger, retention, taxonomy, transparency
 from .config import Settings
 from .config import settings as default_settings
 from .corroborate import corroboration
@@ -1043,7 +1042,12 @@ def create_app(
             # served, and double-speak would fork our own published log too.
             from .models import Receipt
 
-            cp = await asyncio.to_thread(engine.issue_log_checkpoint)
+            try:
+                cp = await asyncio.to_thread(engine.issue_log_checkpoint)
+            except ValueError:
+                # An empty log can't carry a verifiable head — the cosig
+                # still returns, just without its self-anchor.
+                cp = None
             if cp is not None:
                 proof = await asyncio.to_thread(
                     engine.inclusion_proof,
@@ -1390,13 +1394,13 @@ def create_app(
         if r is None:
             raise HTTPException(404)
         return JSONResponse(
-            json.loads(r.model_dump_json()),
+            transparency.json_loads(r.model_dump_json()),
             headers={"Content-Disposition": f'attachment; filename="{receipt_id}.json"'},
         )
 
     @app.get("/receipts.json")
     async def receipts_export():
-        return JSONResponse([json.loads(r.model_dump_json()) for r in store.receipts()])
+        return JSONResponse([transparency.json_loads(r.model_dump_json()) for r in store.receipts()])
 
     @app.get("/about", response_class=HTMLResponse)
     async def about_page(request: Request):
@@ -1439,7 +1443,7 @@ def create_app(
                 raise HTTPException(413, "verification input too large")
             raw = text
         try:
-            data = json.loads(raw)
+            data = transparency.json_loads(raw)
             pk = signer.public_key_b64
             if isinstance(data, list):
                 ok, why = ledger.verify_chain(
@@ -2248,20 +2252,23 @@ def _verify_pack(data: bytes, public_key: str, known_rotations: list | None = No
         names = set(z.namelist())
         if "manifest.json" in names:
             return _verify_case_pack(z, public_key, known_rotations=known_rotations)
-        bundle = ReviewBundle.model_validate(json.loads(z.read("bundle.json")))
+        bundle = ReviewBundle.model_validate(transparency.json_loads(z.read("bundle.json")))
         # Reviews appended after a key rotation verify under the successor —
         # legitimate only through the signed links in key_rotations.json.
         rotation_receipts = list(known_rotations or [])
         pack_rotations = []
         if "key_rotations.json" in names:
-            rj = json.loads(z.read("key_rotations.json"))
+            rj = transparency.json_loads(z.read("key_rotations.json"))
             rotations = rj.get("rotations") if isinstance(rj, dict) else None
             if not isinstance(rotations, list):
                 return False, "key_rotations.json: malformed"
-            try:
-                pack_rotations = [Receipt.model_validate(r) for r in rotations]
-            except Exception as exc:  # noqa: BLE001
-                return False, f"key_rotations.json: malformed ({exc})"
+            # Unsigned pool content: malformed members are inert-skipped —
+            # only signed, adoption-consented pivots can extend trust.
+            for r in rotations:
+                try:
+                    pack_rotations.append(Receipt.model_validate(r))
+                except Exception:  # noqa: BLE001
+                    continue
             rotation_receipts += pack_rotations
         trusted: str | set = public_key
         if rotation_receipts:
@@ -2322,7 +2329,7 @@ def _verify_pack(data: bytes, public_key: str, known_rotations: list | None = No
                     member_ids.append((r["id"], r["payload_hash"], r.get("public_key")))
         if "verifier_manifest.json" in names:
             try:
-                vm = json.loads(z.read("verifier_manifest.json"))
+                vm = transparency.json_loads(z.read("verifier_manifest.json"))
                 if vm.get("id") and vm.get("payload_hash"):
                     member_ids.append((vm["id"], vm["payload_hash"], vm.get("public_key")))
             except Exception:  # noqa: BLE001 — malformed already failed above
@@ -2355,7 +2362,7 @@ def _check_pack_bundle(
     withheld: set[str] = set()
     marker_name = media_prefix.rsplit("media/", 1)[0] + "redaction.json"
     if marker_name in z.namelist():
-        marker = json.loads(z.read(marker_name))
+        marker = transparency.json_loads(z.read(marker_name))
         withheld = set(marker.get("withheld_digests", []))
         if not withheld <= digests:
             return False, "bundle: redaction.json lists digests not in the signed evidence"
@@ -2422,9 +2429,17 @@ def _verify_log_pin(z, trusted: set, member_ids: list[tuple[str, str, str]]) -> 
 
 def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -> tuple[bool, str]:
     """Verify every visit bundle in a case pack plus the manifest's hash list."""
-    manifest = json.loads(z.read("manifest.json"))
+    manifest = transparency.json_loads(z.read("manifest.json"))
     if manifest.get("schema") != "attest.case-pack/1":
         return False, f"unsupported case pack schema {manifest.get('schema')!r}"
+    # Shape gates — same strictness as verify_case.py: `visits` must be a
+    # list (an absent one verifies nothing, so it is malformed), and
+    # `attestations` may be absent but never a non-list (a dict would
+    # silently iterate keys).
+    if not isinstance(manifest.get("visits"), list):
+        return False, "manifest: visits is missing or not a list"
+    if not isinstance(manifest.get("attestations", []), list):
+        return False, "manifest: attestations is not a list"
     issuer = manifest.get("issuer_key")
     # Trust = the manifest issuer plus every ancestor reachable through signed
     # key_rotation receipts — a pack exported after rotation legitimately
@@ -2433,9 +2448,13 @@ def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -
     # before a rotation still verifies under the current pinned key.
     rotations = []
     for a in manifest.get("attestations", []):
-        rid = a.get("receipt_id")
+        rid = a.get("receipt_id") if isinstance(a, dict) else None
+        # verify_case.py parity: a receipt_id that can't name a member is
+        # malformed — inert-skip it here; the attestation loop fails on it.
+        if not isinstance(rid, str) or not rid or "/" in rid or "\\" in rid or ".." in rid:
+            continue
         try:
-            att = Receipt.model_validate(json.loads(z.read(f"attestations/{rid}.json")))
+            att = Receipt.model_validate(transparency.json_loads(z.read(f"attestations/{rid}.json")))
         except Exception:  # noqa: BLE001 — unreadable members fail in the loop below
             continue
         if att.payload.get("record_type") in ("key_rotation", "key_adoption", "key_revocation"):
@@ -2462,10 +2481,18 @@ def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -
     suspect_total = 0
     lines = []
     member_ids = []  # receipts the transparency checkpoint must prove
+    seen_vids: set = set()
     for v in manifest.get("visits", []):
-        vid = v.get("visit_id", "?")
+        vid = v.get("visit_id") if isinstance(v, dict) else None
+        # verify_case.py parity: the manifest names member paths — a
+        # visit_id that isn't a safe single segment cannot name a file.
+        if not isinstance(vid, str) or not vid or "/" in vid or "\\" in vid or ".." in vid:
+            return False, f"manifest: malformed visit_id {vid!r}"
+        if vid in seen_vids:
+            return False, f"manifest: visit_id {vid} listed twice"
+        seen_vids.add(vid)
         try:
-            bundle = ReviewBundle.model_validate(json.loads(z.read(f"visits/{vid}/bundle.json")))
+            bundle = ReviewBundle.model_validate(transparency.json_loads(z.read(f"visits/{vid}/bundle.json")))
         except Exception as exc:  # noqa: BLE001
             return False, f"{vid}: missing or invalid bundle ({exc})"
         member_ids.append((bundle.original.id, bundle.original.payload_hash, bundle.original.public_key))
@@ -2479,7 +2506,7 @@ def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -
             return False, f"{vid}: manifest hash disagrees with signed original"
         marker_name = f"visits/{vid}/redaction.json"
         if marker_name in z.namelist():
-            marker = json.loads(z.read(marker_name))
+            marker = transparency.json_loads(z.read(marker_name))
             if set(v.get("media_withheld", [])) != set(marker.get("withheld_digests", [])):
                 return False, f"{vid}: manifest redaction list disagrees with redaction.json"
         media_detail = detail.split("; ", 1)[-1] if "; " in detail else detail
@@ -2503,13 +2530,24 @@ def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -
             for v in manifest.get("visits", [])
             if isinstance(v, dict) and "visit_id" in v and "payload_hash" in v
         }
-        if listed != signed_hashes:
+        # Homogeneous types before comparing (JSON receipt_hashes is str->str):
+        # a non-str listed key stringifies on the JS surface, and Python's
+        # True==1 dict equality bridges where the browser's === never can.
+        if (
+            not isinstance(signed_hashes, dict)
+            or any(not isinstance(k, str) or not isinstance(h, str) for k, h in signed_hashes.items())
+            or any(not isinstance(k, str) or not isinstance(h, str) for k, h in listed.items())
+            or listed != signed_hashes
+        ):
             return False, "manifest visit list disagrees with the signed export"
         manifest_note = f"export signed: {total} record(s)"
     for a in manifest.get("attestations", []):
-        rid = a.get("receipt_id", "?")
+        rid = a.get("receipt_id") if isinstance(a, dict) else None
+        # Same guard as the embedded verifier: receipt_id is a member name.
+        if not isinstance(rid, str) or not rid or "/" in rid or "\\" in rid or ".." in rid:
+            return False, f"attestation: malformed receipt_id {rid!r}"
         try:
-            att = Receipt.model_validate(json.loads(z.read(f"attestations/{rid}.json")))
+            att = Receipt.model_validate(transparency.json_loads(z.read(f"attestations/{rid}.json")))
         except Exception as exc:  # noqa: BLE001
             return False, f"attestation {rid}: missing or invalid ({exc})"
         if att.public_key not in trusted:
@@ -2517,6 +2555,8 @@ def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -
         ok, why = ledger.verify_receipt(att, public_key=att.public_key)
         if not ok:
             return False, f"attestation {rid}: {why}"
+        if att.id != rid:
+            return False, f"attestation {rid}: filename disagrees with the signed receipt id"
         if att.visit_id != a.get("visit_id") or att.payload_hash != a.get("payload_hash"):
             return False, f"attestation {rid}: does not match the manifest's signed entry"
         member_ids.append((att.id, att.payload_hash, att.public_key))
@@ -2553,7 +2593,7 @@ def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -
         member_ids.append((sig.get("id"), sig.get("payload_hash"), sig.get("public_key")))
     if "verifier_manifest.json" in z.namelist():
         try:
-            vm = json.loads(z.read("verifier_manifest.json"))
+            vm = transparency.json_loads(z.read("verifier_manifest.json"))
             if vm.get("id") and vm.get("payload_hash"):
                 member_ids.append((vm["id"], vm["payload_hash"], vm.get("public_key")))
         except Exception:  # noqa: BLE001 — malformed already failed above

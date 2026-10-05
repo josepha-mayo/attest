@@ -67,7 +67,7 @@ pack carries about itself.</small></p>
 function parseKeep(text){
   let i=0;const n=text.length;
   const ws=()=>{while(i<n&&" \t\n\r".includes(text[i]))i++;};
-  function literal(){const m=/^-?\d+(\.\d+)?([eE][+-]?\d+)?/.exec(text.slice(i));
+  function literal(){const m=/^-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?/.exec(text.slice(i));
     if(m){i+=m[0].length;return{t:"lit",r:m[0]};}
     if(text.startsWith("true",i)){i+=4;return{t:"lit",r:"true"};}
     if(text.startsWith("false",i)){i+=5;return{t:"lit",r:"false"};}
@@ -101,13 +101,43 @@ function toJS(n){
   if(!n)return null;
   if(n.t==="lit")return n.str!==undefined?n.str:JSON.parse(n.r);
   if(n.t==="arr")return n.v.map(toJS);
-  const o={};for(const[k,v]of n.v)o[k]=toJS(v);return o;}
+  /* null-prototype map: a literal "__proto__" key must become an OWN
+     property — assigning through a plain {}'s prototype setter silently
+     drops it where Python's dict keeps it (one doc, two member sets). */
+  const o=Object.create(null);for(const[k,v]of n.v)o[k]=toJS(v);return o;}
+/* CPython repr()/json.dumps float spelling — shortest round-trip digits:
+   integral floats carry ".0"; fixed notation for -4 <= exp10 < 16;
+   scientific with a signed >=2-digit exponent beyond it. */
+function _pyFloat(x){
+  if(Number.isNaN(x))return"NaN";
+  if(!isFinite(x))return x<0?"-Infinity":"Infinity";
+  if(x===0)return Object.is(x,-0)?"-0.0":"0.0";
+  const neg=x<0?"-":"";
+  const s=Math.abs(x).toExponential();
+  const ix=s.indexOf("e");
+  const digits=s.slice(0,ix).replace(".","");
+  const e=+s.slice(ix+1);
+  if(e>=-4&&e<16){
+    if(e>=digits.length-1)
+      return neg+digits+"0".repeat(e-digits.length+1)+".0";
+    if(e<0)return neg+"0."+"0".repeat(-e-1)+digits;
+    return neg+digits.slice(0,e+1)+"."+digits.slice(e+1);}
+  return neg+digits[0]+(digits.length>1?"."+digits.slice(1):"")
+    +"e"+(e<0?"-":"+")+String(Math.abs(e)).padStart(2,"0");}
+/* A literal's canonical spelling — Python json.dumps semantics: ints stay
+   exact via BigInt (past double precision), floats get CPython repr,
+   bool/null keep the file spelling. */
+function _pyLit(r){
+  if(/^-?[0-9]+$/.test(r))return BigInt(r).toString();
+  if(/^(true|false|null)$/.test(r))return r;
+  return _pyFloat(Number(r));}
 function canonical(n){
   /* Strings re-serialize through JSON.stringify — the decoded value's canonical
      spelling — so `—` and `—` in a file canonicalize identically, matching
-     Python's ensure_ascii=False. Non-string literals keep the file's verbatim
-     spelling (float spellings like 34.0 must survive). */
-  if(n.t==="lit")return n.str!==undefined?JSON.stringify(n.str):n.r;
+     Python's ensure_ascii=False. Number literals re-normalize through the
+     CPython float/int repr — the file's verbatim spelling ("34.00") must
+     canonicalize to what Python emits ("34.0") for the hash to agree. */
+  if(n.t==="lit")return n.str!==undefined?JSON.stringify(n.str):_pyLit(n.r);
   if(n.t==="arr")return "["+n.v.map(canonical).join(",")+"]";
   /* Duplicate keys: last wins — same as toJS/JSON.parse — and keys sort by
      codepoint (Python order), not UTF-16 units: astral chars would differ. */
@@ -168,21 +198,98 @@ async function edVerify(sig,pk,msg){
   const lhs=pMul(B,S),rhs=pAdd(R,pMul(A,h));
   return lhs.x===rhs.x&&lhs.y===rhs.y;}
 /* ---------- receipt + chain checks (mirrors ledger.verify_*) ---------- */
+/* Python ``==`` between a validated int and a raw JSON literal: bools
+   coerce (True==1), numbers compare at exact mathematical value, strings/
+   null/objects never equal a number. ``n`` is a keep-node (the verbatim
+   literal — a Number unwrap would round past 2^53), ``b`` a BigInt. */
+function _pyEqN(n,b){
+  if(!n||n.t!=="lit"||n.str!==undefined)return false;
+  if(n.r==="true")return b===1n;
+  if(n.r==="false")return b===0n;
+  if(n.r==="null")return false;
+  if(/^-?(0|[1-9][0-9]*)$/.test(n.r))return BigInt(n.r)===b;
+  const f=Number(n.r);
+  return isFinite(f)&&Number.isInteger(f)&&BigInt(f)===b;}
+/* Model-side int gate — mirrors models._json_int / json_is_int /
+   Number.isInteger: a REAL JSON integer, or an integral float literal.
+   Strings ("5") and booleans reject on every surface now that the pydantic
+   model is strict — the node must be a number literal. Returns BigInt so
+   arbitrary-precision literals compare exactly, like Python ints. */
+function _pyModelInt(n){
+  if(!n||n.t!=="lit"||n.str!==undefined)return null;
+  if(/^-?(0|[1-9][0-9]*)$/.test(n.r))return BigInt(n.r);
+  if(n.r==="true"||n.r==="false"||n.r==="null")return null;
+  const f=Number(n.r);  /* float literal — Python float.is_integer() semantics */
+  return isFinite(f)&&Number.isInteger(f)?BigInt(f):null;}
+/* The instant spelling every verifier surface agrees on — shared with
+   models.ISO_INSTANT_RE / disputepack._iso_instant. */
+const _ISO_INSTANT=new RegExp(
+  "^([0-9]{4})-([0-9]{2})-([0-9]{2})([T ]([01][0-9]|2[0-3]):[0-5][0-9]"+
+  "(:[0-5][0-9]([.][0-9]+)?)?(Z|[+-]([01][0-9]|2[0-3]):?[0-5][0-9])?)?$");
+function _pyInstant(v){
+  /* Instant parse under the shared ISO grammar, computed from the captures —
+     Date.parse is TZ- and engine-dependent ("2026-01-01"→UTC, "T00:00"→local,
+     space-separator/+HHMM spellings vary by engine), and Date.UTC maps years
+     0-99 to 1900+y. Returns [key, aware] — keys carry µs so .123456 vs .1235
+     compare exactly; awareness mirrors Python's naive-never-equals-aware. */
+  if(typeof v!=="string")return null;
+  const m=_ISO_INSTANT.exec(v);if(!m)return null;
+  const y=+m[1],mo=+m[2],dd=+m[3];
+  if(y===0)return null;
+  let hh=0,mi=0,ss=0,us=0,aware=false,offM=0;
+  if(m[4]!==undefined){
+    hh=+m[4].slice(1,3);mi=+m[4].slice(4,6);
+    if(m[6]!==undefined)ss=+m[6].slice(1,3);
+    if(m[7]!==undefined)us=+(m[7].slice(1)+"000000").slice(0,6);
+    if(m[8]!==undefined){aware=true;
+      if(m[8]!=="Z"){const sgn=m[8][0]==="-"?-1:1;
+        offM=sgn*(+m[9]*60+(+m[8].slice(-2)));}}
+  }
+  const d=new Date(Date.UTC(0,mo-1,dd,hh,mi,ss));
+  d.setUTCFullYear(y);
+  if(d.getUTCFullYear()!==y||d.getUTCMonth()!==mo-1||d.getUTCDate()!==dd||
+     d.getUTCHours()!==hh||d.getUTCMinutes()!==mi||d.getUTCSeconds()!==ss)
+    return null;
+  const sec=d.getTime()/1000;
+  return[(aware?sec-offM*60:sec)+"|"+us,aware];}
 async function checkReceipt(rNode){
   const r=toJS(rNode);
   if(!r||typeof r!=="object")return{ok:false,why:"malformed receipt"};
-  const canon=canonical(get(rNode,"payload"));
+  const pn=get(rNode,"payload");
+  /* Mirrors Receipt.model_validate typing on the consumed fields — a pool
+     member missing or mistyping them is malformed (Python drops it at
+     model validation), never a throw and never a lenient pass. */
+  if(!pn||pn.t!=="obj"||typeof r.id!=="string"||typeof r.visit_id!=="string"||
+     typeof r.public_key!=="string"||typeof r.payload_hash!=="string"||
+     typeof r.signature!=="string"||
+     !(typeof r.prev_hash==="string"||r.prev_hash===null))
+    return{ok:false,why:"malformed receipt"};
+  /* issued_at is model-gated at intake on the Python surfaces: absent →
+     default_factory; present must be an ISO-grammar instant (pydantic's
+     BeforeValidator rejects null and everything else). Applies on every
+     schema — /1 receipts never reach the instant compare below. */
+  if(r.issued_at!==undefined&&_pyInstant(r.issued_at)===null)
+    return{ok:false,why:"malformed receipt"};
+  const rs=_pyModelInt(get(rNode,"sequence"));
+  if(rs===null)return{ok:false,why:"malformed receipt"};
+  const canon=canonical(pn);
   const h=await sha256hex(enc(canon));
   if(h!==r.payload_hash)return{ok:false,why:"payload hash mismatch (payload was altered)"};
   const p=r.payload;
-  if(p.sequence!==r.sequence||p.prev_hash!==r.prev_hash)
+  /* payload.get("prev_hash") — an absent key reads null on the Python side,
+     so absent and explicit null both compare equal to an envelope null. */
+  if(!_pyEqN(get(pn,"sequence"),rs)||(p.prev_hash===undefined?null:p.prev_hash)!==r.prev_hash)
     return{ok:false,why:"envelope fields disagree with signed payload"};
   if(p.visit_id!==r.visit_id)return{ok:false,why:"visit id disagrees with signed payload"};
   if(p.schema==="attest.receipt/2"){
     /* issued_at serializes as "...Z" in the envelope but "+00:00" in the
-       signed payload — compare parsed instants, mirroring the embedded
-       Python verifier (ledger uses exact strings on in-model objects). */
-    const sameInstant=Date.parse(p.issued_at||"")===Date.parse(r.issued_at||"");
+       signed payload — compare parsed instants under the shared grammar
+       (models.ISO_INSTANT_RE / _iso_instant). Date.parse accepts RFC-2822
+       spellings ("Mar 1, 2026") Python rejects, and rolls invalid dates —
+       the regex gate + rollover check pin both sides to one grammar.
+       Awareness must match: Python never equates naive with aware. */
+    const i1=_pyInstant(p.issued_at),i2=_pyInstant(r.issued_at);
+    const sameInstant=i1!==null&&i2!==null&&i1[0]===i2[0]&&i1[1]===i2[1];
     if(p.receipt_id!==r.id||!sameInstant)
       return{ok:false,why:"receipt envelope identity disagrees with signed payload"};
   }else if(p.schema!=="attest.receipt/1")return{ok:false,why:"unsupported receipt schema"};
@@ -217,12 +324,24 @@ async function checkBundle(root,key){
   if(!c0.ok)return{ok:false,why:"original: "+c0.why};
   let prev=original.payload_hash,n=0;
   const rev=get(root,"reviews");
-  const entries=rev&&rev.t==="arr"?rev.v:[];
+  if(rev&&rev.t!=="arr")
+    return{ok:false,why:"reviews is not a list"};
+  const entries=rev?rev.v:[];
+  /* ReviewBundle caps at max_length=500 — enforce the same ceiling so a
+     chain Python rejects can't verify here (and a hostile chain can't
+     hang the tab on thousands of BigInt verifies). */
+  if(entries.length>500)
+    return{ok:false,why:"review chain exceeds the 500-entry cap"};
   for(let i=0;i<entries.length;i++){
     n=i+1;
     const e=toJS(entries[i]);
     const rNode=get(entries[i],"receipt");
     if(!rNode)return{ok:false,why:`review ${n}: entry has no receipt`};
+    /* Entry typing mirrors ReviewEntry.model_validate — malformed members
+       fail the bundle, never slip through a lenient raw compare. */
+    if(!e||typeof e!=="object"||typeof e.id!=="string"||
+       typeof e.visit_id!=="string"||_pyModelInt(get(entries[i],"revision"))===null)
+      return{ok:false,why:`review ${n}: malformed entry`};
     const r=toJS(rNode)||{};
     if(outOf(r.public_key))
       return{ok:false,why:`review ${n}: signed by a key outside the trusted issuer chain`};
@@ -230,10 +349,15 @@ async function checkBundle(root,key){
     if(!c.ok)return{ok:false,why:`review ${n}: ${c.why}`};
     if(e.id!==r.id||e.visit_id!==original.visit_id||r.visit_id!==original.visit_id)
       return{ok:false,why:`review ${n}: identity does not match original`};
-    if(e.revision!==n||r.sequence!==n||r.prev_hash!==prev)
+    if(_pyModelInt(get(entries[i],"revision"))!==BigInt(n)||
+       _pyModelInt(get(rNode,"sequence"))!==BigInt(n)||r.prev_hash!==prev)
       return{ok:false,why:`review ${n}: sequence or previous hash mismatch`};
-    const p=r.payload||{},a=p.original_receipt||{};
-    if(p.record_type!=="review"||a.id!==original.id||a.hash!==original.payload_hash)
+    const p=r.payload||{},a=p.original_receipt;
+    /* reviews.py compares the anchor by exact dict equality — an anchor with
+       extra keys is content the signer committed that must not verify. */
+    const aOk=a!==null&&typeof a==="object"&&!Array.isArray(a)&&
+      Object.keys(a).length===2&&a.id===original.id&&a.hash===original.payload_hash;
+    if(p.record_type!=="review"||!aOk)
       return{ok:false,why:`review ${n}: not anchored to this original`};
     prev=r.payload_hash;}
   return{ok:true,why:`original and ${n} review(s) verified (integrity only)`};}
@@ -340,9 +464,21 @@ async function checkManifestNode(mNode,key){
   const h=await sha256hex(enc(canonical(dropKey(mNode,"signature_receipt"))));
   if(h!==p.manifest_sha256)
     return{ok:false,why:"manifest content hash mismatch (manifest was altered)"};
-  const signed=p.receipt_hashes||{};
-  const listed={};for(const v of m.visits||[])listed[v.visit_id]=v.payload_hash;
-  const same=Object.keys(listed).length===Object.keys(signed).length
+  /* Homogeneous str->str maps on both sides — Python dict equality bridges
+     True==1 and keeps int keys distinct from "5"; JS object keys stringify,
+     so type-gate first, then compare per-key. null/non-object signed maps
+     reject (Python: listed != None always mismatches). */
+  const signed=p.receipt_hashes===undefined?{}:p.receipt_hashes;
+  const isObj=x=>x!==null&&typeof x==="object"&&!Array.isArray(x);
+  let same=isObj(signed)&&Object.keys(signed).every(k=>typeof signed[k]==="string");
+  const listed=Object.create(null);
+  if(same)for(const v of m.visits||[]){
+    if(v&&typeof v==="object"&&"visit_id"in v&&"payload_hash"in v){
+      if(typeof v.visit_id!=="string"||typeof v.payload_hash!=="string"){same=false;break;}
+      listed[v.visit_id]=v.payload_hash;
+    }  /* entries missing either key are dropped — the Python filter does too */
+  }
+  if(same)same=Object.keys(listed).length===Object.keys(signed).length
     &&Object.keys(listed).every(k=>listed[k]===signed[k]);
   if(!same)return{ok:false,why:"manifest visit list disagrees with the signed export"};
   return{ok:true,why:`export signed: ${Object.keys(listed).length} record(s)`};}
@@ -456,7 +592,8 @@ async function revokedKeys(keyNodes,issuerKey){
     seen.add(r.public_key);
     if(p.record_type==="key_rotation"&&p.previous_key===inEffect&&p.new_key
        &&await adoptedBy(ord,rn,p.new_key)){inEffect=p.new_key;seen.add(inEffect);continue;}
-    if(p.record_type==="key_revocation"&&seen.has(p.revoked_key)&&r.public_key===inEffect){
+    if(p.record_type==="key_revocation"&&typeof p.revoked_key==="string"
+       &&seen.has(p.revoked_key)&&r.public_key===inEffect){
       out[p.revoked_key]=p.suspect_after||"";
     }
   }
@@ -489,7 +626,7 @@ function deriveStance(js){
      field can only exist in a forged pack (checkBundle now rejects it). */
   const ST={confirm:"acknowledged",dispute:"contested",correction:"corrected",inconclusive:"inconclusive"};
   let lastWorker=null,lastRes=null;
-  for(const e of js.reviews||[]){
+  for(const e of Array.isArray(js.reviews)?js.reviews:[]){
     const p=((e||{}).receipt||{}).payload||{};
     if((p.actor||{}).role==="worker")lastWorker=e;
     if((p.review||{}).kind==="resolution")lastRes=e;
@@ -553,6 +690,9 @@ async function _incOk(leafHex,size,index,pathHex,rootHex){
     ||size<1||size>2147483647)return false;
   if(typeof leafHex!=="string"||!/^[0-9a-f]{64}$/i.test(leafHex)
     ||typeof rootHex!=="string"||!/^[0-9a-f]{64}$/i.test(rootHex))return false;
+  /* path must be a JSON array — an object would crash for-of where Python
+     iterates keys; both must read as "not a valid proof", not a pass. */
+  if(pathHex!==undefined&&pathHex!==null&&!Array.isArray(pathHex))return false;
   rootHex=rootHex.toLowerCase();  /* Python compares decoded bytes — case-insensitive */
   const cat=(...a)=>{const n=a.reduce((t,x)=>t+x.length,0);const o=new Uint8Array(n);let p=0;
     for(const x of a){o.set(x,p);p+=x.length;}return o;};
@@ -579,6 +719,9 @@ async function _conOk(oldRootHex,oldSize,newRootHex,newSize,pathHex){
   oldRootHex=oldRootHex.toLowerCase();newRootHex=newRootHex.toLowerCase();
   if(!Number.isInteger(oldSize)||!Number.isInteger(newSize)
     ||oldSize>2147483647||newSize>2147483647)return false;
+  /* non-array proof: {} reads "empty" under !{}.length — a dict literal would
+     verify here while Python iterates keys and rejects; gate the shape. */
+  if(pathHex!==undefined&&pathHex!==null&&!Array.isArray(pathHex))return false;
   if(oldSize===newSize)return(!pathHex||!pathHex.length)&&oldRootHex===newRootHex;
   if(oldSize<1||oldSize>=newSize||!pathHex||!pathHex.length)return false;
   const cat=(...a)=>{const n=a.reduce((t,x)=>t+x.length,0);const o=new Uint8Array(n);let p=0;
@@ -603,10 +746,18 @@ async function _conOk(oldRootHex,oldSize,newRootHex,newSize,pathHex){
    CAN interpret — a signed `first:"5"` still gets judged (and a bad proof
    convicts), never silently dropped to the fallback path the way a
    type-strict read would. Only truly unparseable material is absent. */
+const _CIWS=new RegExp(
+  "^[ \t\n\r\x0b\f\xa0\u1680-\u200a\u2028\u2029\u202f\u205f\u3000]*"+
+  "[+-]?[0-9]+"+
+  "[ \t\n\r\x0b\f\xa0\u1680-\u200a\u2028\u2029\u202f\u205f\u3000]*$");
 function _pyInt(v){
   if(typeof v==="boolean")return v?1:0;
   if(typeof v==="number"&&Number.isInteger(v))return v;
-  if(typeof v==="string"&&/^\s*[+-]?\d+\s*$/.test(v))return parseInt(v,10);
+  /* Whitespace = the JS-ws ∩ int()-strippable intersection (same class as
+     transparency._COERCIBLE_INT): JS's whitespace class adds the BOM char
+     int() won't strip, Python's adds \x1c-\x1f/\x85 JS won't match —
+     spelling it out pins both sides identical. */
+  if(typeof v==="string"&&_CIWS.test(v))return parseInt(v,10);
   if(typeof v==="number"&&isFinite(v))return Math.trunc(v);
   return null;
 }
@@ -675,7 +826,9 @@ function isLoopHost(h){
 async function fetchCap(url){
   const big=()=>{const e=new Error("response exceeds the 4 MB bound");
     e.oversize=true;return e;};
-  const r=await fetch(url);
+  /* Same deadline as the Python fetches (timeout=15): a stalled endpoint
+     must not hang the cross-check forever where the CLI reports it. */
+  const r=await fetch(url,{signal:AbortSignal.timeout?AbortSignal.timeout(15000):undefined});
   if(!r.ok)throw new Error(url.split("/").pop()+" HTTP "+r.status);
   if(!r.body||!r.body.getReader){const t=await r.text();
     if(t.length>4194304)throw big();
@@ -716,7 +869,10 @@ async function liveCheck(base,say){
   const d=toJS(docDn)||{};
   if(d.schema!=="attest.issuer/1"||typeof d.issuer_key!=="string"){
     say("bad","live issuer document is not attest.issuer/1");return;}
-  const kn=get(docDn,"key_receipts"),inodes=kn&&kn.t==="arr"?kn.v:[];
+  const kn=get(docDn,"key_receipts");
+  if(kn&&kn.t!=="arr"){
+    say("bad","live issuer document key_receipts is not a list");return;}
+  const inodes=kn?kn.v:[];
   /* Same bound the CLI puts on the served document — the lineage walk is
      one signature verification per candidate per hop, so a hostile
      deployment can't serve a CPU amplifier as its identity document. */
@@ -757,6 +913,14 @@ async function liveCheck(base,say){
       say("bad","live head cannot bridge from the pack's head — the deployment cannot "
         +"show the pack's log inside the one it serves now");return;
     }
+    /* Header strictness parity with logmonitor.check(): the response's
+       first/tree_size must be JSON integers equal to the sizes requested —
+       a proof answering a different question cannot stand in for this one. */
+    if(!Number.isInteger(proof.first)||!Number.isInteger(proof.tree_size)
+      ||proof.first!==ps||proof.tree_size!==ls){
+      say("bad","served consistency proof is for different tree sizes than the "
+        +"bridge requested — it cannot stand in for the pack's ancestry");return;
+    }
     if(await _conOk(pr,ps,lr,ls,proof.proof))
       say("ok",`live log provably extends the pack's head (${ps} → ${ls} leaves) — `
         +"the pack's log is the one still served");
@@ -788,8 +952,14 @@ async function checkLog(byName,trustedSet,refs,bad,ok){
   const rc=await checkReceipt(cpNode);
   if(!rc.ok){bad(`log_checkpoint.json: ${esc(rc.why)}`);return;}
   const size=p.tree_size,rootHex=p.root_sha256;
-  if(!Number.isInteger(size)||size<1||typeof rootHex!=="string"||!/^[0-9a-f]{64}$/i.test(rootHex)){
+  if(!Number.isInteger(size)||size<1||size>2147483647
+    ||typeof rootHex!=="string"||!/^[0-9a-f]{64}$/i.test(rootHex)){
     bad("log_checkpoint.json: malformed tree head");return;}
+  /* The checkpoint's own signed continuity claim — a head whose embedded
+     bridge fails verification is attesting a history it cannot prove; the
+     standalone checkpoint path convicts the same way (verify_extends). */
+  if((await _extOk(p))===false){
+    bad("log_checkpoint.json: extends bridge attests a history it cannot prove");return;}
   /* Validated signed head — the live cross-check compares it against the
      head the deployment serves now. */
   packStash={node:cpNode,size,root:rootHex};
@@ -813,7 +983,8 @@ async function checkLog(byName,trustedSet,refs,bad,ok){
   /* Embedded evidence receipts (`attest checkpoint --include monitor:`):
      each must verify under the issuer lineage AND carry a proof reaching
      the signed head — CLI _verify_log_doc parity, every failure fatal. */
-  if(doc.receipts!==undefined){
+  /* receipts:null reads as absent on the Python surfaces (is-not-None gate). */
+  if(doc.receipts!==undefined&&doc.receipts!==null){
     if(!Array.isArray(doc.receipts)||doc.receipts.length>2048){
       bad("log_checkpoint.json: 'receipts' must be a list of at most 2048");return;}
     const rsec=get(dn,"receipts"),rNodes=rsec&&rsec.t==="arr"?rsec.v:[];
@@ -878,7 +1049,8 @@ async function checkLog(byName,trustedSet,refs,bad,ok){
     &&!Array.isArray(doc.cosig_anchors))?doc.cosig_anchors:{};
   for(const cid of Object.keys(anchorsObj)){
     const anchor=anchorsObj[cid];
-    const cosig=(doc.cosignatures||[]).find(c=>c&&c.id===cid);
+    const cosig=(Array.isArray(doc.cosignatures)?doc.cosignatures:[])
+      .find(c=>c&&c.id===cid);
     if(!cosig){
       bad(`log_checkpoint.json: cosig_anchors ${esc(cid)} anchors a cosignature `
         +"the doc doesn't carry");continue;}
@@ -904,7 +1076,9 @@ async function checkLog(byName,trustedSet,refs,bad,ok){
     +`${anchored?` (${anchored} anchored in the witness's own published log)`:""}`);
 }
 async function verifyFiles(files){
-  const byName={};for(const f of files)byName[f.name]=f;
+  /* null-prototype map — a zip member literally named "__proto__" must land
+     as an own key or the smuggle-member sweep (and Python's dict) see it. */
+  const byName=Object.create(null);for(const f of files)byName[f.name]=f;
   const out=[];const say=(c,m)=>out.push(`<div class="row ${c}">${m}</div>`);
   const text=async n=>byName[n]?await byName[n].text():null;
   const bundles=[];let mNode=null,manifest=null;
@@ -967,6 +1141,9 @@ async function verifyFiles(files){
   }
   let trusted=null;let revoked={};let suspectTotal=0;let lifecycleNodes=[];
   const logRefs=[];  /* pack-member receipts the transparency checkpoint must prove */
+  /* Guarded manifest visit ids — populated inside the manifest walk, read by
+     the member-sweep below; function-scoped so both blocks see it. */
+  const seenVids=new Set();
   /* Issuer-doc pin: the doc's lifecycle receipts merge into the lineage pools
      and the doc's issuer_key becomes the pinned key — reachability through
      the signed rotation walk is enforced below (a doc naming an unrelated
@@ -992,13 +1169,28 @@ async function verifyFiles(files){
       anyBad=true;
       say("bad",`manifest: unsupported schema ${esc(String(manifest.schema||"?"))}`);
     }
+    /* verify_case.py parity: visits must be a list (absent verifies nothing);
+       attestations may be absent but never a non-list — a dict would crash
+       for-of here and silently iterate keys on the Python surfaces. */
+    if(!Array.isArray(manifest.visits)){
+      anyBad=true;say("bad","manifest: visits is missing or not a list");
+      manifest.visits=[];}
+    if(manifest.attestations!==undefined&&manifest.attestations!==null&&
+       !Array.isArray(manifest.attestations)){
+      anyBad=true;say("bad","manifest: attestations is not a list");
+      manifest.attestations=[];}
     say("ok",`manifest: ${esc(String(Number(manifest.visits?.length)||0))} visit(s)`);
     /* Rotation receipts travel as manifest-listed attestations — collect them
        before the bundle loop so the trusted issuer set spans the signed
        rotation chain (a pack exported after rotation mixes keys). */
     const rotNodes=[...issuerNodes];
     for(const a of manifest.attestations||[]){
-      const at=await text(`attestations/${a.receipt_id}.json`);
+      /* receipt_id names a zip member — inert-skip the malformed here; the
+         attestation loop below fails the same entry (verify_case.py parity). */
+      const rid=a&&typeof a==="object"?a.receipt_id:null;
+      if(typeof rid!=="string"||!rid||rid.includes("/")||rid.includes("\\")||rid.includes(".."))
+        continue;
+      const at=await text(`attestations/${rid}.json`);
       if(!at)continue;
       const aNode=parseKeep(at);
       const art=((toJS(aNode)||{}).payload||{}).record_type;
@@ -1020,11 +1212,20 @@ async function verifyFiles(files){
     }
     revoked=await revokedKeys(rotNodes,manifest.issuer_key||"");
     for(const v of manifest.visits||[]){
-      const t=await text(`visits/${v.visit_id}/bundle.json`);
+      /* The manifest names member paths — verify_case.py parity: visit_id
+         must be a safe single segment, and a duplicate listing fails (the
+         Python verifiers and packdiff both reject it). */
+      const vid=v&&typeof v==="object"?v.visit_id:null;
+      if(typeof vid!=="string"||!vid||vid.includes("/")||vid.includes("\\")||vid.includes("..")){
+        anyBad=true;say("bad",`manifest: malformed visit_id ${esc(String(vid))}`);continue;}
+      if(seenVids.has(vid)){
+        anyBad=true;say("bad",`manifest: visit_id ${esc(vid)} listed twice`);continue;}
+      seenVids.add(vid);
+      const t=await text(`visits/${vid}/bundle.json`);
       /* A manifest-listed bundle absent from the zip fails closed — the row is
          red AND the verdict fails; anything less fails open on a dropped record. */
-      if(!t){anyBad=true;say("bad",`${esc(v.visit_id)}: bundle listed but missing from pack`);continue;}
-      bundles.push([v.visit_id,parseKeep(t)]);
+      if(!t){anyBad=true;say("bad",`${esc(vid)}: bundle listed but missing from pack`);continue;}
+      bundles.push([vid,parseKeep(t)]);
     }
   }else{
     const t=await text("bundle.json");
@@ -1042,11 +1243,10 @@ async function verifyFiles(files){
       const rn=get(parseKeep(kt),"rotations");
       if(!rn||rn.t!=="arr"){
         anyBad=true;say("bad","key_rotations.json: malformed");
-      }else if(rn.v.some(e=>!e||e.t!=="obj")){
-        /* Python fails the same bytes via Receipt.model_validate — a scalar
-           or nested array must split no verdict across surfaces. */
-        anyBad=true;say("bad","key_rotations.json: malformed");
       }else{
+        /* Unsigned pool content: malformed members are inert-skipped inside
+           the lineage walks (checkReceipt fails closed on them) — matching
+           the embedded/CLI rule that only signed pivots extend trust. */
         rnV.push(...rn.v);
         /* Pack-member lifecycle receipts owe inclusion proofs; the issuer
            doc's external pin receipts do not — they never were members. */
@@ -1101,14 +1301,17 @@ async function verifyFiles(files){
     const redT=await text(mNode?`visits/${vid}/redaction.json`:"redaction.json");
     const rj=redT?JSON.parse(redT):{};
     /* Python's redaction_for recognizes only withheld_digests — the browser
-       must be at least as strict, so no alias fallback here. */
-    const withheld=new Set(rj.withheld_digests||[]);
+       must be at least as strict, so no alias fallback here. The set()
+       mirror keeps Python semantics for a hostile dict member (its keys),
+       where `new Set(dict)` would crash. */
+    const _set=x=>new Set(Array.isArray(x)?x:(x&&typeof x==="object"?Object.keys(x):[]));
+    const withheld=_set(rj.withheld_digests);
     /* The marker file is unsigned — the signed manifest's media_withheld list
        is the authority. If they disagree, a "withheld" claim may be masking a
        deletion: fail closed, mirroring _verify_case_pack. */
     if(manifest){
       const mv=(manifest.visits||[]).find(x=>x.visit_id===vid);
-      const listed=new Set((mv&&mv.media_withheld)||[]);
+      const listed=_set(mv&&mv.media_withheld);
       if(listed.size!==withheld.size||[...listed].some(d=>!withheld.has(d))){
         anyBad=true;
         say("bad",`${esc(vid)}: manifest redaction list disagrees with redaction.json`);
@@ -1161,24 +1364,35 @@ async function verifyFiles(files){
     /* Site attestations (coverage certs, digests, prior exports, disconnects)
        travel in the pack — each must verify and match the manifest entry. */
     for(const a of manifest.attestations||[]){
-      const at=await text(`attestations/${a.receipt_id}.json`);
-      if(!at){anyBad=true;say("bad",`attestation ${esc(a.receipt_id)}: missing from pack`);continue;}
+      /* Same member-name guard as verify_case.py: receipt_id must be a safe
+         single segment — a malformed one fails the row, not a for-of crash. */
+      const rid=a&&typeof a==="object"?a.receipt_id:null;
+      if(typeof rid!=="string"||!rid||rid.includes("/")||rid.includes("\\")||rid.includes("..")){
+        anyBad=true;say("bad",`attestation: malformed receipt_id ${esc(String(rid))}`);continue;}
+      const at=await text(`attestations/${rid}.json`);
+      if(!at){anyBad=true;say("bad",`attestation ${esc(rid)}: missing from pack`);continue;}
       const aNode=parseKeep(at);const rjs=toJS(aNode)||{};
       const aOut=trusted?!trusted.has(rjs.public_key):(key&&rjs.public_key!==key);
       if(aOut){
         anyBad=true;
-        say("bad",`attestation ${esc(a.receipt_id)}: key outside the trusted issuer chain`);continue;}
+        say("bad",`attestation ${esc(rid)}: key outside the trusted issuer chain`);continue;}
       const rc=await checkReceipt(aNode);
-      if(!rc.ok){anyBad=true;say("bad",`attestation ${esc(a.receipt_id)}: ${esc(rc.why)}`);continue;}
+      if(!rc.ok){anyBad=true;say("bad",`attestation ${esc(rid)}: ${esc(rc.why)}`);continue;}
+      if(rjs.id!==rid){
+        anyBad=true;
+        say("bad",`attestation ${esc(rid)}: filename disagrees with `+
+          `the signed receipt id`);continue;}
       if(rjs.payload_hash!==a.payload_hash||rjs.visit_id!==a.visit_id){
-        anyBad=true;say("bad",`attestation ${esc(a.receipt_id)}: disagrees with signed manifest`);continue;}
+        anyBad=true;say("bad",`attestation ${esc(rid)}: disagrees with signed manifest`);continue;}
       say("ok",`attestation ${esc(a.record_type||"record")}: signed and intact`);
       logRefs.push({id:rjs.id,payload_hash:rjs.payload_hash,public_key:rjs.public_key});
     }
     /* Fail closed on ANY file the signed manifest does not name — a smuggled
        top-level file or an extra member inside a listed visit dir would ride
        inside a VERIFIED pack. Media members are digest-checked per visit. */
-    const vids=new Set((manifest.visits||[]).map(v=>v.visit_id));
+    /* seenVids holds only the entries that passed the member-name guard —
+       a malformed visit_id must never name an allowed path. */
+    const vids=seenVids;
     const allowed=new Set(["manifest.json","README.txt","verify_case.py","verify.html","index.html",
       "verifier_manifest.json","log_checkpoint.json"]);
     for(const a of manifest.attestations||[])allowed.add(`attestations/${a.receipt_id}.json`);
@@ -1268,12 +1482,22 @@ async function readZipEntries(file){
     if(dv.getUint32(p,true)!==0x02014b50)throw new Error("corrupt central directory");
     const method=dv.getUint16(p+10,true),csize=dv.getUint32(p+20,true);
     const usize=dv.getUint32(p+24,true);
+    /* Method first (BoundedZip reports it before the version): only
+       stored/deflate exist in the shared envelope. */
+    if(method!==0&&method!==8)
+      throw new Error("unsupported compression method "+method+
+        " — a member the verifier cannot read must fail, never vanish");
+    /* ZIP64 sits outside the shared verification envelope — the same
+       version-needed field BoundedZip rejects (>=45), plus the 0xFFFFFFFF
+       sentinels a lazy writer could leave without raising the version. */
+    const verNeed=dv.getUint16(p+6,true),lhoff0=dv.getUint32(p+42,true);
+    if(verNeed>=45||csize===0xffffffff||usize===0xffffffff||lhoff0===0xffffffff)
+      throw new Error("ZIP64 member exceeds the verification envelope");
     /* Bound total decompressed bytes — a small zip can expand unboundedly. */
     totalUncompressed+=usize;
     if(totalUncompressed>256*1024*1024)
       throw new Error("pack expands beyond the 256 MB verification bound");
     const nlen=dv.getUint16(p+28,true),elen=dv.getUint16(p+30,true),clen=dv.getUint16(p+32,true);
-    const lhoff=dv.getUint32(p+42,true);
     const name=dec.decode(buf.slice(p+46,p+46+nlen));
     /* Same fail-closed rule as check_member_names: duplicate names are
        ambiguous across extractors, and ../absolute/drive segments escape the
@@ -1282,13 +1506,18 @@ async function readZipEntries(file){
     seenNames.add(name);
     if(name.split(/[\\/]/).includes("..")||/^[\\/]/.test(name)||name.includes(":"))
       throw new Error(`unsafe member name: ${name}`);
-    const lnlen=dv.getUint16(lhoff+26,true),lelen=dv.getUint16(lhoff+28,true);
-    const start=lhoff+30+lnlen+lelen;
+    const lnlen=dv.getUint16(lhoff0+26,true),lelen=dv.getUint16(lhoff0+28,true);
+    const start=lhoff0+30+lnlen+lelen;
     const raw=buf.slice(start,start+csize);
     let data;
     if(method===0)data=raw;
     else if(method===8)data=await inflate(raw);
-    else continue;  // unsupported compression — skip, the verifier reports it missing
+    else throw new Error("unsupported compression method "+method+
+      " — a member the verifier cannot read must fail, never vanish");
+    /* Per-member bound — BoundedZip.per_file: the cumulative cap alone
+       would let one member claim the whole budget. */
+    if(data.length>64*1024*1024)
+      throw new Error("pack member expands beyond the 64 MB per-file bound");
     /* Declared usize can lie — bound ACTUAL decompressed bytes cumulatively
        too, else many small entries each under the per-member cap still
        inflate the tab into OOM. Mirrors packdiff.BoundedZip's seen counter. */
@@ -1322,9 +1551,13 @@ async function go(fileList){
           const dn=parseKeep(await f.text()),d=toJS(dn);
           if(d&&d.schema==="attest.issuer/1"&&typeof d.issuer_key==="string"){
             const kn=get(dn,"key_receipts");
-            if(freshDoc)multiDoc=true;
-            freshDoc={issuer_key:d.issuer_key,nodes:kn&&kn.t==="arr"?kn.v:[]};
-            continue;}
+            /* Same intake rules as the CLI/fetch paths: a non-list or
+               >64-entry key_receipts is a malformed document — fall through
+               to the verify set rather than arming a pin on junk. */
+            if(!kn||kn.t==="arr"&&kn.v.length<=64){
+              if(freshDoc)multiDoc=true;
+              freshDoc={issuer_key:d.issuer_key,nodes:kn?kn.v:[]};
+              continue;}}
         }catch(e){/* ordinary pack JSON — stays in the verify set */}
       }
       rest.push(f);

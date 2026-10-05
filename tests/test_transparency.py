@@ -239,7 +239,9 @@ def _visit_pack(engine, store, household, t0, tmp_path, **kw):
     )
     visit = engine.ingest(ev).visit
     engine.close_for_review(visit.id)
-    bundle = ReviewBundle(original=store.receipt_for_visit(visit.id), reviews=[])
+    bundle = ReviewBundle(
+        kind="attest.review_bundle/1", original=store.receipt_for_visit(visit.id), reviews=[]
+    )
     data = build_pack(
         store,
         tmp_path / "media",

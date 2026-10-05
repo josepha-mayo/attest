@@ -66,12 +66,12 @@ class KmsBox:
     def unwrap(self, record: dict[str, str]) -> bytes:
         if record.get("schema") != "attest.kms-wrapped-key/1":
             raise ValueError("not a kms-wrapped key record")
-        blob = base64.b64decode(record["ciphertext_blob"])
+        blob = base64.b64decode(record["ciphertext_blob"], validate=True)
         resp = self.client.decrypt(CiphertextBlob=blob, EncryptionContext=_context(self.key_id))
         data_key = resp["Plaintext"]
         return AESGCM(data_key).decrypt(
-            base64.b64decode(record["nonce"]),
-            base64.b64decode(record["ciphertext"]),
+            base64.b64decode(record["nonce"], validate=True),
+            base64.b64decode(record["ciphertext"], validate=True),
             json.dumps(_context(self.key_id)).encode(),
         )
 
