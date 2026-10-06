@@ -31,6 +31,10 @@ _HEAD = """<!doctype html>
  .row{display:flex;gap:.5rem;align-items:baseline}
  .row.ok::before{content:"\\2713 "}.row.bad::before{content:"\\2717 "}
  .row.warn::before{content:"\\26a0 "}
+ .row.stamp{display:block;font-size:1.1rem;font-weight:700;border:2px solid;
+   border-radius:10px;padding:.7rem 1rem;margin:.9rem 0}
+ .row.stamp.ok{border-color:#146c2e;background:#f0fdf4}
+ .row.stamp.bad{border-color:#b3261e;background:#fef2f2}
  small{color:#666}
 </style>
 </head>
@@ -1139,7 +1143,8 @@ async function verifyFiles(files){
             +(chk.detail?` <small class="muted">— ${esc(String(chk.detail)).slice(0,160)}</small>`:""));
       }else
         say(c.ok?"ok":"bad",`receipt ${esc(r.id||"")} (${esc(p.record_type||"record")}): ${esc(c.why)}`);
-      say(c.ok?"ok":"bad",`<strong>${c.ok?"VERIFIED":"FAILED"}</strong>`);
+      say(`stamp ${c.ok?"ok":"bad"}`,`<strong>${c.ok?"VERIFIED":"FAILED"}</strong>`
+        +(c.ok?" — this record is intact":" — this record was altered"));
       return out.join("");
     }
   }
@@ -1463,7 +1468,7 @@ async function verifyFiles(files){
   if(pivotSuspect)
     say("warn",`${pivotSuspect} key-lifecycle receipt(s) signed inside a suspect `
       +"window — the trust pivot itself is qualified");
-  say(anyBad?"bad":"ok",anyBad
+  say(`stamp ${anyBad?"bad":"ok"}`,anyBad
     ?"FAILED — do not rely on this pack"
     :"VERIFIED — chain intact under issuer key "+esc((key||"").slice(0,16))+"…"
       /* A pack that spans a key rotation verifies under more than one issuer —
@@ -1642,6 +1647,19 @@ if(location.protocol.indexOf("http")===0){
       }
     };
   }).catch(()=>{});
+  fetch("sample-pack-tampered.zip",{method:"HEAD"}).then(r=>{
+    if(!r.ok)return;
+    document.getElementById("trytamper-wrap").hidden=false;
+    document.getElementById("trytamper").onclick=async()=>{
+      try{
+        const buf=await(await fetch("sample-pack-tampered.zip")).arrayBuffer();
+        go([new File([buf],"sample-pack-tampered.zip")]);
+      }catch(e){
+        document.getElementById("out").innerHTML=
+          "<div class='row bad'>sample fetch failed: "+esc(e.message)+"</div>";
+      }
+    };
+  }).catch(()=>{});
 }
 """
 
@@ -1660,6 +1678,9 @@ document too (from <code>/.well-known/attest-issuer.json</code> or
 signed lifecycle bridges pre-rotation exports.</small></div>
 <p id="trysample-wrap" hidden><button id="trysample" type="button">Verify the bundled
 sample pack — one click, fetched from this site</button></p>
+<p id="trytamper-wrap" hidden><button id="trytamper" type="button">Verify the tampered
+twin — the same pack, but someone doctored the recorded 12-minute stay to 82.
+Watch the signature catch it</button></p>
 <div id="out" role="status" aria-live="polite"></div>
 <div id="live-wrap" hidden>
 <h2>Is this still the log the deployment serves?</h2>
@@ -2225,9 +2246,9 @@ async function renderIndex(){
     }
   }
   verdict.innerHTML=anyBad
-    ?'<div class="row bad">FAILED — '+n
+    ?'<div class="row stamp bad">FAILED — '+n
      +" record(s), at least one does not verify. Do not rely on this pack.</div>"+mLine
-    :`<div class="row ok">VERIFIED — ${n} record(s), chains intact under issuer key `
+    :`<div class="row stamp ok">VERIFIED — ${n} record(s), chains intact under issuer key `
      +esc(String(key||"").slice(0,16))+"…</div>"+mLine
      +(suspectTotal
        ?`<div class="row warn">${suspectTotal} record(s) signed by a revoked issuer `

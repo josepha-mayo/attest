@@ -3,102 +3,118 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex">
-<title>Attest — hosted pack verifier</title>
+<title>Attest — records, not verdicts</title>
 <style>
-  body { font-family: system-ui, sans-serif; max-width: 44rem; margin: 4rem auto; padding: 0 1.25rem; color: #1c2330; line-height: 1.55; }
-  h1 { font-size: 1.5rem; margin-bottom: .25rem; }
-  .sub { color: #5a6572; margin-top: 0; }
-  a { color: #2456a6; }
-  code { background: #f0f2f5; padding: .1em .35em; border-radius: 4px; }
-  .card { border: 1px solid #d8dee6; border-radius: 8px; padding: 1rem 1.25rem; margin: 1.5rem 0; }
-  footer { margin-top: 3rem; font-size: .85rem; color: #5a6572; border-top: 1px solid #e3e7ec; padding-top: 1rem; }
+body{font-family:system-ui,sans-serif;max-width:760px;margin:2rem auto;padding:0 1rem;line-height:1.5;color:#1c1c1e}
+h1{font-size:1.7rem;margin-bottom:.2rem}
+.tag{color:#6b6b70;font-size:1.05rem;margin-top:.2rem}
+.cards{display:flex;gap:.8rem;flex-wrap:wrap;margin:1.4rem 0}
+.card{flex:1;min-width:200px;border:1px solid #d4d4d8;border-radius:10px;padding:.9rem 1rem;text-decoration:none;color:inherit;background:#fff}
+.card:hover{border-color:#3b82f6;box-shadow:0 1px 6px rgba(59,130,246,.25)}
+.card b{display:block;margin-bottom:.3rem}
+.card small{color:#6b6b70}
+.badge{display:inline-block;font-size:.7rem;font-weight:700;letter-spacing:.05em;border-radius:4px;padding:.1rem .4rem;vertical-align:middle;margin-left:.4rem}
+.badge.ok{background:#dcfce7;color:#166534}
+.badge.bad{background:#fee2e2;color:#991b1b}
+h2{font-size:1.1rem;margin-top:1.8rem;border-top:1px solid #e4e4e7;padding-top:1rem}
+.proves{display:flex;gap:.8rem;flex-wrap:wrap}
+.proves>div{flex:1;min-width:240px;border-radius:10px;padding:.9rem 1rem}
+.proves .yes{background:#f0fdf4;border:1px solid #bbf7d0}
+.proves .no{background:#fff7ed;border:1px solid #fed7aa}
+.proves h3{margin:.1rem 0 .5rem;font-size:.95rem}
+.proves ul{margin:0;padding-left:1.1rem}
+.proves li{margin:.3rem 0;font-size:.9rem}
+code{background:#f4f4f5;padding:.1rem .35rem;border-radius:4px;font-size:.9em}
+a{color:#2563eb}
+.foot{color:#6b6b70;font-size:.85rem;border-top:1px solid #e4e4e7;margin-top:2rem;padding-top:1rem}
+details{margin:.4rem 0}
+summary{cursor:pointer;color:#2563eb}
 </style>
 </head>
 <body>
-<main>
-<h1>Attest pack verifier</h1>
-<p class="sub">Verify an exported Attest case or dispute pack — entirely in your browser.</p>
+<h1>Attest</h1>
+<p class="tag">Tamper-evident visit records for home services, built on the Ring Partner API —
+what the devices observed, what the worker reported, what a human concluded.
+<strong>Records, not verdicts.</strong></p>
 
-<div class="card">
-  <p><a href="verify.html"><strong>Open the verifier &rarr;</strong></a></p>
-  <p>Drop a <code>pack.zip</code> exported from Attest, or a single signed
-  receipt such as a <code>verify-live --sign</code> report. Every signature,
-  payload hash, chain link, and manifest entry is checked locally — nothing
-  is uploaded anywhere.</p>
-  <p>No pack handy? Open the verifier and press <strong>"Verify the bundled
-  sample pack"</strong> — one click fetches a small simulated pack (media
-  digests only) and runs every check in-page. Or
-  <a href="sample-pack.zip">download it</a> and drop it on the verifier
-  yourself. Its story rotated the signing key mid-week, then <em>revoked</em>
-  the retired key as compromised — look for the
-  <code>key_rotation</code>, <code>key_adoption</code>, and
-  <code>key_revocation</code> attestations: receipts on both sides of the
-  pivot still verify, the verifier annotates the suspect window, and it even
-  flags that the pivot itself was signed by the compromised key — the trust
-  handoff inherits the doubt. The pack also carries
-  <code>verifier_manifest.json</code> — an issuer-signed receipt pinning the
-  sha256 of its own verifier tooling, so a forged always-green script can't
-  ride inside a genuine pack — and <code>log_checkpoint.json</code>, a signed
-  Merkle tree head over the deployment's receipt log (RFC 6962-style, like
-  Certificate Transparency) with an inclusion proof per pack receipt: a
-  receipt with a valid signature the log never committed still fails.
-  <code>attest monitor</code> runs the auditor half against a live
-  deployment — pin a signed head, then every later checkpoint must prove it
-  extends the pinned one or the rewritten log is caught; chained
-  checkpoints carry that bridge in their own signatures, and
-  <code>attest verify --issuer-url</code> cross-checks a pack's head
-  against the deployment's live log, so a fork served to one auditor
-  alone can't stand. Every deployment is also a cosigning witness —
-  <code>attest export --witness</code> collects independent
-  counter-signatures into this very pack's checkpoint, and a forked log
-  can never honestly collect them. Look for the cosignature in this
-  pack's checkpoint — it is itself <em>anchored</em>: the witness
-  committed its attestation to its own published log and the pack
-  carries the inclusion proof, so the counter-signature is publicly
-  committed, not just handed over. And the attestations list carries a
-  real watch trail — <code>monitor_observation</code> receipts from
-  <code>monitor --journal</code> cycles (pinned → advanced → steady)
-  signed into the record, so "someone was watching the log" is itself
-  signed evidence. <code>attest split-demo</code> fabricates the attack
-  no single observer can catch — one issuer key signs two divergent
-  histories, a witness pins the fork, a monitor pins the true log — and
-  emits the caught divergence as a self-verifying document.</p>
-  <p>Or check our own claim: <a href="live-sweep-receipt.json">this signed
-  receipt</a> is the <code>verify-live --sign</code> sweep run against the
-  real <code>api.amazonvision.com</code> on 2026-09-30 — 5 pass, 3 fail
-  (Playground scope limits, honestly recorded). The signature proves the
-  report is exactly what the API returned that day; it can't be edited to
-  turn a fail into a pass.</p>
+<p>"He said / she said" disputes get resolved from signed evidence instead of memory:
+every observation, statement, and conclusion is a separate Ed25519-signed receipt on a
+hash-chained ledger — and the pack you're about to verify carries its own verifier,
+so nobody has to trust this site either.</p>
+
+<div class="cards">
+<a class="card" href="verify.html">
+<b>Open the verifier</b>
+<small>Drop any exported <code>pack.zip</code>. All hashing and signature checks run
+<strong>in your browser</strong> — the pack bytes never leave this machine.</small>
+</a>
+<a class="card" href="verify.html">
+<b>Verify the sample pack<span class="badge ok">PASS</span></b>
+<small>One click inside the verifier — fetches <code>sample-pack.zip</code> from this
+site and verifies it end-to-end.</small>
+</a>
+<a class="card" href="verify.html">
+<b>Verify the tampered twin<span class="badge bad">FAIL</span></b>
+<small>Same pack, but someone doctored the recorded 12-minute stay to 82 minutes.
+One click in the verifier — the signature catches the edit.</small>
+</a>
 </div>
 
-<p>Verifying a pack pins it to an <em>issuer</em>, not just a fingerprint:
-every deployment serves <code>/.well-known/attest-issuer.json</code> — the
-JWKS analogue — carrying the current issuer key plus every signed
-rotation/adoption/revocation receipt. <code>attest verify pack.zip
---issuer-url &lt;deployment&gt;</code> (or a doc file exported by
-<code>attest issuer --out</code>) pins the pack to that deployment and walks
-the signed lifecycle itself, so a pack exported <em>before</em> a key
-rotation still verifies against the deployment's <em>current</em> key.
-Remote loads are HTTPS-only (loopback excepted) and byte-capped — and the
-document itself says the pin's authenticity rides on transport, so
-<code>--key</code> remains the zero-trust path.</p>
+<h2>What verification proves — and what it doesn't</h2>
+<div class="proves">
+<div class="yes"><h3>A green verdict means</h3>
+<ul>
+<li>Every signature is valid under the pinned issuer key.</li>
+<li>No record was added, dropped, or altered since signing.</li>
+<li>The receipts are committed in the signed transparency-log head the pack carries.</li>
+<li>Redacted media was withheld <em>by policy</em> — its signed digests still match the manifest.</li>
+</ul></div>
+<div class="no"><h3>It does not mean</h3>
+<ul>
+<li>That the worker physically attended — camera activity is an observation, not attendance.</li>
+<li>That absence of events means absence — silence isn't absence.</li>
+<li>That the issuer is honest — a signature proves integrity under a key, not truth.
+That's why witness cosigning and the live-log cross-check exist.</li>
+</ul></div>
+</div>
 
-<p><strong>What verification proves:</strong> the records in the pack are the
-records the issuing deployment signed, and nothing was added, removed, or
-altered since. It does <em>not</em> prove physical attendance, identity, or
-time worked — that boundary is the point of the project.</p>
+<h2>What's inside the sample pack</h2>
+<p>The bundled <a href="sample-pack.zip"><code>sample-pack.zip</code></a> is a real export from the
+simulated <em>Alvarez residence</em> deployment — media withheld by redaction policy,
+signed SHA-256 digests preserved. It exercises the hard parts, not just the happy path:</p>
+<ul>
+<li>a <strong>signing-key rotation mid-history</strong>: the pack names both issuer keys —
+  the rotated-away key, its signed adoption, and the revocation receipt that retires it;</li>
+<li>receipts on <strong>both sides of the pivot</strong>, verified under different keys;</li>
+<li>a <strong>suspect-window annotation</strong> — the window signed while the old key was
+  compromised inherits doubt, explicitly;</li>
+<li><code>verifier_manifest.json</code> pinning the verifier tooling's own hashes —
+  the pack defends against a hostile verifier shipped inside itself;</li>
+<li><code>log_checkpoint.json</code>: a signed RFC 6962-style Merkle tree head with
+  inclusion proofs — the receipts are committed in a transparency log, and the verifier's
+  cross-check can prove the deployment still serves the same head to everyone;</li>
+<li>monitor observations and a <strong>witness cosignature</strong> anchored in the
+  witness's own independent log;</li>
+<li>a <code>split-demo</code> scenario: a deliberate log fork that the witness and monitor
+  jointly catch.</li>
+</ul>
 
-<footer>
-  <p>
-    <a href="https://github.com/josepha-mayo/attest">Attest</a> &middot;
-    <a href="https://github.com/josepha-mayo/ring-sandbox">ring-sandbox</a> &middot;
-    <a href="https://pypi.org/project/ring-sandbox/">PyPI</a>
-    <br>This page is generated documentation for the hackathon prototype; the
-    verifier source lives in <code>src/attest/verifyjs.py</code> and the hosted
-    copy is kept in sync by a test.
-  </p>
-</footer>
-</main>
+<h2>Proof it talks to the real API</h2>
+<p><a href="live-sweep-receipt.json"><code>live-sweep-receipt.json</code></a> is the signed
+<code>verify-live --sign</code> report from a real sweep against
+<code>api.amazonvision.com</code> (2026-09-30): users/me, devices, device status, Event
+History, and media download through the regional redirect — every probe signed, so the
+claim verifies offline the same way a pack does.</p>
+
+<details><summary>Deployment housekeeping</summary>
+<p>If Pages serves a stale copy: bump this file or commit with <code>--allow-empty</code>.
+This page and <code>verify.html</code> must ship together —
+the pack's embedded verifier is byte-identical to <code>verify.html</code>.</p>
+</details>
+
+<p class="foot">Attest is a hackathon prototype — evidence-preserving records for visit
+disputes, not an attendance-verification or EVV product. Source:
+<a href="https://github.com/josepha-mayo/attest">github.com/josepha-mayo/attest</a> ·
+emulator: <a href="https://github.com/josepha-mayo/ring-sandbox">ring-sandbox</a>.</p>
 </body>
 </html>

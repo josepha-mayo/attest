@@ -1950,6 +1950,71 @@ def build_case_pack(
     return buf.getvalue()
 
 
+def tamper_twin(pack: bytes) -> tuple[bytes, str]:
+    """A hostile copy of a case pack: byte-identical except one doctored field
+    inside a signed payload, so the copy must FAIL verification with a payload
+    hash mismatch. Used for demos and verifier QA — ``export --tamper-twin``
+    writes one, and ``docs/sample-pack-tampered.zip`` is built this way.
+    Returns ``(zip_bytes, description_of_the_doctoring)``."""
+    with zipfile.ZipFile(io.BytesIO(pack)) as src:
+        names = src.namelist()
+        targets = sorted(
+            n
+            for n in names
+            if n == "bundle.json"
+            or (n.startswith("visits/") and n.endswith("/bundle.json") and n.count("/") == 2)
+        )
+        doctored: tuple[str, bytes] | None = None
+        desc = ""
+        # The demo story: the *shortest* recorded stay inflated toward the
+        # scheduled expectation — "she was there most of the window".
+        best: tuple[float, str, bytes, bytes, int, int] | None = None
+        for name in targets:
+            raw = src.read(name)
+            marker = b'"duration_minutes": '
+            i = raw.find(marker)
+            if i < 0:
+                continue
+            j = i + len(marker)
+            k = j
+            while k < len(raw) and raw[k] in b"0123456789.-":
+                k += 1
+            try:
+                val = float(raw[j:k])
+            except ValueError:
+                continue
+            if best is None or val < best[0]:
+                best = (val, name, raw, raw[j:k], j, k)
+        if best is not None:
+            val, name, raw, span, j, k = best
+            new = repr(val + 70.0)
+            doctored = (name, raw[:j] + new.encode() + raw[k:])
+            vid = name.split("/")[1] if "/" in name else "bundle"
+            desc = f"{vid}: duration_minutes {span.decode()} -> {new}"
+        else:
+            for name in targets:
+                raw = src.read(name)
+                wmark = b'"worker": "'
+                i = raw.find(wmark)
+                if i < 0:
+                    continue
+                j = i + len(wmark)
+                k = raw.find(b'"', j)
+                worker = raw[j:k].decode()
+                new = worker[:-1] + ("X" if not worker.endswith("X") else "Y")
+                doctored = (name, raw[:j] + new.encode() + raw[k:])
+                vid = name.split("/")[1] if "/" in name else "bundle"
+                desc = f"{vid}: worker '{worker}' -> '{new}'"
+                break
+        if doctored is None:
+            raise ValueError("no doctorable field found in any visit bundle")
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as dst:
+            for n in names:
+                dst.writestr(n, doctored[1] if n == doctored[0] else src.read(n))
+    return buf.getvalue(), desc
+
+
 def log_member(engine, receipts, cosign_fn=None) -> dict:
     """Build ``log_checkpoint.json`` for an export: a signed Merkle Tree Head
     over the deployment's whole receipt log plus an RFC 6962 inclusion path

@@ -3541,6 +3541,19 @@ def _export(args: argparse.Namespace) -> None:
         else:
             print(f"WARNING: self-check failed — {why}", file=sys.stderr)
             sys.exit(2)
+        if args.tamper_twin:
+            from .disputepack import tamper_twin
+
+            tdata, desc = tamper_twin(data)
+            tpath = Path(args.tamper_twin)
+            tpath.write_bytes(tdata)
+            print(f"wrote {tpath} — doctored: {desc}")
+            # Mirror-image self-check: a twin that verifies must never ship.
+            with zipfile.ZipFile(io.BytesIO(tdata)) as z:
+                ok2, why2 = _verify_case_pack(z, engine.signer.public_key_b64)
+            if ok2:
+                sys.exit("WARNING: tampered twin verifies — do not ship it")
+            print(f"twin self-check: correctly refused — {why2}")
     finally:
         store.close()
 
@@ -4261,6 +4274,14 @@ def main(argv: list[str] | None = None) -> None:
         metavar="URL",
         help="stamp witness counter-signatures into the pack's log checkpoint — "
         "repeatable; each witness only signs a head it proves extends its pin",
+    )
+    s.add_argument(
+        "--tamper-twin",
+        default=None,
+        metavar="PATH",
+        help="also write a deliberately doctored copy of the pack to PATH — one "
+        "signed field changed, so the twin must FAIL verification; for demos "
+        "and QA of the verifier itself",
     )
     s.set_defaults(fn=_export)
 
