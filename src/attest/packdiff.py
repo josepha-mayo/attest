@@ -501,10 +501,12 @@ def _verify_attestation_files(
         if att.id != rid:
             failures.append(f"attestation {rid}: file contains receipt {att.id}")
             continue
-        if entry.get("payload_hash") and entry["payload_hash"] != att.payload_hash:
+        # Strict like every verdict surface: an absent manifest field is a
+        # MISMATCH (att fields are always non-None), not a skipped compare.
+        if entry.get("payload_hash") != att.payload_hash:
             failures.append(f"attestation {rid}: payload hash differs from manifest entry")
             continue
-        if entry.get("visit_id") and entry["visit_id"] != att.visit_id:
+        if entry.get("visit_id") != att.visit_id:
             failures.append(f"attestation {rid}: visit_id differs from manifest entry")
             continue
         if trusted is not None and att.public_key not in trusted:
@@ -579,12 +581,85 @@ def _manifest_consistency(manifest: dict, bundles: dict, notes: list[str]) -> li
         seen.add(vid)
         claimed = v.get("payload_hash")
         bundle = bundles.get(vid)
-        if bundle and claimed and claimed != bundle["original"]["payload_hash"]:
+        # An absent manifest hash is a MISMATCH like the verdict surfaces
+        # (bundle hash is never None), not a skipped comparison.
+        if bundle and claimed != bundle["original"]["payload_hash"]:
             actual = bundle["original"]["payload_hash"]
-            failures.append(f"{vid}: manifest claims {claimed[:12]}… but bundle hashes {actual[:12]}…")
+            c = claimed[:12] if isinstance(claimed, str) else repr(claimed)
+            a = actual[:12] if isinstance(actual, str) else repr(actual)
+            failures.append(f"{vid}: manifest claims {c}… but bundle hashes {a}…")
     if manifest.get("signature_receipt") is None:
         notes.append("unsigned manifest — listed states and worker stances are unverified claims")
     return failures
+
+
+def _pyset(x):
+    """set() mirror for JSON values: list→elements, dict→keys, str→chars —
+    exactly what ``set(x)`` yields on the other surfaces. Non-iterables
+    (null/int/bool) return None so the caller can fail like the TypeError
+    the Python surfaces hit."""
+    if isinstance(x, (list, tuple, set)):
+        return set(x)
+    if isinstance(x, (str, dict)):
+        return set(x)
+    return None
+
+
+def _redaction_withheld(z, marker_name: str, failures: list) -> set:
+    """Read a redaction.json member's withheld digest set.
+
+    Absent marker → empty set (nothing withheld). Present-but-unreadable or
+    non-set()-able withheld_digests → flagged, treated as empty — a malformed
+    marker can never *mask* a missing media digest."""
+    if marker_name not in z.namelist():
+        return set()
+    try:
+        marker = transparency.json_loads(z.read(marker_name))
+        if not isinstance(marker, dict):
+            raise ValueError("marker is not an object")
+        # Absent key → ∅; explicit null → set(None) TypeError on the Python
+        # surfaces → fail here too. Dict/str coerce like set() does.
+        raw = marker["withheld_digests"] if "withheld_digests" in marker else []
+        withheld = _pyset(raw)
+        if withheld is None:
+            raise ValueError("withheld_digests is not set-able")
+        return withheld
+    except Exception as exc:  # noqa: BLE001 — malformed marker flags, never masks
+        failures.append(f"{marker_name}: malformed ({exc})")
+        return set()
+
+
+def _media_members_check(z, names: set, prefix: str, payload: dict, withheld: set, failures: list) -> None:
+    """Hash each ``prefix``-rooted member and compare against the signed
+    evidence digests — the same check app/embedded/browser run. A member
+    whose bytes hash to nothing the evidence names is smuggled content, and
+    a signed digest neither present nor withheld is missing."""
+    import hashlib
+
+    evidence = payload.get("evidence") if isinstance(payload, dict) else None
+    digests = {
+        e.get("media_sha256")
+        for e in (evidence if isinstance(evidence, list) else [])
+        if isinstance(e, dict) and isinstance(e.get("media_sha256"), str)
+    }
+    if not withheld <= digests:
+        failures.append("redaction.json lists digests not in the signed evidence")
+    found = set()
+    for name in names:
+        if not name.startswith(prefix) or name.endswith("/"):
+            continue
+        try:
+            h = hashlib.sha256(z.read(name)).hexdigest()
+        except Exception as exc:  # noqa: BLE001
+            failures.append(f"{name}: unreadable media member ({exc})")
+            continue
+        if h not in digests:
+            failures.append(f"{name}: media not named by the signed evidence")
+            continue
+        found.add(h)
+    for d in digests:
+        if d not in found and d not in withheld:
+            failures.append(f"media {d[:12]}… missing (not listed as withheld)")
 
 
 def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: list | None = None) -> dict:
@@ -604,6 +679,11 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
             bad_name = check_member_names(raw.namelist())
             if bad_name:
                 raise ValueError(f"{path}: {bad_name}")
+            # Declared-size bound before any reads, same as app._verify_pack /
+            # the browser: a member never opened (e.g. media) can still carry a
+            # lying central-directory usize over the limit.
+            if sum(i.file_size for i in raw.infolist()) > 256 * 1024 * 1024:
+                raise ValueError(f"{path}: zip too large (declared size over 256MB)")
             z = BoundedZip(raw)
             names = set(z.namelist())
             if "manifest.json" in names:
@@ -710,13 +790,37 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                         and parts[2] == "media"
                         and parts[1] in entries
                     ):
-                        continue  # media members — digest-checked upstream
+                        continue  # digest-checked against the evidence below
                     failures.append(f"{name}: present but not in the signed manifest")
+                # Media bytes are NOT exempt — every visits/<vid>/media/ member
+                # must hash to a digest the visit's signed evidence names, and
+                # every signed digest must resolve to a member or a withheld
+                # listing. The manifest's media_withheld must match the
+                # redaction marker exactly.
+                for vid, mentry in entries.items():
+                    marker = f"visits/{vid}/redaction.json"
+                    withheld = _redaction_withheld(z, marker, failures)
+                    # Absent → ∅; explicit null/non-set-able → the Python
+                    # surfaces' set(x) raises → fail here too.
+                    mw = _pyset(mentry["media_withheld"] if "media_withheld" in mentry else [])
+                    if mw is None or mw != withheld:
+                        failures.append(f"{vid}: media_withheld disagrees with redaction.json")
+                    ob = b.get("original") if isinstance(b := bundles.get(vid), dict) else None
+                    payload = ob.get("payload") if isinstance(ob, dict) else None
+                    _media_members_check(
+                        z,
+                        names,
+                        f"visits/{vid}/media/",
+                        payload if isinstance(payload, dict) else {},
+                        withheld,
+                        failures,
+                    )
+                _site = manifest.get("site")
                 _tools_pin_check(
                     z,
                     names,
                     trusted,
-                    f"site:{(manifest.get('site') or {}).get('id') or ''}",
+                    f"site:{(_site.get('id') if isinstance(_site, dict) else None) or ''}",
                     failures,
                     notes,
                 )
@@ -821,6 +925,17 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                     if name.endswith("/") or name in allowed or name.startswith("media/"):
                         continue
                     failures.append(f"{name}: present but not in the signed manifest")
+                # Same media-digest rule as the case pack: every media/ member
+                # must hash into the signed evidence, every signed digest must
+                # resolve to a member or a redaction.json withheld listing.
+                _media_members_check(
+                    z,
+                    names,
+                    "media/",
+                    original.get("payload") or {},
+                    _redaction_withheld(z, "redaction.json", failures),
+                    failures,
+                )
                 _tools_pin_check(
                     z,
                     names,

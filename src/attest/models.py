@@ -308,7 +308,10 @@ class Visit(BaseModel):
 class Receipt(BaseModel):
     """Canonical, signed record of a closed visit. ``payload`` is what gets signed."""
 
-    id: str = Field(default_factory=lambda: _id("rcpt"))
+    # Required, never default-minted: a receipt dict missing ``id`` must fail
+    # validation — embedded/JS verifiers reject it outright, and a generated
+    # id here would let an unsigned envelope field shape the verified object.
+    id: str
     visit_id: str
     # Strict-int gate before pydantic coercion — embedded/JS verifiers require
     # a real JSON integer here, so "5"/True spellings must reject natively too.

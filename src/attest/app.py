@@ -2505,10 +2505,14 @@ def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -
         if bundle.original.payload_hash != v.get("payload_hash"):
             return False, f"{vid}: manifest hash disagrees with signed original"
         marker_name = f"visits/{vid}/redaction.json"
+        withheld_marker: set = set()
         if marker_name in z.namelist():
             marker = transparency.json_loads(z.read(marker_name))
-            if set(v.get("media_withheld", [])) != set(marker.get("withheld_digests", [])):
-                return False, f"{vid}: manifest redaction list disagrees with redaction.json"
+            withheld_marker = set(marker.get("withheld_digests", []))
+        # Always compare — an absent marker means nothing may be withheld, so
+        # a non-empty media_withheld must still disagree and fail.
+        if set(v.get("media_withheld", [])) != withheld_marker:
+            return False, f"{vid}: manifest redaction list disagrees with redaction.json"
         media_detail = detail.split("; ", 1)[-1] if "; " in detail else detail
         lines.append(f"{vid}: {v.get('state')} ({v.get('countersign', {}).get('state')}) — {media_detail}")
     total = len(manifest.get("visits", []))
@@ -2584,7 +2588,10 @@ def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -
         if len(parts) >= 4 and parts[0] == "visits" and parts[2] == "media" and parts[1] in visit_ids:
             continue  # digest-checked against the signed evidence above
         return False, f"{name}: present but not in the signed manifest"
-    tok, tnote = _verify_tools_pin(z, trusted, f"site:{(manifest.get('site') or {}).get('id') or ''}")
+    _site = manifest.get("site")
+    tok, tnote = _verify_tools_pin(
+        z, trusted, f"site:{(_site.get('id') if isinstance(_site, dict) else None) or ''}"
+    )
     if not tok:
         return False, tnote
     if tnote:

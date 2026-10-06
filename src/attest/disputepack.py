@@ -147,8 +147,17 @@ def _mul(P, e):
 
 
 def _point(s):
+    # Canonicality (browser decodePoint parity): y >= q is a second spelling
+    # of y - q — and under a small-order point the encoding forgery
+    # S=0,R=identity satisfies the equation without the private key.
     y = int.from_bytes(s, "little") & ((1 << 255) - 1)
+    if y >= q:
+        raise ValueError("non-canonical encoding")
     x = _xrecover(y)
+    # Negative-zero x: y in {1, q-1} has x == 0, and the sign bit on it is a
+    # second (rejected) encoding — same gate the browser applies.
+    if x == 0 and (s[31] & 0x80):
+        raise ValueError("negative-zero x encoding")
     if bool(x & 1) != bool(s[31] & 0x80):
         x = q - x
     if (-x * x + y * y - 1 - d * x * x * y * y) % q != 0:
@@ -159,8 +168,11 @@ def _point(s):
 def ed25519_verify(sig, msg, pk):
     if len(sig) != 64 or len(pk) != 32:
         return False
-    R = _point(sig[:32])
-    A = _point(pk)
+    try:
+        R = _point(sig[:32])
+        A = _point(pk)
+    except ValueError:
+        return False
     S = int.from_bytes(sig[32:], "little")
     if S >= l:
         return False
@@ -274,9 +286,16 @@ def check_receipt(r, key):
             return False, "receipt envelope identity disagrees with signed payload"
     elif payload.get("schema") != "attest.receipt/1":
         return False, "unsupported receipt schema"
-    if not ed25519_verify(
-        _unb64(r["signature"]), bytes.fromhex(r["payload_hash"]), _unb64(key)
-    ):
+    # Malformed base64/hex in the envelope must be a clean "signature
+    # invalid", not a crash — verify_receipt's except-ValueError returns the
+    # same verdict, and pool members are attacker-controlled.
+    try:
+        sig_ok = ed25519_verify(
+            _unb64(r["signature"]), bytes.fromhex(r["payload_hash"]), _unb64(key)
+        )
+    except ValueError:
+        return False, "signature invalid"
+    if not sig_ok:
         return False, "signature invalid"
     return True, "ok"
 
@@ -1219,9 +1238,9 @@ def main():
         if str(bad).startswith("smuggled:"):
             sys.exit(f"FAIL media file not named by the signed evidence: {bad[9:]}")
         sys.exit(f"FAIL media digest not found in pack: {bad[:16]}...")
-    # Fail closed on files the pack format doesn't name — but only when the
-    # directory looks like an extracted pack (README/media/pack pages present).
-    # A bare bundle.json shared alone has no pack around it to smuggle into.
+    # Fail closed on files the pack format doesn't name — the zip surfaces
+    # sweep every member, so the extracted dir must too: a bare bundle.json +
+    # evil.txt would otherwise pass where the same zip fails.
     allowed_top = {
         "bundle.json",
         "README.txt",
@@ -1233,13 +1252,11 @@ def main():
         "verifier_manifest.json",
         "log_checkpoint.json",
     }
-    markers = ("README.txt", "media", "verify.html", "index.html")
-    if any((pack_dir / m).exists() for m in markers):
-        for p in sorted(pack_dir.iterdir()):
-            if p.is_file() and p.name not in allowed_top:
-                sys.exit(f"FAIL {p.name}: present but not part of the pack format")
-            if p.is_dir() and p.name != "media":
-                sys.exit(f"FAIL {p.name}/: directory not part of the pack format")
+    for p in sorted(pack_dir.iterdir()):
+        if p.is_file() and p.name not in allowed_top:
+            sys.exit(f"FAIL {p.name}: present but not part of the pack format")
+        if p.is_dir() and p.name != "media":
+            sys.exit(f"FAIL {p.name}/: directory not part of the pack format")
     pinned_tools = check_tools(pack_dir, trusted, f'visit:{bundle["original"]["visit_id"]}')
     # Transparency checkpoint: the log's leaves are the receipts-table chain
     # — originals, lifecycle, manifests. Review-chain entries anchor to the
@@ -1457,17 +1474,32 @@ def main():
             log_receipts.append(ar)
     adir = root / "attestations"
     if adir.exists():
-        listed = {f"{a.get('receipt_id')}.json" for a in manifest.get("attestations", [])}
-        extra = {p.name for p in adir.glob("*.json")} - listed
-        if extra:
-            print(f"FAIL {len(extra)} attestation file(s) present but not in the signed manifest")
-            failed += 1
+        # Any member that isn't exactly a listed "<receipt_id>.json" file is
+        # smuggled — non-.json files and whole subdirectories too, so sweep
+        # every member rather than glob("*.json").
+        listed = {
+            f"{a.get('receipt_id')}.json"
+            for a in attestations
+            if isinstance(a, dict) and a.get("receipt_id")
+        }
+        for p in sorted(adir.iterdir()):
+            if p.is_file() and p.name not in listed:
+                print(f"FAIL attestations/{p.name}: present but not in the signed manifest")
+                failed += 1
+            elif p.is_dir():
+                print(f"FAIL attestations/{p.name}/: directory not in the signed manifest")
+                failed += 1
     vdir = root / "visits"
     if vdir.exists():
-        extra_v = {p.name for p in vdir.iterdir() if p.is_dir()} - listed_vids
-        if extra_v:
-            print(f"FAIL {len(extra_v)} visit dir(s) present but not in the signed manifest")
-            failed += 1
+        # Plain files directly under visits/ are smuggled members too — only
+        # directories named for a listed visit_id are legal.
+        for p in sorted(vdir.iterdir()):
+            if p.is_dir() and p.name not in listed_vids:
+                print(f"FAIL visits/{p.name}/: directory not in the signed manifest")
+                failed += 1
+            elif p.is_file():
+                print(f"FAIL visits/{p.name}: present but not in the signed manifest")
+                failed += 1
     # Fail closed on any file the pack format doesn't name — a smuggled
     # top-level file or extra member inside a visit dir would otherwise ride
     # inside a "VERIFIED" pack. Media members are digest-checked by

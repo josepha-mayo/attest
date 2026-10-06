@@ -49,6 +49,30 @@ def _unb64(s: str) -> bytes:
     return base64.b64decode(s + "=" * (-len(s) % 4), validate=True)
 
 
+_ED_P = 2**255 - 19
+_ED_L = 2**252 + 27742317777372353535851937790883648493
+
+
+def _canonical_point(s: bytes) -> bool:
+    """The browser ``decodePoint`` canonicality gate, run before OpenSSL.
+
+    OpenSSL's Ed25519 (ref10 family) accepts two non-canonical point
+    encodings the browser verifier rejects: ``y >= p`` (it masks and
+    reduces, so ``y + p`` verifies under the same math) and the negative-zero
+    ``x = 0`` encodings with the sign bit set. Worse, both encode *small-order
+    points* — under such a key the forgery ``S = 0, R = identity`` satisfies
+    ``S·B == R + h·A`` without any private key, so a Python surface that
+    skipped this check would accept a forged receipt the browser rejects.
+    ``x == 0`` is exactly ``y in {1, p-1}``, so no decompression is needed.
+    """
+    if len(s) != 32:
+        return False
+    y = int.from_bytes(s, "little") & ((1 << 255) - 1)
+    if y >= _ED_P:
+        return False
+    return not (s[31] & 0x80 and y in (1, _ED_P - 1))
+
+
 class Signer:
     def __init__(self, private_key: Ed25519PrivateKey):
         self._sk = private_key
@@ -158,9 +182,19 @@ def verify_receipt(receipt: Receipt | dict[str, Any], *, public_key: str | None 
     elif r.payload.get("schema") != "attest.receipt/1":
         return False, "unsupported receipt schema"
     try:
-        Ed25519PublicKey.from_public_bytes(_unb64(r.public_key)).verify(
-            _unb64(r.signature), bytes.fromhex(r.payload_hash)
-        )
+        pk_b = _unb64(r.public_key)
+        sig_b = _unb64(r.signature)
+        # Canonicality gate (browser decodePoint parity): non-canonical A/R
+        # encodings — y >= p or sign-bit-set x = 0 — are forgeries OpenSSL
+        # would verify. S >= L is likewise rejected on the other surfaces.
+        if (
+            len(sig_b) != 64
+            or not _canonical_point(pk_b)
+            or not _canonical_point(sig_b[:32])
+            or int.from_bytes(sig_b[32:], "little") >= _ED_L
+        ):
+            return False, "signature invalid"
+        Ed25519PublicKey.from_public_bytes(pk_b).verify(sig_b, bytes.fromhex(r.payload_hash))
     except (InvalidSignature, ValueError):
         return False, "signature invalid"
     return True, "ok"

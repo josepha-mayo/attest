@@ -293,7 +293,13 @@ async function checkReceipt(rNode){
     if(p.receipt_id!==r.id||!sameInstant)
       return{ok:false,why:"receipt envelope identity disagrees with signed payload"};
   }else if(p.schema!=="attest.receipt/1")return{ok:false,why:"unsupported receipt schema"};
-  const ok=await edVerify(b64d(r.signature),b64d(r.public_key),hex2b(r.payload_hash));
+  /* atob throws on non-alphabet bytes where Python's _unb64(validate=True)
+     returns ValueError->False — a malformed envelope must fail HERE, not
+     abort the whole pack check up at go()'s catch. */
+  let sigB,pkB;
+  try{sigB=b64d(r.signature);pkB=b64d(r.public_key);}
+  catch(e){return{ok:false,why:"signature invalid"};}
+  const ok=await edVerify(sigB,pkB,hex2b(r.payload_hash));
   return ok?{ok:true}:{ok:false,why:"signature invalid"};}
 async function checkBundle(root,key){
   /* Full parity with attest.reviews.verify_bundle: each review entry binds its
@@ -388,7 +394,7 @@ function timelineSVG(p){
     checkin:"worker check-in"};
   /* role=img hides child <title>s from screen readers — build a prose
      aria-label from the same data so the strip reads for everyone. */
-  const counts={};for(const e of p.evidence||[]){
+  const counts=Object.create(null);for(const e of p.evidence||[]){
     const lbl=KIND_LBL[e.kind]||String(e.kind||"activity").replace(/_/g," ");
     counts[lbl]=(counts[lbl]||0)+1;}
   if(p.checked_in_at)counts["worker check-in (self-reported)"]=
@@ -454,7 +460,9 @@ async function checkManifestNode(mNode,key){
      unsigned rather than failing. */
   const m=toJS(mNode)||{};
   const sig=get(mNode,"signature_receipt");
-  if(!sig)return{ok:true,why:"unsigned manifest (pre-signature pack)"};
+  /* Python's `sig is None` reads explicit null as absent — the keep-node is
+     truthy either way, so test the VALUE. */
+  if(!sig||toJS(sig)===null)return{ok:true,why:"unsigned manifest (pre-signature pack)"};
   const c=await checkReceipt(sig);
   if(!c.ok)return{ok:false,why:"manifest signature: "+c.why};
   const js=toJS(sig);
@@ -540,12 +548,16 @@ async function descendantKeys(rootKey,rotationNodes,maxHops=32){
     for(const rn of rotationNodes){
       const r=toJS(rn)||{},p=r.payload||{};
       if(p.record_type==="key_rotation"&&p.previous_key===cur&&r.public_key===cur
-        &&typeof p.new_key==="string"&&Number.isInteger(r.sequence)){
+        &&typeof p.new_key==="string"&&_pyModelInt(get(rn,"sequence"))!==null){
         const c=await checkReceipt(rn);
         if(c.ok)cands.push([rn,r]);  /* adoptedBy takes the RAW node */
       }
     }
-    cands.sort((a,b)=>b[1].sequence-a[1].sequence);
+    /* Python sorts the exact int — sort the verbatim literal as BigInt so a
+       >2^53 sequence orders identically (toJS Number would round it). */
+    cands.sort((a,b)=>{
+      const sa=_pyModelInt(get(a[0],"sequence")),sb=_pyModelInt(get(b[0],"sequence"));
+      return sa===null||sb===null?0:sa<sb?1:sa>sb?-1:0;});
     let nxt=null;
     for(const [rn,r] of cands){
       if(await adoptedBy(rotationNodes,rn,r.payload.new_key)){nxt=r.payload.new_key;break;}
@@ -576,12 +588,17 @@ async function revokedKeys(keyNodes,issuerKey){
      already produced — a grafted foreign key or a retired key smearing a
      successor that hasn't pivoted in yet are both inert. */
   /* Malformed sequence sorts as -1 — an attacker controls this unsigned
-     field, and a NaN comparator would order differently than Python. */
-  const _seq=n=>{const s=(toJS(n)||{}).sequence;return Number.isInteger(s)?s:-1;};
-  const ord=[...keyNodes].sort((a,b)=>_seq(a)-_seq(b));
+     field, and a NaN comparator would order differently than Python. The
+     key is the verbatim literal via _pyModelInt (BigInt, arbitrary
+     precision) — toJS Numbers round past 2^53 and would order differently
+     than Python's exact ints. */
+  const _seq=n=>{const s=_pyModelInt(get(n,"sequence"));return s===null?-1n:s;};
+  const ord=[...keyNodes].sort((a,b)=>{const sa=_seq(a),sb=_seq(b);return sa<sb?-1:sa>sb?1:0;});
   let inEffect=issuerKey?await lineageRoot(issuerKey,ord):null;
   const seen=new Set();if(inEffect)seen.add(inEffect);
-  const out={};
+  /* Null-prototype map — revoked_key is attacker-controlled and "__proto__"
+     writes would silently drop, reads would hit Object.prototype. */
+  const out=Object.create(null);
   for(const rn of ord){
     const r=toJS(rn)||{},p=r.payload||{};
     /* not signed by the in-effect key: out-of-band history, no authority */
@@ -613,11 +630,14 @@ function suspectRecords(receiptNodes,revoked){
   }
   return out;}
 /* ---------- shared pack helpers ---------- */
-function digests(o,out=[]){
-  if(Array.isArray(o))o.forEach(v=>digests(v,out));
-  else if(o&&typeof o==="object"){
-    if(typeof o.media_sha256==="string")out.push(o.media_sha256);
-    for(const v of Object.values(o))digests(v,out);}
+function digests(payload,out=[]){
+  /* Evidence-only, matching app/disputepack: only payload.evidence[*]'s
+     media_sha256 entries count — a media_sha256 nested anywhere else must
+     neither mint ("digest matches" for a smuggled file) nor mask ("missing")
+     a digest the signed evidence never declared. */
+  const ev=payload&&payload.evidence;
+  if(Array.isArray(ev))for(const e of ev){
+    if(e&&typeof e.media_sha256==="string")out.push(e.media_sha256);}
   return out;}
 function deriveStance(js){
   /* Derive the worker stance from the SIGNED review chain — mirrors
@@ -1082,7 +1102,9 @@ async function verifyFiles(files){
   const out=[];const say=(c,m)=>out.push(`<div class="row ${c}">${m}</div>`);
   const text=async n=>byName[n]?await byName[n].text():null;
   const bundles=[];let mNode=null,manifest=null;
-  let anyBad=false,key=null;const actual={};
+  /* Null-prototype: visit_id "__proto__" is a legal member name but a
+     silently-ignored write on a plain object — it must compare, not poison. */
+  let anyBad=false,key=null;const actual=Object.create(null);
   const mText=await text("manifest.json");
   if(issuerDoc&&!issuerDoc.nodes){
     /* Callers that assign the parsed doc directly (tests, tooling) skip the
@@ -1139,7 +1161,7 @@ async function verifyFiles(files){
       return out.join("");
     }
   }
-  let trusted=null;let revoked={};let suspectTotal=0;let lifecycleNodes=[];
+  let trusted=null;let revoked=Object.create(null);let suspectTotal=0;let lifecycleNodes=[];
   const logRefs=[];  /* pack-member receipts the transparency checkpoint must prove */
   /* Guarded manifest visit ids — populated inside the manifest walk, read by
      the member-sweep below; function-scoped so both blocks see it. */
@@ -1300,23 +1322,22 @@ async function verifyFiles(files){
     if(svg)out.push(svg);
     const redT=await text(mNode?`visits/${vid}/redaction.json`:"redaction.json");
     const rj=redT?JSON.parse(redT):{};
-    /* Python's redaction_for recognizes only withheld_digests — the browser
-       must be at least as strict, so no alias fallback here. The set()
-       mirror keeps Python semantics for a hostile dict member (its keys),
-       where `new Set(dict)` would crash. */
-    const _set=x=>new Set(Array.isArray(x)?x:(x&&typeof x==="object"?Object.keys(x):[]));
-    const withheld=_set(rj.withheld_digests);
-    /* The marker file is unsigned — the signed manifest's media_withheld list
-       is the authority. If they disagree, a "withheld" claim may be masking a
-       deletion: fail closed, mirroring _verify_case_pack. */
-    if(manifest){
-      const mv=(manifest.visits||[]).find(x=>x.visit_id===vid);
-      const listed=_set(mv&&mv.media_withheld);
-      if(listed.size!==withheld.size||[...listed].some(d=>!withheld.has(d))){
-        anyBad=true;
-        say("bad",`${esc(vid)}: manifest redaction list disagrees with redaction.json`);
-      }
+    /* Python reads the marker via data.get — a parsed non-object marker
+       (array/scalar) crashes → FAIL there; match it, don't silently ∅. */
+    if(redT&&(rj===null||typeof rj!=="object"||Array.isArray(rj))){
+      anyBad=true;
+      say("bad",`${esc(vid)}: redaction.json is not an object`);
     }
+    /* set() mirror: Python set() takes a dict's keys and a string's chars but
+       raises on null/number/bool — the Python surfaces fail those, so _set
+       returns null there and the compares below fail closed. Absent
+       (undefined) is ∅; explicit null is the Python crash → fail. */
+    const _set=x=>x===undefined?new Set()
+      :Array.isArray(x)?new Set(x)
+      :typeof x==="string"?new Set(x)
+      :(x&&typeof x==="object"&&x!==null)?new Set(Object.keys(x))
+      :null;
+    const withheld=_set(rj?rj.withheld_digests:undefined);
     /* Media is matched by CONTENT hash, not filename — the pack stores files as
        media/<vid>/<label>.<digest-prefix>.png, mirroring _check_pack_bundle.
        Case packs nest under visits/<vid>/; single packs use media/ flat.
@@ -1325,6 +1346,25 @@ async function verifyFiles(files){
     const mprefix=mNode?`visits/${vid}/media/`:"media/";
     const found=new Set();
     const dset=new Set(digests((js.original||{}).payload||{}));
+    /* The marker file is unsigned — a withheld digest the signed evidence
+       never names is itself suspicious (app.py:2367 / redaction_for). */
+    if(withheld===null||[...withheld].some(d=>!dset.has(d))){
+      anyBad=true;
+      say("bad",`${esc(vid)}: redaction.json lists digests not in the signed evidence`);
+    }
+    /* The marker file is unsigned — the signed manifest's media_withheld list
+       is the authority. If they disagree, a "withheld" claim may be masking a
+       deletion: fail closed, mirroring _verify_case_pack. Compared even with
+       no marker (withheld=∅) — an absent marker can't skip the compare. */
+    if(manifest){
+      const mv=(manifest.visits||[]).find(x=>x.visit_id===vid);
+      const listed=_set(mv?mv.media_withheld:undefined);
+      if(listed===null||listed.size!==(withheld||new Set()).size
+         ||[...listed].some(d=>!withheld||!withheld.has(d))){
+        anyBad=true;
+        say("bad",`${esc(vid)}: manifest redaction list disagrees with redaction.json`);
+      }
+    }
     for(const name of Object.keys(byName)){
       if(name.startsWith(mprefix)&&!name.endsWith("/")){
         const h=await sha256hex(new Uint8Array(await byName[name].arrayBuffer()));
@@ -1338,8 +1378,9 @@ async function verifyFiles(files){
         found.add(h);
       }
     }
+    const wset=withheld||new Set();
     for(const d of digests((js.original||{}).payload||{})){
-      if(withheld.has(d)){say("warn",`  media ${esc(d.slice(0,12))}… withheld by redaction`);continue;}
+      if(wset.has(d)){say("warn",`  media ${esc(d.slice(0,12))}… withheld by redaction`);continue;}
       if(found.has(d))say("ok",`  media ${esc(d.slice(0,12))}… digest matches`);
       else{say("bad",`  media ${esc(d.slice(0,12))}… missing (not listed as withheld)`);anyBad=true;}
     }
