@@ -15,6 +15,16 @@ Why this problem is real: visit-verification records today are *editable*. New Y
 
 **See it in 30 seconds — no install:** [verify a real signed pack in your browser](https://josepha-mayo.github.io/attest/verify.html) — one click verifies the bundled sample green, one more verifies [its tampered twin](https://josepha-mayo.github.io/attest/sample-pack-tampered.zip) red (someone doctored the recorded 12-minute stay to 82; the signature catches it) — plus a four-attack gallery (deleted record, smuggled file, forged verifier) where each attack is caught by a different layer. The pure-JS verifier does Ed25519 + hash checks locally — drop any exported pack/receipt — or check [our signed `verify-live` sweep against the real Ring API](https://josepha-mayo.github.io/attest/live-sweep-receipt.json). Then `attest demo` — one command boots emulator + server + an eight-day story with a printed dashboard URL.
 
+<details><summary><strong>Judging in five minutes?</strong></summary>
+
+1. Open the hosted verifier's [deep link to the sample pack](https://josepha-mayo.github.io/attest/verify.html#sample-pack) → green **VERIFIED** stamp, no clicks needed.
+2. [Deep link to the tampered twin](https://josepha-mayo.github.io/attest/verify.html#sample-pack-tampered) → red **FAILED** stamp (`payload hash mismatch`). Then the attack gallery: deleted record, smuggled file, forged verifier — each caught by a different layer.
+3. `attest demo` → open the printed dashboard → the contested visit shows the source-divergence callout and the worker's signed dispute.
+4. Download `pack.zip`, unzip, open `index.html` — every record self-verifies from `file://`.
+5. `attest attack-demo` — twenty-one real tamper attempts against the store, all caught and rolled back. `attest status` for the self-audit.
+
+</details>
+
 ## What the record means
 
 - A schedule records an expectation, not the identity of a person at the camera.

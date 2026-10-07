@@ -430,13 +430,20 @@ def test_verify_html_is_self_contained():
         "src='",
         "url(http",
         "@import",
-        "<link",
         "<img",
         "fetch('http",
         'fetch("http',
         "import(",
     ):
         assert pat not in VERIFY_HTML, f"external resource reference {pat!r} in verifier"
+    # <link> is allowed only for a self-contained data: favicon — any other
+    # <link> (stylesheet, preload) would be an external reference.
+    import re as _re
+
+    for m in _re.finditer(r"<link[^>]*>", VERIFY_HTML):
+        assert _re.fullmatch(r"<link rel=\"icon\" href=\"data:image/svg\+xml,[^\"]*\">", m.group(0)), (
+            f"non-favicon <link> in verifier: {m.group(0)!r}"
+        )
     assert "crypto.subtle" in VERIFY_HTML  # real hashing, not a stub
     assert "BigInt" in VERIFY_HTML or "n<<" in VERIFY_HTML  # BigInt ed25519
 

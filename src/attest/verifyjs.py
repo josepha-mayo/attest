@@ -16,11 +16,20 @@ The node smoke test (tests/test_verifyjs.py) executes the same script block
 against a real signed receipt to prove the crypto, not just the packaging.
 """
 
+# A shield-check favicon — inline data URI so every generated page stays
+# fully self-contained (the self-containment test whitelists only this tag).
+_FAVICON = (
+    "data:image/svg+xml,%3Csvg xmlns='http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg' viewBox='0 0 16 16'%3E"
+    "%3Cpath d='M8 1l6 2v5c0 3.5-2.6 6-6 7-3.4-1-6-3.5-6-7V3z' fill='%231c1c1e'/%3E"
+    "%3Cpath d='M4.6 8.2l2.2 2.2 4.6-4.9' stroke='%23fff' stroke-width='1.5' fill='none'/%3E%3C/svg%3E"
+)
+
 _HEAD = """<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="{_FAVICON}">
 <title>Attest pack verifier</title>
 <style>
  body{font:15px/1.5 system-ui,sans-serif;max-width:760px;margin:2rem auto;padding:0 1rem;color:#1c1c1e}
@@ -39,7 +48,7 @@ _HEAD = """<!doctype html>
 </style>
 </head>
 <body>
-"""
+""".replace("{_FAVICON}", _FAVICON)
 
 _JS_OPEN = '<script>\n"use strict";\n'
 
@@ -1657,6 +1666,10 @@ if(location.protocol.indexOf("http")===0){
             "<div class='row bad'>sample fetch failed: "+esc(e.message)+"</div>";
         }
       };
+      /* verify.html#sample-pack-tampered deep-links straight to a verdict —
+         the landing page uses it so one click is the whole demo. */
+      if(location.hash.length>1&&file===location.hash.slice(1)+".zip")
+        document.getElementById(bid).click();
     }).catch(()=>{});
   }
 }
