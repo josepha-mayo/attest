@@ -489,34 +489,51 @@ def test_sample_pack_artifact_verifies():
     assert ok, detail
 
 
-def test_sample_pack_tampered_twin_fails():
-    """docs/sample-pack-tampered.zip is the demo's deliberate FAIL half — it must
-    fail verification with a payload-hash mismatch or the landing-page story lies."""
+@pytest.mark.parametrize(
+    "artifact,expect",
+    [
+        ("sample-pack-tampered.zip", "payload hash mismatch"),
+        ("sample-pack-attack-missing-record.zip", "missing or invalid bundle"),
+        ("sample-pack-attack-smuggled-file.zip", "not in the signed manifest"),
+        ("sample-pack-attack-forged-verifier.zip", "issuer-signed pin"),
+    ],
+)
+def test_sample_pack_attack_gallery_fails(artifact, expect):
+    """The docs attack gallery is the demo's deliberate FAIL half — every
+    shipped attack copy must fail verification at the layer the landing page
+    advertises, or the story lies."""
     from attest.app import _verify_pack
 
     docs = Path(__file__).resolve().parents[1] / "docs"
-    with zipfile.ZipFile(docs / "sample-pack-tampered.zip") as z:
+    with zipfile.ZipFile(docs / artifact) as z:
         issuer = json.loads(z.read("manifest.json"))["issuer_key"]
-        data = z.read("visits/vis_92f095f4eee7/bundle.json")
-        # the one doctoring the demo advertises: 12.2-minute stay -> 82.2
-        assert b'"duration_minutes": 82.2' in data
-    ok, detail = _verify_pack((docs / "sample-pack-tampered.zip").read_bytes(), issuer)
-    assert not ok and "payload hash mismatch" in detail
+        if artifact == "sample-pack-tampered.zip":
+            data = z.read("visits/vis_92f095f4eee7/bundle.json")
+            # the one doctoring the demo advertises: 12.2-minute stay -> 82.2
+            assert b'"duration_minutes": 82.2' in data
+    ok, detail = _verify_pack((docs / artifact).read_bytes(), issuer)
+    assert not ok and expect in detail, detail
 
 
 def test_tamper_twin_helper_fails_verification():
     """disputepack.tamper_twin() mints a hostile copy that must never verify —
-    the tool backs `export --tamper-twin` and the shipped docs artifact."""
+    the tool backs `export --tamper-twin` and the shipped docs artifacts."""
     from attest.app import _verify_pack
-    from attest.disputepack import tamper_twin
+    from attest.disputepack import TAMPER_ATTACKS, tamper_twin
 
     docs = Path(__file__).resolve().parents[1] / "docs"
     with zipfile.ZipFile(docs / "sample-pack.zip") as z:
         issuer = json.loads(z.read("manifest.json"))["issuer_key"]
-    tdata, desc = tamper_twin((docs / "sample-pack.zip").read_bytes())
-    assert "duration_minutes" in desc
-    ok, detail = _verify_pack(tdata, issuer)
-    assert not ok and "payload hash mismatch" in detail
+    pack = (docs / "sample-pack.zip").read_bytes()
+    descs = {}
+    for attack in TAMPER_ATTACKS:
+        tdata, desc = tamper_twin(pack, attack=attack)
+        descs[attack] = desc
+        ok, detail = _verify_pack(tdata, issuer)
+        assert not ok, f"{attack} ({desc}) verified — a minted twin must never pass"
+    assert "duration_minutes" in descs["duration"]
+    with pytest.raises(ValueError):
+        tamper_twin(pack, attack="social-engineering")
 
 
 def _case_pack(engine, store, household, schedule, t0, tmp_path, ring_world=None):

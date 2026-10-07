@@ -3544,7 +3544,7 @@ def _export(args: argparse.Namespace) -> None:
         if args.tamper_twin:
             from .disputepack import tamper_twin
 
-            tdata, desc = tamper_twin(data)
+            tdata, desc = tamper_twin(data, attack=args.attack)
             tpath = Path(args.tamper_twin)
             tpath.write_bytes(tdata)
             print(f"wrote {tpath} — doctored: {desc}")
@@ -4282,6 +4282,14 @@ def main(argv: list[str] | None = None) -> None:
         help="also write a deliberately doctored copy of the pack to PATH — one "
         "signed field changed, so the twin must FAIL verification; for demos "
         "and QA of the verifier itself",
+    )
+    s.add_argument(
+        "--attack",
+        choices=["duration", "missing-record", "smuggled-file", "forged-verifier"],
+        default="duration",
+        help="which attack --tamper-twin plants: duration doctors a signed field, "
+        "missing-record deletes a committed record, smuggled-file injects an "
+        "uncommitted member, forged-verifier swaps the embedded checker",
     )
     s.set_defaults(fn=_export)
 

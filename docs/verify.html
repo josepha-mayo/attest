@@ -38,7 +38,14 @@ signed lifecycle bridges pre-rotation exports.</small></div>
 sample pack — one click, fetched from this site</button></p>
 <p id="trytamper-wrap" hidden><button id="trytamper" type="button">Verify the tampered
 twin — the same pack, but someone doctored the recorded 12-minute stay to 82.
-Watch the signature catch it</button></p>
+Watch the signature catch it</button><br>
+<small>Or pick an attack — each is caught by a different layer:</small></p>
+<p id="tryatk1-wrap" hidden><button id="tryatk1" type="button">Attack: deleted record
+— a visit bundle was removed, but the signed manifest still names its receipt</button></p>
+<p id="tryatk2-wrap" hidden><button id="tryatk2" type="button">Attack: smuggled file
+— extra-evidence.json injected after signing; nothing signed commits to it</button></p>
+<p id="tryatk3-wrap" hidden><button id="tryatk3" type="button">Attack: forged verifier
+— the embedded checker swapped for an always-green stub; the tooling pin names its bytes</button></p>
 <div id="out" role="status" aria-live="polite"></div>
 <div id="live-wrap" hidden>
 <h2>Is this still the log the deployment serves?</h2>
@@ -1655,32 +1662,31 @@ if(location.protocol.indexOf("http")===0){
   fetch("/.well-known/attest-issuer.json",{method:"HEAD"}).then(r=>{
     if(r.ok)document.getElementById("liveurl").value=location.origin;
   }).catch(()=>{});
-  fetch("sample-pack.zip",{method:"HEAD"}).then(r=>{
-    if(!r.ok)return;
-    document.getElementById("trysample-wrap").hidden=false;
-    document.getElementById("trysample").onclick=async()=>{
-      try{
-        const buf=await(await fetch("sample-pack.zip")).arrayBuffer();
-        go([new File([buf],"sample-pack.zip")]);
-      }catch(e){
-        document.getElementById("out").innerHTML=
-          "<div class='row bad'>sample fetch failed: "+esc(e.message)+"</div>";
-      }
-    };
-  }).catch(()=>{});
-  fetch("sample-pack-tampered.zip",{method:"HEAD"}).then(r=>{
-    if(!r.ok)return;
-    document.getElementById("trytamper-wrap").hidden=false;
-    document.getElementById("trytamper").onclick=async()=>{
-      try{
-        const buf=await(await fetch("sample-pack-tampered.zip")).arrayBuffer();
-        go([new File([buf],"sample-pack-tampered.zip")]);
-      }catch(e){
-        document.getElementById("out").innerHTML=
-          "<div class='row bad'>sample fetch failed: "+esc(e.message)+"</div>";
-      }
-    };
-  }).catch(()=>{});
+  /* The bundled sample plus its attack gallery — one button per attack, each
+     caught by a different layer of the verifier. Absent files just leave
+     their buttons hidden. */
+  const _samples=[
+    ["sample-pack.zip","trysample"],
+    ["sample-pack-tampered.zip","trytamper"],
+    ["sample-pack-attack-missing-record.zip","tryatk1"],
+    ["sample-pack-attack-smuggled-file.zip","tryatk2"],
+    ["sample-pack-attack-forged-verifier.zip","tryatk3"],
+  ];
+  for(const [file,bid] of _samples){
+    fetch(file,{method:"HEAD"}).then(r=>{
+      if(!r.ok)return;
+      document.getElementById(bid+"-wrap").hidden=false;
+      document.getElementById(bid).onclick=async()=>{
+        try{
+          const buf=await(await fetch(file)).arrayBuffer();
+          go([new File([buf],file)]);
+        }catch(e){
+          document.getElementById("out").innerHTML=
+            "<div class='row bad'>sample fetch failed: "+esc(e.message)+"</div>";
+        }
+      };
+    }).catch(()=>{});
+  }
 }
 </script>
 </body>

@@ -1950,68 +1950,105 @@ def build_case_pack(
     return buf.getvalue()
 
 
-def tamper_twin(pack: bytes) -> tuple[bytes, str]:
-    """A hostile copy of a case pack: byte-identical except one doctored field
-    inside a signed payload, so the copy must FAIL verification with a payload
-    hash mismatch. Used for demos and verifier QA — ``export --tamper-twin``
-    writes one, and ``docs/sample-pack-tampered.zip`` is built this way.
-    Returns ``(zip_bytes, description_of_the_doctoring)``."""
+TAMPER_ATTACKS = ("duration", "missing-record", "smuggled-file", "forged-verifier")
+
+
+def tamper_twin(pack: bytes, attack: str = "duration") -> tuple[bytes, str]:
+    """A hostile copy of a pack: byte-identical except one deliberate attack,
+    so the copy must FAIL verification. Each ``attack`` exercises a different
+    verification layer — ``duration`` doctors a signed payload field,
+    ``missing-record`` deletes a record the manifest commits to,
+    ``smuggled-file`` injects a member no signed content names, and
+    ``forged-verifier`` swaps the embedded checker for an always-green stub.
+    Used for demos and verifier QA — ``export --tamper-twin`` writes one, and
+    the ``docs/sample-pack-*`` twins are built this way.
+    Returns ``(zip_bytes, description_of_the_attack)``."""
+    if attack not in TAMPER_ATTACKS:
+        raise ValueError(f"unknown attack {attack!r} — pick one of {', '.join(TAMPER_ATTACKS)}")
     with zipfile.ZipFile(io.BytesIO(pack)) as src:
         names = src.namelist()
-        targets = sorted(
+        bundles = sorted(
             n
             for n in names
             if n == "bundle.json"
             or (n.startswith("visits/") and n.endswith("/bundle.json") and n.count("/") == 2)
         )
-        doctored: tuple[str, bytes] | None = None
+        mutated: dict[str, bytes] = {}
+        added: dict[str, bytes] = {}
+        dropped: set[str] = set()
         desc = ""
-        # The demo story: the *shortest* recorded stay inflated toward the
-        # scheduled expectation — "she was there most of the window".
-        best: tuple[float, str, bytes, bytes, int, int] | None = None
-        for name in targets:
-            raw = src.read(name)
-            marker = b'"duration_minutes": '
-            i = raw.find(marker)
-            if i < 0:
-                continue
-            j = i + len(marker)
-            k = j
-            while k < len(raw) and raw[k] in b"0123456789.-":
-                k += 1
-            try:
-                val = float(raw[j:k])
-            except ValueError:
-                continue
-            if best is None or val < best[0]:
-                best = (val, name, raw, raw[j:k], j, k)
-        if best is not None:
-            val, name, raw, span, j, k = best
-            new = repr(val + 70.0)
-            doctored = (name, raw[:j] + new.encode() + raw[k:])
-            vid = name.split("/")[1] if "/" in name else "bundle"
-            desc = f"{vid}: duration_minutes {span.decode()} -> {new}"
-        else:
-            for name in targets:
+
+        if attack == "duration":
+            # The demo story: the *shortest* recorded stay inflated toward the
+            # scheduled expectation — "she was there most of the window".
+            best: tuple[float, str, bytes, bytes, int, int] | None = None
+            for name in bundles:
                 raw = src.read(name)
-                wmark = b'"worker": "'
-                i = raw.find(wmark)
+                marker = b'"duration_minutes": '
+                i = raw.find(marker)
                 if i < 0:
                     continue
-                j = i + len(wmark)
-                k = raw.find(b'"', j)
-                worker = raw[j:k].decode()
-                new = worker[:-1] + ("X" if not worker.endswith("X") else "Y")
-                doctored = (name, raw[:j] + new.encode() + raw[k:])
+                j = i + len(marker)
+                k = j
+                while k < len(raw) and raw[k] in b"0123456789.-":
+                    k += 1
+                try:
+                    val = float(raw[j:k])
+                except ValueError:
+                    continue
+                if best is None or val < best[0]:
+                    best = (val, name, raw, raw[j:k], j, k)
+            if best is not None:
+                val, name, raw, span, j, k = best
+                new = repr(val + 70.0)
+                mutated[name] = raw[:j] + new.encode() + raw[k:]
                 vid = name.split("/")[1] if "/" in name else "bundle"
-                desc = f"{vid}: worker '{worker}' -> '{new}'"
-                break
-        if doctored is None:
-            raise ValueError("no doctorable field found in any visit bundle")
+                desc = f"{vid}: duration_minutes {span.decode()} -> {new}"
+            else:
+                for name in bundles:
+                    raw = src.read(name)
+                    wmark = b'"worker": "'
+                    i = raw.find(wmark)
+                    if i < 0:
+                        continue
+                    j = i + len(wmark)
+                    k = raw.find(b'"', j)
+                    worker = raw[j:k].decode()
+                    new = worker[:-1] + ("X" if not worker.endswith("X") else "Y")
+                    mutated[name] = raw[:j] + new.encode() + raw[k:]
+                    vid = name.split("/")[1] if "/" in name else "bundle"
+                    desc = f"{vid}: worker '{worker}' -> '{new}'"
+                    break
+                if not mutated:
+                    raise ValueError("no doctorable field found in any visit bundle")
+        elif attack == "missing-record":
+            if not bundles:
+                raise ValueError("no visit bundle to delete")
+            dropped.add(bundles[0])
+            vid = bundles[0].split("/")[1] if "/" in bundles[0] else "bundle"
+            desc = f"{vid}: record deleted — the signed manifest still commits to its receipt"
+        elif attack == "smuggled-file":
+            if not bundles:
+                raise ValueError("no visit bundle to smuggle beside")
+            vid = bundles[0].split("/")[1] if "/" in bundles[0] else ""
+            member = f"visits/{vid}/extra-evidence.json" if vid else "extra-evidence.json"
+            added[member] = b'{"planted": true, "note": "injected after signing"}\n'
+            desc = f"{member} injected — a member no signed content commits to"
+        else:  # forged-verifier
+            tool = next((t for t in ("verify_case.py", "verify_bundle.py") if t in names), None)
+            if tool is None:
+                raise ValueError("pack carries no embedded verifier to forge")
+            mutated[tool] = b'import sys\nprint("VERIFIED - nothing was checked")\nsys.exit(0)\n'
+            desc = f"{tool} replaced with an always-green stub — the tooling pin names its bytes"
+
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as dst:
             for n in names:
-                dst.writestr(n, doctored[1] if n == doctored[0] else src.read(n))
+                if n in dropped:
+                    continue
+                dst.writestr(n, mutated.get(n) or src.read(n))
+            for n, data in added.items():
+                dst.writestr(n, data)
     return buf.getvalue(), desc
 
 

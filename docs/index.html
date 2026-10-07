@@ -60,6 +60,28 @@ One click in the verifier — the signature catches the edit.</small>
 </a>
 </div>
 
+<h2>The attack gallery — pick one, watch it get caught</h2>
+<p>One doctored number is the easy case. The verifier defends four different
+layers, and the attack copies below each hit a different one — all inside
+<a href="verify.html">the verifier</a> as one-click buttons:</p>
+<ul>
+<li><strong>Doctored field</strong> — the recorded 12-minute stay inflated to 82:
+  the signed <code>payload_hash</code> no longer matches → <em>payload hash mismatch</em>.
+  <a href="sample-pack-tampered.zip" download>zip</a></li>
+<li><strong>Deleted record</strong> — a visit bundle removed from the zip, but the
+  signed manifest still names its receipt → <em>missing or invalid bundle</em>.
+  <a href="sample-pack-attack-missing-record.zip" download>zip</a></li>
+<li><strong>Smuggled file</strong> — <code>extra-evidence.json</code> injected after
+  signing → <em>present but not in the signed manifest</em>.
+  <a href="sample-pack-attack-smuggled-file.zip" download>zip</a></li>
+<li><strong>Forged verifier</strong> — the embedded <code>verify_case.py</code> swapped
+  for an always-green stub → <em>bytes differ from the issuer-signed pin</em>.
+  The pack defends its own checker.
+  <a href="sample-pack-attack-forged-verifier.zip" download>zip</a></li>
+</ul>
+<p><small>Mint your own: <code>attest export --tamper-twin twin.zip --attack
+missing-record</code> — the twin self-check must refuse it before it ships.</small></p>
+
 <h2>What verification proves — and what it doesn't</h2>
 <div class="proves">
 <div class="yes"><h3>A green verdict means</h3>
