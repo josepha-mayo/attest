@@ -13,15 +13,16 @@ Why this problem is real: visit-verification records today are *editable*. New Y
 
 **What makes it different.** Attendance tools answer with a verdict; Attest ships evidence you don't have to trust. The export pack **verifies itself** — open it in a browser or a stock Python install and every record re-checks, with no Attest dependency and no trust in the issuer. Silence is signed too: receipts attest *how much of the window was watched*, so "we checked and saw nothing" is provably different from "we weren't watching." The dispute loop is bilateral — the worker's words land in the same signed chain the coordinator concludes on, and appends never rewrite. And the project names exactly what it cannot prove (identity, attendance, completeness of a hidden tail) in the record boundary, the threat model, and a live tamper battery that fails against itself.
 
-**See it in 30 seconds — no install:** [verify a real signed pack in your browser](https://josepha-mayo.github.io/attest/verify.html) — one click verifies the bundled sample green, one more verifies [its tampered twin](https://josepha-mayo.github.io/attest/sample-pack-tampered.zip) red (someone doctored the recorded 12-minute stay to 82; the signature catches it) — plus a four-attack gallery (deleted record, smuggled file, forged verifier) where each attack is caught by a different layer. The pure-JS verifier does Ed25519 + hash checks locally — drop any exported pack/receipt — or check [our signed `verify-live` sweep against the real Ring API](https://josepha-mayo.github.io/attest/live-sweep-receipt.json). Then `attest demo` — one command boots emulator + server + an eight-day story with a printed dashboard URL.
+**See it in 30 seconds — no install:** [verify a real signed pack in your browser](https://josepha-mayo.github.io/attest/verify.html) — one click verifies the bundled sample green, one more verifies [its tampered twin](https://josepha-mayo.github.io/attest/sample-pack-tampered.zip) red (someone doctored the recorded 12-minute stay to 82; the signature catches it) — plus a four-attack gallery (deleted record, smuggled file, forged verifier) where each attack is caught by a different layer. The pure-JS verifier does Ed25519 + hash checks locally — drop any exported pack/receipt — or check [our signed `verify-live` sweep against the real Ring API](https://josepha-mayo.github.io/attest/verify.html#live-sweep-receipt) — a lone receipt auto-verified by the same page. Then `attest demo` — one command boots emulator + server + an eight-day story with a printed dashboard URL.
 
 <details><summary><strong>Judging in five minutes?</strong></summary>
 
-1. Open the hosted verifier's [deep link to the sample pack](https://josepha-mayo.github.io/attest/verify.html#sample-pack) → green **VERIFIED** stamp, no clicks needed.
+1. Open the hosted verifier's [deep link to the sample pack](https://josepha-mayo.github.io/attest/verify.html#sample-pack) → green **VERIFIED** stamp, no clicks needed → then the **open index.html** link under the stamp — the verified pack hands you its own record browser (it re-verifies every record itself).
 2. [Deep link to the tampered twin](https://josepha-mayo.github.io/attest/verify.html#sample-pack-tampered) → red **FAILED** stamp (`payload hash mismatch`). Then the attack gallery: deleted record, smuggled file, forged verifier — each caught by a different layer.
-3. `attest demo` → open the printed dashboard → the contested visit shows the source-divergence callout and the worker's signed dispute.
-4. Download `pack.zip`, unzip, open `index.html` — every record self-verifies from `file://`.
-5. `attest attack-demo` — twenty-one real tamper attempts against the store, all caught and rolled back. `attest status` for the self-audit.
+3. [Deep link to the signed live sweep](https://josepha-mayo.github.io/attest/verify.html#live-sweep-receipt) → the `verify-live --sign` report from the real `api.amazonvision.com` run, auto-verified.
+4. `attest demo` → open the printed dashboard → the contested visit shows the source-divergence callout and the worker's signed dispute.
+5. Download `pack.zip`, unzip, open `index.html` — every record self-verifies from `file://`.
+6. `attest attack-demo` — twenty-one real tamper attempts against the store, all caught and rolled back. `attest status` for the self-audit.
 
 </details>
 

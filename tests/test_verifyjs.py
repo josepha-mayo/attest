@@ -1108,6 +1108,7 @@ const fake={name:'p.zip',
 __rz(fake).then(async files=>{
   const html=await __v(files);
   console.log('verdict:',(html.match(/VERIFIED[^<]*|FAILED[^<]*/)||['none'])[0]);
+  console.log('has-blob:',html.includes('blob:'));
   console.log(html.replace(/<[^>]+>/g,' ').replace(/\s+/g,' '));
 }).catch(e=>{console.log('ERR',e.message);process.exit(2);});
 """
@@ -1296,6 +1297,49 @@ def test_verify_html_redacted_pack_still_verifies(
     assert "VERIFIED" in out, out
     assert "FAILED" not in out, out
     assert "withheld" in out, out
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_verify_html_offers_record_browser_only_on_verified(engine, store, household, schedule, t0, tmp_path):
+    """The 'open index.html' affordance is a verified-only bridge: a green pack
+    gets a blob: link to its embedded record browser; a doctored pack must NOT
+    offer it — an untrusted narrative must never render under FAILED."""
+    from attest.disputepack import tamper_twin
+
+    z = _case_pack(engine, store, household, schedule, t0, tmp_path)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as out:
+        for name in z.namelist():
+            out.writestr(name, z.read(name))
+    clean = buf.getvalue()
+
+    out = _drive_zip(tmp_path, zipfile.ZipFile(io.BytesIO(clean)))
+    assert "VERIFIED" in out, out
+    assert "open index.html" in out, out
+    assert "has-blob: true" in out, out
+
+    twin, _ = tamper_twin(clean, attack="smuggled-file")
+    out = _drive_zip(tmp_path, zipfile.ZipFile(io.BytesIO(twin)), name="twin.zip")
+    assert "FAILED" in out, out
+    assert "open index.html" not in out, out
+    assert "has-blob: false" in out, out
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_verify_html_no_browser_link_without_index_member(engine, store, household, schedule, t0, tmp_path):
+    """A pack with no index.html member (and no verifier pin — older export
+    format) still VERIFIEDs but must not offer a record-browser link."""
+    z = _case_pack(engine, store, household, schedule, t0, tmp_path)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as out:
+        for name in z.namelist():
+            if name in ("index.html", "verifier_manifest.json"):
+                continue
+            out.writestr(name, z.read(name))
+    buf.seek(0)
+    out = _drive_zip(tmp_path, zipfile.ZipFile(buf))
+    assert "VERIFIED" in out, out
+    assert "open index.html" not in out, out
 
 
 @pytest.mark.skipif(NODE is None, reason="node runtime not available")

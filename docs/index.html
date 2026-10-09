@@ -48,8 +48,9 @@ hash-chained ledger — and the pack you're about to verify carries its own veri
 so nobody has to trust this site either.</p>
 
 <p><small><strong>Suggested 60 seconds:</strong> open the verifier → green
-VERIFIED on the sample → red FAILED on the tampered twin → the rest of the
-attack gallery.</small></p>
+VERIFIED on the sample → click <em>open index.html</em> under the stamp (the
+verified pack hands you its own record browser) → red FAILED on the tampered
+twin → the rest of the attack gallery.</small></p>
 
 <div class="cards">
 <a class="card" href="verify.html">
@@ -66,6 +67,11 @@ moment this page opens.</small>
 <b>Verify the tampered twin<span class="badge bad">FAIL</span></b>
 <small>Same pack, but someone doctored the recorded 12-minute stay to 82 minutes.
 Deep link — lands on a red FAILED stamp.</small>
+</a>
+<a class="card" href="verify.html#live-sweep-receipt">
+<b>Verify the real-API sweep<span class="badge ok">PASS</span></b>
+<small>The signed <code>verify-live --sign</code> report from the actual
+<code>api.amazonvision.com</code> run — a lone receipt, auto-verified on load.</small>
 </a>
 </div>
 
@@ -174,7 +180,8 @@ signed SHA-256 digests preserved. It exercises the hard parts, not just the happ
 <code>verify-live --sign</code> report from a real sweep against
 <code>api.amazonvision.com</code> (2026-09-30): users/me, devices, device status, Event
 History, and media download through the regional redirect — every probe signed, so the
-claim verifies offline the same way a pack does.</p>
+claim verifies offline the same way a pack does.
+<a href="verify.html#live-sweep-receipt">Verify it in your browser, one click →</a></p>
 
 <details><summary>Deployment housekeeping</summary>
 <p>If Pages serves a stale copy: bump this file or commit with <code>--allow-empty</code>.

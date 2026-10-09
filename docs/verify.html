@@ -15,9 +15,11 @@
  .row.ok::before{content:"\2713 "}.row.bad::before{content:"\2717 "}
  .row.warn::before{content:"\26a0 "}
  .row.stamp{display:block;font-size:1.1rem;font-weight:700;border:2px solid;
-   border-radius:10px;padding:.7rem 1rem;margin:.9rem 0}
+   border-radius:10px;padding:.7rem 1rem;margin:.9rem 0;animation:stampin .28s ease-out}
  .row.stamp.ok{border-color:#146c2e;background:#f0fdf4}
  .row.stamp.bad{border-color:#b3261e;background:#fef2f2}
+ @keyframes stampin{from{transform:scale(1.5);opacity:0}to{transform:scale(1);opacity:1}}
+ @media (prefers-reduced-motion:reduce){.row.stamp{animation:none}}
  small{color:#666}
 </style>
 </head>
@@ -47,6 +49,9 @@ Watch the signature catch it</button><br>
 — extra-evidence.json injected after signing; nothing signed commits to it</button></p>
 <p id="tryatk3-wrap" hidden><button id="tryatk3" type="button">Attack: forged verifier
 — the embedded checker swapped for an always-green stub; the tooling pin names its bytes</button></p>
+<p id="tryreceipt-wrap" hidden><button id="tryreceipt" type="button">Verify the signed
+report from a real sweep against the Ring Partner API — a lone receipt, verified
+by the same math</button></p>
 <div id="out" role="status" aria-live="polite"></div>
 <div id="live-wrap" hidden>
 <h2>Is this still the log the deployment serves?</h2>
@@ -679,6 +684,9 @@ let issuerDoc=null;
    optional live cross-check (verify --issuer-url parity) can compare it
    against the head the deployment serves NOW. */
 let packStash=null;
+/* Blob URL for the verified pack's index.html — revoked on every new verify so
+   re-runs don't accumulate dead object URLs. */
+let _idxUrl=null;
 const _TOOLNAMES=new Set(["verify_case.py","verify_bundle.py","verify.html","index.html","README.txt"]);
 async function checkTools(byName,trustedSet,scope,bad,ok){
   /* verifier_manifest.json pins the pack's tooling BYTES to the issuer —
@@ -1113,6 +1121,7 @@ async function checkLog(byName,trustedSet,refs,bad,ok){
 async function verifyFiles(files){
   /* null-prototype map — a zip member literally named "__proto__" must land
      as an own key or the smuggle-member sweep (and Python's dict) see it. */
+  if(_idxUrl){URL.revokeObjectURL(_idxUrl);_idxUrl=null;}
   const byName=Object.create(null);for(const f of files)byName[f.name]=f;
   const out=[];const say=(c,m)=>out.push(`<div class="row ${c}">${m}</div>`);
   const text=async n=>byName[n]?await byName[n].text():null;
@@ -1506,6 +1515,17 @@ async function verifyFiles(files){
         ?` · ${trusted.size} issuer keys via the signed rotation chain`:""));
   if(suspectTotal)
     say("warn",`${suspectTotal} record(s) signed by a revoked issuer inside its suspect window`);
+  /* Verified packs carry their own record browser — offer it only on a green
+     verdict: a FAILED pack's narrative is untrusted and must not render. */
+  if(!anyBad&&byName["index.html"]){
+    try{
+      const idx=await byName["index.html"].text();
+      const url=_idxUrl=URL.createObjectURL(new Blob([idx],{type:"text/html"}));
+      say("ok","this pack carries its own record browser — "
+        +`<a href="${url}" target="_blank" rel="noopener">open index.html</a>`
+        +" — it re-verifies every record and renders the timelines");
+    }catch(e){/* no Blob URLs in this host — the verdict stands alone */}
+  }
   return out.join("");}
 /* ---------- minimal zip reader: stored + deflate via DecompressionStream ---------- */
 async function inflate(raw){
@@ -1672,6 +1692,7 @@ if(location.protocol.indexOf("http")===0){
     ["sample-pack-attack-missing-record.zip","tryatk1"],
     ["sample-pack-attack-smuggled-file.zip","tryatk2"],
     ["sample-pack-attack-forged-verifier.zip","tryatk3"],
+    ["live-sweep-receipt.json","tryreceipt"],
   ];
   for(const [file,bid] of _samples){
     fetch(file,{method:"HEAD"}).then(r=>{
@@ -1679,6 +1700,8 @@ if(location.protocol.indexOf("http")===0){
       document.getElementById(bid+"-wrap").hidden=false;
       document.getElementById(bid).onclick=async()=>{
         try{
+          /* Put the deep-link in the bar — the verdict URL is shareable. */
+          history.replaceState(null,"",location.pathname+"#"+file.replace(/\.(zip|json)$/,""));
           const buf=await(await fetch(file)).arrayBuffer();
           go([new File([buf],file)]);
         }catch(e){
@@ -1688,7 +1711,8 @@ if(location.protocol.indexOf("http")===0){
       };
       /* verify.html#sample-pack-tampered deep-links straight to a verdict —
          the landing page uses it so one click is the whole demo. */
-      if(location.hash.length>1&&file===location.hash.slice(1)+".zip")
+      if(location.hash.length>1&&(file===location.hash.slice(1)+".zip"
+        ||file===location.hash.slice(1)+".json"))
         document.getElementById(bid).click();
     }).catch(()=>{});
   }
