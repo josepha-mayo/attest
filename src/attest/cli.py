@@ -1047,7 +1047,9 @@ def _verify(args: argparse.Namespace) -> None:
         """Every verification verdict exits the same way on both surfaces —
         with --json stdout still carries exactly one object, so a pipeline
         can gate on .ok without parsing prose."""
-        _write_verdict_badge(getattr(args, "badge", None), False, detail)
+        _write_verdict_badge(
+            getattr(args, "badge", None), False, detail, link=getattr(args, "badge_link", None)
+        )
         if json_mode:
             print(json.dumps({"ok": False, "detail": detail, **kw}, indent=2))
             sys.exit(1)
@@ -1178,6 +1180,7 @@ def _verify(args: argparse.Namespace) -> None:
             witness_names=witness_names,
             witness_threshold=witness_threshold,
             badge=getattr(args, "badge", None),
+            badge_link=getattr(args, "badge_link", None),
         )
         return
     try:
@@ -1787,6 +1790,7 @@ def _verify_zip(
     witness_names: dict | None = None,
     witness_threshold: int = 1,
     badge: str | None = None,
+    badge_link: str | None = None,
 ) -> None:
     """Verify a dispute pack or case pack zip in place — same checks as the
     embedded verify_case.py and the /verify page. Without --key the pack's own
@@ -1805,7 +1809,7 @@ def _verify_zip(
     from .packdiff import BoundedZip
 
     def fail(detail: str, **kw) -> None:
-        _write_verdict_badge(badge, False, detail)
+        _write_verdict_badge(badge, False, detail, link=badge_link)
         if json_mode:
             print(json.dumps({"ok": False, "detail": detail, **kw}, indent=2))
             sys.exit(1)
@@ -1930,7 +1934,7 @@ def _verify_zip(
                 pass
         if live_report is not None:
             extra["live_log"] = live_report
-        _write_verdict_badge(badge, True, detail)
+        _write_verdict_badge(badge, True, detail, link=badge_link)
         print(
             json.dumps(
                 {"ok": True, "kind": kind, "detail": detail, "pinned": bool(pinned_key), **extra},
@@ -1939,7 +1943,7 @@ def _verify_zip(
         )
         return
     print(f"OK: {detail}")
-    _write_verdict_badge(badge, True, detail)
+    _write_verdict_badge(badge, True, detail, link=badge_link)
     if live_line:
         print(f"Live log: {live_line}")
     if pinned_key:
@@ -1951,11 +1955,13 @@ def _verify_zip(
         )
 
 
-def _write_verdict_badge(path: str | None, ok: bool, detail: str) -> None:
+def _write_verdict_badge(path: str | None, ok: bool, detail: str, link: str | None = None) -> None:
     """``verify --badge`` — render the verdict as a self-contained SVG shield,
     the evidence-pack analogue of a CI badge. Written on failure too: a red
     badge that says FAILED is honest output, not an error artifact. The full
-    verdict detail rides in ``<title>`` so a hover carries the real string."""
+    verdict detail rides in ``<title>`` so a hover carries the real string.
+    ``--badge-link`` wraps the shield in an ``<a>`` so a badge opened
+    standalone still leads back to a verifier."""
     if not path:
         return
     from html import escape as _esc
@@ -1975,6 +1981,21 @@ def _write_verdict_badge(path: str | None, ok: bool, detail: str) -> None:
         f'<text x="{lw + rw / 2:.0f}" y="14" text-anchor="middle">{_esc(value)}</text>'
         f"</g></svg>\n"
     )
+    if link:
+        svg = (
+            svg.replace(
+                "<svg ",
+                '<svg xmlns:xlink="http://www.w3.org/1999/xlink" ',
+                1,
+            )
+            .replace(
+                f'<rect width="{lw}"',
+                f'<a xlink:href="{_esc(link, quote=True)}" href="{_esc(link, quote=True)}">'
+                f'<rect width="{lw}"',
+                1,
+            )
+            .replace("</svg>", "</a></svg>", 1)
+        )
     Path(path).write_text(svg, encoding="utf-8")
     print(f"verdict badge written to {path}", file=sys.stderr)
 
@@ -4289,6 +4310,13 @@ def main(argv: list[str] | None = None) -> None:
         metavar="SVG_PATH",
         help="also write the verdict as a self-contained SVG shield — a CI "
         "badge for evidence packs; written red on failure, not withheld",
+    )
+    s.add_argument(
+        "--badge-link",
+        default=None,
+        metavar="URL",
+        help="wrap the badge shield in a link to this URL (e.g. a verifier "
+        "page), so a badge opened standalone still leads to the check",
     )
     s.add_argument(
         "--witness-key",

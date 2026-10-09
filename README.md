@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/josepha-mayo/attest/actions/workflows/ci.yml/badge.svg)](https://github.com/josepha-mayo/attest/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![pack verified](https://josepha-mayo.github.io/attest/badge-verified.svg)](https://josepha-mayo.github.io/attest/verify.html#sample-pack)
 
 **Tamper-evident visit records for home services — what the Ring devices observed, what the worker reported, what a human concluded. Signed, reviewable, verifiable offline.**
 
