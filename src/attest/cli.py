@@ -3635,6 +3635,34 @@ def _split_demo(args: argparse.Namespace) -> None:
     )
 
 
+def _judge(args: argparse.Namespace) -> None:
+    """The judge's walkthrough, printed where a judge actually looks: the
+    terminal. Pure output — reads nothing, locks nothing."""
+    print(
+        """\
+Attest — records, not verdicts. The ten-minute path:
+
+  Zero install (hosted):
+    1. green VERIFIED … https://josepha-mayo.github.io/attest/verify.html#sample-pack
+    2. red FAILED   … https://josepha-mayo.github.io/attest/verify.html#sample-pack-tampered
+       (one doctored field — 12.2→82.2 minutes — caught by the signature)
+    3. the attack gallery + caught fork + real-API sweep: same page, one click each
+    4. after a green stamp: open index.html — the pack hands you its own
+       record browser, which re-verifies every record itself
+
+  With the repo:
+    attest demo           # emulator + server + an eight-day story, prints a URL
+    attest attack-demo    # twenty-one real tamper attacks — all caught
+    attest split-demo     # a witness + monitor catching a forked log
+    attest export --tamper-twin twin.zip --attack forged-verifier
+    attest status && attest doctor
+
+  To read: JUDGE.md (scoring map) · THREATMODEL.md (limits are the point) ·
+           FRICTIONLOG.md (17 API-friction entries)
+"""
+    )
+
+
 def _diff(args: argparse.Namespace) -> None:
     """Compare two exports (case pack, dispute pack, or bundle.json) — append-only
     drift is normal; vanished or altered records are anomalies."""
@@ -4314,6 +4342,13 @@ def main(argv: list[str] | None = None) -> None:
         "(divergence-checkpoint.json — verify with `attest verify`) to DIR",
     )
     s.set_defaults(fn=_split_demo)
+
+    s = sub.add_parser(
+        "judge",
+        help="print the ten-minute judge walkthrough — hosted deep links, the "
+        "repo path, and the docs that carry the scoring evidence",
+    )
+    s.set_defaults(fn=_judge)
 
     s = sub.add_parser(
         "diff",
