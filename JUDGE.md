@@ -32,6 +32,7 @@ self-verifying evidence record. This is the fastest honest path through it.
 
 ```bash
 pip install -e .   # or see README for the pinned dev set
+attest judge       # this walkthrough, in your terminal
 attest demo        # boots emulator + server + an eight-day story, prints a URL
 ```
 
