@@ -664,6 +664,9 @@ let packStash=null;
 /* Blob URL for the verified pack's index.html — revoked on every new verify so
    re-runs don't accumulate dead object URLs. */
 let _idxUrl=null;
+/* The dropped/fetched file's own name — stamped into the verdict so a
+   screenshot of the result is self-labelling. */
+let packName="";
 const _TOOLNAMES=new Set(["verify_case.py","verify_bundle.py","verify.html","index.html","README.txt"]);
 async function checkTools(byName,trustedSet,scope,bad,ok){
   /* verifier_manifest.json pins the pack's tooling BYTES to the issuer —
@@ -1159,7 +1162,8 @@ async function verifyFiles(files){
       }else
         say(c.ok?"ok":"bad",`receipt ${esc(r.id||"")} (${esc(p.record_type||"record")}): ${esc(c.why)}`);
       say(`stamp ${c.ok?"ok":"bad"}`,`<strong>${c.ok?"VERIFIED":"FAILED"}</strong>`
-        +(c.ok?" — this record is intact":" — this record was altered"));
+        +(c.ok?" — this record is intact":" — this record was altered")
+        +(packName?` · ${esc(packName)}`:""));
       return out.join("");
     }
   }
@@ -1483,13 +1487,14 @@ async function verifyFiles(files){
   if(pivotSuspect)
     say("warn",`${pivotSuspect} key-lifecycle receipt(s) signed inside a suspect `
       +"window — the trust pivot itself is qualified");
-  say(`stamp ${anyBad?"bad":"ok"}`,anyBad
+  say(`stamp ${anyBad?"bad":"ok"}`,(anyBad
     ?"FAILED — do not rely on this pack"
     :"VERIFIED — chain intact under issuer key "+esc((key||"").slice(0,16))+"…"
       /* A pack that spans a key rotation verifies under more than one issuer —
          say so: the lineage is the signed pivot, not a weaker check. */
       +(trusted&&trusted.size>1
-        ?` · ${trusted.size} issuer keys via the signed rotation chain`:""));
+        ?` · ${trusted.size} issuer keys via the signed rotation chain`:""))
+    +(packName?` · ${esc(packName)}`:""));
   if(suspectTotal)
     say("warn",`${suspectTotal} record(s) signed by a revoked issuer inside its suspect window`);
   /* Verified packs carry their own record browser — offer it only on a green
@@ -1624,6 +1629,8 @@ async function go(fileList){
         +(multiDoc?"<div class='row warn'>multiple issuer documents dropped — armed the last one.</div>":"");
       return;
     }
+    packName="";
+    if(files.length===1&&/\\.(zip|json)$/i.test(files[0].name))packName=files[0].name;
     if(files.length===1&&/\\.zip$/i.test(files[0].name))files=await readZipEntries(files[0]);
     else files=files.map(f=>{
       /* A folder pick (webkitdirectory) yields webkitRelativePath like
