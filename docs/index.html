@@ -34,6 +34,14 @@ a{color:#2563eb}
 .foot{color:#6b6b70;font-size:.85rem;border-top:1px solid #e4e4e7;margin-top:2rem;padding-top:1rem}
 details{margin:.4rem 0}
 summary{cursor:pointer;color:#2563eb}
+.term{background:#0f1115;border:1px solid #262b36;border-radius:10px;margin:.6rem 0 1.2rem;overflow:hidden}
+.term .bar{display:flex;gap:6px;padding:8px 12px;border-bottom:1px solid #262b36}
+.term .bar i{width:10px;height:10px;border-radius:50%;background:#3a4152}
+.term pre{margin:0;padding:12px 14px;font:12.5px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;color:#e7eaf0;white-space:pre-wrap;min-height:28em}
+.term .p{color:#7c9cff}.term .ok{color:#3ddc97}.term .bad{color:#ff5c7a}.term .mut{color:#8b94a7}
+.term .cur{display:inline-block;width:.55em;background:#e7eaf0;animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.term .cur{animation:none}}
 </style>
 </head>
 <body>
@@ -74,6 +82,63 @@ Deep link — lands on a red FAILED stamp.</small>
 <code>api.amazonvision.com</code> run — a lone receipt, auto-verified on load.</small>
 </a>
 </div>
+
+<div class="term" aria-label="Terminal demo of the CLI flow">
+  <div class="bar" aria-hidden="true"><i></i><i></i><i></i></div>
+  <pre id="termbody"></pre>
+</div>
+<script>
+(function(){
+var lines=[
+ ["cmd","$ attest demo"],
+ ["mut","  emulator + server + an eight-day story \u2192 http://127.0.0.1:8000"],
+ ["cmd","$ attest export --redact-media --out pack.zip --tamper-twin twin.zip"],
+ ["mut","  wrote pack.zip \u2014 2 signed visit records"],
+ ["mut","  wrote twin.zip \u2014 doctored: duration_minutes 12.2 \u2192 82.2"],
+ ["mut","  twin self-check: correctly refused \u2014 payload hash mismatch"],
+ ["cmd","$ attest verify pack.zip"],
+ ["ok","  VERIFIED \u2014 chain intact under issuer key"],
+ ["cmd","$ attest verify twin.zip"],
+ ["bad","  FAILED \u2014 payload hash mismatch (payload was altered)"],
+ ["cmd","$ attest attack-demo"],
+ ["ok","  CAUGHT  forge a visit row (state -> attended_verified)"],
+ ["ok","  CAUGHT  erase a journal entry mid-chain (hide a past write)"],
+ ["ok","  CAUGHT  re-sign a receipt with a different key (key swap)"],
+ ["ok","  CAUGHT  swap media bytes on disk after signing"],
+ ["ok","  CAUGHT  forge a key_rotation pivot to an attacker key"],
+ ["mut","  \u2026 sixteen more"],
+ ["ok","  21/21 attacks caught \u2014 store unchanged"]
+];
+var body=document.getElementById("termbody");
+function esc(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;");}
+function html(n){return lines.slice(0,n).map(function(l){
+  return '<span class="'+l[0]+'">'+esc(l[1])+'</span>';}).join("\n");}
+function play(){
+  var reduced=window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if(reduced){body.innerHTML=html(lines.length)+'<span class="cur">&nbsp;</span>';return;}
+  var li=0;
+  function next(){
+    if(li>=lines.length)return;
+    if(lines[li][0]!=="cmd"){li++;body.innerHTML=html(li)+'<span class="cur">&nbsp;</span>';setTimeout(next,200);return;}
+    var txt=lines[li][1],i=0;
+    var span=document.createElement("span");span.className="cmd";
+    var cur=document.createElement("span");cur.className="cur";cur.innerHTML="&nbsp;";
+    body.innerHTML=html(li)+(li?"\n":"");
+    body.appendChild(span);body.appendChild(cur);
+    var iv=setInterval(function(){
+      span.textContent=txt.slice(0,++i);
+      if(i>=txt.length){clearInterval(iv);li++;body.innerHTML=html(li)+'<span class="cur">&nbsp;</span>';setTimeout(next,300);}
+    },22);
+  }
+  body.innerHTML='<span class="cur">&nbsp;</span>';
+  setTimeout(next,400);
+}
+var started=false;
+if("IntersectionObserver" in window){
+  new IntersectionObserver(function(e,o){if(e[0].isIntersecting&&!started){started=true;play();o.disconnect();}},{threshold:.4}).observe(body);
+}else{started=true;play();}
+})();
+</script>
 
 <svg viewBox="0 0 760 250" width="100%" role="img"
  aria-label="Trust chain: observations and statements become signed receipts on a hash-chained ledger, committed to a Merkle transparency log whose signed head is cosigned by an independent witness; the exported pack is checked by independent verifiers."
