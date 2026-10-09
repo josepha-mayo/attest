@@ -201,6 +201,17 @@ directly on the red FAILED stamp:</p>
 <p><small>Mint your own: <code>attest export --tamper-twin twin.zip --attack
 missing-record</code> — the twin self-check must refuse it before it ships.</small></p>
 
+<h2>The fork nobody can hide</h2>
+<p>The transparency log's whole point: even <em>we</em> can't rewrite history. One
+issuer key, two histories — a witness pins one tree head, a monitor pins the
+other. Neither side can tell alone; together they prove the fork, and the catch
+itself is signed as a <code>monitor_observation</code> receipt committed inside a
+signed tree head. <a href="verify.html#divergence-checkpoint">Verify the caught
+fork in your browser</a> — the evidence doc's checkpoint signature, inclusion
+proofs, and embedded observation all check out. Reproduce it:
+<code>attest split-demo</code> fabricates the whole scenario in scratch space and
+emits the same evidence document.</p>
+
 <h2>What verification proves — and what it doesn't</h2>
 <div class="proves">
 <div class="yes"><h3>A green verdict means</h3>

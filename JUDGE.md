@@ -20,7 +20,12 @@ self-verifying evidence record. This is the fastest honest path through it.
 4. [Signed real-API sweep](https://josepha-mayo.github.io/attest/verify.html#live-sweep-receipt)
    — the `verify-live --sign` report from the actual `api.amazonvision.com`
    run, auto-verified in your browser on load like everything else.
-5. After the green stamp, click **open index.html** — the pack carries its own
+5. [The caught fork](https://josepha-mayo.github.io/attest/verify.html#divergence-checkpoint)
+   — the split-demo evidence doc: a signed `monitor_observation` recording two
+   irreconcilable signed views of one log (witness pinned one root, monitor the
+   other), itself proven inside a signed tree head. The math is real; only the
+   endpoints are simulated.
+6. After the green stamp, click **open index.html** — the pack carries its own
    record browser that re-verifies every record and renders the timelines.
 
 ## With the repo (8 minutes)

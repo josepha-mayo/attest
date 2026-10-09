@@ -1342,6 +1342,96 @@ def test_verify_html_no_browser_link_without_index_member(engine, store, househo
     assert "open index.html" not in out, out
 
 
+def _drive_json_file(tmp_path, name):
+    """Drive verifyFiles on a lone .json File-like (receipt or checkpoint doc);
+    returns stdout with the verdict line and tag-stripped transcript."""
+    (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
+    driver = r"""
+const fs=require('fs');
+let src=fs.readFileSync(process.argv[2],'utf8').replace(/const dz=[\s\S]*$/,'');
+eval(src+';globalThis.__v=verifyFiles;');
+const txt=fs.readFileSync(process.argv[3],'utf8');
+const f={name:process.argv[3].split(/[\\/]/).pop(),text:async()=>txt,
+  arrayBuffer:async()=>new TextEncoder().encode(txt).buffer};
+__v([f]).then(html=>{
+  console.log('verdict:',(html.match(/VERIFIED[^<]*|FAILED[^<]*/)||['none'])[0]);
+  console.log(html.replace(/<[^>]+>/g,' ').replace(/\s+/g,' '));
+}).catch(e=>{console.log('ERR',e.message);process.exit(2);});
+"""
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "verify.js", name],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert proc.returncode == 0, proc.stderr
+    return proc.stdout
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_verify_html_standalone_checkpoint_doc(tmp_path):
+    """A lone attest.log-checkpoint/1 doc — `attest checkpoint --out` output or
+    split-demo's divergence evidence — verifies in-browser: checkpoint sig,
+    packed inclusion proofs, embedded receipts inside the lineage, and the
+    fork's `outcome: diverged` surfaces legibly."""
+    from attest.splitdemo import run as splitdemo_run
+
+    splitdemo_run(tmp_path)
+    out = _drive_json_file(tmp_path, "divergence-checkpoint.json")
+    assert "VERIFIED" in out, out
+    assert "FAILED" not in out, out
+    assert "signed transparency head" in out, out
+    assert "packed inclusion proof" in out, out
+    assert "monitor_observation" in out, out
+    assert "diverged" in out, out
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_verify_html_standalone_checkpoint_doc_fails_closed(tmp_path):
+    """The standalone checkpoint doc is fail-closed: a tampered proof, an
+    embedded receipt that doesn't verify, a missing proof for a listed
+    receipt, and a non-object proofs map each flip the verdict to FAILED."""
+    from attest.splitdemo import run as splitdemo_run
+
+    splitdemo_run(tmp_path)
+    # ensure_ascii=False: the signed payloads carry non-ASCII (—, …) and the
+    # browser canonicalizes the file's literal spellings — ensure_ascii=True
+    # would respell them and corrupt every signature, not just the target's.
+    dump = lambda d: json.dumps(d, ensure_ascii=False)  # noqa: E731
+    doc = json.loads((tmp_path / "divergence-checkpoint.json").read_text())
+
+    bad_proof = json.loads(dump(doc))
+    for k in bad_proof["proofs"]:
+        bad_proof["proofs"][k]["leaf_index"] += 1
+    (tmp_path / "bad-proof.json").write_text(dump(bad_proof))
+    out = _drive_json_file(tmp_path, "bad-proof.json")
+    assert "FAILED" in out, out
+    assert "fails against this signed head" in out, out
+
+    no_proofs = json.loads(dump(doc))
+    del no_proofs["proofs"]
+    (tmp_path / "no-proofs.json").write_text(dump(no_proofs))
+    out = _drive_json_file(tmp_path, "no-proofs.json")
+    assert "FAILED" in out, out
+    assert "carries no inclusion proof" in out, out
+
+    altered = json.loads(dump(doc))
+    altered["receipts"][0]["payload"]["outcome"] = "all_green"
+    (tmp_path / "altered.json").write_text(dump(altered))
+    out = _drive_json_file(tmp_path, "altered.json")
+    assert "FAILED" in out, out
+    assert "payload hash mismatch" in out, out
+
+    bad_proofs = json.loads(dump(doc))
+    bad_proofs["proofs"] = [1]
+    (tmp_path / "bad-proofs.json").write_text(dump(bad_proofs))
+    out = _drive_json_file(tmp_path, "bad-proofs.json")
+    assert "FAILED" in out, out
+    assert "'proofs' must be an object" in out, out
+
+
 @pytest.mark.skipif(NODE is None, reason="node runtime not available")
 def test_js_canonicalization_matches_python_on_edge_cases(tmp_path):
     """Astral-plane key ordering and verbatim float spellings must canonicalize

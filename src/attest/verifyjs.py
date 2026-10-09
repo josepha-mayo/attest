@@ -1037,18 +1037,28 @@ async function checkLog(byName,trustedSet,refs,bad,ok){
       bad(`log_checkpoint.json: unreferenced inclusion proof for ${esc(ph.slice(0,16))}… `
         +"does not reach the signed tree head");return;}
   }
-  /* witness counter-signatures ride the checkpoint doc — verify each under
-     its own signer's key and count only those whose subject binds THIS head;
-     auxiliary attestation, never the gate. The count tracks INDEPENDENT
-     witnesses: duplicate receipts count once, repeat cosigs from one key
-     count once, and a cosig signed inside the issuer's own lineage is
-     self-vouching — not a witness. Mirrors _cosig_count. */
+  const {cosigs,anchored}=await _cosigReport(dn,doc,cp.id,size,rootHex,trustedSet,
+    m=>bad(`log_checkpoint.json: ${m}`));
+  if(proven)ok(`${proven} receipt(s) proven inside the deployment transparency `
+    +`log at checkpoint size ${size}${cosigs?` — cosigned by ${cosigs} witness(es)`:""}`
+    +`${anchored?` (${anchored} anchored in the witness's own published log)`:""}`);
+}
+/* Cosignature + self-anchor accounting for a checkpoint document — shared by
+   the pack path (checkLog) and the standalone attest.log-checkpoint/1 path.
+   Witness counter-signatures are auxiliary attestation — verified and counted,
+   never the gate. The count tracks INDEPENDENT witnesses: duplicate receipts
+   count once, repeat cosigs from one key count once, and a cosig signed inside
+   the issuer's own lineage is self-vouching — not a witness. Packed anchors
+   prove the cosig was committed to the witness's own published log; a present
+   anchor that fails is a lie, not a downgrade. Mirrors _cosig_count /
+   check_cosig_anchors. */
+async function _cosigReport(dn,doc,cpId,size,rootHex,trustedSet,bad){
   let cosigs=0;const seenCosig=new Set(),seenKeys=new Set();
   const cosec=get(dn,"cosignatures"),coNodes=cosec&&cosec.t==="arr"?cosec.v:[];
   for(let i=0;i<(doc.cosignatures||[]).length;i++){
     const raw=doc.cosignatures[i]||{},cp2=raw.payload;
     if(!cp2||cp2.record_type!=="witness_cosignature")continue;
-    if(cp2.subject_checkpoint!==cp.id||cp2.subject_tree_size!==size
+    if(cp2.subject_checkpoint!==cpId||cp2.subject_tree_size!==size
       ||cp2.subject_root_sha256!==rootHex)continue;
     /* the cosig must name THIS issuer — attesting another deployment's
        head never counts here (logmonitor parity) */
@@ -1058,12 +1068,6 @@ async function checkLog(byName,trustedSet,refs,bad,ok){
     const rc=await checkReceipt(coNodes[i]);
     if(rc.ok){seenCosig.add(raw.id);seenKeys.add(pk);cosigs++;}
   }
-  /* packed self-anchors: the WITNESS's own signed head + the cosig's
-     inclusion path, so the pack proves the attestation was committed to
-     the witness's published log — not just signed and handed over. An
-     anchor only counts when its head is signed by the cosig's own key;
-     a present one that fails is a lie, not a downgrade (logmonitor
-     check_cosig_anchors parity). */
   let anchored=0;
   const asec=get(dn,"cosig_anchors");
   /* Python parity: a non-object cosig_anchors is absent, not hostile — but
@@ -1075,28 +1079,26 @@ async function checkLog(byName,trustedSet,refs,bad,ok){
     const cosig=(Array.isArray(doc.cosignatures)?doc.cosignatures:[])
       .find(c=>c&&c.id===cid);
     if(!cosig){
-      bad(`log_checkpoint.json: cosig_anchors ${esc(cid)} anchors a cosignature `
+      bad(`cosig_anchors ${esc(cid)} anchors a cosignature `
         +"the doc doesn't carry");continue;}
     const acp=anchor&&anchor.checkpoint,ap=acp&&acp.payload;
     if(!ap||ap.record_type!=="log_checkpoint"){
-      bad(`log_checkpoint.json: cosig_anchors ${esc(cid)}: anchor is not a `
+      bad(`cosig_anchors ${esc(cid)}: anchor is not a `
         +"log_checkpoint receipt");continue;}
     if(acp.public_key!==cosig.public_key){
-      bad(`log_checkpoint.json: cosig_anchors ${esc(cid)}: anchor head not `
+      bad(`cosig_anchors ${esc(cid)}: anchor head not `
         +"signed by the cosig's own witness key");continue;}
     const anode=get(asec,cid);
     const arc=anode?await checkReceipt(get(anode,"checkpoint"))
       :{ok:false,why:"anchor checkpoint missing from canonical map"};
-    if(!arc.ok){bad(`log_checkpoint.json: cosig_anchors ${esc(cid)}: ${arc.why}`);continue;}
+    if(!arc.ok){bad(`cosig_anchors ${esc(cid)}: ${arc.why}`);continue;}
     const proof=anchor.proof||{};
     if(!await _incOk(cosig.payload_hash,ap.tree_size,proof.leaf_index,proof.path||[],ap.root_sha256)){
-      bad(`log_checkpoint.json: cosig_anchors ${esc(cid)}: the cosig does not reach `
+      bad(`cosig_anchors ${esc(cid)}: the cosig does not reach `
         +"the anchor's signed tree head");continue;}
     anchored++;
   }
-  if(proven)ok(`${proven} receipt(s) proven inside the deployment transparency `
-    +`log at checkpoint size ${size}${cosigs?` — cosigned by ${cosigs} witness(es)`:""}`
-    +`${anchored?` (${anchored} anchored in the witness's own published log)`:""}`);
+  return{cosigs,anchored};
 }
 async function verifyFiles(files){
   /* null-prototype map — a zip member literally named "__proto__" must land
@@ -1127,6 +1129,125 @@ async function verifyFiles(files){
   if(!mText&&files.length===1&&/\\.json$/i.test(files[0].name)){
     const node=parseKeep(await files[0].text());
     const r=toJS(node)||{};
+    /* A standalone transparency evidence doc (`attest checkpoint --out`, or
+       split-demo's divergence-checkpoint.json) verifies too — the same checks
+       the CLI's _verify_log_doc runs: the checkpoint receipt verifies, every
+       packed proof reaches its signed head, embedded receipts sit inside the
+       lineage AND carry proofs, the self-bridge verifies, and cosig anchors
+       fail closed. The armed pin (if any) supplies the lineage; otherwise the
+       checkpoint's own key anchors it. */
+    if(r.checkpoint&&typeof r.checkpoint==="object"&&!Array.isArray(r.checkpoint)){
+      const cpNode=get(node,"checkpoint");
+      const cp=r.checkpoint||{},cpay=cp.payload||{};
+      if(cpay.record_type!=="log_checkpoint"){
+        say("bad","checkpoint: not a log_checkpoint receipt");
+        say(`stamp bad`,"<strong>FAILED</strong>"
+          +(packName?` · ${esc(packName)}`:""));
+        return out.join("");
+      }
+      let allowed=new Set([cp.public_key]);
+      if(issuerDoc){
+        const inodes=issuerDoc.nodes||[];
+        allowed=new Set([issuerDoc.issuer_key,
+          ...(await trustedKeys(issuerDoc.issuer_key,inodes)),
+          ...(await descendantKeys(issuerDoc.issuer_key,inodes))]);
+        say("warn",`pinned to the issuer document's deployment key `
+          +`${esc(String(issuerDoc.issuer_key).slice(0,16))}…`);
+        if(!allowed.has(cp.public_key)){
+          say("bad","checkpoint signed by a key outside the pinned deployment's lineage");
+          say(`stamp bad`,"<strong>FAILED</strong>"
+            +(packName?` · ${esc(packName)}`:""));
+          return out.join("");
+        }
+        if(suspectRecords([cpNode],await revokedKeys(inodes,issuerDoc.issuer_key)).length)
+          say("warn","checkpoint signed inside its issuer's declared suspect window");
+      }
+      const crc=await checkReceipt(cpNode);
+      if(!crc.ok)say("bad","checkpoint signature invalid: "+esc(crc.why));
+      const size=cpay.tree_size,rootHex=cpay.root_sha256;
+      let headOk=crc.ok;
+      if(!Number.isInteger(size)||size<1||size>2147483647
+        ||typeof rootHex!=="string"||!/^[0-9a-f]{64}$/i.test(rootHex)){
+        say("bad","checkpoint carries a malformed root or size");headOk=false;}
+      if(headOk){
+        say("ok",`signed transparency head: tree size ${size}, root `
+          +`${esc(String(rootHex).slice(0,16))}…`);
+        packStash={node:cpNode,size,root:rootHex};
+        /* proofs: absent means nothing to prove; non-object is a lie. Every
+           entry must reach the signed head — unreferenced junk is not
+           decoration. */
+        let proofs=r.proofs;
+        if(proofs===undefined||proofs===null)proofs={};
+        if(typeof proofs!=="object"||Array.isArray(proofs)){
+          say("bad","checkpoint document: 'proofs' must be an object");proofs=null;}
+        if(proofs){
+          let proven=0;
+          for(const ph of Object.keys(proofs)){
+            const pr=proofs[ph];
+            if(!pr||typeof pr!=="object"
+              ||!await _incOk(ph,size,pr.leaf_index,pr.path||[],rootHex)){
+              say("bad",`inclusion proof for ${esc(String(ph).slice(0,16))}… fails `
+                +"against this signed head — never committed there");
+            }else proven++;
+          }
+          if(proven)say("ok",`${proven} packed inclusion proof(s) verified`);
+          /* Embedded evidence receipts: each must verify, sit inside the
+             lineage, and carry a proof — 'signed AND inside the head'. */
+          const receipts=r.receipts;
+          if(receipts!==undefined&&receipts!==null){
+            if(!Array.isArray(receipts)||receipts.length>2048)
+              say("bad","checkpoint document: 'receipts' must be a list of at most 2048");
+            else{
+              const rsec=get(node,"receipts"),rNodes=rsec&&rsec.t==="arr"?rsec.v:[];
+              const seenIds=new Set();
+              for(let i=0;i<receipts.length;i++){
+                const rr=receipts[i]||{};
+                const rid=String(rr.id||"?").slice(0,24);
+                /* model_validate parity: a non-object entry is malformed,
+                   not a dup — check shape before the id set. */
+                if(typeof rr!=="object"||rr===null||Array.isArray(rr)){
+                  say("bad",`embedded receipt ${esc(rid)}… malformed`);continue;}
+                if(seenIds.has(rr.id)){say("bad",`embedded receipt ${esc(rid)}… listed twice`);continue;}
+                seenIds.add(rr.id);
+                if(!allowed.has(rr.public_key)){
+                  say("bad",`embedded receipt ${esc(rid)}… signed by a key `
+                    +"outside the issuer lineage");continue;}
+                const rrc=await checkReceipt(rNodes[i]);
+                if(!rrc.ok){say("bad",`embedded receipt ${esc(rid)}… invalid: ${esc(rrc.why)}`);continue;}
+                if(!Object.prototype.hasOwnProperty.call(proofs,rr.payload_hash)){
+                  say("bad",`embedded receipt ${esc(rid)}… carries no inclusion proof — `
+                    +"'inside the signed head' is unproven");continue;}
+                const rt=(rr.payload&&rr.payload.record_type)||"record";
+                let extra="";
+                if(rt==="monitor_observation"&&rr.payload.outcome)
+                  extra=` — outcome: ${esc(String(rr.payload.outcome))}`;
+                say("ok",`embedded receipt ${esc(rid)}… (${esc(rt)}): signed and `
+                  +"inside the signed head"+extra);
+              }
+            }
+          }
+        }
+        const selfExt=await _extOk(cpay);
+        if(selfExt===false)
+          say("bad","checkpoint's embedded `extends` bridge does not verify — "
+            +"the signed head attests a history it cannot prove");
+        else if(selfExt===true){
+          const e=cpay.extends||{};
+          say("ok",`embedded bridge extends checkpoint `
+            +`${esc(String(e.checkpoint_id||"").slice(0,16))}… from size ${esc(String(e.first))}`);
+        }
+        const {cosigs,anchored}=await _cosigReport(node,r,cp.id,size,rootHex,allowed,
+          m=>say("bad",m));
+        if(cosigs)say("ok",`cosigned by ${cosigs} witness(es)`
+          +(anchored?` — ${anchored} anchored in the witness's own published log`:""));
+      }
+      const dBad=out.some(l=>l.includes('class="row bad"'));
+      say(`stamp ${dBad?"bad":"ok"}`,(dBad
+        ?"<strong>FAILED</strong> — do not rely on this document"
+        :"<strong>VERIFIED</strong> — signed transparency evidence intact")
+        +(packName?` · ${esc(packName)}`:""));
+      return out.join("");
+    }
     if(r.signature&&r.payload_hash&&r.public_key&&r.payload){
       const c=await checkReceipt(node);
       const p=r.payload||{};
@@ -1677,6 +1798,7 @@ if(location.protocol.indexOf("http")===0){
     ["sample-pack-attack-smuggled-file.zip","tryatk2"],
     ["sample-pack-attack-forged-verifier.zip","tryatk3"],
     ["live-sweep-receipt.json","tryreceipt"],
+    ["divergence-checkpoint.json","tryfork"],
   ];
   for(const [file,bid] of _samples){
     fetch(file,{method:"HEAD"}).then(r=>{
@@ -1731,6 +1853,9 @@ Watch the signature catch it</button><br>
 <p id="tryreceipt-wrap" hidden><button id="tryreceipt" type="button">Verify the signed
 report from a real sweep against the Ring Partner API — a lone receipt, verified
 by the same math</button></p>
+<p id="tryfork-wrap" hidden><button id="tryfork" type="button">Verify the caught fork
+— a signed monitor observation documenting two irreconcilable views of one log,
+proven inside its own signed tree head</button></p>
 <div id="out" role="status" aria-live="polite"></div>
 <div id="live-wrap" hidden>
 <h2>Is this still the log the deployment serves?</h2>
