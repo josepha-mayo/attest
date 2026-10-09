@@ -1102,6 +1102,17 @@ def create_app(
         cov = _coverage_local(cov)
         late = [r["body"] for r in store.late_event_rows() if r["site_id"] == v.site_id]
         s_visit = lang_strings(pick_lang(request.query_params.get("lang")))
+        # A receipt signed inside a revoked key's declared suspect window still
+        # verifies — annotate it honestly, matching the pack verifier's overlay.
+        suspect_window = bool(
+            receipt
+            and ledger.suspect_receipts(
+                [receipt],
+                revoked=ledger.revoked_issuer_keys(
+                    [r for r in store.receipts() if r.visit_id.startswith("key:")]
+                ),
+            )
+        )
         strip = timeline_strip(
             schedule=schedule,
             evidence=evidence,
@@ -1132,6 +1143,7 @@ def create_app(
                 if receipt and receipt.public_key in reviews.trusted_issuer_keys()
                 else ((False, "signed by a key outside the rotation chain") if receipt else None)
             ),
+            suspect_window=suspect_window,
             countersign=reviews.countersign(visit_id) if bundle else None,
             coverage=cov,
             late_count=len(late),

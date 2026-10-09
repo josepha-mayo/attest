@@ -515,9 +515,15 @@ def test_sample_pack_attack_gallery_fails(artifact, expect):
     with zipfile.ZipFile(docs / artifact) as z:
         issuer = json.loads(z.read("manifest.json"))["issuer_key"]
         if artifact == "sample-pack-tampered.zip":
-            data = z.read("visits/vis_92f095f4eee7/bundle.json")
-            # the one doctoring the demo advertises: 12.2-minute stay -> 82.2
-            assert b'"duration_minutes": 82.2' in data
+            # the one doctoring the demo advertises: a stay field inflated on
+            # the shortest visit (observed_span_minutes ~0.58 -> ~70.58 today;
+            # packs with durations doctor duration_minutes 12.2 -> 82.2 instead)
+            names = [n for n in z.namelist() if n.startswith("visits/") and n.endswith("bundle.json")]
+            with zipfile.ZipFile(docs / "sample-pack.zip") as clean:
+                differ = [n for n in names if z.read(n) != clean.read(n)]
+            assert len(differ) == 1
+            data = z.read(differ[0])
+            assert b'"observed_span_minutes": 70.5' in data or b'"duration_minutes": 82.2' in data
     ok, detail = _verify_pack((docs / artifact).read_bytes(), issuer)
     assert not ok and expect in detail, detail
 
@@ -538,7 +544,11 @@ def test_tamper_twin_helper_fails_verification():
         descs[attack] = desc
         ok, detail = _verify_pack(tdata, issuer)
         assert not ok, f"{attack} ({desc}) verified — a minted twin must never pass"
-    assert "duration_minutes" in descs["duration"]
+    # The field doctored depends on the pack's story — an old-style pack signs
+    # duration_minutes, the demo story signs observed_span_minutes; either is the
+    # same "inflated stay" attack (the worker-name fallback only fires on packs
+    # with neither numeric field).
+    assert "_minutes" in descs["duration"] or "worker" in descs["duration"]
     with pytest.raises(ValueError):
         tamper_twin(pack, attack="social-engineering")
 

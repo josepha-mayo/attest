@@ -1841,7 +1841,7 @@ signed lifecycle bridges pre-rotation exports.</small></div>
 <p id="trysample-wrap" hidden><button id="trysample" type="button">Verify the bundled
 sample pack — one click, fetched from this site</button></p>
 <p id="trytamper-wrap" hidden><button id="trytamper" type="button">Verify the tampered
-twin — the same pack, but someone doctored the recorded 12-minute stay to 82.
+twin — the same pack, but someone inflated a ~35-second observed span to ~70 minutes.
 Watch the signature catch it</button><br>
 <small>Or pick an attack — each is caught by a different layer:</small></p>
 <p id="tryatk1-wrap" hidden><button id="tryatk1" type="button">Attack: deleted record
@@ -1886,15 +1886,18 @@ pack carries about itself.</small></p>
 VERIFY_HTML = _HEAD + _VERIFY_BODY + _JS_OPEN + _JS_LIB + _VERIFY_DRIVER + "</script>\n</body>\n</html>\n"
 
 _INDEX_BODY = """<h1 id="site">Attest case record</h1>
+<noscript><p><strong>This page is the verifier</strong> — it needs JavaScript to check
+the signed records inlined below and render them; without it, nothing here verifies.</p></noscript>
 <p id="meta" class="muted"></p>
 <div id="verdict" role="status" aria-live="polite"></div>
 <div id="cards"></div>
 <h2>Verify the media bytes</h2>
 <p><small>This page verifies every signed record and renders its timeline offline — and every
 record can be toggled between the technical view and the plain-language family view
-(&ldquo;View as the family sees it&rdquo;). Signed media digests are listed per record;
-to check the media bytes themselves, open <code>verify.html</code> and drop every file
-from this extracted pack onto it.</small></p>
+(the &ldquo;plain language (family)&rdquo; tab on each card). Signed media digests are
+listed per record; to check the media bytes themselves, open
+<a href="verify.html">verify.html</a> (from the extracted pack folder) and drop every
+file from this pack onto it.</small></p>
 <h2>The transparency checkpoint</h2>
 <p><small>This pack also carries <code>log_checkpoint.json</code> — a signed Merkle
 tree head over the deployment's receipt log (RFC 6962-style), with an inclusion
@@ -1937,12 +1940,27 @@ for a dispute that matters, re-verify the pack with a verifier obtained independ
  .plain-byline{color:#5f6e7c;font-size:.8rem}
  .plain-foot{margin-top:1rem;color:#5f6e7c;font-size:.8rem;line-height:1.5;
   border-top:1px solid #eee;padding-top:.7rem}
- .view-toggle{display:inline-block;margin-top:.6rem;color:#2563a8;text-decoration:underline;cursor:pointer}
+ .view-toggle{display:inline-flex;border:1px solid #ccd3df;border-radius:8px;
+   overflow:hidden;margin-top:.6rem}
+ .view-tab{border:0;background:#eef1f6;color:#3b4a63;padding:.3rem .85rem;
+   font:inherit;font-size:.82rem;cursor:pointer}
+ .view-tab.on{background:#3b4a63;color:#fff}
+ .anchors{margin-top:.6rem}
+ .anchors .kv{width:100%;border-collapse:collapse;font-size:.82rem}
+ .anchors .kv td{border-top:1px solid #eee;padding:.12rem .4rem .12rem 0;vertical-align:top}
+ .anchors .kv td.k{white-space:nowrap;font-weight:600;width:1%;color:#5c6b7a}
+ .print-btn{margin-left:auto;border:1px solid #ccd3df;border-radius:8px;
+   background:#eef1f6;color:#3b4a63;padding:.2rem .7rem;font-size:.8rem;cursor:pointer}
  .week-row{display:flex;align-items:center;gap:.6rem;margin:1px 0}
  .week-label{width:6.5em;text-align:right;flex:none}
  .week-strip{flex:1;min-width:0}
  .week-legend{margin-bottom:.4rem;line-height:1.9}
  .sw{display:inline-block;width:.9em;height:.7em;border-radius:2px;vertical-align:-1px;margin-left:.6em}
+ @media print{
+  .plain{display:block !important}
+  .view-toggle,.print-btn{display:none !important}
+  .card,.stamp,.week-row,tr{break-inside:avoid}
+ }
 </style>
 """
 
@@ -2107,6 +2125,63 @@ function plainHTML(p,js){
     account are kept separate.
     A signature proves the record hasn't been altered since it was signed — not identity, attendance, or
     time worked. No reported activity is not proof nobody came.</div>`;
+}
+/* Signed anchors — the receipt's envelope facts (what the signature actually
+   commits to) plus the payload's own provenance declarations: where the data
+   came from, which clock timed it, who wrote the summary. Compact key/value
+   rows; everything shown is inside the signed bytes. ``oNode`` is the
+   parseKeep node so the sequence renders its verbatim literal spelling. */
+function anchorsHTML(oNode,o,p){
+  const rows=[];
+  const row=(k,v,note)=>rows.push(`<tr><td class="k">${k}</td><td>${v}</td>`
+    +`<td class="muted"><small>${esc(note||"")}</small></td></tr>`);
+  const hash=String(o.payload_hash||"");
+  const seqN=get(oNode,"sequence");
+  const seq=seqN&&seqN.t==="lit"?seqN.r:(o.sequence==null?"—":o.sequence);
+  row("receipt",`<code>${esc(o.id||"—")}</code>`,"the signed envelope naming this record");
+  row("payload hash",`<code title="${esc(hash)}">${esc(hash.slice(0,16))}…</code>`,
+    "what the signature commits to");
+  row("sequence",esc(seq),"position in the issuer's receipt chain");
+  if(o.issued_at)
+    row("issued at",esc(o.issued_at),"issuer signing time — wall clock, even in replays");
+  if(p.data_origin)
+    row("data origin",
+      `<span class="pill">${esc(p.data_origin==="ring_api"?"Ring API"
+        :p.data_origin==="local_or_test"?"local test / replay"
+        :String(p.data_origin).replaceAll("_"," "))}</span>`,
+      p.data_origin==="ring_api"
+        ?"device facts came from the Ring Partner API"
+        :p.data_origin==="local_or_test"
+        ?"device facts came from a local emulator or replay — demo data, not a home"
+        :"payload-declared ingestion source");
+  const clk=p.clock||{};
+  if(clk.mode&&clk.mode!=="wall")
+    row("clock",`<span class="pill">${esc(clk.mode)}</span>`
+      +(clk.replay_id?` <code>${esc(clk.replay_id)}</code>`:""),
+      "a replay-clocked record — event times are simulated; signing used real time");
+  const scope=p.signature_scope||(p.assessment||{}).signature_scope;
+  if(scope)
+    row("signature scope",esc(String(scope).replaceAll("_"," ")),
+      "integrity of this record — never physical truth");
+  const sp=p.summary_provenance||{};
+  if(sp.source)
+    row("summary",esc(sp.source==="bedrock"
+        ?`bedrock — ${sp.model||"model unstated"}`
+        :sp.source==="template"?"deterministic template":String(sp.source)),
+      "which writer produced the narrative — wording, not evidence");
+  const CR={departure:"closed on a departure cue",idle:"closed after an activity idle timeout",
+    window_elapsed:"closed when the scheduled window elapsed",
+    coordinator_review:"closed for coordinator review"};
+  if(p.close_reason)
+    row("closed",esc(CR[p.close_reason]||String(p.close_reason).replaceAll("_"," ")),"");
+  for(const f of Array.isArray(p.flags)?p.flags:[]){
+    const fo=f&&typeof f==="object"?f:{};
+    const msg=fo.message||fo.code||(typeof f==="string"?f:"");
+    if(!msg)continue;
+    row("flag",`<span class="pill ${esc({warn:"warn",critical:"bad"}[fo.severity]||"")}">`
+      +`${esc(fo.severity||"flag")}</span> ${esc(msg)}`,"flagged for human review");}
+  return `<div class="anchors"><small class="muted">signed anchors — envelope facts and the`
+    +` payload's own provenance declarations</small><table class="kv">${rows.join("")}</table></div>`;
 }
 /* ---------- site-level week strip: the whole exported window at a glance.
    Every mark derives from verified signed payloads only — the strip can show
@@ -2327,20 +2402,25 @@ async function renderIndex(){
       ?esc(p.schedule.window_start||"")+" → "+esc(p.schedule.window_end||"")
       :"unscheduled";
     rows.push(
-      `<div class="card"><div class="row ${cls}">`
+      `<div class="card" id="v-${esc(tag.dataset.vid)}"><div class="row ${cls}">`
       +`<span class="pill">${esc(p.state||"?")}</span> `
       +`<strong>${esc(tag.dataset.vid)}</strong>`
       +(p.scheduled_worker?` · worker ${esc(p.scheduled_worker.name||"")}`:"")
       +(stance!=="no_statement"?` · statement: ${esc(stance)}`:"")
       +` — ${esc(c.why)}</div>`
       /* a FAILED bundle's narrative is untrusted — render only the verdict
-         row; statements/plain view stay hidden so tampered content can't
+         row; tabs/statements/plain view stay hidden so tampered content can't
          present itself as a verified account. */
       +(c.ok
-        ?`<div class="tech"><small>${win} · ${ds.length} media digest(s)</small>`
+        ?`<span class="view-toggle" role="group" aria-label="record view">`
+         +`<button type="button" class="view-tab on" data-view="tech" aria-pressed="true">`
+         +`technical</button>`
+         +`<button type="button" class="view-tab" data-view="plain" aria-pressed="false">`
+         +`plain language (family)</button></span>`
+         +`<div class="tech"><small>${win} · ${ds.length} media digest(s)</small>`
+         +anchorsHTML(oNode,js.original||{},p)
          +timelineSVG(p)+corroborationHTML(p)+statementsHTML(js)+`</div>`
          +`<div class="plain" style="display:none">${plainHTML(p,js)}</div>`
-         +`<a href="#" class="view-toggle muted"><small>View as the family sees it</small></a>`
         :"")
       +`</div>`);
   }
@@ -2348,15 +2428,24 @@ async function renderIndex(){
   if(wk)rows.unshift(
     `<div class="card"><div class="row ok"><span class="pill">week</span> `
     +`<strong>the exported window at a glance</strong> `
-    +`<small class="muted">— assembled only from verified signed payloads</small></div>`
+    +`<small class="muted">— assembled only from verified signed payloads</small>`
+    +`<button type="button" class="print-btn">print this record</button></div>`
     +wk+`</div>`);
   cards.innerHTML=rows.join("");
   cards.onclick=e=>{
-    const a=e.target.closest(".view-toggle");if(!a)return;e.preventDefault();
-    const card=a.closest(".card"),t=card.querySelector(".tech"),pl=card.querySelector(".plain");
-    const showPlain=pl.style.display==="none";
+    /* Delegated chrome: the week strip's print button and each card's
+       technical/plain segmented toggle. Views flip by display only — the
+       verified DOM stays intact, and @media print re-shows .plain. */
+    if(e.target.closest(".print-btn")){window.print();return;}
+    const b=e.target.closest(".view-tab");if(!b)return;
+    const card=b.closest(".card");if(!card)return;
+    const t=card.querySelector(".tech"),pl=card.querySelector(".plain");
+    if(!t||!pl)return;
+    const showPlain=b.dataset.view==="plain";
     pl.style.display=showPlain?"":"none";t.style.display=showPlain?"none":"";
-    a.innerHTML="<small>"+(showPlain?"View the technical record":"View as the family sees it")+"</small>";
+    for(const tb of card.querySelectorAll(".view-tab")){
+      tb.classList.toggle("on",tb===b);
+      tb.setAttribute("aria-pressed",tb===b?"true":"false");}
   };
   let mLine="";
   const mtag=document.getElementById("packmanifest");
@@ -2451,13 +2540,20 @@ def case_index_html(
 ) -> str:
     """Self-contained offline case browser embedded in case packs.
 
-    Each visit's bundle.json text is inlined base64-encoded — immune to
-    ``</script>`` breakout inside signed statement text and decoded back to the
-    exact bytes, so ``parseKeep`` still canonicalizes the original literal
-    spellings. ``meta`` (site, generated_at, issuer_key) and the raw
-    ``manifest.json`` text — so the signed export receipt is verified too —
-    are inlined the same way. Everything else — Ed25519, canonicalization,
-    the timeline — is the shared ``_JS_LIB``, so the browser *is* the verifier.
+    Each visit's bundle.json text is inlined base64-encoded inside inert
+    ``type="text/plain"`` script tags — immune to ``</script>`` breakout inside
+    signed statement text, decoded back to the exact bytes so ``parseKeep``
+    still canonicalizes the original literal spellings, and never executed as
+    script (a bare ``<script>`` would log a console error per tag). ``meta``
+    (site, generated_at, issuer_key) and the raw ``manifest.json`` text — so
+    the signed export receipt is verified too — are inlined the same way.
+    Everything else — Ed25519, canonicalization, the timeline — is the shared
+    ``_JS_LIB``, so the browser *is* the verifier.
+
+    Attribute order is contractual: ``data-vid``/``data-rid``/``id`` stay last
+    before ``>`` — tests and the node-side drivers match
+    ``data-vid="…">``, ``class="attestation" data-rid="…">`` and
+    ``id="packmeta">`` literally.
     """
     import base64
     import json as _json
@@ -2465,16 +2561,17 @@ def case_index_html(
 
     enc = lambda s: base64.b64encode(s.encode()).decode()  # noqa: E731
     tags = "".join(
-        f'<script class="bundle" data-vid="{_hesc(vid, quote=True)}">{enc(text)}</script>\n'
+        f'<script type="text/plain" class="bundle" data-vid="{_hesc(vid, quote=True)}">{enc(text)}</script>\n'
         for vid, text in bundles
     )
     tags += "".join(
-        f'<script class="attestation" data-rid="{_hesc(rid, quote=True)}">{enc(text)}</script>\n'
+        f'<script type="text/plain" class="attestation" data-rid="{_hesc(rid, quote=True)}">'
+        f"{enc(text)}</script>\n"
         for rid, text in attestations
     )
-    meta_tag = f'<script id="packmeta">{enc(_json.dumps(meta))}</script>\n'
+    meta_tag = f'<script type="text/plain" id="packmeta">{enc(_json.dumps(meta))}</script>\n'
     if manifest_text:
-        meta_tag += f'<script id="packmanifest">{enc(manifest_text)}</script>\n'
+        meta_tag += f'<script type="text/plain" id="packmanifest">{enc(manifest_text)}</script>\n'
     return (
         _HEAD.replace("<title>Attest pack verifier</title>", "<title>Attest case record</title>")
         + _INDEX_BODY

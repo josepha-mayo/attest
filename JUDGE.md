@@ -7,9 +7,12 @@ self-verifying evidence record. This is the fastest honest path through it.
 
 1. [Green **VERIFIED** stamp](https://josepha-mayo.github.io/attest/verify.html#sample-pack)
    — deep link; the verifier fetches the bundled pack and runs the moment the
-   page opens. Everything is computed in your browser; nothing uploads.
+   page opens. Read the verdict rows: 9 records, two issuer keys linked through
+   a signed rotation, **6 records annotated "signed by a revoked key inside its
+   suspect window"** — integrity holds *and* inherited doubt is reported, never
+   hidden. Everything is computed in your browser; nothing uploads.
 2. [Red **FAILED** stamp](https://josepha-mayo.github.io/attest/verify.html#sample-pack-tampered)
-   — same pack, but someone doctored the recorded 12-minute stay to 82. The
+   — same pack, but someone inflated a ~35-second observed span to ~70 minutes. The
    signature catches it: `payload hash mismatch`.
 3. **The attack gallery** — the same page offers three more one-click attacks,
    each caught by a *different* layer:
@@ -39,6 +42,11 @@ attest demo        # boots emulator + server + an eight-day story, prints a URL
 - **Dashboard** → the contested visit shows the source-divergence callout and
   the worker's signed dispute — three voices (devices, worker, household) kept
   separate in the same signed chain.
+- **`/integrity`** → the deployment auditing itself: receipt chain, mutation
+  journal, transparency head, key custody, webhook posture — each signed, and
+  `/integrity.json` serves it machine-readable.
+- **`?lang=es`** → household, worker, and public surfaces localize —
+  accessibility is a Ring priority category.
 - **Download `pack.zip`, unzip, open `index.html`** — every record
   self-verifies from `file://`, with a plain-language family view.
 - **`attest attack-demo`** — twenty-one real tamper attempts against the store
@@ -48,6 +56,10 @@ attest demo        # boots emulator + server + an eight-day story, prints a URL
   preflight.
 - **`attest export --tamper-twin twin.zip --attack forged-verifier`** — mint
   your own hostile pack; the built-in self-check refuses it before it ships.
+- **`attest demo --revoke-day 6`** — replays the compromise drill live: the
+  deployment rotates mid-story, the successor revokes the retired key, and its
+  records stay valid but carry the suspect-window annotation — the same overlay
+  the sample pack's verdict rows show.
 
 ## Scoring map — where each criterion's evidence lives
 

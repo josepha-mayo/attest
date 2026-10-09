@@ -82,7 +82,8 @@ document.getElementById('issue-link').onclick = async () => {
 <h2>Camera snapshots</h2>
 <div class="snap">
 {% for e in snaps %}<figure>
-<img src="/visits/{{ visit.id }}/media/{{ e.media_path.replace('\\','/').split('/')[-1] }}" alt="Snapshot associated with {{ e.note }}">
+<img src="/visits/{{ visit.id }}/media/{{ e.media_path.replace('\\','/').split('/')[-1] }}" alt="Snapshot associated with {{ e.note }}" onerror="this.parentElement.classList.add('mediafailed')">
+<div class="mediafail">Media bytes failed the signed integrity check — withheld, not shown.<br>expected sha256 {{ e.media_sha256[:16] }}…</div>
 <figcaption>{{ e.note }} {{ t(e.at) }}<br>sha256 {{ e.media_sha256[:16] }}…</figcaption>
 </figure>{% endfor %}
 </div>
@@ -329,7 +330,9 @@ document.getElementById('coordinator-resolve').onsubmit = async event => {
 {% endif %}
 <h2>Original signed record #{{ receipt.sequence }}</h2>
 <div class="card">
-<div class="small">{% if verified[0] %}<span class="ok">Ed25519 signature valid — integrity only</span>{% else %}<span class="bad">{{ verified[1] }}</span>{% endif %}</div>
+<div class="small">{% if verified[0] %}<span class="ok">Ed25519 signature valid — integrity only</span>{% else %}<span class="bad">{{ verified[1] }}</span>{% endif %}
+{% if suspect_window %} <span class="flag warn" title="the signing key was later revoked and this signature falls inside its declared suspect window — the signature verifies, custody is qualified">suspect window</span>{% endif %}
+{% if receipt.payload.get("data_origin") %} <span class="flag {{ 'info' if receipt.payload.data_origin == 'ring_api' else '' }}" title="the signed payload declares where this record's facts came from">{{ "Ring API" if receipt.payload.data_origin == "ring_api" else "local / test data" }}</span>{% endif %}</div>
 {% set pclock = receipt.payload.get("clock") %}
 {% if pclock and pclock.mode == "replay" %}<div class="muted small">Replay-clocked record — replay {{ pclock.replay_id }} · check-in received at wall time {{ t(pclock.checkin_received_at) if pclock.checkin_received_at else "n/a" }}</div>{% endif %}
 <div class="muted small" style="overflow-wrap:anywhere">sha256 <code>{{ receipt.payload_hash }}</code><br>previous <code>{{ receipt.prev_hash or "genesis" }}</code></div>

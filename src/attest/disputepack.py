@@ -1980,30 +1980,36 @@ def tamper_twin(pack: bytes, attack: str = "duration") -> tuple[bytes, str]:
 
         if attack == "duration":
             # The demo story: the *shortest* recorded stay inflated toward the
-            # scheduled expectation — "she was there most of the window".
-            best: tuple[float, str, bytes, bytes, int, int] | None = None
-            for name in bundles:
-                raw = src.read(name)
-                marker = b'"duration_minutes": '
-                i = raw.find(marker)
-                if i < 0:
-                    continue
-                j = i + len(marker)
-                k = j
-                while k < len(raw) and raw[k] in b"0123456789.-":
-                    k += 1
-                try:
-                    val = float(raw[j:k])
-                except ValueError:
-                    continue
-                if best is None or val < best[0]:
-                    best = (val, name, raw, raw[j:k], j, k)
+            # scheduled expectation — "she was there most of the window". Older
+            # packs carry `duration_minutes`; the eight-day demo story instead
+            # signs `observed_span_minutes` (first→last camera observation),
+            # so doctor whichever numeric stay-field exists.
+            best: tuple[float, str, bytes, bytes, int, int, bytes] | None = None
+            for field in (b'"duration_minutes": ', b'"observed_span_minutes": '):
+                if best is not None:
+                    break
+                for name in bundles:
+                    raw = src.read(name)
+                    i = raw.find(field)
+                    if i < 0:
+                        continue
+                    j = i + len(field)
+                    k = j
+                    while k < len(raw) and raw[k] in b"0123456789.-":
+                        k += 1
+                    try:
+                        val = float(raw[j:k])
+                    except ValueError:
+                        continue
+                    if best is None or val < best[0]:
+                        best = (val, name, raw, raw[j:k], j, k, field)
             if best is not None:
-                val, name, raw, span, j, k = best
+                val, name, raw, span, j, k, field = best
                 new = repr(val + 70.0)
                 mutated[name] = raw[:j] + new.encode() + raw[k:]
                 vid = name.split("/")[1] if "/" in name else "bundle"
-                desc = f"{vid}: duration_minutes {span.decode()} -> {new}"
+                fname = field.decode().strip('": ')
+                desc = f"{vid}: {fname} {span.decode()} -> {new}"
             else:
                 for name in bundles:
                     raw = src.read(name)
