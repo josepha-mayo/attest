@@ -29,6 +29,12 @@ _HEAD = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="Verify an Attest evidence pack entirely in your browser —
+  pure-JS Ed25519, SHA-256, and Merkle proofs. Nothing uploads; the math is the check.">
+<meta property="og:title" content="Attest pack verifier — zero install">
+<meta property="og:description" content="Drop a signed evidence pack; the browser runs Ed25519
+  and Merkle checks locally. Records, not verdicts.">
+<meta property="og:type" content="website">
 <link rel="icon" href="{_FAVICON}">
 <title>Attest pack verifier</title>
 <style>

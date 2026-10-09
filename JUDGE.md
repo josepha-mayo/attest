@@ -40,7 +40,12 @@ self-verifying evidence record. This is the fastest honest path through it.
    dispute, and *two household accounts that contradict each other* — he
    said / she said, signed and unrewritable.
 7. **The product face, zero install**: static snapshots of the running demo —
-   [the coordinator dashboard](https://josepha-mayo.github.io/attest/demo-dashboard.html)
+   [the coordinator dashboard](https://josepha-mayo.github.io/attest/demo-dashboard.html),
+   [the contested visit](https://josepha-mayo.github.io/attest/demo-visit.html)
+   (divergence callout, signed worker dispute, suspect-window warning),
+   [the household view](https://josepha-mayo.github.io/attest/demo-household.html)
+   ([en español](https://josepha-mayo.github.io/attest/demo-household-es.html)),
+   [the printable brief](https://josepha-mayo.github.io/attest/demo-visit-brief.html),
    and [the deployment's signed self-audit](https://josepha-mayo.github.io/attest/demo-integrity.html).
    `attest verify --badge` also renders verdicts as SVG shields
    (see [badge-verified.svg](https://josepha-mayo.github.io/attest/badge-verified.svg)

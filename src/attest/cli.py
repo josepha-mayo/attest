@@ -3683,8 +3683,9 @@ Attest — records, not verdicts. The ten-minute path:
     3. the attack gallery + caught fork + real-API sweep: same page, one click each
     4. after a green stamp: open index.html — the pack hands you its own
        record browser, which re-verifies every record itself
-    5. the product face, no install: demo-dashboard.html + demo-integrity.html
-       are snapshots of the running app on the same site
+    5. the product face, no install: demo-dashboard.html, demo-visit.html (the
+       contested record), demo-household.html (+ -es), demo-integrity.html —
+       snapshots of the running app on the same site
 
   With the repo:
     attest demo           # emulator + server + an eight-day story, prints a URL

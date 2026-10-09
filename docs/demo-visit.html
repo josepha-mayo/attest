@@ -1,0 +1,891 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23171a21'/%3E%3Cpath d='M4 8.5l2.5 2.5L12 5.5' stroke='%237c9cff' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<title>Observation record vis_70e42116a4cf</title>
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --line:#262b36; --fg:#e7eaf0; --muted:#8b94a7;
+          --ok:#3ddc97; --warn:#f5b342; --crit:#ff5c7a; --info:#6ea8fe; --accent:#7c9cff; }
+  * { box-sizing:border-box }
+  body { margin:0; font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--fg) }
+  header { display:flex; align-items:center; gap:18px; padding:14px 28px; border-bottom:1px solid var(--line); background:var(--panel) }
+  header .brand { font-weight:700; letter-spacing:.3px; font-size:18px }
+  header .brand span { color:var(--accent) }
+  header nav a { color:var(--muted); text-decoration:none; margin-right:16px }
+  header nav a:hover { color:var(--fg) }
+  header .meta { margin-left:auto; color:var(--muted); font-size:13px }
+  main { max-width:1100px; margin:0 auto; padding:26px 28px 60px }
+  h1 { font-size:22px; margin:0 0 6px } h2 { font-size:16px; color:var(--muted); font-weight:600; margin:26px 0 10px; text-transform:uppercase; letter-spacing:.6px }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:14px }
+  a { color:#9db4ff }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px }
+  .card a { color:var(--accent); text-decoration:underline }
+  .card a.btn { text-decoration:none }
+  .flash { padding:11px 14px; border-radius:9px; margin-bottom:14px }
+  .flash.err { background:#3f1620; color:#f0a5b3; border:1px solid #c05a5a }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap }
+  .muted { color:var(--muted) } .small { font-size:13px }
+  .sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap }
+  .pill { display:inline-block; padding:2px 9px; border-radius:999px; font-size:12px; font-weight:600; border:1px solid var(--line) }
+  .pill.open, .pill.in_progress { color:var(--info); border-color:var(--info) }
+  .pill.closed { color:var(--ok); border-color:var(--ok) }
+  .pill.unmatched { color:var(--warn); border-color:var(--warn) }
+  /* no_observation is absence of evidence — a watched silence, not an alarm.
+     Amber, not red: the coverage column says how much the silence means. */
+  .pill.no_observation, .pill.no_show { color:var(--warn); border-color:var(--warn) }
+  .pill.failed { color:var(--crit); border-color:var(--crit) }
+  .flag { display:inline-block; padding:2px 8px; border-radius:6px; font-size:12px; margin:2px 4px 2px 0 }
+  .flag.info { background:#1d2a44; color:var(--info) } .flag.warn { background:#3b2f14; color:var(--warn) } .flag.critical { background:#3f1620; color:var(--crit) }
+  table { width:100%; border-collapse:collapse } td, th { padding:9px 10px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top } th { color:var(--muted); font-weight:600; font-size:13px }
+  tr.link:hover { background:#1c2029; cursor:pointer }
+  .timeline { list-style:none; padding:0; margin:0 } .timeline li { display:grid; grid-template-columns:110px 1fr; gap:12px; padding:7px 0; border-bottom:1px dashed var(--line) }
+  .timeline time { color:var(--muted); font-variant-numeric:tabular-nums }
+  .snap { display:flex; gap:14px; flex-wrap:wrap } .snap figure { margin:0; width:240px } .snap img { width:100%; border-radius:8px; border:1px solid var(--line); background:#000 }
+  .snap figcaption { font-size:12px; color:var(--muted); word-break:break-all; margin-top:4px }
+  .snap .mediafail { display:none } .snap figure.mediafailed img { display:none } .snap figure.mediafailed .mediafail { display:block; padding:26px 12px; border:1px dashed var(--crit); border-radius:8px; color:var(--crit); font-size:12px }
+  pre { background:#0b0d11; border:1px solid var(--line); border-radius:8px; padding:12px; overflow:auto; font-size:12px }
+  code { word-break:break-all }
+  .btn { display:inline-block; background:var(--accent); color:#0b0d11; font-weight:700; padding:10px 18px; border-radius:8px; border:0; cursor:pointer; text-decoration:none }
+  .btn.secondary { background:transparent; color:var(--fg); border:1px solid var(--line) }
+  .ok { color:var(--ok) } .bad { color:var(--crit) } .warn { color:var(--warn) }
+  .kpi { font-size:28px; font-weight:700 } .kpi + .muted { margin-top:-4px }
+  textarea, input[type=file] { width:100%; background:#0b0d11; color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:10px; font:13px ui-monospace,monospace }
+  .summary { font-size:16px; line-height:1.6; border-left:3px solid var(--accent); padding-left:14px }
+  .dispute-quote { font-size:16px; line-height:1.55; border-left:3px solid var(--warn); padding-left:14px; margin:12px 0 }
+  label { display:block; margin:10px 0; font-size:13px; color:var(--muted) }
+  input:not([type=file]):not([type=radio]):not([type=checkbox]), select { display:block; width:100%; margin-top:5px; padding:10px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg) }
+  fieldset { border:0; padding:0; margin:0; min-width:0 }
+  button:disabled, fieldset:disabled { opacity:.5; cursor:not-allowed }
+  .table-wrap { overflow-x:auto }
+  .replay-banner { padding:10px 28px; background:#332810; color:var(--warn); font-size:13px }
+  a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible, tr.link:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:4px }
+  tr.link:focus-visible { background:#1c2029 }
+  .skip-link { position:absolute; left:-9999px; top:0; background:var(--accent); color:#0b0d11; padding:8px 16px; z-index:10; font-weight:700; border-radius:0 0 8px 0 }
+  .skip-link:focus { left:0 }
+  @media(prefers-contrast:more) { :root { --muted:#c3cadb; --line:#4a5265 } .flag { border:1px solid currentColor } }
+  @media(prefers-reduced-motion:reduce) { * { animation:none!important; transition:none!important; scroll-behavior:auto!important } }
+  @media(max-width:720px) { header { flex-wrap:wrap; padding:14px 16px } header .meta { margin-left:0; width:100% } main { padding:20px 16px } .row label { width:100% } }
+</style>
+</head>
+<body><div style="background:#f9edd4;border-bottom:1px solid #d9a83c;color:#6b4d0f;font:13px/1.5 system-ui,sans-serif;padding:8px 16px;text-align:center">Snapshot of the live <code>attest demo</code> product — served from a local Ring emulator. Run <code>attest demo</code> for the real thing; <a href="index.html" style="color:#6b4d0f">back to the demo page</a>.</div>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header>
+  <div class="brand">Attest<span>.</span></div>
+  <nav><a href="demo-dashboard.html">Records</a><a href="/setup">Setup &amp; schedules</a><a href="demo-integrity.html">Integrity</a><a href="/verify">Verify</a><a href="/verify-pack">Pack verifier</a><a href="/about">Claim boundary</a><a href="/receipts.json" download>Receipts (JSON)</a></nav>
+  <div class="meta">Local / test data &middot; configured summary provider: template</div>
+</header>
+<div class="replay-banner">LOCAL REPLAY — not a live visit. Event clock: 2026-10-08T20:37:03.318922+00:00. Security expiry and signature issuance use real time.</div>
+
+<main id="main" tabindex="-1">
+
+<a href="demo-dashboard.html" class="muted small">&larr; all records</a>
+<div class="row" style="justify-content:space-between;margin-top:8px">
+  <div>
+    <h1>Alvarez residence <span class="pill closed">closed</span></h1>
+    <div class="muted">Check-in self-reported using Maria Chen's link. Identity not verified.
+      · closed on a departure cue</div>
+  </div>
+  <div class="row" style="gap:8px">
+    <a class="btn secondary" href="demo-household.html" title="Plain-language view for the household">Household view</a>
+    <a class="btn secondary" href="/receipts/rcpt_8af58f6242d04e13a94147ddc2c70a19.json">Download signed record</a>
+  </div>
+</div>
+<p class="muted">A valid signature proves record integrity, not identity, attendance, or time worked. Review observations alongside the worker's account.</p>
+<p class="summary" style="margin:22px 0">Door activity was observed at Alvarez residence from 6:31 PM to 7:36 PM, spanning about 65 minutes. The link issued to Maria Chen was used to self-report presence at 7:36 PM; identity was not independently verified. These observations do not establish departure, continuous presence, or time worked. Review notes: Record closed for review; direction, identity, and continuous presence are not established; Observations span 65 min; 90 min scheduled. Time worked is unknown.</p>
+<div class="small muted">Summary source: template</div>
+<div class="grid" style="margin-top:14px">
+  <div class="card"><div class="muted small">First observation</div><div class="kpi" style="font-size:20px">11:31:03 AM</div></div>
+  <div class="card"><div class="muted small">Self-reported check-in</div><div class="kpi" style="font-size:20px">12:36:03 PM</div></div>
+  <div class="card"><div class="muted small">Last observation</div><div class="kpi" style="font-size:20px">12:36:18 PM</div></div>
+  <div class="card"><div class="muted small">Observed interval, not time worked</div><div class="kpi" style="font-size:20px">65 min</div>
+    <div class="muted small">90 min scheduled &middot; Morning care visit</div></div>
+</div>
+
+
+<h2>Review notes</h2>
+<div class="card"><div><span class="flag warn">departure_unconfirmed</span> Record closed for review; direction, identity, and continuous presence are not established</div><div><span class="flag warn">observed_interval_short</span> Observations span 65 min; 90 min scheduled. Time worked is unknown</div></div>
+
+
+<div class="card" style="margin-bottom:12px">
+  <div class="muted small">Record agreement</div>
+  <div style="font-size:20px;font-weight:600;margin:4px 0">
+    <span class="bad">Worker disputes this record</span>
+    
+  </div>
+  <div class="small muted">Worker disputes this record — received 2026-10-09T18:06:11.975531+00:00. An acknowledgment binds to this record's hash; it does not certify identity or attendance.</div>
+  
+  
+  
+  
+  <blockquote class="dispute-quote">“I dispute this record — I arrived before the first observation shown.”<br>
+    <span class="small muted">— Maria Chen (worker), revision 1</span>
+  </blockquote>
+  <a class="btn" href="#coordinator-resolve">Conclude the record</a>
+  
+</div>
+
+
+
+<h2>Camera snapshots</h2>
+<div class="snap">
+<figure>
+<img src="demo-media/first_observation.png" alt="Snapshot associated with first-observation window" onerror="this.parentElement.classList.add('mediafailed')">
+<div class="mediafail">Media bytes failed the signed integrity check — withheld, not shown.<br>expected sha256 b85ccab328138c7e…</div>
+<figcaption>first-observation window 11:31:03 AM<br>sha256 b85ccab328138c7e…</figcaption>
+</figure><figure>
+<img src="demo-media/departure_cue.png" alt="Snapshot associated with near departure cue" onerror="this.parentElement.classList.add('mediafailed')">
+<div class="mediafail">Media bytes failed the signed integrity check — withheld, not shown.<br>expected sha256 cc56f09f352d5f6e…</div>
+<figcaption>near departure cue 12:36:18 PM<br>sha256 cc56f09f352d5f6e…</figcaption>
+</figure>
+</div>
+
+<h2>Source corroboration</h2>
+<div class="card table-wrap" style="padding:0;margin-bottom:18px">
+<table>
+  <thead><tr><th scope="col">Source</th><th scope="col">Status</th><th scope="col"><span class="sr-only">Detail</span></th><th scope="col">Establishes</th></tr></thead>
+  <tbody>
+  
+  <tr>
+    <td>Scheduled expectation</td>
+    <td>18:01–20:06 UTC</td>
+    <td class="small muted">90 min · Morning care visit</td>
+    <td class="small muted">What was planned — never what happened</td>
+  </tr>
+  
+  <tr>
+    <td>Camera/doorbell 97A169</td>
+    <td>5 events 18:31–19:36 UTC</td>
+    <td class="small muted">departure cue + doorbell + motion + snapshot</td>
+    <td class="small muted">Device-observed activity timestamps only</td>
+  </tr>
+  
+  <tr>
+    <td>Contact sensor D9A4D9</td>
+    <td>4 events 18:31–19:36 UTC</td>
+    <td class="small muted">door closed + door opened</td>
+    <td class="small muted">Open/close transitions at the door</td>
+  </tr>
+  
+  <tr>
+    <td>Worker self-report</td>
+    <td>check-in 19:36 UTC</td>
+    <td class="small muted">via single-use link</td>
+    <td class="small muted">The worker&#39;s account — a claim, not verification</td>
+  </tr>
+  
+  <tr>
+    <td>Media on record</td>
+    <td>2 snapshots</td>
+    <td class="small muted">sha256 digests signed in receipt</td>
+    <td class="small muted">Bytes received at fetch time, hashed at ingest</td>
+  </tr>
+  
+  <tr>
+    <td>Ring Event History</td>
+    <td>3 corroborating entries</td>
+    <td class="small muted"></td>
+    <td class="small muted">Ring-side record independent of delivery path</td>
+  </tr>
+  
+  <tr>
+    <td>Pipeline coverage</td>
+    <td>watched — events seen</td>
+    <td class="small muted">32% of window · 6 polls</td>
+    <td class="small muted">How much silence is meaningful vs. unwatched</td>
+  </tr>
+  
+  <tr>
+    <td>Source divergence</td>
+    <td><span class="flag warn">65 min apart</span></td>
+    <td class="small muted">first device observation vs. worker check-in (check-in later)</td>
+    <td class="small muted">Discrepancy to review — neither source is authoritative</td>
+  </tr>
+  
+  </tbody>
+</table>
+</div>
+<h2>Observation timeline</h2>
+
+<div class="card" style="padding:14px 10px 6px">
+
+
+<svg viewBox="0 0 100 34" preserveAspectRatio="none" style="width:100%;height:96px;display:block" role="img"
+     aria-label="Timeline — scheduled 11:01am–1:06pm; 2 watched interval(s), 2 coverage gap(s); 1 motion, 2 snapshot, 1 doorbell, 2 door opened, 2 door closed, 2 worker check-in, 1 departure cue">
+  
+  <rect x="3.7" y="4" width="92.6" height="20" rx="1.5"
+        fill="#3b4a63" opacity="0.55"><title>scheduled window</title></rect>
+  
+  
+  <rect x="25.93" y="25" width="0.43" height="3.2"
+        fill="#2f9e63" opacity="0.9">
+    <title>watched by polling</title>
+  </rect>
+  
+  <rect x="51.85" y="25" width="22.37" height="3.2"
+        fill="#2f9e63" opacity="0.9">
+    <title>watched by polling</title>
+  </rect>
+  
+  <rect x="26.36" y="25" width="25.49" height="3.2"
+        fill="#9aa3b2" opacity="0.9">
+    <title>coverage gap — not watched</title>
+  </rect>
+  
+  <rect x="74.22" y="25" width="22.08" height="3.2"
+        fill="#9aa3b2" opacity="0.9">
+    <title>coverage gap — not watched</title>
+  </rect>
+  
+  
+  <g>
+    <line x1="25.93" y1="8" x2="25.93" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>motion — 2026-10-02T18:31:03.318000+00:00</title></line>
+    <circle cx="25.93" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>motion — 2026-10-02T18:31:03.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="25.93" y1="8" x2="25.93" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>snapshot — 2026-10-02T18:31:03.318000+00:00</title></line>
+    <circle cx="25.93" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>snapshot — 2026-10-02T18:31:03.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="26.0" y1="8" x2="26.0" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>doorbell — 2026-10-02T18:31:09.318000+00:00</title></line>
+    <circle cx="26.0" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>doorbell — 2026-10-02T18:31:09.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="26.17" y1="8" x2="26.17" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>door opened — 2026-10-02T18:31:23.318000+00:00</title></line>
+    <circle cx="26.17" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>door opened — 2026-10-02T18:31:23.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="26.36" y1="8" x2="26.36" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>door closed — 2026-10-02T18:31:38.318000+00:00</title></line>
+    <circle cx="26.36" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>door closed — 2026-10-02T18:31:38.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="74.07" y1="8" x2="74.07" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>door opened — 2026-10-02T19:36:03.318000+00:00</title></line>
+    <circle cx="74.07" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>door opened — 2026-10-02T19:36:03.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="74.07" y1="8" x2="74.07" y2="24"
+          stroke="#e8b93e"
+          stroke-width="0.7"><title>worker check-in — 2026-10-02T19:36:03.318922+00:00</title></line>
+    <circle cx="74.07" cy="7" r="1.1"
+            fill="#e8b93e">
+      <title>worker check-in — 2026-10-02T19:36:03.318922+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="74.22" y1="8" x2="74.22" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>door closed — 2026-10-02T19:36:15.318000+00:00</title></line>
+    <circle cx="74.22" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>door closed — 2026-10-02T19:36:15.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="74.26" y1="8" x2="74.26" y2="24"
+          stroke="#c05a5a"
+          stroke-width="0.7"><title>departure cue — 2026-10-02T19:36:18.318000+00:00</title></line>
+    <circle cx="74.26" cy="7" r="1.1"
+            fill="#c05a5a">
+      <title>departure cue — 2026-10-02T19:36:18.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="74.26" y1="8" x2="74.26" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>snapshot — 2026-10-02T19:36:18.318000+00:00</title></line>
+    <circle cx="74.26" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>snapshot — 2026-10-02T19:36:18.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="74.07" y1="8" x2="74.07" y2="24"
+          stroke="#e8b93e"
+          stroke-width="0.7"><title>worker check-in — 2026-10-02T19:36:03.318922+00:00</title></line>
+    <circle cx="74.07" cy="7" r="1.1"
+            fill="#e8b93e">
+      <title>worker check-in — 2026-10-02T19:36:03.318922+00:00</title></circle>
+  </g>
+  
+</svg>
+
+<div class="row" aria-hidden="true" style="justify-content:space-between;font-size:11px;color:var(--muted);margin-top:2px">
+  <span>10:56am</span><span>11:29am</span><span>12:03pm</span><span>12:37pm</span><span>1:11pm</span>
+</div>
+<div class="row" style="gap:16px;font-size:11px;color:var(--muted);margin:6px 2px 4px">
+  <span><span style="color:#8fa3c8">&#9632;</span> scheduled window</span>
+  <span><span style="color:#2f9e63">&#9632;</span> watched &nbsp;<span style="color:#9aa3b2">&#9632;</span> gap</span>
+  <span><span style="color:#5aa2e8">&#9679;</span> observation &nbsp;<span style="color:#e8b93e">&#9679;</span> self-reported check-in</span>
+  
+</div>
+
+
+</div>
+
+
+<div class="card"><ul class="timeline">
+
+<li><time datetime="2026-10-02 18:31:03.318000+00:00">11:31:03 AM</time><div>motion (human)
+
+<div class="small muted">webhook: <code>motion_detected</code> &middot; ed016276-eb7a-43a8-9b70-db757af215c7</div>
+</div></li>
+<li><time datetime="2026-10-02 18:31:09.318000+00:00">11:31:09 AM</time><div>doorbell
+
+<div class="small muted">webhook: <code>button_press</code> &middot; d5413a3b-08e9-411c-9c17-45861df7a0ee</div>
+</div></li>
+<li><time datetime="2026-10-02 18:31:23.318000+00:00">11:31:23 AM</time><div>door opened
+
+<div class="small muted">webhook: <code>contact_sensor_faulted</code> &middot; ceb2b2a0-c6a6-4228-ba46-2f4760036dd6</div>
+</div></li>
+<li><time datetime="2026-10-02 18:31:38.318000+00:00">11:31:38 AM</time><div>door closed
+
+<div class="small muted">webhook: <code>contact_sensor_cleared</code> &middot; 98eb65ff-2b8e-4969-aaf7-514c1a373b97</div>
+</div></li>
+<li><time datetime="2026-10-02 19:36:03.318000+00:00">12:36:03 PM</time><div>door opened
+
+<div class="small muted">webhook: <code>contact_sensor_faulted</code> &middot; bb898f16-801b-4585-86e3-8ad200cf0ac3</div>
+</div></li>
+<li><time datetime="2026-10-02 19:36:03.318922+00:00">12:36:03 PM</time><div>worker check-in
+<div class="muted">Worker check-in self-reported using the link issued to Maria Chen; not identity-verified</div>
+
+</div></li>
+<li><time datetime="2026-10-02 19:36:15.318000+00:00">12:36:15 PM</time><div>door closed
+
+<div class="small muted">webhook: <code>contact_sensor_cleared</code> &middot; b4d9dfd4-4fbc-4f5c-a271-a864276e945f</div>
+</div></li>
+<li><time datetime="2026-10-02 19:36:18.318000+00:00">12:36:18 PM</time><div>departure cue (human)
+
+<div class="small muted">webhook: <code>motion_detected</code> &middot; 7bdb90da-4843-48f4-a94e-94248515bfe0</div>
+</div></li>
+</ul></div>
+
+
+<h2>Review and corrections</h2>
+<div class="card">
+<p class="ok">original and 3 append-only reviews verified (integrity only)</p>
+<a class="btn secondary" href="/visits/vis_70e42116a4cf/bundle.json">Export original + review chain</a>
+<a class="btn secondary" href="/visits/vis_70e42116a4cf/pack.zip" title="bundle + media + offline verifier in one zip">Download dispute pack</a>
+<a class="btn secondary" href="/visits/vis_70e42116a4cf/pack.zip?redact_media=1" title="media withheld, signed digests kept">Privacy export</a>
+<a class="btn secondary" href="demo-visit-brief.html" title="one printable page for a mediator or filing — anchors and verification steps, no media bytes">Printable brief</a>
+
+<button class="btn secondary" id="issue-review">Request worker's account</button>
+<a id="worker-review-link" style="display:block;overflow-wrap:anywhere;color:var(--accent)"></a>
+<img id="worker-review-qr" alt="QR code for the worker review link" style="display:none;width:120px;height:120px;margin-top:8px;border:1px solid var(--line);border-radius:8px">
+<p id="review-link-status" role="status" class="small muted"></p>
+
+<button class="btn secondary" id="issue-family">Share the household view</button>
+<button class="btn secondary" id="revoke-family" title="Kills the existing family link — anyone holding it loses access immediately">Revoke family link</button>
+<a id="family-view-link" style="display:block;overflow-wrap:anywhere;color:var(--accent)"></a>
+<a id="family-mailto" class="muted small" style="display:none" href="#">Send by email</a>
+<img id="family-view-qr" alt="QR code for the household view link" style="display:none;width:120px;height:120px;margin-top:8px;border:1px solid var(--line);border-radius:8px">
+<p id="family-link-status" role="status" class="small muted"></p>
+
+
+<article style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
+
+<strong>Revision 1: dispute — Maria Chen (worker)</strong>
+<div class="small muted">Self-reported reason <code>schedule_difference</code> — Service or timing differed from the plan. Stated by the worker, not verified.</div>
+
+<p style="white-space:pre-wrap">I dispute this record — I arrived before the first observation shown.</p>
+
+
+<div class="muted small">Received 11:06:11 AM &middot; hash 84fdc95eff712d55…</div>
+</article>
+
+
+<article style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
+
+<strong>Revision 2: household account — no one seen — Household member (household)</strong>
+
+<p style="white-space:pre-wrap">My mother was home all morning and says the doorbell never rang — nobody came to the door before ten.</p>
+
+<p class="small muted">Household account via the family link — self-reported; identity not independently verified. It doesn't alter the worker or coordinator stances.</p>
+<div class="muted small">Received 11:06:12 AM &middot; hash a0a670db4e09dd3c…</div>
+</article>
+
+
+<article style="border-top:1px solid var(--line);margin-top:16px;padding-top:12px">
+
+<strong>Revision 3: household account — saw someone — Household member (household)</strong>
+
+<p style="white-space:pre-wrap">I was home that afternoon � I heard the doorbell a little after six and saw someone at the door. I can&#39;t say how long she stayed.</p>
+
+<p class="small muted">Household account via the family link — self-reported; identity not independently verified. It doesn't alter the worker or coordinator stances.</p>
+<div class="muted small">Received 11:09:43 AM &middot; hash 08dd5d5fed59df57…</div>
+</article>
+
+</div>
+<form id="coordinator-review" class="card" style="margin-top:16px">
+<h2>Append coordinator statement</h2>
+<label>Assessment
+<select name="decision" required>
+
+<option value="inconclusive" >Inconclusive — more context needed</option>
+
+<option value="confirm" >Confirm the recorded account</option>
+
+<option value="dispute" >Dispute the interpretation</option>
+
+<option value="correction" >Add a correction or missing context</option>
+
+</select></label>
+<label>Reason code <span class="muted">(optional — the coded explanation you are stating; never a verified cause)</span>
+<select name="reason_code">
+<option value="">No coded reason — statement carries it</option>
+<option value="device_fault" >device_fault — Camera or sensor faulted — channel interruption recorded</option><option value="worker_error" >worker_error — Worker forgot the check-in step or used it wrong</option><option value="service_outside_home" >service_outside_home — Service happened away from the camera&#39;s view</option><option value="no_electronic_confirmation" >no_electronic_confirmation — No device confirmation exists — unexplained gap</option><option value="participant_unavailable" >participant_unavailable — Household wasn&#39;t home or didn&#39;t answer</option><option value="schedule_difference" >schedule_difference — Service or timing differed from the plan</option><option value="authorization_gap" >authorization_gap — Plan/authorization coverage lapsed or ended</option><option value="subscription_lapse" >subscription_lapse — Ring subscription ended mid-window</option><option value="mobile_or_network_issue" >mobile_or_network_issue — Worker&#39;s phone/app or the home network failed</option><option value="worker_unavailable" >worker_unavailable — Worker was unavailable or reassigned</option><option value="participant_refused" >participant_refused — Household declined the visit or the device</option><option value="weather_or_disaster" >weather_or_disaster — Weather/emergency prevented the visit</option><option value="other" >other — Other — the statement carries the detail</option>
+</select></label>
+<label>Statement <textarea name="statement" rows="4" maxlength="2000" required placeholder="Explain what you know and what should be corrected."></textarea></label>
+<div class="row">
+<label>Reported start (optional, include UTC offset)<input name="reported_start" value="" placeholder="2026-09-15T09:00:00-07:00"></label>
+<label>Reported end (optional, include UTC offset)<input name="reported_end" value="" placeholder="2026-09-15T10:30:00-07:00"></label>
+</div>
+<p class="muted small">Supply both times or neither. These are reported times, not independently measured work duration. Original observations will not change.</p>
+<button class="btn">Append signed review</button>
+<p id="review-status" role="status"></p>
+</form>
+<form id="coordinator-resolve" class="card" style="margin-top:16px">
+<h2>Conclude the record</h2>
+<p class="muted small">A resolution appends the coordinator's signed conclusion. It never edits or removes the worker's statement — a later worker statement re-opens the record.</p>
+<label>Conclusion
+<select name="outcome" required>
+<option value="record_upheld">Record upheld — the signed record stands as the conclusion</option>
+<option value="account_accepted">Worker's account accepted — their statement is the operative conclusion</option>
+<option value="inconclusive">Inconclusive — the ambiguity itself is the conclusion</option>
+</select></label>
+<label>Reason <span class="muted">(coded — classifies your explanation, never asserts what happened)</span>
+<select name="reason_code">
+<option value="">No coded reason — statement carries it</option>
+<option value="device_fault">device_fault — Camera or sensor faulted — channel interruption recorded</option><option value="worker_error">worker_error — Worker forgot the check-in step or used it wrong</option><option value="service_outside_home">service_outside_home — Service happened away from the camera&#39;s view</option><option value="no_electronic_confirmation">no_electronic_confirmation — No device confirmation exists — unexplained gap</option><option value="participant_unavailable">participant_unavailable — Household wasn&#39;t home or didn&#39;t answer</option><option value="schedule_difference">schedule_difference — Service or timing differed from the plan</option><option value="authorization_gap">authorization_gap — Plan/authorization coverage lapsed or ended</option><option value="subscription_lapse">subscription_lapse — Ring subscription ended mid-window</option><option value="mobile_or_network_issue">mobile_or_network_issue — Worker&#39;s phone/app or the home network failed</option><option value="worker_unavailable">worker_unavailable — Worker was unavailable or reassigned</option><option value="participant_refused">participant_refused — Household declined the visit or the device</option><option value="weather_or_disaster">weather_or_disaster — Weather/emergency prevented the visit</option><option value="other">other — Other — the statement carries the detail</option>
+</select></label>
+<label>Statement <textarea name="statement" rows="4" maxlength="2000" required placeholder="Why this conclusion, and what evidence weighed on it."></textarea></label>
+<button class="btn">Sign conclusion</button>
+<p id="resolve-status" role="status"></p>
+</form>
+<script>
+const requestReview = document.getElementById('issue-review');
+if (requestReview) requestReview.onclick = async () => {
+  const response = await fetch('/api/visits/vis_70e42116a4cf/review-link', {method: 'POST'});
+  const data = await response.json();
+  document.getElementById('review-link-status').textContent = response.ok ? 'Share privately, or let the worker scan the code. Expires in 24 hours; single use.' : data.detail;
+  if (response.ok) {
+    const link = document.getElementById('worker-review-link');
+    link.href = data.path; link.textContent = new URL(data.path, location.origin).href;
+    const qr = document.getElementById('worker-review-qr');
+    qr.src = '/qr.svg?target=' + encodeURIComponent(data.path);
+    qr.style.display = 'block';
+  }
+};
+const issueFamily = document.getElementById('issue-family');
+if (issueFamily) issueFamily.onclick = async () => {
+  const response = await fetch('/api/visits/vis_70e42116a4cf/family-link', {method: 'POST'});
+  const data = await response.json();
+  document.getElementById('family-link-status').textContent = response.ok ? 'Text or show the code to the family — they can view the record and add their own account; expires in 7 days.' : data.detail;
+  if (response.ok) {
+    const link = document.getElementById('family-view-link');
+    link.href = data.path; link.textContent = new URL(data.path, location.origin).href;
+    const mail = document.getElementById('family-mailto');
+    mail.href = 'mailto:?subject=' + encodeURIComponent('Your visit record')
+      + '&body=' + encodeURIComponent('Your visit record is ready — open this link to see what the camera reported, what the worker said, and to add your own account (expires in 7 days):\n\n' + link.textContent);
+    mail.style.display = 'inline';
+    const qr = document.getElementById('family-view-qr');
+    qr.src = '/qr.svg?target=' + encodeURIComponent(data.path);
+    qr.style.display = 'block';
+    const rv = document.getElementById('revoke-family');
+    if (!rv) {
+      const b = document.createElement('button');
+      b.className = 'btn secondary'; b.id = 'revoke-family';
+      b.textContent = 'Revoke family link';
+      b.title = 'Kills the existing family link — anyone holding it loses access immediately';
+      issueFamily.after(b);
+      b.onclick = revokeFamily;
+    }
+  }
+};
+async function revokeFamily() {
+  const status = document.getElementById('family-link-status');
+  const response = await fetch('/api/visits/vis_70e42116a4cf/family-link/revoke', {method: 'POST'});
+  if (response.ok) {
+    status.textContent = 'Family link revoked — the URL stops working immediately.';
+    document.getElementById('family-view-link').removeAttribute('href');
+    document.getElementById('family-view-link').textContent = '';
+    document.getElementById('family-view-qr').style.display = 'none';
+    document.getElementById('family-mailto').style.display = 'none';
+    document.getElementById('revoke-family').remove();
+  } else {
+    status.textContent = (await response.json()).detail || 'Revoke failed';
+  }
+}
+const revokeFamilyBtn = document.getElementById('revoke-family');
+if (revokeFamilyBtn) revokeFamilyBtn.onclick = revokeFamily;
+document.getElementById('coordinator-review').onsubmit = async event => {
+  event.preventDefault();
+  const body = Object.fromEntries(new FormData(event.target));
+  body.reported_start = body.reported_start || null; body.reported_end = body.reported_end || null;
+  const response = await fetch('/api/visits/vis_70e42116a4cf/reviews', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  if (response.ok) { location.reload(); return; }
+  const data = await response.json();
+  document.getElementById('review-status').textContent = typeof data.detail === 'string' ? data.detail : 'Check the required statement and reported time fields.';
+};
+document.getElementById('coordinator-resolve').onsubmit = async event => {
+  event.preventDefault();
+  const btn = event.target.querySelector('button[type=submit],button');
+  if (btn) btn.disabled = true;
+  const body = Object.fromEntries(new FormData(event.target));
+  const response = await fetch('/api/visits/vis_70e42116a4cf/resolve', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  if (response.ok) { location.reload(); return; }
+  if (btn) btn.disabled = false;
+  const data = await response.json();
+  document.getElementById('resolve-status').textContent = typeof data.detail === 'string' ? data.detail : 'Check the required conclusion fields.';
+};
+</script>
+
+
+<h2>Observation coverage</h2>
+<div class="card">
+<div class="row" style="justify-content:space-between">
+  <div>
+    <span class="ok">Observed — events on record</span>
+    
+    <div class="small muted" style="margin-top:6px">Attest polled Ring Event History during this window; it attests what the pipeline observed, not what physically happened.</div>
+  </div>
+  <div class="kpi" style="font-size:26px">32%</div>
+</div>
+<div class="small muted" style="margin-top:8px">
+  6 successful polls
+  · 11 history events returned for this device
+</div>
+
+<div class="small" style="margin-top:8px">
+  <span class="flag warn">coverage gap</span>
+  
+    
+      <div class="muted">11:31:38 AM – 12:06:03 PM not watched by any successful poll</div>
+    
+  
+    
+      <div class="muted">12:36:15 PM – 1:06:03 PM not watched by any successful poll</div>
+    
+  
+</div>
+
+
+
+</div>
+
+<h2>Original signed record #2</h2>
+<div class="card">
+<div class="small"><span class="ok">Ed25519 signature valid — integrity only</span>
+
+ <span class="flag " title="the signed payload declares where this record's facts came from">local / test data</span></div>
+
+<div class="muted small">Replay-clocked record — replay 2f3ad3e1913b44259c05fac05f72981c · check-in received at wall time 11:06:05 AM</div>
+<div class="muted small" style="overflow-wrap:anywhere">sha256 <code>6eb91537d98252e89178633a219d0326171e697406f459bc52e6178bc0ff3344</code><br>previous <code>c54b4aa30fdb05172fe02eaac09b09ef2167a1eca227da9a892eccd432187d6f</code></div>
+<details><summary class="muted small" style="cursor:pointer">Signed payload (JSON)</summary>
+<pre>{
+  "assessment": {
+    "attendance": "self_reported",
+    "departure_verified": false,
+    "identity_verified": false,
+    "requires_review": true,
+    "signature_scope": "record_integrity_only",
+    "time_worked_minutes": null
+  },
+  "checked_in_at": "2026-10-02T19:36:03.318922+00:00",
+  "clock": {
+    "checkin_received_at": "2026-10-09T18:06:05.765065+00:00",
+    "issuance_uses_wall_clock": true,
+    "mode": "replay",
+    "replay_id": "2f3ad3e1913b44259c05fac05f72981c"
+  },
+  "close_reason": "departure",
+  "closed_at": "2026-10-02T19:36:18.318922+00:00",
+  "cures_act_elements": {
+    "date": {
+      "basis": "scheduled_date_observation_timestamps_are_device_reported",
+      "value": "2026-10-02"
+    },
+    "individual_providing": {
+      "basis": "scheduled_worker_plus_self_report_identity_unverified",
+      "value": "Maria Chen"
+    },
+    "individual_receiving": {
+      "basis": "premises_not_a_verified_person",
+      "value": "Alvarez residence"
+    },
+    "location": {
+      "basis": "device_anchored_at_premises_not_gps",
+      "value": "ava1.ring.device.0F9EB1CB06604797A169"
+    },
+    "service_type": {
+      "basis": "scheduled_expectation_not_verified_performed",
+      "value": "Morning care visit"
+    },
+    "status": "corroboration_map_only_not_an_evv_submission",
+    "time_begins_ends": {
+      "basis": "observed_interval_bounds_never_time_worked",
+      "value": [
+        "2026-10-02T18:31:03.318000+00:00",
+        "2026-10-02T19:36:18.318000+00:00"
+      ]
+    }
+  },
+  "data_origin": "local_or_test",
+  "departed_at": null,
+  "departure_candidate_at": "2026-10-02T19:36:18.318000+00:00",
+  "duration_minutes": null,
+  "evidence": [
+    {
+      "at": "2026-10-02T18:31:03.318000+00:00",
+      "device": "ava1.ring.device.0F9EB1CB06604797A169",
+      "ingestion_source": "webhook",
+      "kind": "arrival_motion",
+      "media_sha256": null,
+      "ring_event": "motion_detected",
+      "ring_history_event_id": null,
+      "ring_request_id": "ed016276-eb7a-43a8-9b70-db757af215c7",
+      "ring_sub_type": "human"
+    },
+    {
+      "at": "2026-10-02T18:31:03.318000+00:00",
+      "device": "ava1.ring.device.0F9EB1CB06604797A169",
+      "ingestion_source": "local_or_test",
+      "kind": "snapshot",
+      "media_sha256": "b85ccab328138c7e3cbcf6d8cce21b452be2267c6fe12bc9a682b77ea1c35ebd",
+      "ring_event": null,
+      "ring_history_event_id": null,
+      "ring_request_id": null,
+      "ring_sub_type": null
+    },
+    {
+      "at": "2026-10-02T18:31:09.318000+00:00",
+      "device": "ava1.ring.device.0F9EB1CB06604797A169",
+      "ingestion_source": "webhook",
+      "kind": "doorbell",
+      "media_sha256": null,
+      "ring_event": "button_press",
+      "ring_history_event_id": null,
+      "ring_request_id": "d5413a3b-08e9-411c-9c17-45861df7a0ee",
+      "ring_sub_type": null
+    },
+    {
+      "at": "2026-10-02T18:31:23.318000+00:00",
+      "device": "ava1.ring.device.1C5AE0F5809743D9A4D9",
+      "ingestion_source": "webhook",
+      "kind": "door_opened",
+      "media_sha256": null,
+      "ring_event": "contact_sensor_faulted",
+      "ring_history_event_id": null,
+      "ring_request_id": "ceb2b2a0-c6a6-4228-ba46-2f4760036dd6",
+      "ring_sub_type": null
+    },
+    {
+      "at": "2026-10-02T18:31:38.318000+00:00",
+      "device": "ava1.ring.device.1C5AE0F5809743D9A4D9",
+      "ingestion_source": "webhook",
+      "kind": "door_closed",
+      "media_sha256": null,
+      "ring_event": "contact_sensor_cleared",
+      "ring_history_event_id": null,
+      "ring_request_id": "98eb65ff-2b8e-4969-aaf7-514c1a373b97",
+      "ring_sub_type": null
+    },
+    {
+      "at": "2026-10-02T19:36:03.318000+00:00",
+      "device": "ava1.ring.device.1C5AE0F5809743D9A4D9",
+      "ingestion_source": "webhook",
+      "kind": "door_opened",
+      "media_sha256": null,
+      "ring_event": "contact_sensor_faulted",
+      "ring_history_event_id": null,
+      "ring_request_id": "bb898f16-801b-4585-86e3-8ad200cf0ac3",
+      "ring_sub_type": null
+    },
+    {
+      "at": "2026-10-02T19:36:03.318922+00:00",
+      "device": null,
+      "ingestion_source": "unknown",
+      "kind": "checkin",
+      "media_sha256": null,
+      "ring_event": null,
+      "ring_history_event_id": null,
+      "ring_request_id": null,
+      "ring_sub_type": null
+    },
+    {
+      "at": "2026-10-02T19:36:15.318000+00:00",
+      "device": "ava1.ring.device.1C5AE0F5809743D9A4D9",
+      "ingestion_source": "webhook",
+      "kind": "door_closed",
+      "media_sha256": null,
+      "ring_event": "contact_sensor_cleared",
+      "ring_history_event_id": null,
+      "ring_request_id": "b4d9dfd4-4fbc-4f5c-a271-a864276e945f",
+      "ring_sub_type": null
+    },
+    {
+      "at": "2026-10-02T19:36:18.318000+00:00",
+      "device": "ava1.ring.device.0F9EB1CB06604797A169",
+      "ingestion_source": "webhook",
+      "kind": "departure_motion",
+      "media_sha256": null,
+      "ring_event": "motion_detected",
+      "ring_history_event_id": null,
+      "ring_request_id": "7bdb90da-4843-48f4-a94e-94248515bfe0",
+      "ring_sub_type": "human"
+    },
+    {
+      "at": "2026-10-02T19:36:18.318000+00:00",
+      "device": "ava1.ring.device.0F9EB1CB06604797A169",
+      "ingestion_source": "local_or_test",
+      "kind": "snapshot",
+      "media_sha256": "cc56f09f352d5f6ef7e91977afc369d4dc574012a792d7fd83257de071931e62",
+      "ring_event": null,
+      "ring_history_event_id": null,
+      "ring_request_id": null,
+      "ring_sub_type": null
+    }
+  ],
+  "first_observed_at": "2026-10-02T18:31:03.318000+00:00",
+  "flags": [
+    {
+      "code": "departure_unconfirmed",
+      "message": "Record closed for review; direction, identity, and continuous presence are not established",
+      "severity": "warn"
+    },
+    {
+      "code": "observed_interval_short",
+      "message": "Observations span 65 min; 90 min scheduled. Time worked is unknown",
+      "severity": "warn"
+    }
+  ],
+  "history_poll_coverage": {
+    "claim": "Attest polled Ring Event History during this window; it attests what the pipeline observed, not what physically happened",
+    "covered": [
+      {
+        "end": "2026-10-02T18:31:38.318922+00:00",
+        "start": "2026-10-02T18:31:03.318000+00:00"
+      },
+      {
+        "end": "2026-10-02T19:36:15.318922+00:00",
+        "start": "2026-10-02T19:06:03.318922+00:00"
+      }
+    ],
+    "events": 11,
+    "failed_polls": 0,
+    "fraction": 0.324,
+    "gaps": [
+      {
+        "end": "2026-10-02T19:06:03.318922+00:00",
+        "start": "2026-10-02T18:31:38.318922+00:00"
+      },
+      {
+        "end": "2026-10-02T20:06:03.318922+00:00",
+        "start": "2026-10-02T19:36:15.318922+00:00"
+      }
+    ],
+    "interruptions": [],
+    "live_sessions": [],
+    "polls": 6,
+    "state": "observed_with_events",
+    "window": {
+      "end": "2026-10-02T20:06:03.318922+00:00",
+      "start": "2026-10-02T18:31:03.318000+00:00"
+    }
+  },
+  "issued_at": "2026-10-09T18:06:05.909358+00:00",
+  "journal_head": "21db708bfb80dd53e4f32a634070fe25b140e9ee94ef349a5e49284b63bb6f74",
+  "last_observed_at": "2026-10-02T19:36:18.318000+00:00",
+  "observed_span_minutes": 65.25,
+  "prev_hash": "c54b4aa30fdb05172fe02eaac09b09ef2167a1eca227da9a892eccd432187d6f",
+  "receipt_id": "rcpt_8af58f6242d04e13a94147ddc2c70a19",
+  "ring_history": [
+    {
+      "end": "2026-10-02T19:36:38.318000+00:00",
+      "event_type": "motion",
+      "id": "ava1.ring.device.0F9EB1CB06604797A169.motion.1790969778318",
+      "start": "2026-10-02T19:36:18.318000+00:00"
+    },
+    {
+      "end": "2026-10-02T18:31:29.318000+00:00",
+      "event_type": "ding",
+      "id": "ava1.ring.device.0F9EB1CB06604797A169.ding.1790965869318",
+      "start": "2026-10-02T18:31:09.318000+00:00"
+    },
+    {
+      "end": "2026-10-02T18:31:23.318000+00:00",
+      "event_type": "motion",
+      "id": "ava1.ring.device.0F9EB1CB06604797A169.motion.1790965863318",
+      "start": "2026-10-02T18:31:03.318000+00:00"
+    }
+  ],
+  "schedule": {
+    "expected_minutes": 90,
+    "id": "sch_7b4cdd6dba26",
+    "service": "Morning care visit",
+    "window_end": "2026-10-02T20:06:03.318922+00:00",
+    "window_start": "2026-10-02T18:01:03.318922+00:00"
+  },
+  "scheduled_worker": {
+    "id": "wkr_08da460682ff",
+    "name": "Maria Chen"
+  },
+  "schema": "attest.receipt/2",
+  "sequence": 2,
+  "site": {
+    "door_camera_id": "ava1.ring.device.0F9EB1CB06604797A169",
+    "door_sensor_id": "ava1.ring.device.1C5AE0F5809743D9A4D9",
+    "id": "site_a55d249ad6dd",
+    "name": "Alvarez residence",
+    "ring_account_id": "ava1.ring.account.SANDBOX"
+  },
+  "state": "closed",
+  "summary": "Door activity was observed at Alvarez residence from 6:31 PM to 7:36 PM, spanning about 65 minutes. The link issued to Maria Chen was used to self-report presence at 7:36 PM; identity was not independently verified. These observations do not establish departure, continuous presence, or time worked. Review notes: Record closed for review; direction, identity, and continuous presence are not established; Observations span 65 min; 90 min scheduled. Time worked is unknown.",
+  "summary_provenance": {
+    "fallback_reason": null,
+    "is_attendance_evidence": false,
+    "model": null,
+    "source": "template"
+  },
+  "visit_id": "vis_70e42116a4cf",
+  "worker": "Maria Chen",
+  "worker_id": "wkr_08da460682ff"
+}</pre>
+</details>
+</div>
+
+</main>
+</body>
+</html>
