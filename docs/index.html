@@ -21,6 +21,7 @@ h1{font-size:1.7rem;margin-bottom:.2rem}
 .badge{display:inline-block;font-size:.7rem;font-weight:700;letter-spacing:.05em;border-radius:4px;padding:.1rem .4rem;vertical-align:middle;margin-left:.4rem}
 .badge.ok{background:#dcfce7;color:#166534}
 .badge.bad{background:#fee2e2;color:#991b1b}
+.badge.mut{background:#f1f5f9;color:#475569}
 h2{font-size:1.1rem;margin-top:1.8rem;border-top:1px solid #e4e4e7;padding-top:1rem}
 .proves{display:flex;gap:.8rem;flex-wrap:wrap}
 .proves>div{flex:1;min-width:240px;border-radius:10px;padding:.9rem 1rem}
@@ -54,6 +55,12 @@ what the devices observed, what the worker reported, what a human concluded.
 every observation, statement, and conclusion is a separate Ed25519-signed receipt on a
 hash-chained ledger — and the pack you're about to verify carries its own verifier,
 so nobody has to trust this site either.</p>
+
+<p><small><strong>Ring surface called at runtime:</strong> signed webhooks ·
+Event History · media &amp; snapshots (regional redirect handled) ·
+devices/capabilities · app-integrations · subscriptions · WHEP live view.
+<strong>Track fit:</strong> business systems + caretaking, with accessibility
+carried through the household view and doorstep QR flow.</small></p>
 
 <p><small><strong>Suggested 60 seconds:</strong> open the verifier → green
 VERIFIED on the sample → click <em>open index.html</em> under the stamp (the
@@ -211,6 +218,54 @@ fork in your browser</a> — the evidence doc's checkpoint signature, inclusion
 proofs, and embedded observation all check out. Reproduce it:
 <code>attest split-demo</code> fabricates the whole scenario in scratch space and
 emits the same evidence document.</p>
+
+<h2>Five AWS touchpoints — three verified live</h2>
+<ul>
+<li><b>Lambda</b> <span class="badge ok">verified live</span> — <code>attest-verify-pack</code>
+re-verifies a posted pack in AWS using the project's pinned verifier, never the
+pack's embedded script — data and code come from different parties:</li>
+</ul>
+<div class="term" aria-label="Lambda invoke transcript">
+  <div class="bar" aria-hidden="true"><i></i><i></i><i></i></div>
+  <pre style="min-height:0"><span class="p">$ aws lambda invoke --function-name attest-verify-pack \
+    --payload fileb://pack.json out.json</span>
+<span class="ok">  {"ok": true} — 2 visit records, 43 receipts proven inside the log</span>
+<span class="p">$ # doctor one byte in a signed payload, invoke again</span>
+<span class="bad">  {"ok": false} — payload hash mismatch (payload was altered)</span>
+<span class="mut">  the function catches exactly what the local verifiers catch</span></pre>
+</div>
+<ul>
+<li><b>KMS</b> <span class="badge ok">verified live</span> — the Ed25519 signing key
+is envelope-encrypted under a KMS data key (AES-256-GCM + encryption context); every
+unwrap is a CloudTrail-audited <code>Decrypt</code>, verified end-to-end on a real CMK.</li>
+<li><b>S3</b> <span class="badge ok">verified live</span> — <code>attest anchor
+--publish</code> uploads signed checkpoints to a versioned, public-access-blocked
+bucket with the file sha256 stamped into object metadata — a checkpoint outside
+the deployment's control.</li>
+<li><b>Bedrock Converse</b> <span class="badge mut">labeled fallback</span> — writes
+per-record narrative summaries with provenance labels; the account's on-demand
+quota is zero, so every model call authenticates then throttles — and the record
+labels the deterministic fallback as its true source instead of pretending.</li>
+<li><b>Strands agent</b> <span class="badge mut">labeled fallback</span> — the weekly
+triage brief reads the ledger through real read-only tools; same quota wall, same
+honest labeling (<code>strands-agent</code> vs <code>deterministic</code> + reason).</li>
+</ul>
+<p><small>The fallback path is itself verified against real AWS failure modes —
+expired <code>aws login</code> creds surface as <code>LoginRefreshRequired</code>,
+quota as <code>ThrottlingException</code> — which is the designed behavior, not a
+mock. An honest FAIL on the label beats a fake PASS.</small></p>
+
+<h2>Also entered: ring-sandbox — the Open Source mini-challenge</h2>
+<p>Ring ships no SDK and no simulator, so we built both:
+<a href="https://github.com/josepha-mayo/ring-sandbox">ring-sandbox</a> is a typed
+Python client + FastAPI emulator of the documented surface (webhooks, Event
+History, media, subscriptions, WHEP), a YAML scenario DSL, chaos injection, and a
+pytest plugin — MIT-licensed, on PyPI, CI-tested on Windows/Linux × Python
+3.11/3.14, shipping real Playground recordings as fixtures. Attest's whole demo
+runs on it — and every team after us gets Ring integration without a doorbell.</p>
+<p><small>Developer-experience feedback for the bonus: 17 documented friction-log
+entries (task → expected vs actual → severity → workaround → suggestion) in
+<a href="https://github.com/josepha-mayo/attest/blob/main/FRICTIONLOG.md">FRICTIONLOG.md</a>.</small></p>
 
 <h2>What verification proves — and what it doesn't</h2>
 <div class="proves">

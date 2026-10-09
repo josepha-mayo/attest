@@ -48,6 +48,20 @@ attest demo        # boots emulator + server + an eight-day story, prints a URL
 - **`attest export --tamper-twin twin.zip --attack forged-verifier`** — mint
   your own hostile pack; the built-in self-check refuses it before it ships.
 
+## Scoring map — where each criterion's evidence lives
+
+| Criterion | The evidence to look at |
+|---|---|
+| **Tech Implementation** | The repo *calls* Ring at runtime — signed webhooks, Event History, media+snapshots through the regional redirect, devices/capabilities, app-integrations, subscriptions, WHEP. Five AWS touchpoints (Bedrock, Strands, KMS, S3, Lambda) — KMS/S3/Lambda verified live. Eight one-click artifacts on the hosted verifier, 21 real attacks all caught, conformance vectors pinning five verifier surfaces to one oracle. |
+| **Design** | Three audiences, three honest readings of one signed record: coordinator console (corroboration + coverage), worker scoped link (QR, no account), household view (plain language + family voice). Verified packs hand you their own record browser. |
+| **Potential Impact** | Home-service disputes are a real recurring cost; Ring-track priorities named business systems + caretaking. The Appstore path is argued from the privacy posture itself: disconnect tombstones, retention, scoped links, redaction. |
+| **Quality of the Idea** | The non-obvious move: don't certify presence — attest the *record*. Missing events are never absence; outages are signed explanations; even the issuer can't fork its log. The honesty boundary is the product. |
+
+**Bonuses:** [FRICTIONLOG.md](FRICTIONLOG.md) holds 17 entries in the required
+schema (task → expected vs actual → severity → workaround → suggestion), and
+[ring-sandbox](https://github.com/josepha-mayo/ring-sandbox) is the Open Source
+mini-challenge entry — the SDK + emulator Ring doesn't ship.
+
 ## What to read
 
 - [THREATMODEL.md](THREATMODEL.md) — every attack path and its detection,
