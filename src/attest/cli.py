@@ -1047,6 +1047,7 @@ def _verify(args: argparse.Namespace) -> None:
         """Every verification verdict exits the same way on both surfaces —
         with --json stdout still carries exactly one object, so a pipeline
         can gate on .ok without parsing prose."""
+        _write_verdict_badge(getattr(args, "badge", None), False, detail)
         if json_mode:
             print(json.dumps({"ok": False, "detail": detail, **kw}, indent=2))
             sys.exit(1)
@@ -1176,6 +1177,7 @@ def _verify(args: argparse.Namespace) -> None:
             required_witnesses=required_witnesses,
             witness_names=witness_names,
             witness_threshold=witness_threshold,
+            badge=getattr(args, "badge", None),
         )
         return
     try:
@@ -1784,6 +1786,7 @@ def _verify_zip(
     required_witnesses: list | None = None,
     witness_names: dict | None = None,
     witness_threshold: int = 1,
+    badge: str | None = None,
 ) -> None:
     """Verify a dispute pack or case pack zip in place — same checks as the
     embedded verify_case.py and the /verify page. Without --key the pack's own
@@ -1802,6 +1805,7 @@ def _verify_zip(
     from .packdiff import BoundedZip
 
     def fail(detail: str, **kw) -> None:
+        _write_verdict_badge(badge, False, detail)
         if json_mode:
             print(json.dumps({"ok": False, "detail": detail, **kw}, indent=2))
             sys.exit(1)
@@ -1926,6 +1930,7 @@ def _verify_zip(
                 pass
         if live_report is not None:
             extra["live_log"] = live_report
+        _write_verdict_badge(badge, True, detail)
         print(
             json.dumps(
                 {"ok": True, "kind": kind, "detail": detail, "pinned": bool(pinned_key), **extra},
@@ -1934,6 +1939,7 @@ def _verify_zip(
         )
         return
     print(f"OK: {detail}")
+    _write_verdict_badge(badge, True, detail)
     if live_line:
         print(f"Live log: {live_line}")
     if pinned_key:
@@ -1943,6 +1949,34 @@ def _verify_zip(
             "Note: a valid pack proves record integrity under the pack's self-declared "
             "issuer key — pin a trusted key with --key. Signatures are not physical truth."
         )
+
+
+def _write_verdict_badge(path: str | None, ok: bool, detail: str) -> None:
+    """``verify --badge`` — render the verdict as a self-contained SVG shield,
+    the evidence-pack analogue of a CI badge. Written on failure too: a red
+    badge that says FAILED is honest output, not an error artifact. The full
+    verdict detail rides in ``<title>`` so a hover carries the real string."""
+    if not path:
+        return
+    from html import escape as _esc
+    from pathlib import Path
+
+    label, value, color = "attest", ("verified" if ok else "FAILED"), ("#2e8b57" if ok else "#c0392b")
+    # ~6.2px per Verdana-11 glyph plus padding, per the shields.io convention.
+    lw, rw = round(6.2 * len(label)) + 12, round(6.2 * len(value)) + 12
+    svg = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{lw + rw}" height="20" role="img" '
+        f'aria-label="{_esc(label)}: {_esc(value)}"><title>{_esc(detail)}</title>'
+        f'<rect width="{lw}" height="20" rx="3" fill="#555"/>'
+        f'<rect x="{lw}" width="{rw}" height="20" rx="3" fill="{color}"/>'
+        f'<rect x="{lw}" width="4" height="20" fill="{color}"/>'
+        f'<g fill="#fff" font-family="Verdana,DejaVu Sans,sans-serif" font-size="11">'
+        f'<text x="{lw / 2:.0f}" y="14" text-anchor="middle">{_esc(label)}</text>'
+        f'<text x="{lw + rw / 2:.0f}" y="14" text-anchor="middle">{_esc(value)}</text>'
+        f"</g></svg>\n"
+    )
+    Path(path).write_text(svg, encoding="utf-8")
+    print(f"verdict badge written to {path}", file=sys.stderr)
 
 
 def _sibling_ots_report(path) -> str | None:
@@ -3649,6 +3683,8 @@ Attest — records, not verdicts. The ten-minute path:
     3. the attack gallery + caught fork + real-API sweep: same page, one click each
     4. after a green stamp: open index.html — the pack hands you its own
        record browser, which re-verifies every record itself
+    5. the product face, no install: demo-dashboard.html + demo-integrity.html
+       are snapshots of the running app on the same site
 
   With the repo:
     attest demo           # emulator + server + an eight-day story, prints a URL
@@ -4245,6 +4281,13 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="emit the verdict as one JSON object ({ok, kind, detail, pinned, "
         "warnings}) — exit 1 on failure, so a CI gate needs no prose parsing",
+    )
+    s.add_argument(
+        "--badge",
+        default=None,
+        metavar="SVG_PATH",
+        help="also write the verdict as a self-contained SVG shield — a CI "
+        "badge for evidence packs; written red on failure, not withheld",
     )
     s.add_argument(
         "--witness-key",

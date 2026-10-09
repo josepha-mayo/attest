@@ -1956,6 +1956,12 @@ for a dispute that matters, re-verify the pack with a verifier obtained independ
  .week-strip{flex:1;min-width:0}
  .week-legend{margin-bottom:.4rem;line-height:1.9}
  .sw{display:inline-block;width:.9em;height:.7em;border-radius:2px;vertical-align:-1px;margin-left:.6em}
+ .voices{font-size:.85rem;margin:.35rem 0 .1rem}
+ .flag{display:inline-block;border-radius:6px;padding:0 .45rem;font-size:.78rem;
+   background:#f9edd4;color:#8a5a00;border:1px solid #e8d3a8}
+ .plink{color:#8a93a3;text-decoration:none;font-size:.78rem;font-weight:400}
+ .plink:hover{text-decoration:underline}
+ .tl{border-bottom:1px dotted #9aa3b2}
  @media print{
   .plain{display:block !important}
   .view-toggle,.print-btn{display:none !important}
@@ -1967,7 +1973,43 @@ for a dispute that matters, re-verify the pack with a verifier obtained independ
 _INDEX_DRIVER = """/* ---------- index driver: inlined pack data ---------- */
 const d64=s=>new TextDecoder().decode(Uint8Array.from(atob(s),c=>c.charCodeAt(0)));
 const STATE_CLS={closed:"ok",no_observation:"warn",open:"warn",unmatched:"warn"};
-const hhmm=s=>s?String(s).slice(11,16):"";
+/* Human-facing instants render in the viewer's local zone — the zone label
+   comes from the same Intl pipeline that formats the digits, so it can never
+   disagree with the rendered time. The exact signed UTC literal stays on
+   hover (title); signed-literal surfaces (anchor rows, inlined payloads)
+   keep the verbatim spelling. */
+const _DTF=(()=>{try{return new Intl.DateTimeFormat(undefined,{month:"short",
+  day:"numeric",hour:"numeric",minute:"2-digit",timeZoneName:"short"});
+  }catch(e){return null;}})();
+const _DTF_D=(()=>{try{return new Intl.DateTimeFormat(undefined,{month:"short",
+  day:"numeric"});}catch(e){return null;}})();
+const _DTF_T=(()=>{try{return new Intl.DateTimeFormat(undefined,{hour:"numeric",
+  minute:"2-digit",timeZoneName:"short"});}catch(e){return null;}})();
+const _tmOnly=t=>_DTF_T.formatToParts(t).filter(x=>x.type!=="timeZoneName")
+  .map(x=>x.value).join("").trim();
+const _zone=t=>{const z=_DTF_T.formatToParts(t).find(x=>x.type==="timeZoneName");
+  return z?z.value:"";};
+function fmtLocal(iso){
+  const t=Date.parse(iso);
+  if(!isFinite(t)||!_DTF)return esc(iso==null?"":iso);
+  return `<span class="tl" title="${esc(iso)}">${esc(_DTF.format(t))}</span>`;
+}
+function fmtRange(a,b){
+  /* Same local day collapses to "Oct 2, 6:31 – 7:36 PM EDT"; crossing days
+     give each endpoint its own full label. Both ends keep their UTC literal
+     on hover. */
+  const ta=Date.parse(a),tb=Date.parse(b);
+  if(!isFinite(ta))return fmtLocal(b);
+  if(!isFinite(tb))return fmtLocal(a);
+  if(!_DTF_D||!_DTF_T)return esc(a)+" – "+esc(b);
+  if(new Date(ta).toDateString()===new Date(tb).toDateString()){
+    const zA=_zone(ta),zB=_zone(tb),z=zA===zB?zA:zA+"/"+zB;
+    return `<span class="tl" title="${esc(a)} – ${esc(b)}">`
+      +`${esc(_DTF_D.format(ta))}, ${esc(_tmOnly(ta))} – ${esc(_tmOnly(tb))}`
+      +(z?` ${esc(z)}`:"")+"</span>";
+  }
+  return fmtLocal(a)+" – "+fmtLocal(b);
+}
 /* corroboration table — mirrors attest.corroborate semantics: each row says
    what a source reported and what it establishes; silence is labelled. */
 function corroborationHTML(p){
@@ -1976,19 +2018,26 @@ function corroborationHTML(p){
   const sen=ev.filter(e=>site.door_sensor_id&&e.device===site.door_sensor_id);
   const snaps=ev.filter(e=>e.media_sha256);
   const hist=p.ring_history||[];
-  const span=es=>es.length?hhmm(es[0].at)+"–"+hhmm(es[es.length-1].at)+" UTC":"";
+  /* Cells carrying rendered times arrive pre-marked {h:html} (the fmt*
+     helpers escape internally); every other cell is signed text esc()'d at
+     emission below. */
+  const HC=h=>({h});
+  const cell=v=>v&&typeof v==="object"&&"h"in v?v.h:esc(v);
   const COV={observed:"fully watched",observed_with_events:"watched — events seen",
     partial:"partially watched",blind:"blind — polls failed",no_polls:"not polled"};
   const rows=[
     ["Scheduled expectation",p.schedule
-      ?hhmm(p.schedule.window_start)+"–"+hhmm(p.schedule.window_end):"unscheduled",
+      ?HC(fmtRange(p.schedule.window_start,p.schedule.window_end)):"unscheduled",
       "What was planned — never what happened"],
-    ["Camera/doorbell",cam.length?cam.length+" event(s) "+span(cam):"silent",
+    ["Camera/doorbell",cam.length
+      ?HC(esc(cam.length+" event(s) ")+fmtRange(cam[0].at,cam[cam.length-1].at)):"silent",
       "Device-observed activity timestamps only"],
     ["Contact sensor",!site.door_sensor_id?"not bound"
-      :sen.length?sen.length+" event(s) "+span(sen):"silent",
+      :sen.length
+      ?HC(esc(sen.length+" event(s) ")+fmtRange(sen[0].at,sen[sen.length-1].at)):"silent",
       "Open/close transitions at the door"],
-    ["Worker self-report",p.checked_in_at?"check-in "+hhmm(p.checked_in_at):"none received",
+    ["Worker self-report",p.checked_in_at
+      ?HC("check-in "+fmtLocal(p.checked_in_at)):"none received",
       "The worker's account — a claim, not verification"],
     ["Media on record",snaps.length+" snapshot(s)",
       snaps.length?"sha256 digests signed in receipt":"Bytes received at fetch time, hashed at ingest"],
@@ -2004,8 +2053,46 @@ function corroborationHTML(p){
       "first device observation vs. worker check-in — neither source is authoritative"]);
   }
   return '<table class="corr">'+rows.map(r=>
-    `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td><td class="muted"><small>${esc(r[2])}</small></td></tr>`
+    `<tr><td>${esc(r[0])}</td><td>${cell(r[1])}</td><td class="muted"><small>${esc(r[2])}</small></td></tr>`
   ).join("")+"</table>";
+}
+/* Voices rollup — one compact line naming who has spoken on this record and
+   whether the signed accounts disagree. Worker/coordinator/household stay
+   separate (the same chain statementsHTML renders verbatim below); a
+   household disagreement is flagged, never merged or adjudicated. */
+function voicesHTML(js){
+  const rv=Array.isArray(js.reviews)?js.reviews:[];
+  if(!rv.length)return"";
+  const W={confirm:"confirmed",dispute:"disputed",correction:"sent a correction",
+    inconclusive:"responded inconclusively"};
+  let wDec=null,wN=0,cord=null;const hh=[];
+  for(const e of rv){
+    const p=((e||{}).receipt||{}).payload||{};
+    const role=(p.actor||{}).role,r=p.review||{};
+    if(r.kind==="household_account"||role==="household")
+      hh.push(r.perception==null?"":String(r.perception));
+    else if(r.kind==="resolution")
+      cord=String(r.outcome||"concluded").replaceAll("_"," ");
+    else if(role==="worker"&&r.decision){wDec=r.decision;wN++;}
+    else if(role==="coordinator"&&r.decision)
+      cord=String(r.decision).replaceAll("_"," ");
+  }
+  const parts=[];
+  if(wDec)parts.push(`worker: <span${wDec==="dispute"?' class="warn"':""}>`
+    +`${esc(W[wDec]||String(wDec).replaceAll("_"," "))}</span>`
+    +(wN>1?` <small class="muted">(${wN} statements, latest shown)</small>`:""));
+  if(cord)parts.push(`coordinator: ${esc(cord)}`);
+  if(hh.length){
+    const percs=[...new Set(hh.filter(x=>x))];
+    parts.push(`household: ${hh.length} account${hh.length>1?"s":""}`
+      +(percs.length===1?` (${esc(percs[0].replaceAll("_"," "))})`:"")
+      +(percs.length>1
+        ?` <span class="flag">household accounts disagree — both recorded verbatim</span>`
+        :""));
+  }
+  if(!parts.length)return"";
+  return `<div class="voices"><small class="muted">voices on this record —</small> `
+    +parts.join(" · ")+"</div>";
 }
 /* signed statements — worker/coordinator words from the review chain,
    verbatim with actor + honesty markers. */
@@ -2018,8 +2105,9 @@ function statementsHTML(js){
     const who=a.name?`${esc(a.name)} (${esc(a.role||"reviewer")})`:esc(a.role||"reviewer");
     const note=a.identity_verified===false?" — identity not independently verified":"";
     const window=rv.reported_start
-      ?` <small class="muted">reports ${esc(hhmm(rv.reported_start))}–`
-        +`${esc(hhmm(rv.reported_end))}</small>`:"";
+      ?` <small class="muted">reports ${fmtRange(rv.reported_start,rv.reported_end)}</small>`:"";
+    const recv=p.statement_received_at
+      ?` <small class="muted">· received ${fmtLocal(p.statement_received_at)}</small>`:"";
     const label=rv.kind==="resolution"
       ?`resolution: ${String(rv.outcome||"").replaceAll("_"," ")}`
       :rv.kind==="household_account"
@@ -2029,7 +2117,7 @@ function statementsHTML(js){
       ?` <small class="muted">reason <code>${esc(rv.reason_code)}</code>`
         +`${rv.reason_label?` — ${esc(rv.reason_label)}`:""} (stated, not verified)</small>`:"";
     out.push(`<div class="stmt"><strong>${esc(label)}</strong> by ${who}${note}:`
-      +` ${esc(rv.statement||"")}`+window+reason+`</div>`);
+      +` ${esc(rv.statement||"")}`+window+reason+recv+`</div>`);
   }
   return out.join("");
 }
@@ -2071,19 +2159,19 @@ function plainHTML(p,js){
       line+" No activity is not proof nobody came — it only means the camera reported nothing.","quiet"];
   }else
     hero=["&#10003;","Activity was observed",
-      `The camera reported activity between ${esc(hhmm(obsA))}`
-      +` and ${esc(hhmm(obsB))}`
+      `The camera reported activity between ${fmtLocal(obsA)}`
+      +` and ${fmtLocal(obsB)}`
       +(span!=null?` — about ${Math.round(span)} minutes of observed span`:"")
       +".","ok"];
   const facts=[];
   if(hasObs){
-    facts.push(["First observation",esc(hhmm(obsA))]);
-    facts.push(["Last observation",esc(hhmm(obsB))]);}
+    facts.push(["First observation",fmtLocal(obsA)]);
+    facts.push(["Last observation",fmtLocal(obsB)]);}
   const sw=p.scheduled_worker||(p.worker?{name:p.worker}:null);
   if(sw&&sw.name)facts.push(["Scheduled worker",esc(sw.name)]);
   if(p.checked_in_at)
     facts.push(["Worker check-in",
-      esc(hhmm(p.checked_in_at))
+      fmtLocal(p.checked_in_at)
       +" — self-reported from their link; identity isn't verified by the check-in itself."]);
   else if(sw)facts.push(["Worker check-in","Not received"]);
   if(stance!=="no_statement"){
@@ -2180,6 +2268,34 @@ function anchorsHTML(oNode,o,p){
     if(!msg)continue;
     row("flag",`<span class="pill ${esc({warn:"warn",critical:"bad"}[fo.severity]||"")}">`
       +`${esc(fo.severity||"flag")}</span> ${esc(msg)}`,"flagged for human review");}
+  /* 21st Century Cures Act EVV element crosswalk (42 U.S.C. §1396b(l)(5)(A)) —
+     a real signed field on visit records: each statutory element mapped to
+     the strongest basis this record actually establishes. Mirrors the
+     server brief's statutory crosswalk table. */
+  const cw=p.cures_act_elements;
+  if(cw&&typeof cw==="object"){
+    const ELS=[["service_type","type of service"],
+      ["individual_receiving","individual receiving"],["date","date"],
+      ["location","location"],["individual_providing","individual providing"],
+      ["time_begins_ends","time begins / ends"]];
+    let head=false;
+    for(const[k,lbl]of ELS){
+      const el=cw[k];
+      if(!el||typeof el!=="object")continue;
+      if(!head){
+        row("cures act",'<span class="pill">crosswalk</span>',
+          "EVV elements mapped to the strongest basis this record establishes"
+          +" — a corroboration map, never an EVV submission");
+        head=true;}
+      let v;
+      if(k==="time_begins_ends"&&Array.isArray(el.value))
+        v=!el.value.length||el.value.every(x=>x==null)?"—"
+          :el.value.map(x=>x==null?"—":fmtLocal(x)).join(" → ");
+      else
+        v=el.value==null?"—"
+          :esc(typeof el.value==="object"?JSON.stringify(el.value):el.value);
+      row(lbl,v,String(el.basis||"").replaceAll("_"," "));}
+  }
   return `<div class="anchors"><small class="muted">signed anchors — envelope facts and the`
     +` payload's own provenance declarations</small><table class="kv">${rows.join("")}</table></div>`;
 }
@@ -2292,21 +2408,21 @@ function attestationHTML(p){
     const cov=p.coverage||{};const w=cov.window||{};
     const pct=cov.fraction!=null?Math.round(cov.fraction*100):null;
     return `<div class="row ok"><span class="pill">coverage</span> `
-      +`<strong>coverage attestation</strong> — ${esc(w.start||"")} → ${esc(w.end||"")}</div>`
+      +`<strong>coverage attestation</strong> — ${fmtRange(w.start||"",w.end||"")}</div>`
       +`<small>watched ${pct!=null?pct+"%":"?"} of the window · ${esc(cov.polls||0)} poll(s)`
       +` · ${(cov.gaps||[]).length} gap(s) — silence is not absence</small>`;
   }
   if(t==="period_digest"){
     const i=p.interval||{};const c=p.counts||{};
     return `<div class="row ok"><span class="pill">digest</span> `
-      +`<strong>period digest</strong> — ${esc(i.start||"")} → ${esc(i.end||"")}</div>`
+      +`<strong>period digest</strong> — ${fmtRange(i.start||"",i.end||"")}</div>`
       +`<small>${esc(c.visits_observed||0)} observed · ${esc(c.visits_no_observation||0)}`
       +` no-observation · ${esc(c.worker_disputes||0)} dispute(s)`
       +` · ${esc(c.coordinator_resolutions||0)} resolution(s)</small>`;
   }
   if(t==="source_disconnected"){
     return `<div class="row bad"><span class="pill">disconnected</span> `
-      +`<strong>source disconnected</strong> — ${esc(p.disconnected_at||"")}</div>`
+      +`<strong>source disconnected</strong> — ${fmtLocal(p.disconnected_at||"")}</div>`
       +`<small>${esc(p.reason||"consent revoked")}`
       +` — ingestion and polling stopped; signed records preserved</small>`;
   }
@@ -2326,7 +2442,7 @@ function attestationHTML(p){
   if(t==="key_revocation"){
     return `<div class="row bad"><span class="pill">key revoked</span> `
       +`<strong>issuer key declared suspect</strong> — ${esc(String(p.revoked_key||"").slice(0,12))}…</div>`
-      +`<small>suspect for records after ${esc(String(p.suspect_after||""))}`
+      +`<small>suspect for records after ${fmtLocal(p.suspect_after||"")}`
       +`${p.reason?" · "+esc(p.reason):""} — a trust annotation, never an erasure</small>`;
   }
   if(t==="case_export"){
@@ -2344,7 +2460,7 @@ function attestationHTML(p){
       +`</div>`
     ).join("");
     return `<div class="row ok"><span class="pill">verification</span> `
-      +`<strong>signed verify-live report</strong> — ${esc(p.generated_at||"")}</div>`
+      +`<strong>signed verify-live report</strong> — ${fmtLocal(p.generated_at||"")}</div>`
       +`<small>against <code>${esc(p.base_url||"")}</code> · `
       +`${esc(s.pass||0)} pass · ${esc(s.fail||0)} fail · ${esc(s.warn||0)} warn `
       +`· ${esc(s.skip||0)} skip</small>`
@@ -2358,8 +2474,9 @@ async function renderIndex(){
   const meta=JSON.parse(d64(document.getElementById("packmeta").textContent));
   document.getElementById("site").textContent=
     "Attest case record — "+(meta.site&&meta.site.name||meta.site_id||"site");
-  document.getElementById("meta").textContent=
-    "Generated "+meta.generated_at+" · issuer key "+String(meta.issuer_key||"").slice(0,16)+"…";
+  document.getElementById("meta").innerHTML=
+    "Generated "+(meta.generated_at?fmtLocal(meta.generated_at):"(unknown)")
+    +" · issuer key "+esc(String(meta.issuer_key||"").slice(0,16))+"…";
   const cards=document.getElementById("cards");
   const verdict=document.getElementById("verdict");
   let key=null,anyBad=false,n=0,declared=0;
@@ -2399,12 +2516,14 @@ async function renderIndex(){
     const ds=digests((js.original||{}).payload||{});declared+=ds.length;
     const cls=c.ok?(STATE_CLS[p.state]||"ok"):"bad";
     const win=p.schedule
-      ?esc(p.schedule.window_start||"")+" → "+esc(p.schedule.window_end||"")
+      ?fmtRange(p.schedule.window_start||"",p.schedule.window_end||"")
       :"unscheduled";
     rows.push(
       `<div class="card" id="v-${esc(tag.dataset.vid)}"><div class="row ${cls}">`
       +`<span class="pill">${esc(p.state||"?")}</span> `
       +`<strong>${esc(tag.dataset.vid)}</strong>`
+      +` <a class="plink" href="#v-${esc(tag.dataset.vid)}" `
+      +`title="link to this record" aria-label="link to this record">#</a>`
       +(p.scheduled_worker?` · worker ${esc(p.scheduled_worker.name||"")}`:"")
       +(stance!=="no_statement"?` · statement: ${esc(stance)}`:"")
       +` — ${esc(c.why)}</div>`
@@ -2417,7 +2536,8 @@ async function renderIndex(){
          +`technical</button>`
          +`<button type="button" class="view-tab" data-view="plain" aria-pressed="false">`
          +`plain language (family)</button></span>`
-         +`<div class="tech"><small>${win} · ${ds.length} media digest(s)</small>`
+         +`<div class="tech">`+voicesHTML(js)
+         +`<small>${win} · ${ds.length} media digest(s)</small>`
          +anchorsHTML(oNode,js.original||{},p)
          +timelineSVG(p)+corroborationHTML(p)+statementsHTML(js)+`</div>`
          +`<div class="plain" style="display:none">${plainHTML(p,js)}</div>`

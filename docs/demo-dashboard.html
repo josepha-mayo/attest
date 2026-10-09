@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23171a21'/%3E%3Cpath d='M4 8.5l2.5 2.5L12 5.5' stroke='%237c9cff' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<title>Attest — visits</title>
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --line:#262b36; --fg:#e7eaf0; --muted:#8b94a7;
+          --ok:#3ddc97; --warn:#f5b342; --crit:#ff5c7a; --info:#6ea8fe; --accent:#7c9cff; }
+  * { box-sizing:border-box }
+  body { margin:0; font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--fg) }
+  header { display:flex; align-items:center; gap:18px; padding:14px 28px; border-bottom:1px solid var(--line); background:var(--panel) }
+  header .brand { font-weight:700; letter-spacing:.3px; font-size:18px }
+  header .brand span { color:var(--accent) }
+  header nav a { color:var(--muted); text-decoration:none; margin-right:16px }
+  header nav a:hover { color:var(--fg) }
+  header .meta { margin-left:auto; color:var(--muted); font-size:13px }
+  main { max-width:1100px; margin:0 auto; padding:26px 28px 60px }
+  h1 { font-size:22px; margin:0 0 6px } h2 { font-size:16px; color:var(--muted); font-weight:600; margin:26px 0 10px; text-transform:uppercase; letter-spacing:.6px }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:14px }
+  a { color:#9db4ff }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px }
+  .card a { color:var(--accent); text-decoration:underline }
+  .card a.btn { text-decoration:none }
+  .flash { padding:11px 14px; border-radius:9px; margin-bottom:14px }
+  .flash.err { background:#3f1620; color:#f0a5b3; border:1px solid #c05a5a }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap }
+  .muted { color:var(--muted) } .small { font-size:13px }
+  .sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap }
+  .pill { display:inline-block; padding:2px 9px; border-radius:999px; font-size:12px; font-weight:600; border:1px solid var(--line) }
+  .pill.open, .pill.in_progress { color:var(--info); border-color:var(--info) }
+  .pill.closed { color:var(--ok); border-color:var(--ok) }
+  .pill.unmatched { color:var(--warn); border-color:var(--warn) }
+  /* no_observation is absence of evidence — a watched silence, not an alarm.
+     Amber, not red: the coverage column says how much the silence means. */
+  .pill.no_observation, .pill.no_show { color:var(--warn); border-color:var(--warn) }
+  .pill.failed { color:var(--crit); border-color:var(--crit) }
+  .flag { display:inline-block; padding:2px 8px; border-radius:6px; font-size:12px; margin:2px 4px 2px 0 }
+  .flag.info { background:#1d2a44; color:var(--info) } .flag.warn { background:#3b2f14; color:var(--warn) } .flag.critical { background:#3f1620; color:var(--crit) }
+  table { width:100%; border-collapse:collapse } td, th { padding:9px 10px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top } th { color:var(--muted); font-weight:600; font-size:13px }
+  tr.link:hover { background:#1c2029; cursor:pointer }
+  .timeline { list-style:none; padding:0; margin:0 } .timeline li { display:grid; grid-template-columns:110px 1fr; gap:12px; padding:7px 0; border-bottom:1px dashed var(--line) }
+  .timeline time { color:var(--muted); font-variant-numeric:tabular-nums }
+  .snap { display:flex; gap:14px; flex-wrap:wrap } .snap figure { margin:0; width:240px } .snap img { width:100%; border-radius:8px; border:1px solid var(--line); background:#000 }
+  .snap figcaption { font-size:12px; color:var(--muted); word-break:break-all; margin-top:4px }
+  .snap .mediafail { display:none } .snap figure.mediafailed img { display:none } .snap figure.mediafailed .mediafail { display:block; padding:26px 12px; border:1px dashed var(--crit); border-radius:8px; color:var(--crit); font-size:12px }
+  pre { background:#0b0d11; border:1px solid var(--line); border-radius:8px; padding:12px; overflow:auto; font-size:12px }
+  code { word-break:break-all }
+  .btn { display:inline-block; background:var(--accent); color:#0b0d11; font-weight:700; padding:10px 18px; border-radius:8px; border:0; cursor:pointer; text-decoration:none }
+  .btn.secondary { background:transparent; color:var(--fg); border:1px solid var(--line) }
+  .ok { color:var(--ok) } .bad { color:var(--crit) } .warn { color:var(--warn) }
+  .kpi { font-size:28px; font-weight:700 } .kpi + .muted { margin-top:-4px }
+  textarea, input[type=file] { width:100%; background:#0b0d11; color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:10px; font:13px ui-monospace,monospace }
+  .summary { font-size:16px; line-height:1.6; border-left:3px solid var(--accent); padding-left:14px }
+  .dispute-quote { font-size:16px; line-height:1.55; border-left:3px solid var(--warn); padding-left:14px; margin:12px 0 }
+  label { display:block; margin:10px 0; font-size:13px; color:var(--muted) }
+  input:not([type=file]):not([type=radio]):not([type=checkbox]), select { display:block; width:100%; margin-top:5px; padding:10px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg) }
+  fieldset { border:0; padding:0; margin:0; min-width:0 }
+  button:disabled, fieldset:disabled { opacity:.5; cursor:not-allowed }
+  .table-wrap { overflow-x:auto }
+  .replay-banner { padding:10px 28px; background:#332810; color:var(--warn); font-size:13px }
+  a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible, tr.link:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:4px }
+  tr.link:focus-visible { background:#1c2029 }
+  .skip-link { position:absolute; left:-9999px; top:0; background:var(--accent); color:#0b0d11; padding:8px 16px; z-index:10; font-weight:700; border-radius:0 0 8px 0 }
+  .skip-link:focus { left:0 }
+  @media(prefers-contrast:more) { :root { --muted:#c3cadb; --line:#4a5265 } .flag { border:1px solid currentColor } }
+  @media(prefers-reduced-motion:reduce) { * { animation:none!important; transition:none!important; scroll-behavior:auto!important } }
+  @media(max-width:720px) { header { flex-wrap:wrap; padding:14px 16px } header .meta { margin-left:0; width:100% } main { padding:20px 16px } .row label { width:100% } }
+</style>
+</head>
+<body><div style="background:#f9edd4;border-bottom:1px solid #d9a83c;color:#6b4d0f;font:13px/1.5 system-ui,sans-serif;padding:8px 16px;text-align:center">Snapshot of the live <code>attest demo</code> product — served from a local Ring emulator. Run <code>attest demo</code> for the real thing; <a href="index.html" style="color:#6b4d0f">back to the demo page</a>.</div>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header>
+  <div class="brand">Attest<span>.</span></div>
+  <nav><a href="/" aria-current="page">Records</a><a href="/setup">Setup &amp; schedules</a><a href="/integrity">Integrity</a><a href="/verify">Verify</a><a href="/verify-pack">Pack verifier</a><a href="/about">Claim boundary</a><a href="/receipts.json" download>Receipts (JSON)</a></nav>
+  <div class="meta">Local / test data &middot; configured summary provider: template</div>
+</header>
+<div class="replay-banner">LOCAL REPLAY — not a live visit. Event clock: 2026-10-08T20:37:03.318922+00:00. Security expiry and signature issuance use real time.</div>
+
+<main id="main" tabindex="-1">
+
+<div class="row" style="justify-content:space-between;align-items:flex-end">
+  <div>
+    <h1>Visit observations. Clear limits.</h1>
+    <div class="muted">Ring observations and worker self-reports around scheduled home-service visits — signed, reviewable, correctable. Records preserve what was received; they do not certify identity, attendance, or time worked.</div>
+  </div>
+  <div class="card small">
+    Ledger: <span class="ok">&#10003; 22 receipts, chain intact across 1 signed key rotation</span>
+    <br>Audit log: <span class="ok">&#10003; 335 entries, intact</span>
+    
+    <br><span class="muted">Queue: 0 pending · 0 in flight · 0 failed</span>
+    
+    <br><a href="/sites/site_a55d249ad6dd/pack.zip" style="color:var(--accent)" title="Every signed record for this site, one manifest, offline verifier">Case pack: Alvarez residence</a>
+    <span class="muted">— unzip and open index.html: it verifies every record in the browser, no install</span>
+    
+    <br><a href="/integrity" style="color:var(--accent)" title="Chain, journal, custody, coverage — the runtime's self-audit">Integrity posture &rarr;</a>
+    <br><a href="/verify-pack" style="color:var(--accent)" title="The same verifier every pack embeds — drop a .zip; nothing uploads">Verify a pack in-browser</a>
+    <br><button id="refresh-toggle" class="muted" style="background:none;border:0;padding:6px 2px;cursor:pointer;text-decoration:underline;font-size:13px;min-height:24px">Pause auto-refresh</button>
+  </div>
+</div>
+
+
+<h2>Needs review <span class="muted" style="font-size:13px;font-weight:400">(6 records)</span></h2>
+<div class="card table-wrap" style="padding:0">
+<table>
+  <thead>
+    <tr><th scope="col">Priority</th><th scope="col">Record</th><th scope="col">Why flagged</th><th scope="col"></th></tr>
+  </thead>
+  <tbody>
+  
+  <tr class="link" tabindex="0"
+      onclick="location.href='/visits/vis_70e42116a4cf'"
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();location.href='/visits/vis_70e42116a4cf'}">
+    <td><span class="flag critical">urgent</span></td>
+    <td><a href="/visits/vis_70e42116a4cf">Oct 2, 11:31 AM</a>
+      <a href="/sites/site_a55d249ad6dd" class="muted small" onclick="event.stopPropagation()"> — Alvarez residence</a>
+      <span class="muted small"> · Maria Chen</span></td>
+    <td>worker disputes this record</td>
+    <td class="muted small">Open record &rarr;</td>
+  </tr>
+  
+  <tr class="link" tabindex="0"
+      onclick="location.href='/visits/vis_5b7958271e00'"
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();location.href='/visits/vis_5b7958271e00'}">
+    <td><span class="flag warn">needs review</span></td>
+    <td><a href="/visits/vis_5b7958271e00">Oct 7, 1:46 PM</a>
+      <a href="/sites/site_a55d249ad6dd" class="muted small" onclick="event.stopPropagation()"> — Alvarez residence</a>
+      </td>
+    <td>observation matched no schedule</td>
+    <td class="muted small">Open record &rarr;</td>
+  </tr>
+  
+  <tr class="link" tabindex="0"
+      onclick="location.href='/visits/vis_3feab06a831b'"
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();location.href='/visits/vis_3feab06a831b'}">
+    <td><span class="flag warn">needs review</span></td>
+    <td><a href="/visits/vis_3feab06a831b">Oct 6, 11:06 AM</a>
+      <a href="/sites/site_a55d249ad6dd" class="muted small" onclick="event.stopPropagation()"> — Alvarez residence</a>
+      <span class="muted small"> · Maria Chen</span></td>
+    <td>1 review note(s): observed_interval_short</td>
+    <td class="muted small">Open record &rarr;</td>
+  </tr>
+  
+  <tr class="link" tabindex="0"
+      onclick="location.href='/visits/vis_32a86d6fdbe4'"
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();location.href='/visits/vis_32a86d6fdbe4'}">
+    <td><span class="flag warn">needs review</span></td>
+    <td><a href="/visits/vis_32a86d6fdbe4">Oct 9, 11:06 AM</a>
+      <a href="/sites/site_a55d249ad6dd" class="muted small" onclick="event.stopPropagation()"> — Alvarez residence</a>
+      </td>
+    <td>1 review note(s): no_observation</td>
+    <td class="muted small">Open record &rarr;</td>
+  </tr>
+  
+  <tr class="link" tabindex="0"
+      onclick="location.href='/visits/vis_1071d3b1997a'"
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();location.href='/visits/vis_1071d3b1997a'}">
+    <td><span class="flag warn">needs review</span></td>
+    <td><a href="/visits/vis_1071d3b1997a">Oct 4, 11:06 AM</a>
+      <a href="/sites/site_a55d249ad6dd" class="muted small" onclick="event.stopPropagation()"> — Alvarez residence</a>
+      <span class="muted small"> · Maria Chen</span></td>
+    <td>1 review note(s): observed_interval_short</td>
+    <td class="muted small">Open record &rarr;</td>
+  </tr>
+  
+  <tr class="link" tabindex="0"
+      onclick="location.href='/visits/vis_6a79c8145c2e'"
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();location.href='/visits/vis_6a79c8145c2e'}">
+    <td><span class="flag warn">needs review</span></td>
+    <td><a href="/visits/vis_6a79c8145c2e">Oct 3, 11:06 AM</a>
+      <a href="/sites/site_a55d249ad6dd" class="muted small" onclick="event.stopPropagation()"> — Alvarez residence</a>
+      <span class="muted small"> · Maria Chen</span></td>
+    <td>1 review note(s): observed_interval_short</td>
+    <td class="muted small">Open record &rarr;</td>
+  </tr>
+  
+  </tbody>
+</table>
+</div>
+
+
+<div class="grid" style="margin-top:20px">
+  
+  
+  
+  <div class="card"><div class="kpi">0</div><div class="muted">visits in progress</div></div>
+  <div class="card"><div class="kpi">9</div><div class="muted">receipts issued</div></div>
+  <div class="card"><div class="kpi">9</div><div class="muted">visits with flags</div></div>
+  <div class="card"><div class="kpi">1</div><div class="muted">sites monitored</div></div>
+</div>
+
+
+
+<h2>Weekly triage brief</h2>
+<div class="card">
+  <pre id="triage-brief" role="status" style="white-space:pre-wrap;font:inherit;margin:0">6 record(s) need attention:
+- vis_70e42116a4cf (closed): worker disputes this record
+- vis_5b7958271e00 (closed): observation matched no schedule
+- vis_3feab06a831b (closed): 1 review note(s): observed_interval_short
+- vis_32a86d6fdbe4 (no_observation): 1 review note(s): no_observation
+- vis_1071d3b1997a (closed): 1 review note(s): observed_interval_short
+- vis_6a79c8145c2e (closed): 1 review note(s): observed_interval_short</pre>
+  <div class="muted small" id="triage-source" role="status" style="margin-top:.5rem">source: deterministic triage</div>
+  <button id="triage-run" class="btn" style="margin-top:.75rem" type="button">Run agent brief</button>
+  <span class="muted small" style="margin-left:.5rem">Strands agent over Bedrock reads the ledger through tools; falls back honestly.</span>
+</div>
+<script>
+document.getElementById("triage-run").addEventListener("click", async () => {
+  const btn = document.getElementById("triage-run");
+  btn.disabled = true;
+  btn.textContent = "Running…";
+  window.triageRunning = true;  // hold the auto-reload — it would kill this fetch
+  try {
+    const r = await fetch("/api/triage", {method: "POST"});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || "triage failed");
+    document.getElementById("triage-brief").textContent = data.brief;
+    document.getElementById("triage-source").textContent =
+      data.source === "strands-agent"
+        ? "source: Strands agent over Bedrock " + (data.model || "")
+        : "source: deterministic triage — the baseline brief every agent answer is checked against (agent path: " + (data.fallback_reason || "not configured") + ")";
+  } catch (e) {
+    document.getElementById("triage-source").textContent = "triage failed: " + e.message;
+  } finally {
+    window.triageRunning = false;
+    btn.disabled = false;
+    btn.textContent = "Run agent brief";
+  }
+});
+</script>
+
+<h2>Recent visits</h2>
+<div class="card table-wrap" style="padding:0">
+<table>
+  <thead><tr><th scope="col">Site</th><th scope="col">Self-reported worker</th><th scope="col">First observed</th><th scope="col">Last observed</th><th scope="col">Observed interval</th><th scope="col">State</th><th scope="col">Worker stance</th><th scope="col">Review notes</th></tr></thead>
+  <tbody>
+  
+  <tr>
+    <td><a href="/sites/site_a55d249ad6dd" style="color:var(--accent)">Alvarez residence</a></td>
+    <td>Maria Chen</td>
+    <td>Oct 8, 11:06 AM</td>
+    <td>Oct 8, 12:36 PM</td>
+    <td>90 min</td>
+    <td><a href="/visits/vis_ac04986742ad" style="text-decoration:none"><span class="pill closed">closed</span></a></td>
+    <td>
+      <span class="muted">Not requested</span></td>
+    <td><span class="flag warn">departure_unconfirmed</span></td>
+  </tr>
+  
+  <tr>
+    <td><a href="/sites/site_a55d249ad6dd" style="color:var(--accent)">Alvarez residence</a></td>
+    <td>Unknown</td>
+    <td>Oct 7, 1:46 PM</td>
+    <td>Oct 7, 3:16 PM</td>
+    <td>90 min</td>
+    <td><a href="/visits/vis_5b7958271e00" style="text-decoration:none"><span class="pill closed">closed</span></a></td>
+    <td>
+      <span class="muted">Not requested</span></td>
+    <td><span class="flag warn">unscheduled</span><span class="flag warn">departure_unconfirmed</span></td>
+  </tr>
+  
+  <tr>
+    <td><a href="/sites/site_a55d249ad6dd" style="color:var(--accent)">Alvarez residence</a></td>
+    <td>Unknown</td>
+    <td>None received</td>
+    <td>None received</td>
+    <td>Unknown</td>
+    <td><a href="/visits/vis_f34460136366" style="text-decoration:none"><span class="pill no_observation">no observation</span></a></td>
+    <td>
+      <span class="ok">Resolved</span>
+      </td>
+    <td><span class="flag warn">no_observation</span></td>
+  </tr>
+  
+  <tr>
+    <td><a href="/sites/site_a55d249ad6dd" style="color:var(--accent)">Alvarez residence</a></td>
+    <td>Maria Chen</td>
+    <td>Oct 6, 11:06 AM</td>
+    <td>Oct 6, 11:06 AM</td>
+    <td>1 min</td>
+    <td><a href="/visits/vis_3feab06a831b" style="text-decoration:none"><span class="pill closed">closed</span></a></td>
+    <td>
+      <span class="muted">Not requested</span></td>
+    <td><span class="flag warn">departure_unconfirmed</span><span class="flag warn">observed_interval_short</span></td>
+  </tr>
+  
+  <tr>
+    <td><a href="/sites/site_a55d249ad6dd" style="color:var(--accent)">Alvarez residence</a></td>
+    <td>Unknown</td>
+    <td>None received</td>
+    <td>None received</td>
+    <td>Unknown</td>
+    <td><a href="/visits/vis_32a86d6fdbe4" style="text-decoration:none"><span class="pill no_observation">no observation</span></a></td>
+    <td>
+      <span class="muted">Not requested</span></td>
+    <td><span class="flag warn">no_observation</span></td>
+  </tr>
+  
+  <tr>
+    <td><a href="/sites/site_a55d249ad6dd" style="color:var(--accent)">Alvarez residence</a></td>
+    <td>Maria Chen</td>
+    <td>Oct 4, 11:06 AM</td>
+    <td>Oct 4, 11:06 AM</td>
+    <td>1 min</td>
+    <td><a href="/visits/vis_1071d3b1997a" style="text-decoration:none"><span class="pill closed">closed</span></a></td>
+    <td>
+      <span class="muted">Not requested</span></td>
+    <td><span class="flag warn">departure_unconfirmed</span><span class="flag warn">observed_interval_short</span></td>
+  </tr>
+  
+  <tr>
+    <td><a href="/sites/site_a55d249ad6dd" style="color:var(--accent)">Alvarez residence</a></td>
+    <td>Maria Chen</td>
+    <td>Oct 3, 11:06 AM</td>
+    <td>Oct 3, 11:06 AM</td>
+    <td>1 min</td>
+    <td><a href="/visits/vis_6a79c8145c2e" style="text-decoration:none"><span class="pill closed">closed</span></a></td>
+    <td>
+      <span class="muted">Not requested</span></td>
+    <td><span class="flag warn">departure_unconfirmed</span><span class="flag warn">observed_interval_short</span></td>
+  </tr>
+  
+  <tr>
+    <td><a href="/sites/site_a55d249ad6dd" style="color:var(--accent)">Alvarez residence</a></td>
+    <td>Maria Chen</td>
+    <td>Oct 2, 11:31 AM</td>
+    <td>Oct 2, 12:36 PM</td>
+    <td>65 min</td>
+    <td><a href="/visits/vis_70e42116a4cf" style="text-decoration:none"><span class="pill closed">closed</span></a></td>
+    <td>
+      <span class="bad">Contested</span>
+      </td>
+    <td><span class="flag warn">departure_unconfirmed</span><span class="flag warn">observed_interval_short</span></td>
+  </tr>
+  
+  <tr>
+    <td><a href="/sites/site_a55d249ad6dd" style="color:var(--accent)">Alvarez residence</a></td>
+    <td>Maria Chen</td>
+    <td>Oct 1, 11:06 AM</td>
+    <td>Oct 1, 12:36 PM</td>
+    <td>90 min</td>
+    <td><a href="/visits/vis_8243499a3a78" style="text-decoration:none"><span class="pill closed">closed</span></a></td>
+    <td>
+      <span class="muted">Not requested</span></td>
+    <td><span class="flag warn">departure_unconfirmed</span></td>
+  </tr>
+  
+  </tbody>
+</table>
+</div>
+
+
+<h2>Worker check-in timing</h2>
+<div class="card table-wrap" style="padding:0">
+<table>
+  <thead><tr><th scope="col">Worker</th><th scope="col">Visits with self-report</th><th scope="col">Median lag vs first observation</th><th scope="col">Worst lag</th></tr></thead>
+  <tbody>
+  
+  <tr>
+    <td>Maria Chen</td>
+    <td>6</td>
+    <td>0 min</td>
+    <td>65 min <span class="flag warn">divergence</span></td>
+  </tr>
+  
+  </tbody>
+</table>
+</div>
+<p class="small muted">Lag = time between the first device observation and the worker's self-reported check-in. A pattern, not proof.</p>
+
+
+<h2>Schedules</h2>
+<div class="card table-wrap" style="padding:0">
+<table>
+  <thead><tr><th scope="col">Site</th><th scope="col">Worker</th><th scope="col">Window</th><th scope="col">Expected</th><th scope="col">Service</th><th scope="col">Check-in link</th></tr></thead>
+  <tbody>
+  
+  <tr>
+    <td>Alvarez residence</td>
+    <td>Maria Chen</td>
+    <td>Oct 8, 11:01 AM – 1:06 PM</td>
+    <td>90 min</td>
+    <td>Morning care visit</td>
+    <td class="small muted">Issued from the visit record.</td>
+  </tr>
+  
+  <tr>
+    <td>Alvarez residence</td>
+    <td>Maria Chen</td>
+    <td>Oct 7, 11:01 AM – 1:06 PM</td>
+    <td>90 min</td>
+    <td>Morning care visit</td>
+    <td class="small muted">Issued from the visit record.</td>
+  </tr>
+  
+  <tr>
+    <td>Alvarez residence</td>
+    <td>Maria Chen</td>
+    <td>Oct 6, 11:01 AM – 1:06 PM</td>
+    <td>90 min</td>
+    <td>Morning care visit</td>
+    <td class="small muted">Issued from the visit record.</td>
+  </tr>
+  
+  <tr>
+    <td>Alvarez residence</td>
+    <td>Maria Chen</td>
+    <td>Oct 5, 11:01 AM – 1:06 PM</td>
+    <td>90 min</td>
+    <td>Morning care visit</td>
+    <td class="small muted">Issued from the visit record.</td>
+  </tr>
+  
+  <tr>
+    <td>Alvarez residence</td>
+    <td>Maria Chen</td>
+    <td>Oct 4, 11:01 AM – 1:06 PM</td>
+    <td>90 min</td>
+    <td>Morning care visit</td>
+    <td class="small muted">Issued from the visit record.</td>
+  </tr>
+  
+  <tr>
+    <td>Alvarez residence</td>
+    <td>Maria Chen</td>
+    <td>Oct 3, 11:01 AM – 1:06 PM</td>
+    <td>90 min</td>
+    <td>Morning care visit</td>
+    <td class="small muted">Issued from the visit record.</td>
+  </tr>
+  
+  <tr>
+    <td>Alvarez residence</td>
+    <td>Maria Chen</td>
+    <td>Oct 2, 11:01 AM – 1:06 PM</td>
+    <td>90 min</td>
+    <td>Morning care visit</td>
+    <td class="small muted">Issued from the visit record.</td>
+  </tr>
+  
+  <tr>
+    <td>Alvarez residence</td>
+    <td>Maria Chen</td>
+    <td>Oct 1, 11:01 AM – 1:06 PM</td>
+    <td>90 min</td>
+    <td>Morning care visit</td>
+    <td class="small muted">Issued from the visit record.</td>
+  </tr>
+  
+  </tbody>
+</table>
+</div>
+<script>
+(() => {
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let paused = reduced || sessionStorage.getItem('dash-pause') === '1';
+  const btn = document.getElementById('refresh-toggle');
+  const paint = () => { if (btn) btn.textContent = paused ? 'Resume auto-refresh' : 'Pause auto-refresh'; };
+  if (btn) btn.addEventListener('click', () => {
+    paused = !paused;
+    sessionStorage.setItem('dash-pause', paused ? '1' : '0');
+    paint();
+  });
+  paint();
+  setInterval(() => {
+    if (paused || window.triageRunning || document.visibilityState !== "visible") return;
+    // Never yank the page out from under keyboard/screen-reader users —
+    // reloading rebuilds the DOM and drops focus back to <body>.
+    if (document.activeElement && document.activeElement !== document.body) return;
+    sessionStorage.setItem('dash-scroll', String(window.scrollY));
+    location.reload();
+  }, 5000);
+  const y = sessionStorage.getItem('dash-scroll');
+  if (y) { window.scrollTo(0, Number(y)); sessionStorage.removeItem('dash-scroll'); }
+})();
+</script>
+</main>
+</body>
+</html>

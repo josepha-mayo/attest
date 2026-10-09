@@ -496,6 +496,24 @@ def test_sample_pack_artifact_verifies():
     assert ok, detail
 
 
+def test_verify_badge_writes_verdict_svg(tmp_path):
+    """`attest verify --badge` renders the verdict as a self-contained SVG —
+    green on a clean pack, red and still written on a hostile one."""
+    from attest import cli
+
+    docs = Path(__file__).resolve().parents[1] / "docs"
+    good = tmp_path / "ok.svg"
+    cli.main(["verify", str(docs / "sample-pack.zip"), "--badge", str(good)])
+    svg = good.read_text(encoding="utf-8")
+    assert ">verified</text>" in svg and "#2e8b57" in svg and "<title>" in svg
+
+    bad = tmp_path / "bad.svg"
+    with pytest.raises(SystemExit):
+        cli.main(["verify", str(docs / "sample-pack-tampered.zip"), "--badge", str(bad)])
+    svg = bad.read_text(encoding="utf-8")
+    assert ">FAILED</text>" in svg and "#c0392b" in svg
+
+
 @pytest.mark.parametrize(
     "artifact,expect",
     [
