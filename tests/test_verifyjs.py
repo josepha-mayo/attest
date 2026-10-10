@@ -2385,7 +2385,7 @@ global.fetch=async(u,o)=>{
   }catch(e){return{ok:false};}};
 const mkel=()=>({hidden:true,innerHTML:'',value:'',open:false,options:[],
   setAttribute:()=>{},focus:()=>{},onclick:null,dataset:{},textContent:'',
-  appendChild(c){if(this.options)this.options.push(c)},
+  appendChild(c){if(this.options)this.options.push(c)},remove(){},
   click(){if(this.onclick)this.onclick()}});
 const els={};const mk=id=>els[id]||(els[id]=mkel());
 global.document={getElementById:mk,querySelectorAll:()=>[],

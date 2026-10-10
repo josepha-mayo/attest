@@ -3730,7 +3730,8 @@ Attest — records, not verdicts. The ten-minute path:
       … append ?lang=es   # household/worker surfaces in Spanish (accessibility)
     attest tamper-demo    # 5 seconds: forge a visit in-place, watch the
                           # journal catch it, roll back — non-destructive
-    attest attack-demo    # twenty-one real tamper attacks — all caught
+    attest attack-demo    # 21 real tamper attacks — 19 applicable, all caught
+                          # (2 skipped on stores lacking resolution/media rows)
     attest split-demo     # a witness + monitor catching a forked log
     attest verify pack.zip --witness-url <w> --witness-threshold 2
                           # require k-of-n named witnesses to have vouched

@@ -44,8 +44,8 @@ a{color:#2563eb}
 <aside class="side">
   <div>
     <h1>The Attest tour</h1>
-    <p class="tag">Nine beats — every frame is the live artifact, not a screenshot.
-    The verifier runs for real inside each panel.</p>
+    <p class="tag">Nine beats, ~two minutes — every frame is the live artifact, not a
+    screenshot. The verifier runs for real inside each panel.</p>
   </div>
   <div id="card">
     <div class="beat-no" id="bno"></div>
@@ -87,6 +87,11 @@ const BEATS=[
   rebuilds a real zip around your edit — downloadable — then refuses it. The
   adversary is you.`,
   w:"Nothing staged: the same verifier that passed the clean pack kills yours."},
+ {t:"The product face",u:"demo-visit.html",s:12000,
+  p:`The contested visit as a coordinator sees it: source divergence flagged,
+  the worker's signed dispute, two household accounts that contradict each
+  other — kept verbatim, never merged.`,
+  w:"He said / she said is preserved, not adjudicated — that's the product thesis."},
  {t:"The raw layer",u:"demo-receipts.html",s:10000,
   p:`All 58 signed receipts of the demo deployment, drawn as the literal hash
   chain — every edge a real <code>prev_hash</code>. Click any row or node for a
@@ -97,11 +102,6 @@ const BEATS=[
   link landing on the verdict the oracle predicts. Bool/string/fractional
   <code>leaf_index</code>, padded hex, a 2⁴⁰ tree_size.`,
   w:"Two verifiers silently diverging is how a pack gets ruled valid in one room and invalid in another."},
- {t:"The product face",u:"demo-visit.html",s:12000,
-  p:`The contested visit as a coordinator sees it: source divergence flagged,
-  the worker's signed dispute, two household accounts that contradict each
-  other — kept verbatim, never merged.`,
-  w:"He said / she said is preserved, not adjudicated — that's the product thesis."},
  {t:"The site attests itself",u:"verify.html#verify-site",s:14000,
   p:`<code>site-manifest.json</code> is a signed receipt pinning the sha256 of
   every artifact we ship. One click verifies the manifest, then hashes every

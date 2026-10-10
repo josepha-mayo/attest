@@ -1,11 +1,17 @@
-# Judging Attest in ten minutes
+# Judging Attest
 
 Attest replaces "he said / she said" home-service disputes with a signed,
 self-verifying evidence record. This is the fastest honest path through it.
 
-## Zero install — the hosted demo (2 minutes)
+> **Sixty seconds, three links:**
+> [VERIFIED](https://josepha-mayo.github.io/attest/verify.html#sample-pack) →
+> [FAILED](https://josepha-mayo.github.io/attest/verify.html#sample-pack-tampered) →
+> [forge it yourself](https://josepha-mayo.github.io/attest/verify.html#tamper-lab).
+> Everything below is depth behind those three stamps.
 
-0. **[The 90-second tour](https://josepha-mayo.github.io/attest/tour.html)** —
+## Zero install — the hosted demo
+
+0. **[The two-minute tour](https://josepha-mayo.github.io/attest/tour.html)** —
    if you'd rather look than click: nine self-playing beats, every frame the
    live artifact (verdicts stamp inside the iframes for real), pausable and
    keyboard-navigable. The video run-sheet as a webpage.
@@ -115,7 +121,9 @@ attest demo        # boots emulator + server + an eight-day story, prints a URL
 - **`attest tamper-demo`** — five seconds: forges a visit's state inside a
   transaction, prints `verify_journal` catching it, rolls the transaction
   back. The mutation journal's elevator pitch.
-- **`attest attack-demo`** — twenty-one real tamper attempts against the store
+- **`attest attack-demo`** — twenty-one real tamper attempts against the store;
+  on the demo store nineteen are applicable and all are caught (two need a
+  signed-resolution/media store — reported as skips, never claimed as catches)
   (forge, delete, mid-chain erase, key swap, media swap, …) — all caught, all
   rolled back.
 - **`attest verify pack.zip --witness-url W --witness-threshold 2`** — don't

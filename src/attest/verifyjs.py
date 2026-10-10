@@ -2151,22 +2151,43 @@ if(location.protocol.indexOf("http")===0){
         const names=Object.keys(arts);
         if(names.length>512){say("bad","manifest lists "+names.length+
           " artifacts — beyond the sweep bound");return;}
-        let bad=0,checked=0,total=0;
-        for(const nm of names){
-          if(!/^[A-Za-z0-9._\\/-]+$/.test(nm)||nm.split("/").includes("..")
-            ||nm[0]==="/"||nm.includes(":")){
-            say("bad","unsafe artifact name in manifest: "+esc(nm));bad++;continue;}
-          const want=String(arts[nm]);
-          const rr=await fetch(nm);
-          if(!rr.ok){say("bad",esc(nm)+" — listed but not served");bad++;continue;}
-          const b=await rr.arrayBuffer();total+=b.byteLength;
-          if(total>256*1024*1024){say("bad","sweep exceeded the byte bound");break;}
-          const got=await sha256hex(new Uint8Array(b));
-          if(got===want)checked++;
-          else{bad++;
-            say("bad","<code>"+esc(nm)+"</code> — sha256 mismatch (signed "+
-              esc(want.slice(0,16))+"…, served "+got.slice(0,16)+"…)");}
-        }
+        /* Sweep 8-at-a-time — 127 serial fetches is seconds of silence;
+           results collect in deterministic order before verdict lines emit. */
+        const results=[];
+        let checked=0,total=0,idx=0;
+        const prog=document.createElement("p");
+        prog.textContent="sweeping 0/"+names.length+" artifacts…";
+        out.appendChild(prog);
+        const worker=async()=>{
+          while(idx<names.length){
+            const nm=names[idx++];
+            if(!/^[A-Za-z0-9._\\/-]+$/.test(nm)||nm.split("/").includes("..")
+              ||nm[0]==="/"||nm.includes(":")){
+              results.push({nm,ok:false,why:"unsafe artifact name in manifest"});
+              prog.textContent="sweeping "+idx+"/"+names.length+" artifacts…";
+              continue;}
+            const want=String(arts[nm]);
+            try{
+              const rr=await fetch(nm);
+              if(!rr.ok){results.push({nm,ok:false,why:"listed but not served"});
+                prog.textContent="sweeping "+idx+"/"+names.length+" artifacts…";
+                continue;}
+              const b=await rr.arrayBuffer();total+=b.byteLength;
+              if(total>256*1024*1024){results.push({nm,ok:false,
+                why:"sweep exceeded the byte bound"});continue;}
+              const got=await sha256hex(new Uint8Array(b));
+              if(got===want)checked++;
+              else results.push({nm,ok:false,
+                why:"sha256 mismatch (signed "+esc(want.slice(0,16))+
+                  "…, served "+got.slice(0,16)+"…)"});
+            }catch(e){results.push({nm,ok:false,why:"fetch failed"});}
+            prog.textContent="sweeping "+idx+"/"+names.length+" artifacts…";
+          }};
+        await Promise.all([...Array(Math.min(8,names.length))].map(worker));
+        prog.remove();
+        for(const r2 of results)
+          say("bad","<code>"+esc(r2.nm)+"</code> — "+r2.why);
+        const bad=results.length;
         if(!bad&&checked===names.length)
           say("stamp ok","<strong>SITE VERIFIED</strong> — all "+checked+
             " artifacts byte-match the issuer-signed manifest");
@@ -2200,6 +2221,9 @@ aria-label="Choose the extracted pack folder"><br>
 document too (from <code>/.well-known/attest-issuer.json</code> or
 <code>attest issuer --out</code>) — the pin arms for the pack, and the doc's
 signed lifecycle bridges pre-rotation exports.</small></div>
+<p><small>New to the math? <a href="anatomy.html">Anatomy of a signed
+receipt</a> decomposes one field-by-field — or take the <a
+href="tour.html">two-minute tour</a> of every feature on this page.</small></p>
 <p id="trysample-wrap" hidden><button id="trysample" type="button">Verify the bundled
 sample pack — one click, fetched from this site</button></p>
 <p id="trytamper-wrap" hidden><button id="trytamper" type="button">Verify the tampered
