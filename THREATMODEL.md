@@ -141,7 +141,10 @@ the file's digest on public OpenTimestamps calendars — once the calendar's
 Merkle root lands in a Bitcoin block, the `.ots` proof attests the anchor
 *existed at that time*, verifiable by anyone with the free reference tool.
 Backdating an anchor is then provable against a clock neither we nor the
-deployment controls.
+deployment controls. Even the proof-upgrade path can't be redirected: pending
+attestation URIs inside a `.ots` file are attacker-controlled input, so the
+upgrader follows only `https://` URIs whose host ends in a trusted calendar
+suffix (`opentimestamps.org`, `eternitywall.com`, `catallaxy.com`).
 
 ## Privacy model
 
