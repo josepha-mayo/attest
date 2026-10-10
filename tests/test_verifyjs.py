@@ -2264,3 +2264,68 @@ eval(src + `
     assert proc.returncode == 0, proc.stderr
     assert "arr-good: true true true" in proc.stdout, proc.stdout
     assert "arr-bad: true true true" in proc.stdout, proc.stdout
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_vectors_deep_link_verifies_shipped_packs(tmp_path):
+    """#vectors/<slug> deep links: the vectors index lands judges on the
+    oracle's verdict — an ok vector stamps VERIFIED and a grammar-trap
+    vector (leaf_index spelled as a bool) stamps FAILED."""
+    docs = Path(__file__).resolve().parents[1] / "docs"
+    okv = (docs / "vectors" / "ok-clean-bundle.zip").read_bytes()
+    failv = (docs / "vectors" / "fail-bool-leaf-index.zip").read_bytes()
+    (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
+    (tmp_path / "ok.zip").write_bytes(okv)
+    (tmp_path / "fail.zip").write_bytes(failv)
+    driver = r"""
+const fs=require('fs');
+let src=fs.readFileSync(process.argv[2],'utf8');
+const okB=fs.readFileSync(process.argv[3]);
+const failB=fs.readFileSync(process.argv[4]);
+let serve=okB;
+global.location={protocol:'http:',pathname:'/verify.html',
+  hash:'#vectors/ok-clean-bundle',origin:'http://x'};
+global.history={replaceState:()=>{}};
+global.fetch=async(u,o)=>{if(o&&o.method==='HEAD')return{ok:false};
+  const b=String(u).startsWith('vectors/')?serve:null;
+  if(!b)return{ok:false};
+  return{ok:true,arrayBuffer:async()=>b.buffer.slice(b.byteOffset,b.byteOffset+b.byteLength),text:async()=>b.toString()};};
+const els={};const mk=id=>els[id]||(els[id]={hidden:true,innerHTML:'',value:'',
+  setAttribute:()=>{},focus:()=>{},onclick:null,dataset:{},click(){if(this.onclick)this.onclick()}});
+global.document={getElementById:mk,querySelectorAll:()=>[],createElement:()=>({setAttribute:()=>{},style:{}})};
+eval(src + `
+(async()=>{
+  let h1='';
+  for(let i=0;i<100;i++){await new Promise(r=>setTimeout(r,60));
+    h1=els['out'].innerHTML;
+    if(h1.includes('VERIFIED')||h1.includes('FAILED'))break;}
+  console.log('vec-ok:',h1.includes('VERIFIED'),!h1.includes('FAILED'));
+})();`);
+"""
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "verify.js", "ok.zip", "fail.zip"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "vec-ok: true true" in proc.stdout, proc.stdout
+    # fail vector through the same deep link
+    driver2 = driver.replace("#vectors/ok-clean-bundle", "#vectors/fail-bool-leaf-index")
+    driver2 = driver2.replace("let serve=okB;", "let serve=failB;")
+    driver2 = driver2.replace("'vec-ok:'", "'vec-fail:'").replace(
+        "h1.includes('VERIFIED'),!h1.includes('FAILED')",
+        "h1.includes('FAILED'),h1.includes('VERIFIED')===false",
+    )
+    (tmp_path / "drive2.js").write_text(driver2, encoding="utf-8")
+    proc2 = subprocess.run(
+        [NODE, "drive2.js", "verify.js", "ok.zip", "fail.zip"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert proc2.returncode == 0, proc2.stderr
+    assert "vec-fail: true true" in proc2.stdout, proc2.stdout

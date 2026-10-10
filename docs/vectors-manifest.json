@@ -1,0 +1,182 @@
+[
+ {
+  "name": "fail-anchor-proof-graft",
+  "verdict": "fail",
+  "note": "a packed anchor whose cosig cannot reach the anchor's signed head \u2014 a claimed anchor is either verifiable or a lie; every verifier fails closed"
+ },
+ {
+  "name": "fail-bool-leaf-index",
+  "verdict": "fail",
+  "note": "leaf_index true \u2014 bool is an int subclass in Python but not an integer in JSON; Number.isInteger parity rejects it"
+ },
+ {
+  "name": "fail-doctored-verifier",
+  "verdict": "fail",
+  "note": "a post-export edit to verify_case.py \u2014 membership checks names, only the signed pin checks the bytes"
+ },
+ {
+  "name": "fail-embedded-foreign-receipt",
+  "verdict": "fail",
+  "note": "an embedded receipt signed outside the issuer lineage \u2014 embedded evidence must bind the pack's issuer or it is grafted testimony"
+ },
+ {
+  "name": "fail-embedded-tampered-receipt",
+  "verdict": "fail",
+  "note": "an embedded receipt's payload flipped \u2014 payload hash and signature both fail; a doctored observation can never ride the signed head"
+ },
+ {
+  "name": "fail-foreign-pin",
+  "verdict": "fail",
+  "note": "a valid pin receipt under an untrusted key \u2014 signature integrity is not issuer authority"
+ },
+ {
+  "name": "fail-forged-verifier-tool",
+  "verdict": "fail",
+  "note": "a modified verify_bundle.py fails its own signed pin \u2014 membership whitelists names, only the manifest pins bytes"
+ },
+ {
+  "name": "fail-fractional-leaf-index",
+  "verdict": "fail",
+  "note": "leaf_index 5.5 \u2014 non-integral indices are not integers on any surface; Python must not silently truncate where JS rejects"
+ },
+ {
+  "name": "fail-grafted-log-proof",
+  "verdict": "fail",
+  "note": "another receipt's audit path grafted on \u2014 the Merkle math catches what a presence check never would"
+ },
+ {
+  "name": "fail-grafted-pin",
+  "verdict": "fail",
+  "note": "a verifier_manifest signed for another pack cannot pin this one \u2014 the scope binding stops the replay"
+ },
+ {
+  "name": "fail-media-mismatch",
+  "verdict": "fail",
+  "note": "media bytes that don't hash to the signed digest are caught"
+ },
+ {
+  "name": "fail-missing-listed",
+  "verdict": "fail",
+  "note": "a bundle the signed manifest lists but the zip lacks fails"
+ },
+ {
+  "name": "fail-missing-log-proof",
+  "verdict": "fail",
+  "note": "a pack receipt silently dropped from log_proofs.json \u2014 the pack cannot claim log membership it does not prove"
+ },
+ {
+  "name": "fail-missing-pinned-tool",
+  "verdict": "fail",
+  "note": "a tool the signed pin names but the pack lacks fails \u2014 the pin binds both directions"
+ },
+ {
+  "name": "fail-orphan-rotation",
+  "verdict": "fail",
+  "note": "a rotation the successor never countersigned cannot pivot trust"
+ },
+ {
+  "name": "fail-oversize-tree-size",
+  "verdict": "fail",
+  "note": "a properly SIGNED head claiming tree_size 2^40 \u2014 valid signature, impossible size: JS bitwise ops die past 2^31, so every surface rejects it rather than diverging"
+ },
+ {
+  "name": "fail-payload-tamper",
+  "verdict": "fail",
+  "note": "a flipped payload field breaks the signed hash"
+ },
+ {
+  "name": "fail-signature-tamper",
+  "verdict": "fail",
+  "note": "a corrupted signature must never verify"
+ },
+ {
+  "name": "fail-smuggled-member",
+  "verdict": "fail",
+  "note": "a member the pack format doesn't name fails closed"
+ },
+ {
+  "name": "fail-spaced-hex-proof",
+  "verdict": "fail",
+  "note": "a proof node spelled with spaces between byte pairs \u2014 Python bytes.fromhex tolerates whitespace where strict hex rejects; every surface now fails closed identically"
+ },
+ {
+  "name": "fail-string-leaf-index",
+  "verdict": "fail",
+  "note": "leaf_index as a quoted string \u2014 JSON-typed fields must not pass through Python's permissive int() where JS === rejects"
+ },
+ {
+  "name": "fail-unreferenced-junk-proof",
+  "verdict": "fail",
+  "note": "a proof entry referencing nothing and reaching nothing \u2014 every proofs entry must verify; unexplained material is a lie, not decoration"
+ },
+ {
+  "name": "fail-wrong-pin",
+  "verdict": "fail",
+  "note": "pinning an unrelated key must not bless the pack"
+ },
+ {
+  "name": "ok-clean-bundle",
+  "verdict": "ok",
+  "note": "one visit, one key, media digests all present \u2014 the baseline"
+ },
+ {
+  "name": "ok-decoy-successor-order",
+  "verdict": "ok",
+  "note": "a consented decoy successor listed FIRST in key_rotations.json \u2014 only the highest-sequence consented pivot (K_A->K_B) may inherit trust; a first-match-in-pool verifier would pick the attacker and fail this pack"
+ },
+ {
+  "name": "ok-embedded-monitor-trail",
+  "verdict": "ok",
+  "note": "monitor_observation receipts embedded in the checkpoint doc \u2014 each verified under the issuer lineage and proven inside the signed head, so the watch trail travels with the pack"
+ },
+ {
+  "name": "ok-float-leaf-index",
+  "verdict": "ok",
+  "note": "leaf_index spelled 5.0 \u2014 JSON keeps no int/float distinction, so Number.isInteger parity means every verifier accepts integral floats identically"
+ },
+ {
+  "name": "ok-float-tree-size",
+  "verdict": "ok",
+  "note": "a properly SIGNED head claiming tree_size 5.0 \u2014 the signature verifies on the literal bytes, and Number.isInteger parity means integral floats verify identically everywhere"
+ },
+ {
+  "name": "ok-forged-cosig-ignored",
+  "verdict": "ok",
+  "note": "a cosig attesting a DIFFERENT head (or one whose signature fails after the edit) counts as absent \u2014 the pack still verifies on its own proofs; auxiliary attestations report honestly, never gate"
+ },
+ {
+  "name": "ok-grafted-revocation",
+  "verdict": "ok",
+  "note": "a self-signed key_revocation grafted into key_rotations.json is inert twice over \u2014 it can't join the signed trust walk, and foreign-signed receipts owe no log proof so the graft can't kill the pack either"
+ },
+ {
+  "name": "ok-legacy-no-manifest",
+  "verdict": "ok",
+  "note": "a pre-pin pack still verifies \u2014 the manifest is optional when absent, mandatory when present"
+ },
+ {
+  "name": "ok-redacted-media",
+  "verdict": "ok",
+  "note": "media bytes withheld by redaction; signed digests still verify"
+ },
+ {
+  "name": "ok-revoked-case",
+  "verdict": "ok",
+  "note": "revocation annotates: records + the pivot receipt itself sit in the suspect window"
+ },
+ {
+  "name": "ok-rotated-case",
+  "verdict": "ok",
+  "note": "case pack spanning a signed rotation \u2014 predecessor pin verifies both eras"
+ },
+ {
+  "name": "ok-witness-anchored",
+  "verdict": "ok",
+  "note": "the witness's attestation is itself committed to the witness's own transparency log \u2014 the pack proves the cosignature was published, not just signed and handed over"
+ },
+ {
+  "name": "ok-witness-cosigned",
+  "verdict": "ok",
+  "note": "an independent witness's counter-signature rides the checkpoint doc \u2014 verified under its own key, reported as an auxiliary attestation, never a gate"
+ }
+]

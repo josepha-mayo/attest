@@ -1812,6 +1812,27 @@ async function go(fileList){
         cp.textContent="copied";setTimeout(()=>cp.textContent="copy verdict",1600);
       }catch(e){cp.textContent="copy failed";}};
       out.appendChild(cp);}
+    /* The verdict as a document — a transcript a mediator or reviewer can
+       file. Plain text and explicitly unsigned: anyone can type one, so the
+       header says what it is and where the real evidence lives. */
+    try{
+      const dl=document.createElement("button");
+      dl.className="copybtn";dl.textContent="download report";
+      dl.onclick=()=>{try{
+        const head="Attest verification transcript\\n"
+          +"page: "+location.href.split("#")[0]+"\\n"
+          +"when: "+new Date().toISOString()+"\\n"
+          +"NOTE: unsigned transcript produced by the verifier page — anyone\\n"
+          +"can type one; the evidence is the pack. Reproduce independently\\n"
+          +"with the pack's verify_case.py or `attest verify`.\\n\\n";
+        const b=new Blob([head+out.innerText],{type:"text/plain"});
+        const a=document.createElement("a");
+        a.href=URL.createObjectURL(b);a.download="verification-report.txt";
+        a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+        dl.textContent="downloaded";setTimeout(()=>dl.textContent="download report",1600);
+      }catch(e){dl.textContent="download failed";}};
+      out.appendChild(dl);
+    }catch(e){/* no Blob/URL host — copy still works */}
     /* Move focus+scroll to the verdict — the stamp lands last and a keyboard
        user at the button shouldn't have to hunt for it. */
     if(out.setAttribute){out.setAttribute("tabindex","-1");if(out.focus)out.focus();}
@@ -1886,6 +1907,18 @@ if(location.protocol.indexOf("http")===0){
       if(!r.ok)return;
       const buf=await r.arrayBuffer();
       go([new File([buf],path.split("/").pop())]);
+    }).catch(()=>{});
+  }
+  /* Conformance-vector deep links: #vectors/<slug> fetches one of the
+     Wycheproof-style packs the site ships under vectors/ (the index links
+     each row here) — the judge lands directly on the verdict the oracle
+     predicts. Slug pattern pins it to the vector names. */
+  const _vm=location.hash.match(/^#vectors\\/([a-z0-9-]{3,60})$/);
+  if(_vm){
+    fetch("vectors/"+_vm[1]+".zip").then(async r=>{
+      if(!r.ok)return;
+      const buf=await r.arrayBuffer();
+      go([new File([buf],_vm[1]+".zip")]);
     }).catch(()=>{});
   }
   /* Out-of-band pin demo: the pack's trust anchor arrives over a different
