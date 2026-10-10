@@ -1,0 +1,26 @@
+{
+  "id": "rcpt_c54d9cd510f14a468f99f1ceeb980cf4",
+  "visit_id": "key:3uHpTKgOowQV:qRNo7hHrwwi2:adopted",
+  "sequence": 17,
+  "prev_hash": "45731905a5b3820eff8dd380f3c6fcf8bb6cc536c4ba004c45d6c755d097a7ad",
+  "payload": {
+    "record_type": "key_adoption",
+    "previous_key": "3uHpTKgOowQVzIcK5/AQosYY2RFwvc2GA1vYGRRkkw8=",
+    "rotation_receipt": {
+      "id": "rcpt_10b8bda583df441cb500ad2091d45639",
+      "hash": "45731905a5b3820eff8dd380f3c6fcf8bb6cc536c4ba004c45d6c755d097a7ad"
+    },
+    "boundary": "A signed statement that the holder of the new signing key executed the named rotation \u2014 together with the retiring key's endorsement it binds both sides of the transition.",
+    "journal_head": "b6ab25d9dafcb2d847051c6d3d7313cf98d04a6b7b492f529b307fdcace1f696",
+    "schema": "attest.receipt/2",
+    "sequence": 17,
+    "prev_hash": "45731905a5b3820eff8dd380f3c6fcf8bb6cc536c4ba004c45d6c755d097a7ad",
+    "visit_id": "key:3uHpTKgOowQV:qRNo7hHrwwi2:adopted",
+    "receipt_id": "rcpt_c54d9cd510f14a468f99f1ceeb980cf4",
+    "issued_at": "2026-10-09T18:44:15.329256+00:00"
+  },
+  "payload_hash": "95ee257726449bd5fee75467e04d002cc4195dcaf57bc4b41c9233468e9f4309",
+  "signature": "QbkEVAxvBNIKSMlbKOrxmzjclTU7t4szGKlhLeMpWV59Rkh0L36PglX1ZRI6jg/hCf0g0EoG903LWtqQrZtMBg==",
+  "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+  "issued_at": "2026-10-09T18:44:15.329256Z"
+}

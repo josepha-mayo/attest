@@ -1,0 +1,131 @@
+{
+  "id": "rcpt_63a5a0bfb86c453c8110ca37282b4fe8",
+  "visit_id": "vis_32a86d6fdbe4",
+  "sequence": 8,
+  "prev_hash": "ea87131a2deff012f4e78d6c2abc748f4673a3c0a233e80d12d35d01204ab6be",
+  "payload": {
+    "visit_id": "vis_32a86d6fdbe4",
+    "state": "no_observation",
+    "clock": {
+      "mode": "replay",
+      "replay_id": "2f3ad3e1913b44259c05fac05f72981c",
+      "checkin_received_at": null,
+      "issuance_uses_wall_clock": true
+    },
+    "data_origin": "local_or_test",
+    "site": {
+      "id": "site_a55d249ad6dd",
+      "name": "Alvarez residence",
+      "ring_account_id": "ava1.ring.account.SANDBOX",
+      "door_camera_id": "ava1.ring.device.0F9EB1CB06604797A169",
+      "door_sensor_id": "ava1.ring.device.1C5AE0F5809743D9A4D9"
+    },
+    "worker": null,
+    "worker_id": null,
+    "scheduled_worker": {
+      "id": "wkr_08da460682ff",
+      "name": "Maria Chen"
+    },
+    "schedule": {
+      "id": "sch_ebf5be20d575",
+      "window_start": "2026-10-05T18:01:03.318922+00:00",
+      "window_end": "2026-10-05T20:06:03.318922+00:00",
+      "expected_minutes": 90,
+      "service": "Morning care visit"
+    },
+    "first_observed_at": null,
+    "last_observed_at": null,
+    "checked_in_at": null,
+    "departure_candidate_at": null,
+    "departed_at": null,
+    "duration_minutes": null,
+    "observed_span_minutes": null,
+    "cures_act_elements": {
+      "status": "corroboration_map_only_not_an_evv_submission",
+      "service_type": {
+        "value": "Morning care visit",
+        "basis": "scheduled_expectation_not_verified_performed"
+      },
+      "individual_receiving": {
+        "value": "Alvarez residence",
+        "basis": "premises_not_a_verified_person"
+      },
+      "date": {
+        "value": "2026-10-05",
+        "basis": "scheduled_date_observation_timestamps_are_device_reported"
+      },
+      "location": {
+        "value": "ava1.ring.device.0F9EB1CB06604797A169",
+        "basis": "device_anchored_at_premises_not_gps"
+      },
+      "individual_providing": {
+        "value": "Maria Chen",
+        "basis": "scheduled_worker_plus_self_report_identity_unverified"
+      },
+      "time_begins_ends": {
+        "value": [
+          null,
+          null
+        ],
+        "basis": "observed_interval_bounds_never_time_worked"
+      }
+    },
+    "assessment": {
+      "attendance": "unknown",
+      "identity_verified": false,
+      "departure_verified": false,
+      "time_worked_minutes": null,
+      "requires_review": true,
+      "signature_scope": "record_integrity_only"
+    },
+    "closed_at": "2026-10-08T20:37:03.318922+00:00",
+    "close_reason": "window_elapsed",
+    "flags": [
+      {
+        "code": "no_observation",
+        "severity": "warn",
+        "message": "No matching observation was received; attendance and coverage are unknown"
+      }
+    ],
+    "summary": "No matching observation was received. This does not establish a no-show.",
+    "summary_provenance": {
+      "source": "template",
+      "model": null,
+      "fallback_reason": null,
+      "is_attendance_evidence": false
+    },
+    "evidence": [],
+    "history_poll_coverage": {
+      "state": "observed",
+      "fraction": 1.0,
+      "covered": [
+        {
+          "start": "2026-10-05T18:01:03.318922+00:00",
+          "end": "2026-10-05T20:06:03.318922+00:00"
+        }
+      ],
+      "gaps": [],
+      "polls": 5,
+      "failed_polls": 0,
+      "events": 0,
+      "window": {
+        "start": "2026-10-05T18:01:03.318922+00:00",
+        "end": "2026-10-05T20:06:03.318922+00:00"
+      },
+      "claim": "Attest polled Ring Event History during this window; it attests what the pipeline observed, not what physically happened",
+      "interruptions": [],
+      "live_sessions": []
+    },
+    "ring_history": null,
+    "journal_head": "ae0b96bba930d2908d394fbd9b7a713d0e1a53afad7ae3cf27b246b7df1b8976",
+    "schema": "attest.receipt/2",
+    "sequence": 8,
+    "prev_hash": "ea87131a2deff012f4e78d6c2abc748f4673a3c0a233e80d12d35d01204ab6be",
+    "receipt_id": "rcpt_63a5a0bfb86c453c8110ca37282b4fe8",
+    "issued_at": "2026-10-09T18:06:11.909363+00:00"
+  },
+  "payload_hash": "8fb2aa777b744f80b3497033b52081518db78c07d358e932fbc9625a449dad00",
+  "signature": "WZPxS6OOHE1SVY8FpLs6bx06nAtnRQakgahzBBBcA++gzC4ZaH1jW6O4TZCG3MIM9qvZPvRxNUR8dxUNDb4OCQ==",
+  "public_key": "3uHpTKgOowQVzIcK5/AQosYY2RFwvc2GA1vYGRRkkw8=",
+  "issued_at": "2026-10-09T18:06:11.909363Z"
+}

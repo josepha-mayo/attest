@@ -1,0 +1,247 @@
+{
+  "id": "rcpt_b57e23ba30284005a8bf1dc7fbf28d4d",
+  "visit_id": "vis_1071d3b1997a",
+  "sequence": 4,
+  "prev_hash": "436d39bdc5b2f8d61655cde29d3b4bcbb53d8e1a1ff1a0f0eebe8b5db0a0c418",
+  "payload": {
+    "visit_id": "vis_1071d3b1997a",
+    "state": "closed",
+    "clock": {
+      "mode": "replay",
+      "replay_id": "2f3ad3e1913b44259c05fac05f72981c",
+      "checkin_received_at": "2026-10-09T18:06:07.279549+00:00",
+      "issuance_uses_wall_clock": true
+    },
+    "data_origin": "local_or_test",
+    "site": {
+      "id": "site_a55d249ad6dd",
+      "name": "Alvarez residence",
+      "ring_account_id": "ava1.ring.account.SANDBOX",
+      "door_camera_id": "ava1.ring.device.0F9EB1CB06604797A169",
+      "door_sensor_id": "ava1.ring.device.1C5AE0F5809743D9A4D9"
+    },
+    "worker": "Maria Chen",
+    "worker_id": "wkr_08da460682ff",
+    "scheduled_worker": {
+      "id": "wkr_08da460682ff",
+      "name": "Maria Chen"
+    },
+    "schedule": {
+      "id": "sch_016606aa447e",
+      "window_start": "2026-10-04T18:01:03.318922+00:00",
+      "window_end": "2026-10-04T20:06:03.318922+00:00",
+      "expected_minutes": 90,
+      "service": "Morning care visit"
+    },
+    "first_observed_at": "2026-10-04T18:06:03.318000+00:00",
+    "last_observed_at": "2026-10-04T18:06:38.318000+00:00",
+    "checked_in_at": "2026-10-04T18:06:03.318922+00:00",
+    "departure_candidate_at": null,
+    "departed_at": null,
+    "duration_minutes": null,
+    "observed_span_minutes": 0.5833333333333334,
+    "cures_act_elements": {
+      "status": "corroboration_map_only_not_an_evv_submission",
+      "service_type": {
+        "value": "Morning care visit",
+        "basis": "scheduled_expectation_not_verified_performed"
+      },
+      "individual_receiving": {
+        "value": "Alvarez residence",
+        "basis": "premises_not_a_verified_person"
+      },
+      "date": {
+        "value": "2026-10-04",
+        "basis": "scheduled_date_observation_timestamps_are_device_reported"
+      },
+      "location": {
+        "value": "ava1.ring.device.0F9EB1CB06604797A169",
+        "basis": "device_anchored_at_premises_not_gps"
+      },
+      "individual_providing": {
+        "value": "Maria Chen",
+        "basis": "scheduled_worker_plus_self_report_identity_unverified"
+      },
+      "time_begins_ends": {
+        "value": [
+          "2026-10-04T18:06:03.318000+00:00",
+          "2026-10-04T18:06:38.318000+00:00"
+        ],
+        "basis": "observed_interval_bounds_never_time_worked"
+      }
+    },
+    "assessment": {
+      "attendance": "self_reported",
+      "identity_verified": false,
+      "departure_verified": false,
+      "time_worked_minutes": null,
+      "requires_review": true,
+      "signature_scope": "record_integrity_only"
+    },
+    "closed_at": "2026-10-04T18:41:03.318922+00:00",
+    "close_reason": "coordinator_review",
+    "flags": [
+      {
+        "code": "departure_unconfirmed",
+        "severity": "warn",
+        "message": "Record closed for review; direction, identity, and continuous presence are not established"
+      },
+      {
+        "code": "observed_interval_short",
+        "severity": "warn",
+        "message": "Observations span 1 min; 90 min scheduled. Time worked is unknown"
+      }
+    ],
+    "summary": "Door activity was observed at Alvarez residence from 6:06 PM to 6:06 PM, spanning about 1 minutes. The link issued to Maria Chen was used to self-report presence at 6:06 PM; identity was not independently verified. These observations do not establish departure, continuous presence, or time worked. Review notes: Record closed for review; direction, identity, and continuous presence are not established; Observations span 1 min; 90 min scheduled. Time worked is unknown.",
+    "summary_provenance": {
+      "source": "template",
+      "model": null,
+      "fallback_reason": null,
+      "is_attendance_evidence": false
+    },
+    "evidence": [
+      {
+        "kind": "arrival_motion",
+        "at": "2026-10-04T18:06:03.318000+00:00",
+        "device": "ava1.ring.device.0F9EB1CB06604797A169",
+        "ring_event": "motion_detected",
+        "ring_sub_type": "human",
+        "ring_request_id": "136d3266-9bb5-48db-b3d8-b2d06fa6816e",
+        "ring_history_event_id": null,
+        "ingestion_source": "webhook",
+        "media_sha256": null
+      },
+      {
+        "kind": "snapshot",
+        "at": "2026-10-04T18:06:03.318000+00:00",
+        "device": "ava1.ring.device.0F9EB1CB06604797A169",
+        "ring_event": null,
+        "ring_sub_type": null,
+        "ring_request_id": null,
+        "ring_history_event_id": null,
+        "ingestion_source": "local_or_test",
+        "media_sha256": "b48746b93e11c513bd4aad504b287691c45a66f171cd68c5105e24e466e00466"
+      },
+      {
+        "kind": "checkin",
+        "at": "2026-10-04T18:06:03.318922+00:00",
+        "device": null,
+        "ring_event": null,
+        "ring_sub_type": null,
+        "ring_request_id": null,
+        "ring_history_event_id": null,
+        "ingestion_source": "unknown",
+        "media_sha256": null
+      },
+      {
+        "kind": "doorbell",
+        "at": "2026-10-04T18:06:09.318000+00:00",
+        "device": "ava1.ring.device.0F9EB1CB06604797A169",
+        "ring_event": "button_press",
+        "ring_sub_type": null,
+        "ring_request_id": "ce329ea2-ded1-42e2-8f96-d876bb74cc4a",
+        "ring_history_event_id": null,
+        "ingestion_source": "webhook",
+        "media_sha256": null
+      },
+      {
+        "kind": "door_opened",
+        "at": "2026-10-04T18:06:23.318000+00:00",
+        "device": "ava1.ring.device.1C5AE0F5809743D9A4D9",
+        "ring_event": "contact_sensor_faulted",
+        "ring_sub_type": null,
+        "ring_request_id": "b76768c3-1ea0-4517-89fb-56d825288dea",
+        "ring_history_event_id": null,
+        "ingestion_source": "webhook",
+        "media_sha256": null
+      },
+      {
+        "kind": "door_closed",
+        "at": "2026-10-04T18:06:38.318000+00:00",
+        "device": "ava1.ring.device.1C5AE0F5809743D9A4D9",
+        "ring_event": "contact_sensor_cleared",
+        "ring_sub_type": null,
+        "ring_request_id": "fe63cf10-d44f-4655-9e10-ea00c8aacc6f",
+        "ring_history_event_id": null,
+        "ingestion_source": "webhook",
+        "media_sha256": null
+      }
+    ],
+    "history_poll_coverage": {
+      "state": "observed_with_events",
+      "fraction": 0.2549,
+      "covered": [
+        {
+          "start": "2026-10-04T18:06:03.318000+00:00",
+          "end": "2026-10-04T18:06:38.318922+00:00"
+        },
+        {
+          "start": "2026-10-04T18:11:03.318922+00:00",
+          "end": "2026-10-04T18:41:03.318922+00:00"
+        }
+      ],
+      "gaps": [
+        {
+          "start": "2026-10-04T18:06:38.318922+00:00",
+          "end": "2026-10-04T18:11:03.318922+00:00"
+        },
+        {
+          "start": "2026-10-04T18:41:03.318922+00:00",
+          "end": "2026-10-04T20:06:03.318922+00:00",
+          "explained": true,
+          "explained_by": [
+            {
+              "kind": "subscription_deactivated",
+              "device_id": "ava1.ring.device.0F9EB1CB06604797A169",
+              "start": "2026-10-04T18:41:03.318000+00:00",
+              "end": "2026-10-04T20:06:03.318922+00:00",
+              "restored_by": null
+            }
+          ]
+        }
+      ],
+      "polls": 5,
+      "failed_polls": 0,
+      "events": 11,
+      "window": {
+        "start": "2026-10-04T18:06:03.318000+00:00",
+        "end": "2026-10-04T20:06:03.318922+00:00"
+      },
+      "claim": "Attest polled Ring Event History during this window; it attests what the pipeline observed, not what physically happened",
+      "interruptions": [
+        {
+          "kind": "subscription_deactivated",
+          "at": "2026-10-04T18:41:03.318000+00:00",
+          "device_id": "ava1.ring.device.0F9EB1CB06604797A169",
+          "interrupts": true,
+          "detail": {}
+        }
+      ],
+      "live_sessions": []
+    },
+    "ring_history": [
+      {
+        "id": "ava1.ring.device.0F9EB1CB06604797A169.ding.1791137169318",
+        "event_type": "ding",
+        "start": "2026-10-04T18:06:09.318000+00:00",
+        "end": "2026-10-04T18:06:29.318000+00:00"
+      },
+      {
+        "id": "ava1.ring.device.0F9EB1CB06604797A169.motion.1791137163318",
+        "event_type": "motion",
+        "start": "2026-10-04T18:06:03.318000+00:00",
+        "end": "2026-10-04T18:06:23.318000+00:00"
+      }
+    ],
+    "journal_head": "300f6058728a57c1e6217bb5c904e76df25762936f6c0256ac2ef9de9299c9dc",
+    "schema": "attest.receipt/2",
+    "sequence": 4,
+    "prev_hash": "436d39bdc5b2f8d61655cde29d3b4bcbb53d8e1a1ff1a0f0eebe8b5db0a0c418",
+    "receipt_id": "rcpt_b57e23ba30284005a8bf1dc7fbf28d4d",
+    "issued_at": "2026-10-09T18:06:07.793164+00:00"
+  },
+  "payload_hash": "bcf835aa9474ec1bb4581bc07f3568f5e5e781cc3c6df2eae28137c0960129ec",
+  "signature": "3UsafUfLVVBVF1AWCLgDrXXhtklvu3y8WCbzvlu1ijqBRwQCpc0J8En2kL5YUSxeIpOBByE28MUmgWeO3mDZBg==",
+  "public_key": "3uHpTKgOowQVzIcK5/AQosYY2RFwvc2GA1vYGRRkkw8=",
+  "issued_at": "2026-10-09T18:06:07.793164Z"
+}

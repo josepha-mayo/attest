@@ -100,33 +100,44 @@ Deep link — lands on a red FAILED stamp.</small>
 <small>The signed <code>verify-live --sign</code> report from the actual
 <code>api.amazonvision.com</code> run — a lone receipt, auto-verified on load.</small>
 </a>
+<a class="card" href="verify.html#sample-pack">
+<b>Verify it on your phone</b>
+<img src="qr-verify.svg" width="112" height="112"
+alt="QR code linking to the verifier's one-click sample-pack check"
+style="display:block;margin:.2rem 0 .4rem">
+<small>Scan — the same one-click check runs entirely in the mobile browser.
+The pack bytes never leave the phone either.</small>
+</a>
 </div>
 
 <div class="term" role="region" aria-label="Terminal demo of the CLI flow">
   <div class="bar" aria-hidden="true"><i></i><i></i><i></i></div>
   <pre id="termbody"></pre>
 </div>
+<p><small>Real output, captured verbatim — including the honest line where
+two attacks aren't applicable on a store that lacks a signed resolution and
+media bytes. Reproduce it yourself: <code>attest demo</code>, then
+<code>attest attack-demo</code> on the same runtime.</small></p>
 <script>
 (function(){
 var lines=[
  ["cmd","$ attest demo --port 8000"],
- ["mut","  emulator + server + an eight-day story \u2192 http://127.0.0.1:8000"],
- ["cmd","$ attest export --redact-media --out pack.zip --tamper-twin twin.zip"],
- ["mut","  wrote pack.zip \u2014 9 signed visit records"],
- ["mut","  wrote twin.zip \u2014 doctored: observed_span_minutes 0.58 \u2192 70.58"],
- ["mut","  twin self-check: correctly refused \u2014 payload hash mismatch"],
- ["cmd","$ attest verify pack.zip"],
- ["ok","  OK: case pack verified \u2014 9 visit record(s) intact (export signed; \u2026)"],
- ["cmd","$ attest verify twin.zip"],
- ["bad","  verification failed: vis_1071d3b1997a: bundle: original: payload hash mismatch (payload was altered)"],
+ ["mut","  Day 2: camera drops offline mid-visit \u2014 departure unobserved, gap explained by lifecycle events"],
+ ["mut","  Day 3: the Ring plan lapses mid-visit \u2014 observation stops being delivered"],
+ ["mut","  Demo is live \u2014 simulated data only, no real Ring account involved \u2192 http://127.0.0.1:8000"],
+ ["cmd","$ attest verify sample-pack.zip"],
+ ["ok","  OK: case pack verified \u2014 9 visit record(s) intact (export signed: 9 record(s); 4 verifier tool(s) pinned; 31 receipt(s) proven inside the deployment transparency log \u2026)"],
+ ["mut","  Note: a valid pack proves record integrity under the pack's self-declared issuer key \u2014 signatures are not physical truth."],
  ["cmd","$ attest attack-demo"],
  ["ok","  CAUGHT  forge a visit row (state -> attended_verified)"],
  ["ok","  CAUGHT  erase a journal entry mid-chain (hide a past write)"],
  ["ok","  CAUGHT  re-sign a receipt with a different key (key swap)"],
- ["ok","  CAUGHT  swap media bytes on disk after signing"],
  ["ok","  CAUGHT  forge a key_rotation pivot to an attacker key"],
- ["mut","  \u2026 sixteen more"],
- ["ok","  21/21 attacks caught \u2014 store unchanged"]
+ ["ok","  CAUGHT  graft a sequence-0 key_revocation ahead of the chain"],
+ ["ok","  CAUGHT  graft a genuinely-signed receipt the deployment never logged"],
+ ["ok","  CAUGHT  ship a forged always-green verifier inside a genuine pack"],
+ ["mut","  \u2026 eleven more"],
+ ["ok","  19/19 attacks caught \u2014 2 not applicable on this store \u2014 store unchanged"]
 ];
 var body=document.getElementById("termbody");
 function esc(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;");}
@@ -205,7 +216,9 @@ dispute, suspect-window warning) · <a href="demo-household.html">the household
 view</a> (<a href="demo-household-es.html">en español</a>) ·
 <a href="demo-visit-brief.html">the printable brief</a> ·
 <a href="demo-integrity.html">the self-audit page</a> ·
-<a href="demo-integrity.json">its machine-readable JSON</a>:</p>
+<a href="demo-integrity.json">its machine-readable JSON</a> — and the raw layer
+underneath all of it: <a href="demo-receipts.json">58 signed receipts</a>,
+browsable one at a time (each is the artifact everything else derives from):</p>
 <ul>
   <li><code>/</code> — coordinator dashboard: KPI cards, per-day timeline strips, and
       coverage gaps labeled <em>"no observation — not absence"</em></li>

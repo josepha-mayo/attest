@@ -2057,6 +2057,21 @@ def test_every_advertised_pages_artifact_exists():
             rel = m.group(1).rstrip("/")
             if not (docs / rel).exists():
                 missing.append(f"{md.name}: {rel}")
+    # Same 404 class through relative references: every src=/href= pointing at a
+    # sibling file must resolve under docs/ (anchors, absolute URLs, and data
+    # URIs skipped; query/fragment stripped).
+    ref = re.compile(r"""(?:src|href)\s*=\s*["']([^"']+)["']""", re.I)
+    script = re.compile(r"<script[\s\S]*?</script>", re.I)
+    for page in docs.glob("*.html"):
+        text = script.sub("", page.read_text(encoding="utf-8"))
+        for m in ref.finditer(text):
+            rel = m.group(1).split("#")[0].split("?")[0]
+            if not rel or "://" in rel or rel.startswith(("data:", "mailto:")):
+                continue
+            if rel.endswith("/"):
+                rel += "index.html"
+            if not (page.parent / rel).resolve().exists():
+                missing.append(f"{page.name}: {rel}")
     assert not missing, "advertised Pages artifacts missing from docs/: " + "; ".join(missing)
 
 

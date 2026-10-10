@@ -1,0 +1,316 @@
+{
+  "id": "rcpt_c44581e230574aa5919a280f808f489c",
+  "visit_id": "digest:site_a55d249ad6dd:2026-09-30T19:37:03.318922+00:00:2026-10-08T20:37:03.318922+00:00",
+  "sequence": 12,
+  "prev_hash": "a59fa896150f5547f26b7e466287cdd400a533fda97265ca8d3d99f82d3b02b2",
+  "payload": {
+    "record_type": "period_digest",
+    "site": {
+      "id": "site_a55d249ad6dd",
+      "name": "Alvarez residence"
+    },
+    "interval": {
+      "start": "2026-09-30T19:37:03.318922+00:00",
+      "end": "2026-10-08T20:37:03.318922+00:00"
+    },
+    "counts": {
+      "visits_observed": 6,
+      "visits_no_observation": 2,
+      "visits_unmatched": 1,
+      "worker_statements": 1,
+      "worker_disputes": 1,
+      "household_statements": 1,
+      "coordinator_statements": 0,
+      "coordinator_resolutions": 1,
+      "records_resolved": 1,
+      "resolution_reasons": {
+        "no_electronic_confirmation": 1
+      },
+      "median_resolution_minutes": null,
+      "liveview_sessions": 1
+    },
+    "summarized_receipts": {
+      "vis_8243499a3a78": "c54b4aa30fdb05172fe02eaac09b09ef2167a1eca227da9a892eccd432187d6f",
+      "vis_70e42116a4cf": "6eb91537d98252e89178633a219d0326171e697406f459bc52e6178bc0ff3344",
+      "vis_6a79c8145c2e": "436d39bdc5b2f8d61655cde29d3b4bcbb53d8e1a1ff1a0f0eebe8b5db0a0c418",
+      "vis_1071d3b1997a": "bcf835aa9474ec1bb4581bc07f3568f5e5e781cc3c6df2eae28137c0960129ec",
+      "vis_3feab06a831b": "303b9cdbadc1bfbce1279bfa89d5b8f847b0cd811013e038b20d8087ee0be471",
+      "vis_5b7958271e00": "c82ffd07d0219f96a4f26850ae1089ebe915fb31eac8a20248f0ae9d2a5a1bc5",
+      "vis_ac04986742ad": "ea87131a2deff012f4e78d6c2abc748f4673a3c0a233e80d12d35d01204ab6be",
+      "vis_32a86d6fdbe4": "8fb2aa777b744f80b3497033b52081518db78c07d358e932fbc9625a449dad00",
+      "vis_f34460136366": "cbb5b0b265c65a4434fd6dc6ace06a3be08f760977d217f979b3598046eb7e42"
+    },
+    "coverage": {
+      "state": "observed_with_events",
+      "fraction": 0.054,
+      "covered": [
+        {
+          "start": "2026-10-01T17:36:03.318922+00:00",
+          "end": "2026-10-01T18:06:38.318922+00:00"
+        },
+        {
+          "start": "2026-10-01T19:06:03.318922+00:00",
+          "end": "2026-10-01T19:36:18.318922+00:00"
+        },
+        {
+          "start": "2026-10-02T17:31:03.318922+00:00",
+          "end": "2026-10-02T18:31:38.318922+00:00"
+        },
+        {
+          "start": "2026-10-02T19:06:03.318922+00:00",
+          "end": "2026-10-02T19:36:18.318922+00:00"
+        },
+        {
+          "start": "2026-10-03T17:31:03.318922+00:00",
+          "end": "2026-10-03T18:31:03.318922+00:00"
+        },
+        {
+          "start": "2026-10-03T19:16:03.318922+00:00",
+          "end": "2026-10-03T19:46:03.318922+00:00"
+        },
+        {
+          "start": "2026-10-04T17:31:03.318922+00:00",
+          "end": "2026-10-04T18:06:38.318922+00:00"
+        },
+        {
+          "start": "2026-10-04T18:11:03.318922+00:00",
+          "end": "2026-10-04T18:41:03.318922+00:00"
+        },
+        {
+          "start": "2026-10-05T18:01:03.318922+00:00",
+          "end": "2026-10-05T20:07:03.318922+00:00"
+        },
+        {
+          "start": "2026-10-06T17:31:03.318922+00:00",
+          "end": "2026-10-06T18:06:38.318922+00:00"
+        },
+        {
+          "start": "2026-10-07T17:31:03.318922+00:00",
+          "end": "2026-10-07T18:01:03.318922+00:00"
+        },
+        {
+          "start": "2026-10-07T20:16:03.318922+00:00",
+          "end": "2026-10-07T20:46:38.318922+00:00"
+        },
+        {
+          "start": "2026-10-07T21:46:03.318922+00:00",
+          "end": "2026-10-07T22:16:18.318922+00:00"
+        },
+        {
+          "start": "2026-10-08T17:31:03.318922+00:00",
+          "end": "2026-10-08T18:06:38.318922+00:00"
+        },
+        {
+          "start": "2026-10-08T19:06:03.318922+00:00",
+          "end": "2026-10-08T19:36:18.318922+00:00"
+        }
+      ],
+      "gaps": [
+        {
+          "start": "2026-09-30T19:37:03.318922+00:00",
+          "end": "2026-10-01T17:36:03.318922+00:00"
+        },
+        {
+          "start": "2026-10-01T18:06:38.318922+00:00",
+          "end": "2026-10-01T19:06:03.318922+00:00"
+        },
+        {
+          "start": "2026-10-01T19:36:18.318922+00:00",
+          "end": "2026-10-02T17:31:03.318922+00:00"
+        },
+        {
+          "start": "2026-10-02T18:31:38.318922+00:00",
+          "end": "2026-10-02T19:06:03.318922+00:00"
+        },
+        {
+          "start": "2026-10-02T19:36:18.318922+00:00",
+          "end": "2026-10-03T17:31:03.318922+00:00"
+        },
+        {
+          "start": "2026-10-03T18:31:03.318922+00:00",
+          "end": "2026-10-03T19:16:03.318922+00:00",
+          "explained": true,
+          "explained_by": [
+            {
+              "kind": "device_offline",
+              "device_id": "ava1.ring.device.0F9EB1CB06604797A169",
+              "start": "2026-10-03T18:31:03.318000+00:00",
+              "end": "2026-10-03T19:46:03.318000+00:00",
+              "restored_by": "device_online"
+            }
+          ]
+        },
+        {
+          "start": "2026-10-03T19:46:03.318922+00:00",
+          "end": "2026-10-04T17:31:03.318922+00:00"
+        },
+        {
+          "start": "2026-10-04T18:06:38.318922+00:00",
+          "end": "2026-10-04T18:11:03.318922+00:00"
+        },
+        {
+          "start": "2026-10-04T18:41:03.318922+00:00",
+          "end": "2026-10-05T18:01:03.318922+00:00",
+          "explained": true,
+          "explained_by": [
+            {
+              "kind": "subscription_deactivated",
+              "device_id": "ava1.ring.device.0F9EB1CB06604797A169",
+              "start": "2026-10-04T18:41:03.318000+00:00",
+              "end": "2026-10-08T20:37:03.318922+00:00",
+              "restored_by": null
+            }
+          ]
+        },
+        {
+          "start": "2026-10-05T20:07:03.318922+00:00",
+          "end": "2026-10-06T17:31:03.318922+00:00",
+          "explained": true,
+          "explained_by": [
+            {
+              "kind": "subscription_deactivated",
+              "device_id": "ava1.ring.device.0F9EB1CB06604797A169",
+              "start": "2026-10-04T18:41:03.318000+00:00",
+              "end": "2026-10-08T20:37:03.318922+00:00",
+              "restored_by": null
+            }
+          ]
+        },
+        {
+          "start": "2026-10-06T18:06:38.318922+00:00",
+          "end": "2026-10-07T17:31:03.318922+00:00",
+          "explained": true,
+          "explained_by": [
+            {
+              "kind": "subscription_deactivated",
+              "device_id": "ava1.ring.device.0F9EB1CB06604797A169",
+              "start": "2026-10-04T18:41:03.318000+00:00",
+              "end": "2026-10-08T20:37:03.318922+00:00",
+              "restored_by": null
+            }
+          ]
+        },
+        {
+          "start": "2026-10-07T18:01:03.318922+00:00",
+          "end": "2026-10-07T20:16:03.318922+00:00",
+          "explained": true,
+          "explained_by": [
+            {
+              "kind": "subscription_deactivated",
+              "device_id": "ava1.ring.device.0F9EB1CB06604797A169",
+              "start": "2026-10-04T18:41:03.318000+00:00",
+              "end": "2026-10-08T20:37:03.318922+00:00",
+              "restored_by": null
+            }
+          ]
+        },
+        {
+          "start": "2026-10-07T20:46:38.318922+00:00",
+          "end": "2026-10-07T21:46:03.318922+00:00",
+          "explained": true,
+          "explained_by": [
+            {
+              "kind": "subscription_deactivated",
+              "device_id": "ava1.ring.device.0F9EB1CB06604797A169",
+              "start": "2026-10-04T18:41:03.318000+00:00",
+              "end": "2026-10-08T20:37:03.318922+00:00",
+              "restored_by": null
+            }
+          ]
+        },
+        {
+          "start": "2026-10-07T22:16:18.318922+00:00",
+          "end": "2026-10-08T17:31:03.318922+00:00",
+          "explained": true,
+          "explained_by": [
+            {
+              "kind": "subscription_deactivated",
+              "device_id": "ava1.ring.device.0F9EB1CB06604797A169",
+              "start": "2026-10-04T18:41:03.318000+00:00",
+              "end": "2026-10-08T20:37:03.318922+00:00",
+              "restored_by": null
+            }
+          ]
+        },
+        {
+          "start": "2026-10-08T18:06:38.318922+00:00",
+          "end": "2026-10-08T19:06:03.318922+00:00",
+          "explained": true,
+          "explained_by": [
+            {
+              "kind": "subscription_deactivated",
+              "device_id": "ava1.ring.device.0F9EB1CB06604797A169",
+              "start": "2026-10-04T18:41:03.318000+00:00",
+              "end": "2026-10-08T20:37:03.318922+00:00",
+              "restored_by": null
+            }
+          ]
+        },
+        {
+          "start": "2026-10-08T19:36:18.318922+00:00",
+          "end": "2026-10-08T20:37:03.318922+00:00",
+          "explained": true,
+          "explained_by": [
+            {
+              "kind": "subscription_deactivated",
+              "device_id": "ava1.ring.device.0F9EB1CB06604797A169",
+              "start": "2026-10-04T18:41:03.318000+00:00",
+              "end": "2026-10-08T20:37:03.318922+00:00",
+              "restored_by": null
+            }
+          ]
+        }
+      ],
+      "polls": 56,
+      "failed_polls": 0,
+      "events": 94,
+      "window": {
+        "start": "2026-09-30T19:37:03.318922+00:00",
+        "end": "2026-10-08T20:37:03.318922+00:00"
+      },
+      "claim": "Attest polled Ring Event History during this window; it attests what the pipeline observed, not what physically happened",
+      "interruptions": [
+        {
+          "kind": "device_offline",
+          "at": "2026-10-03T18:31:03.318000+00:00",
+          "device_id": "ava1.ring.device.0F9EB1CB06604797A169",
+          "interrupts": true,
+          "detail": {}
+        },
+        {
+          "kind": "device_online",
+          "at": "2026-10-03T19:46:03.318000+00:00",
+          "device_id": "ava1.ring.device.0F9EB1CB06604797A169",
+          "interrupts": false,
+          "detail": {}
+        },
+        {
+          "kind": "subscription_deactivated",
+          "at": "2026-10-04T18:41:03.318000+00:00",
+          "device_id": "ava1.ring.device.0F9EB1CB06604797A169",
+          "interrupts": true,
+          "detail": {}
+        }
+      ],
+      "live_sessions": [
+        {
+          "opened_at": "2026-10-08T18:21:38.318922+00:00",
+          "closed_at": "2026-10-08T18:31:38.318922+00:00",
+          "device_id": "ava1.ring.device.0F9EB1CB06604797A169"
+        }
+      ]
+    },
+    "boundary": "Counts the signed records this deployment wrote in the interval \u2014 a statement about the ledger, never about physical presence or absence.",
+    "journal_head": "8e153aa907ac796b62e33978e634ea4d3d1e6739fc166a6e8ac2ef1f24adac36",
+    "schema": "attest.receipt/2",
+    "sequence": 12,
+    "prev_hash": "a59fa896150f5547f26b7e466287cdd400a533fda97265ca8d3d99f82d3b02b2",
+    "visit_id": "digest:site_a55d249ad6dd:2026-09-30T19:37:03.318922+00:00:2026-10-08T20:37:03.318922+00:00",
+    "receipt_id": "rcpt_c44581e230574aa5919a280f808f489c",
+    "issued_at": "2026-10-09T18:06:12.234642+00:00"
+  },
+  "payload_hash": "d63097958812b18f525e8cafee78887992766c2212cfc0fccce88afd1767d9b1",
+  "signature": "Gw5v0LI2zllgkJt3hSCsniWJT3DUBcecroFet5HI2Jn8KUKC61bRj1TYFX+Xtu5QqOOXCPntcoZiDlwussm6BQ==",
+  "public_key": "3uHpTKgOowQVzIcK5/AQosYY2RFwvc2GA1vYGRRkkw8=",
+  "issued_at": "2026-10-09T18:06:12.234642Z"
+}

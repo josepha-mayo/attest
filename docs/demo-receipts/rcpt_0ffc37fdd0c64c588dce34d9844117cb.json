@@ -1,0 +1,279 @@
+{
+  "id": "rcpt_0ffc37fdd0c64c588dce34d9844117cb",
+  "visit_id": "vis_5b7958271e00",
+  "sequence": 6,
+  "prev_hash": "303b9cdbadc1bfbce1279bfa89d5b8f847b0cd811013e038b20d8087ee0be471",
+  "payload": {
+    "visit_id": "vis_5b7958271e00",
+    "state": "closed",
+    "clock": {
+      "mode": "replay",
+      "replay_id": "2f3ad3e1913b44259c05fac05f72981c",
+      "checkin_received_at": null,
+      "issuance_uses_wall_clock": true
+    },
+    "data_origin": "local_or_test",
+    "site": {
+      "id": "site_a55d249ad6dd",
+      "name": "Alvarez residence",
+      "ring_account_id": "ava1.ring.account.SANDBOX",
+      "door_camera_id": "ava1.ring.device.0F9EB1CB06604797A169",
+      "door_sensor_id": "ava1.ring.device.1C5AE0F5809743D9A4D9"
+    },
+    "worker": null,
+    "worker_id": null,
+    "scheduled_worker": null,
+    "schedule": null,
+    "first_observed_at": "2026-10-07T20:46:03.318000+00:00",
+    "last_observed_at": "2026-10-07T22:16:18.318000+00:00",
+    "checked_in_at": null,
+    "departure_candidate_at": "2026-10-07T22:16:18.318000+00:00",
+    "departed_at": null,
+    "duration_minutes": null,
+    "observed_span_minutes": 90.25,
+    "cures_act_elements": {
+      "status": "corroboration_map_only_not_an_evv_submission",
+      "service_type": {
+        "value": null,
+        "basis": "scheduled_expectation_not_verified_performed"
+      },
+      "individual_receiving": {
+        "value": "Alvarez residence",
+        "basis": "premises_not_a_verified_person"
+      },
+      "date": {
+        "value": null,
+        "basis": "scheduled_date_observation_timestamps_are_device_reported"
+      },
+      "location": {
+        "value": "ava1.ring.device.0F9EB1CB06604797A169",
+        "basis": "device_anchored_at_premises_not_gps"
+      },
+      "individual_providing": {
+        "value": null,
+        "basis": "scheduled_worker_plus_self_report_identity_unverified"
+      },
+      "time_begins_ends": {
+        "value": [
+          "2026-10-07T20:46:03.318000+00:00",
+          "2026-10-07T22:16:18.318000+00:00"
+        ],
+        "basis": "observed_interval_bounds_never_time_worked"
+      }
+    },
+    "assessment": {
+      "attendance": "unknown",
+      "identity_verified": false,
+      "departure_verified": false,
+      "time_worked_minutes": null,
+      "requires_review": true,
+      "signature_scope": "record_integrity_only"
+    },
+    "closed_at": "2026-10-07T22:16:18.318922+00:00",
+    "close_reason": "departure",
+    "flags": [
+      {
+        "code": "unscheduled",
+        "severity": "warn",
+        "message": "device activity with no scheduled visit in window"
+      },
+      {
+        "code": "departure_unconfirmed",
+        "severity": "warn",
+        "message": "Record closed for review; direction, identity, and continuous presence are not established"
+      }
+    ],
+    "summary": "Door activity was observed at Alvarez residence from 8:46 PM to 10:16 PM, spanning about 90 minutes. No worker check-in was received; no one checking in has been identified. These observations do not establish departure, continuous presence, or time worked. Review notes: device activity with no scheduled visit in window; Record closed for review; direction, identity, and continuous presence are not established.",
+    "summary_provenance": {
+      "source": "template",
+      "model": null,
+      "fallback_reason": null,
+      "is_attendance_evidence": false
+    },
+    "evidence": [
+      {
+        "kind": "arrival_motion",
+        "at": "2026-10-07T20:46:03.318000+00:00",
+        "device": "ava1.ring.device.0F9EB1CB06604797A169",
+        "ring_event": "motion_detected",
+        "ring_sub_type": "human",
+        "ring_request_id": "895e3e80-440b-4a39-b541-d9048209b65a",
+        "ring_history_event_id": null,
+        "ingestion_source": "webhook",
+        "media_sha256": null
+      },
+      {
+        "kind": "snapshot",
+        "at": "2026-10-07T20:46:03.318000+00:00",
+        "device": "ava1.ring.device.0F9EB1CB06604797A169",
+        "ring_event": null,
+        "ring_sub_type": null,
+        "ring_request_id": null,
+        "ring_history_event_id": null,
+        "ingestion_source": "local_or_test",
+        "media_sha256": "85be3f998be4768d0f03eb8f838326d92fe7fba843cd7208d8add492b5ab9c1d"
+      },
+      {
+        "kind": "doorbell",
+        "at": "2026-10-07T20:46:09.318000+00:00",
+        "device": "ava1.ring.device.0F9EB1CB06604797A169",
+        "ring_event": "button_press",
+        "ring_sub_type": null,
+        "ring_request_id": "c5036914-d2c9-4f6a-9b58-7b63d038769a",
+        "ring_history_event_id": null,
+        "ingestion_source": "webhook",
+        "media_sha256": null
+      },
+      {
+        "kind": "door_opened",
+        "at": "2026-10-07T20:46:23.318000+00:00",
+        "device": "ava1.ring.device.1C5AE0F5809743D9A4D9",
+        "ring_event": "contact_sensor_faulted",
+        "ring_sub_type": null,
+        "ring_request_id": "d447e480-d7ee-480b-be17-771ab7756527",
+        "ring_history_event_id": null,
+        "ingestion_source": "webhook",
+        "media_sha256": null
+      },
+      {
+        "kind": "door_closed",
+        "at": "2026-10-07T20:46:38.318000+00:00",
+        "device": "ava1.ring.device.1C5AE0F5809743D9A4D9",
+        "ring_event": "contact_sensor_cleared",
+        "ring_sub_type": null,
+        "ring_request_id": "362ba0f0-0599-484d-a85e-24b04a5ebd11",
+        "ring_history_event_id": null,
+        "ingestion_source": "webhook",
+        "media_sha256": null
+      },
+      {
+        "kind": "door_opened",
+        "at": "2026-10-07T22:16:03.318000+00:00",
+        "device": "ava1.ring.device.1C5AE0F5809743D9A4D9",
+        "ring_event": "contact_sensor_faulted",
+        "ring_sub_type": null,
+        "ring_request_id": "8e399462-184e-41d9-84a9-f0d980c29d1b",
+        "ring_history_event_id": null,
+        "ingestion_source": "webhook",
+        "media_sha256": null
+      },
+      {
+        "kind": "door_closed",
+        "at": "2026-10-07T22:16:15.318000+00:00",
+        "device": "ava1.ring.device.1C5AE0F5809743D9A4D9",
+        "ring_event": "contact_sensor_cleared",
+        "ring_sub_type": null,
+        "ring_request_id": "bc74b796-ad9c-4e76-b487-6ea566026b03",
+        "ring_history_event_id": null,
+        "ingestion_source": "webhook",
+        "media_sha256": null
+      },
+      {
+        "kind": "departure_motion",
+        "at": "2026-10-07T22:16:18.318000+00:00",
+        "device": "ava1.ring.device.0F9EB1CB06604797A169",
+        "ring_event": "motion_detected",
+        "ring_sub_type": "human",
+        "ring_request_id": "247cf5d8-8be2-4516-b3b6-677c6ab2ea52",
+        "ring_history_event_id": null,
+        "ingestion_source": "webhook",
+        "media_sha256": null
+      },
+      {
+        "kind": "snapshot",
+        "at": "2026-10-07T22:16:18.318000+00:00",
+        "device": "ava1.ring.device.0F9EB1CB06604797A169",
+        "ring_event": null,
+        "ring_sub_type": null,
+        "ring_request_id": null,
+        "ring_history_event_id": null,
+        "ingestion_source": "local_or_test",
+        "media_sha256": "21993be3b5fce685804a0bbb3e441cb404f7c4053f1a65001d0b71fe3a5203b2"
+      }
+    ],
+    "history_poll_coverage": {
+      "state": "observed_with_events",
+      "fraction": 0.3411,
+      "covered": [
+        {
+          "start": "2026-10-07T20:46:03.318000+00:00",
+          "end": "2026-10-07T20:46:38.318922+00:00"
+        },
+        {
+          "start": "2026-10-07T21:46:03.318922+00:00",
+          "end": "2026-10-07T22:16:15.318922+00:00"
+        }
+      ],
+      "gaps": [
+        {
+          "start": "2026-10-07T20:46:38.318922+00:00",
+          "end": "2026-10-07T21:46:03.318922+00:00",
+          "explained": true,
+          "explained_by": [
+            {
+              "kind": "subscription_deactivated",
+              "device_id": "ava1.ring.device.0F9EB1CB06604797A169",
+              "start": "2026-10-04T18:41:03.318000+00:00",
+              "end": "2026-10-07T22:16:18.318000+00:00",
+              "restored_by": null
+            }
+          ]
+        },
+        {
+          "start": "2026-10-07T22:16:15.318922+00:00",
+          "end": "2026-10-07T22:16:18.318000+00:00",
+          "explained": true,
+          "explained_by": [
+            {
+              "kind": "subscription_deactivated",
+              "device_id": "ava1.ring.device.0F9EB1CB06604797A169",
+              "start": "2026-10-04T18:41:03.318000+00:00",
+              "end": "2026-10-07T22:16:18.318000+00:00",
+              "restored_by": null
+            }
+          ]
+        }
+      ],
+      "polls": 6,
+      "failed_polls": 0,
+      "events": 11,
+      "window": {
+        "start": "2026-10-07T20:46:03.318000+00:00",
+        "end": "2026-10-07T22:16:18.318000+00:00"
+      },
+      "claim": "Attest polled Ring Event History during this window; it attests what the pipeline observed, not what physically happened",
+      "interruptions": [],
+      "live_sessions": []
+    },
+    "ring_history": [
+      {
+        "id": "ava1.ring.device.0F9EB1CB06604797A169.motion.1791411378318",
+        "event_type": "motion",
+        "start": "2026-10-07T22:16:18.318000+00:00",
+        "end": "2026-10-07T22:16:38.318000+00:00"
+      },
+      {
+        "id": "ava1.ring.device.0F9EB1CB06604797A169.ding.1791405969318",
+        "event_type": "ding",
+        "start": "2026-10-07T20:46:09.318000+00:00",
+        "end": "2026-10-07T20:46:29.318000+00:00"
+      },
+      {
+        "id": "ava1.ring.device.0F9EB1CB06604797A169.motion.1791405963318",
+        "event_type": "motion",
+        "start": "2026-10-07T20:46:03.318000+00:00",
+        "end": "2026-10-07T20:46:23.318000+00:00"
+      }
+    ],
+    "journal_head": "4725f45ec5097fa1710160a0557c97ad8935ae3c0058a7e2353d0e0c6a1ac43d",
+    "schema": "attest.receipt/2",
+    "sequence": 6,
+    "prev_hash": "303b9cdbadc1bfbce1279bfa89d5b8f847b0cd811013e038b20d8087ee0be471",
+    "receipt_id": "rcpt_0ffc37fdd0c64c588dce34d9844117cb",
+    "issued_at": "2026-10-09T18:06:10.534080+00:00"
+  },
+  "payload_hash": "c82ffd07d0219f96a4f26850ae1089ebe915fb31eac8a20248f0ae9d2a5a1bc5",
+  "signature": "pupshdb3Z0odeKZUKWNkFz8taLQl+zwpfpplgQS+onNTRUncLh4tWVk7uCO/tLzKC3C2Zl4J8PugQVUxESWhCg==",
+  "public_key": "3uHpTKgOowQVzIcK5/AQosYY2RFwvc2GA1vYGRRkkw8=",
+  "issued_at": "2026-10-09T18:06:10.534080Z"
+}

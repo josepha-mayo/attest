@@ -3,6 +3,7 @@
 [![CI](https://github.com/josepha-mayo/attest/actions/workflows/ci.yml/badge.svg)](https://github.com/josepha-mayo/attest/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![pack verified](https://josepha-mayo.github.io/attest/badge-verified.svg)](https://josepha-mayo.github.io/attest/verify.html#sample-pack)
+<a href="https://josepha-mayo.github.io/attest/verify.html#sample-pack"><img src="docs/qr-verify.png" align="right" width="104" alt="QR: one-click pack verification, works on a phone too"></a>
 
 **Tamper-evident visit records for home services — what the Ring devices observed, what the worker reported, what a human concluded. Signed, reviewable, verifiable offline.**
 

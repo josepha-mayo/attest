@@ -1,0 +1,24 @@
+{
+  "id": "rcpt_10b8bda583df441cb500ad2091d45639",
+  "visit_id": "key:3uHpTKgOowQV:qRNo7hHrwwi2",
+  "sequence": 16,
+  "prev_hash": "8fd614b134cc7beba233d281793f16a115eaa5261a8d350d95e755d13677402f",
+  "payload": {
+    "record_type": "key_rotation",
+    "previous_key": "3uHpTKgOowQVzIcK5/AQosYY2RFwvc2GA1vYGRRkkw8=",
+    "new_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+    "reason": "scheduled rotation \u2014 key A retired after incident review",
+    "boundary": "A signed statement that the issuer retired the signing key named here and adopted the successor \u2014 extends pinned-key trust across the transition; never proves either key was or stayed uncompromised.",
+    "journal_head": "fd9cecba68f843b835f2af6c74c4fb6f5e31b36cb0c8f863a02a9df16818d025",
+    "schema": "attest.receipt/2",
+    "sequence": 16,
+    "prev_hash": "8fd614b134cc7beba233d281793f16a115eaa5261a8d350d95e755d13677402f",
+    "visit_id": "key:3uHpTKgOowQV:qRNo7hHrwwi2",
+    "receipt_id": "rcpt_10b8bda583df441cb500ad2091d45639",
+    "issued_at": "2026-10-09T18:44:15.313033+00:00"
+  },
+  "payload_hash": "45731905a5b3820eff8dd380f3c6fcf8bb6cc536c4ba004c45d6c755d097a7ad",
+  "signature": "RkEfmk0CRumcCRiUVrbsVnT2wugD2ncdeTrFweZeuYzMdwXImLYmOndKlbQq0LgwvNY/a7fZilBSKj3Z0D9JCw==",
+  "public_key": "3uHpTKgOowQVzIcK5/AQosYY2RFwvc2GA1vYGRRkkw8=",
+  "issued_at": "2026-10-09T18:44:15.313033Z"
+}

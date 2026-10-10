@@ -1,0 +1,24 @@
+{
+  "id": "rcpt_f701b52cc775472baa1355f52842ba4c",
+  "visit_id": "key:revoked:3uHpTKgOowQVzIcK5/AQosYY2RFwvc2GA1vYGRRkkw8=",
+  "sequence": 19,
+  "prev_hash": "fd3fdca32e5b45c41c350abd58418cb2638e5e55456f37eef190df475db9052f",
+  "payload": {
+    "record_type": "key_revocation",
+    "revoked_key": "3uHpTKgOowQVzIcK5/AQosYY2RFwvc2GA1vYGRRkkw8=",
+    "suspect_after": "2026-10-09T18:06:11.905000+00:00",
+    "reason": "incident review: custody log gap found for the retired key's final minutes",
+    "boundary": "A signed statement that the issuer declares the named key's signatures suspect for records timestamped after the given instant \u2014 a trust annotation, never proof the records are false, and it never erases them.",
+    "journal_head": "6d6ce0ab34f5265d489a0d43d2bed6bdcc8296cd473226b0742033caa33bdb91",
+    "schema": "attest.receipt/2",
+    "sequence": 19,
+    "prev_hash": "fd3fdca32e5b45c41c350abd58418cb2638e5e55456f37eef190df475db9052f",
+    "visit_id": "key:revoked:3uHpTKgOowQVzIcK5/AQosYY2RFwvc2GA1vYGRRkkw8=",
+    "receipt_id": "rcpt_f701b52cc775472baa1355f52842ba4c",
+    "issued_at": "2026-10-09T18:45:15.335190+00:00"
+  },
+  "payload_hash": "3165e7589ba03c99a887cee0671b2f4d482db48823d374f9042f12da8348c726",
+  "signature": "ZXH4siisdR7ZY4DspR9hPdDa1GMIkVX1LkFw0Y2i7/PeZrC1QIM+k0yQwBzjjzBB0UhxHsOHD3WkNZuGdPAqBw==",
+  "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+  "issued_at": "2026-10-09T18:45:15.335190Z"
+}

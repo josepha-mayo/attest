@@ -1,0 +1,286 @@
+{
+  "id": "rcpt_8c63a69c901d4cb990038bdea191e3f6",
+  "visit_id": "coverage:site_a55d249ad6dd:2026-09-30T19:37:03.318922+00:00:2026-10-08T20:37:03.318922+00:00",
+  "sequence": 10,
+  "prev_hash": "cbb5b0b265c65a4434fd6dc6ace06a3be08f760977d217f979b3598046eb7e42",
+  "payload": {
+    "record_type": "coverage_attestation",
+    "site": {
+      "id": "site_a55d249ad6dd",
+      "name": "Alvarez residence"
+    },
+    "device_id": "ava1.ring.device.0F9EB1CB06604797A169",
+    "coverage": {
+      "state": "observed_with_events",
+      "fraction": 0.054,
+      "covered": [
+        {
+          "start": "2026-10-01T17:36:03.318922+00:00",
+          "end": "2026-10-01T18:06:38.318922+00:00"
+        },
+        {
+          "start": "2026-10-01T19:06:03.318922+00:00",
+          "end": "2026-10-01T19:36:18.318922+00:00"
+        },
+        {
+          "start": "2026-10-02T17:31:03.318922+00:00",
+          "end": "2026-10-02T18:31:38.318922+00:00"
+        },
+        {
+          "start": "2026-10-02T19:06:03.318922+00:00",
+          "end": "2026-10-02T19:36:18.318922+00:00"
+        },
+        {
+          "start": "2026-10-03T17:31:03.318922+00:00",
+          "end": "2026-10-03T18:31:03.318922+00:00"
+        },
+        {
+          "start": "2026-10-03T19:16:03.318922+00:00",
+          "end": "2026-10-03T19:46:03.318922+00:00"
+        },
+        {
+          "start": "2026-10-04T17:31:03.318922+00:00",
+          "end": "2026-10-04T18:06:38.318922+00:00"
+        },
+        {
+          "start": "2026-10-04T18:11:03.318922+00:00",
+          "end": "2026-10-04T18:41:03.318922+00:00"
+        },
+        {
+          "start": "2026-10-05T18:01:03.318922+00:00",
+          "end": "2026-10-05T20:07:03.318922+00:00"
+        },
+        {
+          "start": "2026-10-06T17:31:03.318922+00:00",
+          "end": "2026-10-06T18:06:38.318922+00:00"
+        },
+        {
+          "start": "2026-10-07T17:31:03.318922+00:00",
+          "end": "2026-10-07T18:01:03.318922+00:00"
+        },
+        {
+          "start": "2026-10-07T20:16:03.318922+00:00",
+          "end": "2026-10-07T20:46:38.318922+00:00"
+        },
+        {
+          "start": "2026-10-07T21:46:03.318922+00:00",
+          "end": "2026-10-07T22:16:18.318922+00:00"
+        },
+        {
+          "start": "2026-10-08T17:31:03.318922+00:00",
+          "end": "2026-10-08T18:06:38.318922+00:00"
+        },
+        {
+          "start": "2026-10-08T19:06:03.318922+00:00",
+          "end": "2026-10-08T19:36:18.318922+00:00"
+        }
+      ],
+      "gaps": [
+        {
+          "start": "2026-09-30T19:37:03.318922+00:00",
+          "end": "2026-10-01T17:36:03.318922+00:00"
+        },
+        {
+          "start": "2026-10-01T18:06:38.318922+00:00",
+          "end": "2026-10-01T19:06:03.318922+00:00"
+        },
+        {
+          "start": "2026-10-01T19:36:18.318922+00:00",
+          "end": "2026-10-02T17:31:03.318922+00:00"
+        },
+        {
+          "start": "2026-10-02T18:31:38.318922+00:00",
+          "end": "2026-10-02T19:06:03.318922+00:00"
+        },
+        {
+          "start": "2026-10-02T19:36:18.318922+00:00",
+          "end": "2026-10-03T17:31:03.318922+00:00"
+        },
+        {
+          "start": "2026-10-03T18:31:03.318922+00:00",
+          "end": "2026-10-03T19:16:03.318922+00:00",
+          "explained": true,
+          "explained_by": [
+            {
+              "kind": "device_offline",
+              "device_id": "ava1.ring.device.0F9EB1CB06604797A169",
+              "start": "2026-10-03T18:31:03.318000+00:00",
+              "end": "2026-10-03T19:46:03.318000+00:00",
+              "restored_by": "device_online"
+            }
+          ]
+        },
+        {
+          "start": "2026-10-03T19:46:03.318922+00:00",
+          "end": "2026-10-04T17:31:03.318922+00:00"
+        },
+        {
+          "start": "2026-10-04T18:06:38.318922+00:00",
+          "end": "2026-10-04T18:11:03.318922+00:00"
+        },
+        {
+          "start": "2026-10-04T18:41:03.318922+00:00",
+          "end": "2026-10-05T18:01:03.318922+00:00",
+          "explained": true,
+          "explained_by": [
+            {
+              "kind": "subscription_deactivated",
+              "device_id": "ava1.ring.device.0F9EB1CB06604797A169",
+              "start": "2026-10-04T18:41:03.318000+00:00",
+              "end": "2026-10-08T20:37:03.318922+00:00",
+              "restored_by": null
+            }
+          ]
+        },
+        {
+          "start": "2026-10-05T20:07:03.318922+00:00",
+          "end": "2026-10-06T17:31:03.318922+00:00",
+          "explained": true,
+          "explained_by": [
+            {
+              "kind": "subscription_deactivated",
+              "device_id": "ava1.ring.device.0F9EB1CB06604797A169",
+              "start": "2026-10-04T18:41:03.318000+00:00",
+              "end": "2026-10-08T20:37:03.318922+00:00",
+              "restored_by": null
+            }
+          ]
+        },
+        {
+          "start": "2026-10-06T18:06:38.318922+00:00",
+          "end": "2026-10-07T17:31:03.318922+00:00",
+          "explained": true,
+          "explained_by": [
+            {
+              "kind": "subscription_deactivated",
+              "device_id": "ava1.ring.device.0F9EB1CB06604797A169",
+              "start": "2026-10-04T18:41:03.318000+00:00",
+              "end": "2026-10-08T20:37:03.318922+00:00",
+              "restored_by": null
+            }
+          ]
+        },
+        {
+          "start": "2026-10-07T18:01:03.318922+00:00",
+          "end": "2026-10-07T20:16:03.318922+00:00",
+          "explained": true,
+          "explained_by": [
+            {
+              "kind": "subscription_deactivated",
+              "device_id": "ava1.ring.device.0F9EB1CB06604797A169",
+              "start": "2026-10-04T18:41:03.318000+00:00",
+              "end": "2026-10-08T20:37:03.318922+00:00",
+              "restored_by": null
+            }
+          ]
+        },
+        {
+          "start": "2026-10-07T20:46:38.318922+00:00",
+          "end": "2026-10-07T21:46:03.318922+00:00",
+          "explained": true,
+          "explained_by": [
+            {
+              "kind": "subscription_deactivated",
+              "device_id": "ava1.ring.device.0F9EB1CB06604797A169",
+              "start": "2026-10-04T18:41:03.318000+00:00",
+              "end": "2026-10-08T20:37:03.318922+00:00",
+              "restored_by": null
+            }
+          ]
+        },
+        {
+          "start": "2026-10-07T22:16:18.318922+00:00",
+          "end": "2026-10-08T17:31:03.318922+00:00",
+          "explained": true,
+          "explained_by": [
+            {
+              "kind": "subscription_deactivated",
+              "device_id": "ava1.ring.device.0F9EB1CB06604797A169",
+              "start": "2026-10-04T18:41:03.318000+00:00",
+              "end": "2026-10-08T20:37:03.318922+00:00",
+              "restored_by": null
+            }
+          ]
+        },
+        {
+          "start": "2026-10-08T18:06:38.318922+00:00",
+          "end": "2026-10-08T19:06:03.318922+00:00",
+          "explained": true,
+          "explained_by": [
+            {
+              "kind": "subscription_deactivated",
+              "device_id": "ava1.ring.device.0F9EB1CB06604797A169",
+              "start": "2026-10-04T18:41:03.318000+00:00",
+              "end": "2026-10-08T20:37:03.318922+00:00",
+              "restored_by": null
+            }
+          ]
+        },
+        {
+          "start": "2026-10-08T19:36:18.318922+00:00",
+          "end": "2026-10-08T20:37:03.318922+00:00",
+          "explained": true,
+          "explained_by": [
+            {
+              "kind": "subscription_deactivated",
+              "device_id": "ava1.ring.device.0F9EB1CB06604797A169",
+              "start": "2026-10-04T18:41:03.318000+00:00",
+              "end": "2026-10-08T20:37:03.318922+00:00",
+              "restored_by": null
+            }
+          ]
+        }
+      ],
+      "polls": 56,
+      "failed_polls": 0,
+      "events": 94,
+      "window": {
+        "start": "2026-09-30T19:37:03.318922+00:00",
+        "end": "2026-10-08T20:37:03.318922+00:00"
+      },
+      "claim": "Attest polled Ring Event History during this window; it attests what the pipeline observed, not what physically happened",
+      "interruptions": [
+        {
+          "kind": "device_offline",
+          "at": "2026-10-03T18:31:03.318000+00:00",
+          "device_id": "ava1.ring.device.0F9EB1CB06604797A169",
+          "interrupts": true,
+          "detail": {}
+        },
+        {
+          "kind": "device_online",
+          "at": "2026-10-03T19:46:03.318000+00:00",
+          "device_id": "ava1.ring.device.0F9EB1CB06604797A169",
+          "interrupts": false,
+          "detail": {}
+        },
+        {
+          "kind": "subscription_deactivated",
+          "at": "2026-10-04T18:41:03.318000+00:00",
+          "device_id": "ava1.ring.device.0F9EB1CB06604797A169",
+          "interrupts": true,
+          "detail": {}
+        }
+      ],
+      "live_sessions": [
+        {
+          "opened_at": "2026-10-08T18:21:38.318922+00:00",
+          "closed_at": "2026-10-08T18:31:38.318922+00:00",
+          "device_id": "ava1.ring.device.0F9EB1CB06604797A169"
+        }
+      ]
+    },
+    "boundary": "Attests what the pipeline observed and when it was blind \u2014 never identity, attendance, or absence.",
+    "journal_head": "b3d79b4d4ee3c470e8d877d363e94eac4c220f1a6297c3be99ea941c2f0f6a32",
+    "schema": "attest.receipt/2",
+    "sequence": 10,
+    "prev_hash": "cbb5b0b265c65a4434fd6dc6ace06a3be08f760977d217f979b3598046eb7e42",
+    "visit_id": "coverage:site_a55d249ad6dd:2026-09-30T19:37:03.318922+00:00:2026-10-08T20:37:03.318922+00:00",
+    "receipt_id": "rcpt_8c63a69c901d4cb990038bdea191e3f6",
+    "issued_at": "2026-10-09T18:06:12.110573+00:00"
+  },
+  "payload_hash": "859d60f642ba73cd50431071636f86cce8c18a57c75393b0e002e4ed5b9522d2",
+  "signature": "w8efwlUEXAiCbU51/92SppMVpB81Yr84i0ZsbqlpTk28RGt6WVLFOAmV9ncdqhU9V+TxEk5IRUDOXHzCJfi4Cw==",
+  "public_key": "3uHpTKgOowQVzIcK5/AQosYY2RFwvc2GA1vYGRRkkw8=",
+  "issued_at": "2026-10-09T18:06:12.110573Z"
+}
