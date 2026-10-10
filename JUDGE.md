@@ -20,15 +20,21 @@ self-verifying evidence record. This is the fastest honest path through it.
    smuggled file → `not in the signed manifest` ·
    forged always-green verifier stub → `issuer-signed pin`.
    The pack defends its own checker.
-4. [Signed real-API sweep](https://josepha-mayo.github.io/attest/verify.html#live-sweep-receipt)
+4. [Verify it *pinned*](https://josepha-mayo.github.io/attest/verify.html#sample-pack-pinned)
+   — one click fetches the pack **and** the issuer doc this site serves and
+   verifies the pack against a trust anchor that didn't arrive inside it.
+   That's the "don't trust Attest" story made literal: the anchor comes over a
+   different surface (a GitHub-Pages-hosted `.well-known` doc), and the signed
+   lifecycle receipts extend that pin across the mid-history rotation.
+5. [Signed real-API sweep](https://josepha-mayo.github.io/attest/verify.html#live-sweep-receipt)
    — the `verify-live --sign` report from the actual `api.amazonvision.com`
    run, auto-verified in your browser on load like everything else.
-5. [The caught fork](https://josepha-mayo.github.io/attest/verify.html#divergence-checkpoint)
+6. [The caught fork](https://josepha-mayo.github.io/attest/verify.html#divergence-checkpoint)
    — the split-demo evidence doc: a signed `monitor_observation` recording two
    irreconcilable signed views of one log (witness pinned one root, monitor the
    other), itself proven inside a signed tree head. The math is real; only the
    endpoints are simulated.
-6. After the green stamp, click **open index.html** — the pack carries its own
+7. After the green stamp, click **open index.html** — the pack carries its own
    record browser that re-verifies every record and renders the timelines.
    Scroll to `vis_70e42116a4cf` (the contested visit): the voices line flags
    that the two household accounts *disagree* — a literal he-said/she-said,
@@ -39,7 +45,7 @@ self-verifying evidence record. This is the fastest honest path through it.
    Inside the contested visit you'll find all three voices: the worker's
    dispute, and *two household accounts that contradict each other* — he
    said / she said, signed and unrewritable.
-7. **The product face, zero install**: static snapshots of the running demo —
+8. **The product face, zero install**: static snapshots of the running demo —
    [the coordinator dashboard](https://josepha-mayo.github.io/attest/demo-dashboard.html),
    [the contested visit](https://josepha-mayo.github.io/attest/demo-visit.html)
    (divergence callout, signed worker dispute, suspect-window warning),
@@ -90,7 +96,7 @@ attest demo        # boots emulator + server + an eight-day story, prints a URL
 
 | Criterion | The evidence to look at |
 |---|---|
-| **Tech Implementation** | The repo *calls* Ring at runtime — signed webhooks, Event History, media+snapshots through the regional redirect, devices/capabilities, app-integrations, subscriptions, WHEP. Five AWS touchpoints (Bedrock, Strands, KMS, S3, Lambda) — KMS/S3/Lambda verified live. Seven one-click artifacts on the hosted verifier, 21 real attacks all caught, conformance vectors pinning five verifier surfaces to one oracle. |
+| **Tech Implementation** | The repo *calls* Ring at runtime — signed webhooks, Event History, media+snapshots through the regional redirect, devices/capabilities, app-integrations, subscriptions, WHEP. Five AWS touchpoints (Bedrock, Strands, KMS, S3, Lambda) — KMS/S3/Lambda verified live. Nine one-click artifacts on the hosted verifier, 21 real attacks all caught, conformance vectors pinning five verifier surfaces to one oracle. `extras/ci/` is the adoption story: a zero-install workflow that verifies a pack and *requires its doctored twin to fail*. |
 | **Design** | Three audiences, three honest readings of one signed record: coordinator console (corroboration + coverage), worker scoped link (QR, no account), household view (plain language + family voice). Verified packs hand you their own record browser. |
 | **Potential Impact** | Home-service disputes are a real recurring cost; Ring-track priorities named business systems + caretaking. The Appstore path is argued from the privacy posture itself: disconnect tombstones, retention, scoped links, redaction. |
 | **Quality of the Idea** | The non-obvious move: don't certify presence — attest the *record*. Missing events are never absence; outages are signed explanations; even the issuer can't fork its log. The honesty boundary is the product. |
@@ -108,6 +114,7 @@ mini-challenge entry — the SDK + emulator Ring doesn't ship.
   API hit during the build, documented for the product feedback criterion.
 - `tests/vectors/` — Wycheproof-style conformance vectors all five verifier
   surfaces must judge identically.
+- [SECURITY.md](SECURITY.md) — the disclosure path and scope notes.
 
 ## The honest boundary (it's a feature, not a caveat)
 

@@ -12,6 +12,11 @@ inside itself.
 Copy `verify-pack.yml` into `.github/workflows/` (or translate the three
 lines to your CI of choice) and point `PACK` at the artifact under review.
 
+Set the `TAMPERED_PACK` repo variable to a deliberately-doctored twin
+(`attest export --tamper-twin`) and the workflow gains a negative gate:
+the twin *must* fail, so CI proves the check has teeth rather than just
+printing OK.
+
 The same gate works with the full CLI where the package is installed —
 `attest verify pack.zip --json` emits `{ok, kind, detail, pinned, warnings}`
 and exits non-zero on failure, so a pipeline can gate on `.ok` without

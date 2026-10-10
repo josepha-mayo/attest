@@ -29,3 +29,20 @@ jobs:
           else
             python pack-out/verify_case.py pack-out
           fi
+
+      # Optional negative gate: a deliberately-doctored twin must FAIL —
+      # the job proves the check has teeth, not just that it prints OK.
+      - name: Doctored twin must fail (expected-failure gate)
+        if: ${{ vars.TAMPERED_PACK != '' }}
+        env:
+          TWIN: ${{ vars.TAMPERED_PACK }}   # e.g. docs/sample-pack-tampered.zip
+        run: |
+          python - <<'PY'
+          import zipfile
+          zipfile.ZipFile("$TWIN").extractall("twin-out")
+          PY
+          if python twin-out/verify_case.py twin-out; then
+            echo "::error::doctored pack verified — the gate is broken"
+            exit 1
+          fi
+          echo "doctored pack correctly refused"

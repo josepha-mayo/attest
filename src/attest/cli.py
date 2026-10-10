@@ -3702,6 +3702,8 @@ Attest — records, not verdicts. The ten-minute path:
     2. red FAILED   … https://josepha-mayo.github.io/attest/verify.html#sample-pack-tampered
        (one doctored field — a ~35s observed span inflated to ~70min — caught)
     3. the attack gallery + caught fork + real-API sweep: same page, one click each
+       + #sample-pack-pinned — the pack verified against an issuer doc it
+         didn't ship (TOFU over a second transport)
     4. after a green stamp: open index.html — the pack hands you its own
        record browser, which re-verifies every record itself
     5. the product face, no install: demo-dashboard.html, demo-visit.html (the
