@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Anatomy of a signed receipt · Attest</title>
+<meta name="description" content="A real signed receipt, decomposed field-by-field — what the signature covers, what it never claims, and how the chain holds.">
+<style>
+body{font-family:system-ui,sans-serif;max-width:62em;margin:0 auto;padding:1.4rem 1.2rem;color:#1c1c1e;line-height:1.5}
+code{background:#f4f4f5;padding:.08rem .35rem;border-radius:4px;font-size:.85em;word-break:break-all}
+a{color:#2563eb}
+table{border-collapse:collapse;width:100%;font-size:.88rem}
+th,td{text-align:left;padding:.4rem .6rem;border-bottom:1px solid #e4e4e7;vertical-align:top}
+th.f{font-family:ui-monospace,monospace;color:#7c3aed;white-space:nowrap}
+.tw{overflow-x:auto}
+.snap{background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:.6rem .9rem;font-size:.85rem}
+.warnbox{background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:.6rem .9rem;font-size:.85rem}
+pre{background:#0f172a;color:#e2e8f0;padding:.8rem 1rem;border-radius:8px;overflow-x:auto;font-size:.8rem;line-height:1.45}
+.chain{display:flex;gap:.8rem;flex-wrap:wrap;margin:.6rem 0}
+.chip{border:1px solid #d4d4d8;border-radius:8px;padding:.5rem .8rem;font-size:.82rem;text-decoration:none;color:inherit;background:#fff}
+.chip:hover{border-color:#3b82f6}
+.chip small{display:block;color:#6b6b70}
+.chip.cur{border-color:#2563eb;background:#eff6ff}
+select{font-size:.9rem;padding:.35rem .5rem;border:1px solid #d4d4d8;border-radius:6px;max-width:100%}
+.small{color:#6b6b70;font-size:.85rem}
+h1{margin-bottom:.2rem}
+</style>
+</head>
+<body>
+<h1>Anatomy of a signed receipt</h1>
+<p class="snap">Every claim Attest makes reduces to objects like this one. Pick
+any of the 58 real receipts the demo deployment issued — the annotations are
+per-field, the chain links are real <code>prev_hash</code> edges, and the
+<strong>verify →</strong> button runs the receipt through the same browser
+verifier the packs use. Nothing here is a mockup.</p>
+
+<p><label>receipt <select id="pick" aria-label="choose a receipt"></select></label>
+<a id="vlink" href="#">verify →</a></p>
+
+<div class="chain" id="chain"></div>
+
+<h2 id="rid">receipt</h2>
+<div class="tw"><table>
+<thead><tr><th>field</th><th>value</th><th>what it does / what it never does</th></tr></thead>
+<tbody id="rows"></tbody>
+</table></div>
+
+<h2>What the signature actually covers</h2>
+<p>The Ed25519 signature signs <em>only</em> the payload's SHA-256. The payload
+is canonicalized first — fixed key order, fixed float spellings, ASCII
+timestamps — which is why two implementations produce the same bytes to sign.
+This is the canonical payload of the receipt above:</p>
+<pre id="canon"></pre>
+
+<div class="warnbox" id="scope"><strong>The honest boundary.</strong> A valid
+signature proves these bytes existed under this issuer key at signing time.
+It does <em>not</em> prove the camera saw a person, that the worker was
+present, that the household told the truth, or that the log you saw is the
+only log — the transparency log and witness cosignatures exist to cover those
+gaps, and even they can't prove physical presence. Records, not verdicts.</div>
+
+<p class="small">Payload fields mirror the envelope deliberately: the signature
+binds the payload; the envelope columns must agree, and any divergence is an
+integrity failure, not a reinterpretation. The <code>journal_head</code> field
+inside some payloads pins the mutation journal's tip at issuance — a
+truncated tail is caught too.</p>
+
+<script>
+const FIELDS={
+ id:["the receipt's own name. Required — a receipt missing <code>id</code> is malformed everywhere, never minted on read."],
+ visit_id:["which record chain this belongs to — a visit (<code>vis_*</code>), or a site/system scope like <code>export:*</code>, <code>coverage:*</code>, <code>key:*</code>, <code>monitor:*</code>."],
+ sequence:["ledger position. A strict JSON integer — <code>\"5\"</code>, <code>true</code>, <code>5.5</code> are malformed on every surface; the conformance corpus exists to pin that."],
+ prev_hash:["SHA-256 of the previous receipt's payload — <strong>this field is the chain</strong>. <code>null</code> only at a chain start. Any edit, delete, reorder, or insertion upstream breaks it."],
+ payload_hash:["SHA-256 over the canonical payload below. The signature signs this digest — so the canonicalization rules are the load-bearing detail."],
+ signature:["Ed25519 over <code>payload_hash</code> bytes. Proves bytes-under-key — integrity and origin — never that the events inside are physically true."],
+ public_key:["the issuer's raw Ed25519 key (base64). Mid-history rotations are bridged by the signed key-chain in the issuer document — an ancestor inherits trust only through a consented pivot."],
+ issued_at:["the wall-clock claim, signed — evidence of what the issuer <em>said</em> the time was. Cross-checks (schedules, event windows, rotation order) are what make it meaningful."],
+ payload:["the signed facts — canonicalized and hashed. Record type says what kind of statement it is: observation, statement, conclusion, checkpoint, attestation. A camera observation stays an observation forever — it is never promoted to attendance."]
+};
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let receipts=[],byHash={};
+async function boot(){
+  receipts=await(await fetch('demo-receipts.json')).json();
+  receipts.forEach(r=>{byHash[r.payload_hash]=r;});
+  const pick=$('pick');
+  receipts.forEach((r,k)=>{
+    const o=document.createElement('option');o.value=k;
+    o.textContent=r.id+' — '+(r.payload&&r.payload.record_type||'record')+' · '+(r.visit_id||'');
+    pick.appendChild(o);});
+  pick.onchange=()=>show(receipts[+pick.value]);
+  const m=location.hash.match(/^#(rcpt_[0-9a-f]+)/);
+  let k=0;if(m){const j=receipts.findIndex(r=>r.id===m[1]);if(j>=0)k=j;}
+  pick.value=k;show(receipts[k]);
+}
+function show(r){
+  $('rid').textContent=r.id;
+  $('vlink').href='verify.html#demo-receipts/'+r.id;
+  history.replaceState(null,'','#'+r.id);
+  const ch=$('chain');ch.innerHTML='';
+  const mk=(rr,lab,cur)=>{
+    const a=document.createElement('a');a.className='chip'+(cur?' cur':'');
+    a.href='#'+rr.id;
+    a.innerHTML='<small>'+lab+'</small>'+esc(rr.id.slice(0,18))+'…';
+    a.onclick=e=>{e.preventDefault();
+      const idx=receipts.findIndex(x=>x.id===rr.id);
+      if(idx>=0){$('pick').value=idx;show(receipts[idx]);}};
+    return a;};
+  if(r.prev_hash&&byHash[r.prev_hash])ch.appendChild(mk(byHash[r.prev_hash],'← prev_hash'));
+  else if(!r.prev_hash){const s=document.createElement('span');
+    s.className='chip';s.innerHTML='<small>chain start</small>prev_hash: null';ch.appendChild(s);}
+  ch.appendChild(mk(r,'this receipt',true));
+  receipts.filter(x=>x.prev_hash===r.payload_hash).forEach(x=>ch.appendChild(mk(x,'chains from this →')));
+  const tb=$('rows');tb.innerHTML='';
+  for(const f of['id','visit_id','sequence','prev_hash','payload','payload_hash','signature','public_key','issued_at']){
+    const tr=document.createElement('tr');
+    const v=f==='payload'?(r.payload&&r.payload.record_type||'—')+'  (canonical form below)'
+      :JSON.stringify(r[f]);
+    tr.innerHTML='<th class="f">'+esc(f)+'</th><td><code>'+esc(v)+'</code></td><td>'+(FIELDS[f]||[''])[0]+'</td>';
+    tb.appendChild(tr);}
+  $('canon').textContent=JSON.stringify(r.payload,null,1);
+}
+boot().catch(e=>{$('rows').innerHTML='<tr><td colspan="3">load failed: '+esc(e.message)+'</td></tr>';});
+</script>
+</body>
+</html>

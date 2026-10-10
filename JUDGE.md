@@ -5,6 +5,10 @@ self-verifying evidence record. This is the fastest honest path through it.
 
 ## Zero install — the hosted demo (2 minutes)
 
+0. **[The 90-second tour](https://josepha-mayo.github.io/attest/tour.html)** —
+   if you'd rather look than click: nine self-playing beats, every frame the
+   live artifact (verdicts stamp inside the iframes for real), pausable and
+   keyboard-navigable. The video run-sheet as a webpage.
 1. [Green **VERIFIED** stamp](https://josepha-mayo.github.io/attest/verify.html#sample-pack)
    — deep link; the verifier fetches the bundled pack and runs the moment the
    page opens. Read the verdict rows: 9 records, two issuer keys linked through
@@ -35,7 +39,7 @@ self-verifying evidence record. This is the fastest honest path through it.
    stronger path (the pack's own `verify_case.py`). One click further:
    [the whole site attests itself](https://josepha-mayo.github.io/attest/verify.html#verify-site)
    — `site-manifest.json` is a signed receipt pinning every shipped artifact's
-   sha256; the page verifies the manifest, then hashes all 125 files against
+   sha256; the page verifies the manifest, then hashes all 127 files against
    it: **SITE VERIFIED** or **SITE TAMPER**, drifted files named.
 6. [Signed real-API sweep](https://josepha-mayo.github.io/attest/verify.html#live-sweep-receipt)
    — the `verify-live --sign` report from the actual `api.amazonvision.com`
@@ -71,6 +75,9 @@ self-verifying evidence record. This is the fastest honest path through it.
    — all 58 signed receipts of the demo deployment, drawn as the literal hash
    chain (each edge a `prev_hash` link), each row a one-click `verify.html`
    deep link — or [all 58 at once](https://josepha-mayo.github.io/attest/verify.html#demo-receipts).
+   New to the math? [anatomy.html](https://josepha-mayo.github.io/attest/anatomy.html)
+   decomposes any of the 58 field-by-field — what the signature covers, what
+   `prev_hash` chains, and what a valid signature can never prove.
 11. **The adversarial corpus**: [vectors.html](https://josepha-mayo.github.io/attest/vectors.html)
    — 36 Wycheproof-style conformance packs the shared oracle says must pass or
    fail (grammar traps: bool/string/fractional `leaf_index`, padded hex,

@@ -1,5 +1,5 @@
 {
- "id": "rcpt_ac72577e54d64b018f873f81bdb65a48",
+ "id": "rcpt_31e1b39f52604700912b8860f3ddd027",
  "visit_id": "site:josepha-mayo.github.io/attest",
  "sequence": 1,
  "prev_hash": null,
@@ -11,6 +11,7 @@
    ".well-known/attest-issuer.json": "f20155cb927e849760bcbf3237e4885f2991042446b3e076da577119f3720980",
    ".well-known/security.txt": "8d6a947dd0265a98d84b8e5741a66b99fd86fc4293e3572a926ea3b38db59f66",
    "404.html": "3b48f6497ed633e74bdacb62b1b8ce8deaa26f5fb7861897f1efc9ba56b71ad4",
+   "anatomy.html": "6af3afe29bf90699f80ca019ff1d5f23099afa76d1ff1aabd802b18ffced39dd",
    "badge-verified.svg": "ed4cd54657fd2de5b03f8c5986e466a414247e15fecb668406a2a04d27126331",
    "chain.svg": "ed134773907a301c561bddddafdf4fb9545a3b3acdec2050852580379f8a5ee5",
    "demo-dashboard.html": "4c742d7a3f662b4086dd7ab165818034efa1f691767d23fd21a53df1b1fa6822",
@@ -83,7 +84,7 @@
    "demo-visit-brief.html": "5da4575f9f23e100ac16113ecbe3f0fe790bc638cd4d51e35ef8a9ec09107288",
    "demo-visit.html": "f70fff95a4ca960a2b74fd0dfe8719f25d4f229557854cf5edea3554155a9d48",
    "divergence-checkpoint.json": "1f1fd4315eb2f696af73b8114d21f50461b8b95577c49347ce46721e1914423d",
-   "index.html": "80f388adf4e1afe7c0dd5b48be39bf8419a8e3e417e26fef2d43bd34d9c64cfc",
+   "index.html": "a95378cff0522a5ec6e695e44fdd66520fcaf3f22696b0fd6063dcc79900e2fd",
    "live-sweep-receipt.json": "6341ac6468a7752d5638af756fa77677ba690bb740f43f5901db12c0c3d476a5",
    "og-image.png": "38df079300d4cba7f4518dbc183dd5406753d8281ec36e19dbe57d5694a8d5e5",
    "qr-verify.png": "3e616368ec8298e1380e70dd4c6e5f1dfeb725a6ee6564919c4027ba3d5f82ad",
@@ -93,6 +94,7 @@
    "sample-pack-attack-smuggled-file.zip": "8306b4e707be882aced4410fa1afac0d10927ded72f541143c7eeb2d20b64925",
    "sample-pack-tampered.zip": "e7cdb2b51b7fa5fa30828dfe7ef88b1f4c85f716d078b2aa83193364b24a98ea",
    "sample-pack.zip": "3968de547f331c092e0af9f3df2ca76c3989c4ffc0ee23a77a65e610e63dc067",
+   "tour.html": "a7c3abb6b29c582a52cac675943dd09cf243309a22f87547938b1834a658ecdb",
    "vectors/fail-anchor-proof-graft.zip": "6b1cc70b0b7680c1f60328a6a1a8c374646592ebb5ede74c83c97598134a5d4b",
    "vectors/fail-bool-leaf-index.zip": "f20a72170d1fdce3c13ff6d917d25a04e76ada96fb5ef4bf7b549e520d7171e0",
    "vectors/fail-doctored-verifier.zip": "d4e4b7f8eeb387310266aede0a5b36f85147332af7e99de6f018d5bd3df4b4d0",
@@ -138,11 +140,11 @@
   "sequence": 1,
   "prev_hash": null,
   "visit_id": "site:josepha-mayo.github.io/attest",
-  "receipt_id": "rcpt_ac72577e54d64b018f873f81bdb65a48",
-  "issued_at": "2026-10-10T14:28:10.551929+00:00"
+  "receipt_id": "rcpt_31e1b39f52604700912b8860f3ddd027",
+  "issued_at": "2026-10-10T14:33:04.009079+00:00"
  },
- "payload_hash": "5f130a39b24c734b711ad9d75177a337a66ed4e951184173e359cb5858560ca2",
- "signature": "bGvv3EFSuRbmY3ntbTkZLsdqYQZ5deDGdbOvjFjkOXZ352aPSmRzAbjTw/Niax8TyeZoGsm4gA0UTlwzeIViDA==",
+ "payload_hash": "95aa7f768a2862c1f9c110a96d104cbaf5233931392e4fa142193a1ef2ba2795",
+ "signature": "sRZ/aQVR7vngCIYq11ytMwDNZgS6JfkU86V7aEeFRAHYD/yUycPKmvgLXeghisqv2jf9UUpnETwj4EsBEnilBA==",
  "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
- "issued_at": "2026-10-10T14:28:10.551929Z"
+ "issued_at": "2026-10-10T14:33:04.009079Z"
 }

@@ -3698,6 +3698,8 @@ def _judge(args: argparse.Namespace) -> None:
 Attest — records, not verdicts. The ten-minute path:
 
   Zero install (hosted):
+    0. rather watch than click? https://josepha-mayo.github.io/attest/tour.html
+       — nine self-playing beats, every frame the live artifact
     1. green VERIFIED … https://josepha-mayo.github.io/attest/verify.html#sample-pack
     2. red FAILED   … https://josepha-mayo.github.io/attest/verify.html#sample-pack-tampered
        (one doctored field — a ~35s observed span inflated to ~70min — caught)
@@ -3707,7 +3709,7 @@ Attest — records, not verdicts. The ten-minute path:
        + #verify-self — the page hashes its own bytes against the pack's
          signed pin: PINNED or PIN MISMATCH
        + #verify-site — the site attests itself: a signed manifest pins all
-         125 artifacts' sha256; hash every file → SITE VERIFIED or TAMPER
+         127 artifacts' sha256; hash every file → SITE VERIFIED or TAMPER
        + #tamper-lab — commit the attack yourself: rewrite a signed field
          in-page, download your doctored pack, watch the signature refuse it
     4. after a green stamp: open index.html — the pack hands you its own
@@ -3717,6 +3719,8 @@ Attest — records, not verdicts. The ten-minute path:
        snapshots of the running app on the same site
     6. the raw layer: demo-receipts.html — all 58 signed receipts, drawn as
        the hash chain itself, each a one-click verify.html deep link
+       (+ anatomy.html — one receipt decomposed field-by-field, chain links
+       walkable)
     7. the adversarial corpus: vectors.html — 36 conformance packs the oracle
        says must pass or fail; each a deep link landing on the verdict
 
