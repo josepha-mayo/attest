@@ -1181,6 +1181,28 @@ async function verifyFiles(files){
   if(!mText&&files.length===1&&/\.json$/i.test(files[0].name)){
     const node=parseKeep(await files[0].text());
     const r=toJS(node)||{};
+    /* A JSON array of receipts (the receipts index's "verify all" link drops
+       demo-receipts.json here) verifies each element under the same
+       single-receipt checks and reports the tally — one bad receipt fails
+       the batch. */
+    if(Array.isArray(r)){
+      if(!node.v||!node.v.length){say("bad","receipt array is empty");return out.join("");}
+      let pass=0;const fails=[];
+      for(const el of node.v){
+        const c=await checkReceipt(el);
+        const ej=toJS(el)||{};
+        if(c.ok)pass++;
+        else fails.push(`${esc(String(ej.id||"?"))}: ${esc(c.why)}`);
+      }
+      say("ok",`${pass} receipt(s) verified — signatures and payload hashes intact`);
+      for(const f of fails.slice(0,12))say("bad",f);
+      if(fails.length>12)say("bad",`… and ${fails.length-12} more`);
+      say(`stamp ${fails.length?"bad":"ok"}`,(fails.length
+        ?`<strong>FAILED</strong> — ${fails.length} of ${node.v.length} receipts did not verify`
+        :`<strong>VERIFIED</strong> — all ${pass} receipts intact`)
+        +(packName?` · ${esc(packName)}`:""));
+      return out.join("");
+    }
     /* A standalone transparency evidence doc (`attest checkpoint --out`, or
        split-demo's divergence-checkpoint.json) verifies too — the same checks
        the CLI's _verify_log_doc runs: the checkpoint receipt verifies, every
@@ -1895,13 +1917,15 @@ if(location.protocol.indexOf("http")===0){
   /* Per-receipt deep links: #demo-receipts/rcpt_<hex> fetches a lone signed
      receipt the site ships (the receipts index links each row here) — the
      lone-file path verifies its signature the same way it does the sweep
-     report. Same-origin fetch only; the id pattern pins it to a receipt. */
-  const _rm=location.hash.match(/^#demo-receipts\/(rcpt_[0-9a-f]{4,64})$/);
+     report. #demo-receipts (bare) fetches the whole array and verifies all
+     58 at once. Same-origin fetch only; the pattern pins it to receipts. */
+  const _rm=location.hash.match(/^#demo-receipts(?:\/(rcpt_[0-9a-f]{4,64}))?$/);
   if(_rm){
-    fetch("demo-receipts/"+_rm[1]+".json").then(async r=>{
+    const path=_rm[1]?`demo-receipts/${_rm[1]}.json`:"demo-receipts.json";
+    fetch(path).then(async r=>{
       if(!r.ok)return;
       const buf=await r.arrayBuffer();
-      go([new File([buf],_rm[1]+".json")]);
+      go([new File([buf],path.split("/").pop())]);
     }).catch(()=>{});
   }
   /* Out-of-band pin demo: the pack's trust anchor arrives over a different

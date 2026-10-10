@@ -2221,3 +2221,46 @@ eval(src + `
     )
     assert proc.returncode == 0, proc.stderr
     assert "deep-good: true true" in proc.stdout, proc.stdout
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_receipt_array_verifies_all_and_fails_on_one_bad(tmp_path):
+    """demo-receipts.json drops onto the page as a receipt array — every
+    element verified, the tally stamped VERIFIED; corrupting one receipt's
+    signature must flip the batch to FAILED with the bad id named."""
+    docs = Path(__file__).resolve().parents[1] / "docs"
+    arr = json.loads((docs / "demo-receipts.json").read_text(encoding="utf-8"))
+    assert len(arr) == 58
+    bad = json.loads(json.dumps(arr))
+    sig = bad[0]["signature"]
+    bad[0]["signature"] = ("A" if sig[0] != "A" else "B") + sig[1:]
+    (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
+    (tmp_path / "good.json").write_text(json.dumps(arr), encoding="utf-8")
+    (tmp_path / "bad.json").write_text(json.dumps(bad), encoding="utf-8")
+    driver = r"""
+const fs=require('fs');
+let src=fs.readFileSync(process.argv[2],'utf8').replace(/const dz=[\s\S]*$/,'');
+eval(src + `
+(async()=>{
+  const load=async f=>new (class extends Blob{
+    constructor(){super();this.name=f;this._b=require('fs').readFileSync(f)}
+    text(){return Promise.resolve(this._b.toString())}})();
+  global.document={getElementById:()=>({innerHTML:''}),createElement:()=>({setAttribute:()=>{},style:{}})};
+  const h1=await verifyFiles([await load(process.argv[3])]);
+  console.log('arr-good:',h1.includes('VERIFIED'),h1.includes('all 58 receipts'),!h1.includes('FAILED'));
+  const h2=await verifyFiles([await load(process.argv[4])]);
+  const badId=JSON.parse(require('fs').readFileSync(process.argv[4],'utf8'))[0].id;
+  console.log('arr-bad:',h2.includes('FAILED'),h2.includes('of 58 receipts'),h2.includes(badId));
+})();`);
+"""
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "verify.js", "good.json", "bad.json"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "arr-good: true true true" in proc.stdout, proc.stdout
+    assert "arr-bad: true true true" in proc.stdout, proc.stdout

@@ -30,6 +30,8 @@ rewritten — bytes are the exact signed payloads.</p>
 <p>Every row is a self-contained Ed25519-signed receipt. <strong>verify →</strong>
 opens this site's own verifier on that receipt (a lone signed JSON verifies the
 same way the sweep report does — signature and structure, no chain context).
+Or <a href="verify.html#demo-receipts"><strong>verify all 58 at once</strong></a> —
+one click, every signature and payload hash checked, the tally stamped.
 The <code>rcpt_…</code> link is the raw signed JSON itself. To check them against
 the ledger's chain and the transparency log, download
 <a href="sample-pack.zip">the export pack</a> — receipts alone carry no prev-hash
