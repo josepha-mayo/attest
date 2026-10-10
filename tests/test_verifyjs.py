@@ -2040,3 +2040,55 @@ eval(src + `
     assert "signed outside the issuer lineage" in out, out  # embForeign (witness key)
     assert "no working inclusion proof" in out, out  # embNoProof
     assert "at most 2048" in out, out  # embStr
+
+
+def test_every_advertised_pages_artifact_exists():
+    """JUDGE.md, README.md, and docs/index.html advertise Pages URLs like
+    https://josepha-mayo.github.io/attest/<file> — each must exist under
+    docs/ or the published site 404s (this exact regression once shipped)."""
+    import re
+
+    root = Path(__file__).resolve().parents[1]
+    docs = root / "docs"
+    missing = []
+    pat = re.compile(r"josepha-mayo\.github\.io/attest/([A-Za-z0-9_./-]+)")
+    for md in (root / "JUDGE.md", root / "README.md", docs / "index.html"):
+        for m in pat.finditer(md.read_text(encoding="utf-8")):
+            rel = m.group(1).rstrip("/")
+            if not (docs / rel).exists():
+                missing.append(f"{md.name}: {rel}")
+    assert not missing, "advertised Pages artifacts missing from docs/: " + "; ".join(missing)
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_verify_html_escapes_attacker_markup_in_verdict(tmp_path):
+    """A hostile pack can name a bundle field '<img src=x onerror=…>' — the
+    extra-field rejection echoes the key name into the verdict; every verdict
+    sink must escape it or the checking page itself renders attacker markup.
+    Asserts the FAIL row carries &lt;img and never raw <img."""
+    bundle = json.dumps(
+        {
+            "kind": "attest.review_bundle/1",
+            "x<img src=y onerror=alert(1)>": 1,
+            "original": {},
+        }
+    )
+    (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
+    driver = r"""
+const fs=require('fs');
+let src=fs.readFileSync(process.argv[2],'utf8').replace(/const dz=[\s\S]*$/,'');
+const bundle=__BUNDLE__;
+eval(src + `
+const out={innerHTML:''};
+global.document={getElementById:()=>out};
+(async()=>{
+  const html=await verifyFiles([{name:'bundle.json',text:async()=>bundle}]);
+  console.log('escaped:',html.includes('&lt;img'),!html.includes('<img src'));
+})();`);
+""".replace("__BUNDLE__", json.dumps(bundle))
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "verify.js"], cwd=tmp_path, capture_output=True, text=True, timeout=60
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "escaped: true true" in proc.stdout, proc.stdout

@@ -54,6 +54,8 @@ _HEAD = """<!doctype html>
    padding:.3rem .7rem;border:1px solid #999;border-radius:6px;
    background:#fff;color:#1c1c1e;cursor:pointer}
  .copybtn:hover{background:#f4f4f5}
+ @media print{.drop,#live-wrap,button,.copybtn{display:none}
+   body{max-width:none}}
  @keyframes stampin{from{transform:scale(1.5);opacity:0}to{transform:scale(1);opacity:1}}
  @media (prefers-reduced-motion:reduce){.row.stamp{animation:none}}
  small{color:#666}
@@ -1101,7 +1103,7 @@ async function _cosigReport(dn,doc,cpId,size,rootHex,trustedSet,bad){
     const anode=get(asec,cid);
     const arc=anode?await checkReceipt(get(anode,"checkpoint"))
       :{ok:false,why:"anchor checkpoint missing from canonical map"};
-    if(!arc.ok){bad(`cosig_anchors ${esc(cid)}: ${arc.why}`);continue;}
+    if(!arc.ok){bad(`cosig_anchors ${esc(cid)}: ${esc(arc.why)}`);continue;}
     const proof=anchor.proof||{};
     if(!await _incOk(cosig.payload_hash,ap.tree_size,proof.leaf_index,proof.path||[],ap.root_sha256)){
       bad(`cosig_anchors ${esc(cid)}: the cosig does not reach `
@@ -2688,7 +2690,7 @@ async function renderIndex(){
       const aOut=trusted?!trusted.has(rjs.public_key):(key&&rjs.public_key!==key);
       if(aOut){
         anyBad=true;
-        mLine+=`<div class="row bad">attestation ${esc(rid)}: key outside the trusted issuer chain</div>`;
+        mLine+=`<div class="row bad">attestation ${rid}: key outside the trusted issuer chain</div>`;
         continue;}
       const rc=await checkReceipt(aNode);
       if(!rc.ok){
@@ -2699,7 +2701,7 @@ async function renderIndex(){
         continue;}
       if(!listed||listed.payload_hash!==rjs.payload_hash||listed.visit_id!==rjs.visit_id){
         anyBad=true;
-        mLine+=`<div class="row bad">attestation ${esc(rid)}: not in the signed manifest</div>`;continue;}
+        mLine+=`<div class="row bad">attestation ${rid}: not in the signed manifest</div>`;continue;}
       mLine+=`<div class="row ok">attestation ${esc(listed.record_type||"record")}: signed and intact</div>`;
       cards.innerHTML+=`<div class="card">${attestationHTML(rjs.payload||{})}</div>`;
     }
