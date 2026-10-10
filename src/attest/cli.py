@@ -3704,12 +3704,14 @@ Attest — records, not verdicts. The ten-minute path:
     2. red FAILED   … https://josepha-mayo.github.io/attest/verify.html#sample-pack-tampered
        (one doctored field — a ~35s observed span inflated to ~70min — caught)
     3. the attack gallery + caught fork + real-API sweep: same page, one click each
+       + pipeline.svg — the seven verification gates, each attack pinned to
+         the gate that kills it
        + #sample-pack-pinned — the pack verified against an issuer doc it
          didn't ship (TOFU over a second transport)
        + #verify-self — the page hashes its own bytes against the pack's
          signed pin: PINNED or PIN MISMATCH
        + #verify-site — the site attests itself: a signed manifest pins all
-         127 artifacts' sha256; hash every file → SITE VERIFIED or TAMPER
+         130 artifacts' sha256; hash every file → SITE VERIFIED or TAMPER
        + #tamper-lab — commit the attack yourself: rewrite a signed field
          in-page, download your doctored pack, watch the signature refuse it
     4. after a green stamp: open index.html — the pack hands you its own

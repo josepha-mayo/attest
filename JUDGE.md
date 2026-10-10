@@ -29,7 +29,9 @@ self-verifying evidence record. This is the fastest honest path through it.
    deleted record → `missing or invalid bundle` ·
    smuggled file → `not in the signed manifest` ·
    forged always-green verifier stub → `issuer-signed pin`.
-   The pack defends its own checker.
+   The pack defends its own checker. Beside the gallery,
+   [pipeline.svg](https://josepha-mayo.github.io/attest/pipeline.svg) maps the
+   seven verification gates — each attack pinned to the gate that kills it.
 4. [Verify it *pinned*](https://josepha-mayo.github.io/attest/verify.html#sample-pack-pinned)
    — one click fetches the pack **and** the issuer doc this site serves and
    verifies the pack against a trust anchor that didn't arrive inside it.
