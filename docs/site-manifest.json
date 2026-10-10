@@ -1,5 +1,5 @@
 {
- "id": "rcpt_902e53a9c3794f998d86f2f70ad0731c",
+ "id": "rcpt_fad092c605b54b74ae38a4feac531530",
  "visit_id": "site:josepha-mayo.github.io/attest",
  "sequence": 1,
  "prev_hash": null,
@@ -84,7 +84,7 @@
    "demo-visit-brief.html": "5da4575f9f23e100ac16113ecbe3f0fe790bc638cd4d51e35ef8a9ec09107288",
    "demo-visit.html": "f70fff95a4ca960a2b74fd0dfe8719f25d4f229557854cf5edea3554155a9d48",
    "divergence-checkpoint.json": "1f1fd4315eb2f696af73b8114d21f50461b8b95577c49347ce46721e1914423d",
-   "index.html": "f6cf73fa5d88201feac274048317844c92e0c6522565e5672ad2ffa44765c090",
+   "index.html": "bb42f344a4c23971b6beda896f0de869a015be3e02677b3a2bb9a7b16cbb9871",
    "live-sweep-receipt.json": "6341ac6468a7752d5638af756fa77677ba690bb740f43f5901db12c0c3d476a5",
    "og-image.png": "38df079300d4cba7f4518dbc183dd5406753d8281ec36e19dbe57d5694a8d5e5",
    "qr-verify.png": "3e616368ec8298e1380e70dd4c6e5f1dfeb725a6ee6564919c4027ba3d5f82ad",
@@ -94,7 +94,7 @@
    "sample-pack-attack-smuggled-file.zip": "f8cd9f75342d04936eef80d379003d148e3944f3233350d94c0c378f4059409e",
    "sample-pack-tampered.zip": "2e088306d410775e2e035e629fb6fedd51b95bedff57bc1ca9f1793f97fe0eb6",
    "sample-pack.zip": "db910612edd2b8a6513746d75ce17028f6e7ab6076dc9f14e685433e7fe76f03",
-   "tour.html": "5fedeaaaec0449e361be404bfc8b732fb51f364aeed93ab1f1d6f007a4b4b56c",
+   "tour.html": "cdfc5795e73124287d58f4b76c8fe3344e1b3619c41af9e0f9fd6a1409da4272",
    "vectors/fail-anchor-proof-graft.zip": "6b1cc70b0b7680c1f60328a6a1a8c374646592ebb5ede74c83c97598134a5d4b",
    "vectors/fail-bool-leaf-index.zip": "f20a72170d1fdce3c13ff6d917d25a04e76ada96fb5ef4bf7b549e520d7171e0",
    "vectors/fail-doctored-verifier.zip": "d4e4b7f8eeb387310266aede0a5b36f85147332af7e99de6f018d5bd3df4b4d0",
@@ -140,11 +140,11 @@
   "sequence": 1,
   "prev_hash": null,
   "visit_id": "site:josepha-mayo.github.io/attest",
-  "receipt_id": "rcpt_902e53a9c3794f998d86f2f70ad0731c",
-  "issued_at": "2026-10-10T15:07:09.374146+00:00"
+  "receipt_id": "rcpt_fad092c605b54b74ae38a4feac531530",
+  "issued_at": "2026-10-10T15:11:30.312383+00:00"
  },
- "payload_hash": "2c06ea1dc6617ea02d29f38e1d63640c40cc59be662fc56dfb55b36c8caf31c1",
- "signature": "zYxoHQ1PteleA8/lsGW/wrnvhzKJbg9s+hGg+Lsik2bo3/tYQzPawmrVmrlYvT1Hu7zz3Mrvkl0SYz6j6qeCBw==",
+ "payload_hash": "db7c1c07fbf12e2b69a534e63834ec50c610f2f0affe0d50887843d46bb5ad79",
+ "signature": "UmBNaRapxBSlLT2jBjwER+5A235SW25feDCkp6dXX9S883ktO22D7jaR9Eb71je68PiWCrdIDArNsMQklAvlDA==",
  "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
- "issued_at": "2026-10-10T15:07:09.374146Z"
+ "issued_at": "2026-10-10T15:11:30.312383Z"
 }

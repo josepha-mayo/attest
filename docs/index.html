@@ -228,6 +228,23 @@ whether the bytes are still honest.</p>
 </svg>
 
 <h2>"Isn't this just Ring's event history?"</h2>
+<table style="border-collapse:collapse;font-size:.92rem;margin:.6rem 0">
+<tr><th style="text-align:left;padding:.3rem .8rem .3rem 0;border-bottom:1px solid #d4d4d8"></th>
+    <th style="text-align:left;padding:.3rem .8rem;border-bottom:1px solid #d4d4d8">Ring Event History</th>
+    <th style="text-align:left;padding:.3rem .8rem;border-bottom:1px solid #d4d4d8">Attest</th></tr>
+<tr><td style="padding:.3rem .8rem .3rem 0;color:#6b6b70">Who vouches</td>
+    <td style="padding:.3rem .8rem">Ring says so</td>
+    <td style="padding:.3rem .8rem">the math — anyone re-checks, offline</td></tr>
+<tr><td style="padding:.3rem .8rem .3rem 0;color:#6b6b70">Voices</td>
+    <td style="padding:.3rem .8rem">device events only</td>
+    <td style="padding:.3rem .8rem">worker + household + coordinator, kept separate</td></tr>
+<tr><td style="padding:.3rem .8rem .3rem 0;color:#6b6b70">Edits</td>
+    <td style="padding:.3rem .8rem">platform-controlled</td>
+    <td style="padding:.3rem .8rem">append-only; tampering breaks the math</td></tr>
+<tr><td style="padding:.3rem .8rem .3rem 0;color:#6b6b70">After export</td>
+    <td style="padding:.3rem .8rem">a screenshot</td>
+    <td style="padding:.3rem .8rem">a self-verifying evidence pack</td></tr>
+</table>
 <p>Ring's event history is <em>Ring's word</em>. An Attest receipt verifies
 without Ring — and without us. Incumbent tracking puts a GPS ankle monitor on
 the worker's phone, spoofable and resented; Attest anchors observation to the
