@@ -1892,6 +1892,18 @@ if(location.protocol.indexOf("http")===0){
         document.getElementById(bid).click();
     }).catch(()=>{});
   }
+  /* Per-receipt deep links: #demo-receipts/rcpt_<hex> fetches a lone signed
+     receipt the site ships (the receipts index links each row here) — the
+     lone-file path verifies its signature the same way it does the sweep
+     report. Same-origin fetch only; the id pattern pins it to a receipt. */
+  const _rm=location.hash.match(/^#demo-receipts\/(rcpt_[0-9a-f]{4,64})$/);
+  if(_rm){
+    fetch("demo-receipts/"+_rm[1]+".json").then(async r=>{
+      if(!r.ok)return;
+      const buf=await r.arrayBuffer();
+      go([new File([buf],_rm[1]+".json")]);
+    }).catch(()=>{});
+  }
   /* Out-of-band pin demo: the pack's trust anchor arrives over a different
      surface than the artifact it anchors — the issuer document this site
      serves at .well-known/ (attest issuer --out output, hosted as a

@@ -2169,3 +2169,55 @@ eval(src + `
     )
     assert proc.returncode == 0, proc.stderr
     assert "selfcheck: true true" in proc.stdout, proc.stdout
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_demo_receipt_deep_link_verifies_lone_receipt(tmp_path):
+    """#demo-receipts/rcpt_<hex> deep links: the receipts index links each
+    shipped receipt into the verifier — the lone-file path must stamp the
+    genuine bytes VERIFIED and a byte-doctored copy FAILED."""
+    docs = Path(__file__).resolve().parents[1] / "docs"
+    receipt = sorted((docs / "demo-receipts").glob("rcpt_*.json"))[0]
+    rid = receipt.stem
+    good = receipt.read_bytes()
+    bad = bytearray(good)
+    # flip a byte inside the base64 signature tail — still valid JSON, bad sig
+    idx = good.rfind(b'"')
+    bad[idx - 1] = ord("A") if bad[idx - 1] != ord("A") else ord("B")
+    (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
+    (tmp_path / "good.json").write_bytes(good)
+    (tmp_path / "bad.json").write_bytes(bytes(bad))
+    driver = r"""
+const fs=require('fs');
+let src=fs.readFileSync(process.argv[2],'utf8');
+const goodB=fs.readFileSync(process.argv[3]);
+const badB=fs.readFileSync(process.argv[4]);
+let serve=goodB;
+global.location={protocol:'http:',pathname:'/verify.html',
+  hash:'#demo-receipts/RID',origin:'http://x'};
+global.history={replaceState:()=>{}};
+global.fetch=async(u,o)=>{if(o&&o.method==='HEAD')return{ok:false};
+  const b=String(u).startsWith('demo-receipts/')?serve:null;
+  if(!b)return{ok:false};
+  return{ok:true,arrayBuffer:async()=>b.buffer.slice(b.byteOffset,b.byteOffset+b.byteLength),text:async()=>b.toString()};};
+const els={};const mk=id=>els[id]||(els[id]={hidden:true,innerHTML:'',value:'',
+  setAttribute:()=>{},focus:()=>{},onclick:null,dataset:{},click(){if(this.onclick)this.onclick()}});
+global.document={getElementById:mk,querySelectorAll:()=>[],createElement:()=>({setAttribute:()=>{},style:{}})};
+eval(src + `
+(async()=>{
+  await new Promise(r=>setTimeout(r,60));
+  const h1=els['out'].innerHTML;
+  console.log('deep-good:',h1.includes('VERIFIED'),!h1.includes('FAILED'));
+})();`);
+"""
+    driver = driver.replace("RID", rid)
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "verify.js", "good.json", "bad.json"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "deep-good: true true" in proc.stdout, proc.stdout
