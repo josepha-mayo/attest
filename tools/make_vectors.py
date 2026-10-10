@@ -768,7 +768,7 @@ def main() -> None:
             "verdict": "fail",
             "detail_contains": ["no inclusion proof"],
             "js": {"bundle_ok": True, "verdict": "fail"},
-            "note": "a pack receipt silently dropped from log_proofs.json — "
+            "note": "a pack receipt silently dropped from log_checkpoint.json — "
             "the pack cannot claim log membership it does not prove",
         },
     )

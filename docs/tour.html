@@ -45,7 +45,7 @@ a{color:#2563eb}
 </head>
 <body>
 <div class="wrap">
-<aside class="side">
+<aside class="side" aria-live="polite">
   <div>
     <h1>The Attest tour</h1>
     <p class="tag">Nine beats, ~two minutes — every frame is the live artifact, not a
@@ -68,6 +68,14 @@ a{color:#2563eb}
 </aside>
 <div class="stage"><iframe id="frame" title="live artifact"></iframe></div>
 </div>
+<noscript><p style="padding:1rem">The tour needs JavaScript — but every beat is
+a link: <a href="verify.html#sample-pack">green VERIFIED</a> ·
+<a href="verify.html#sample-pack-tampered">red FAILED</a> ·
+<a href="verify.html#tamper-lab">the tamper lab</a> ·
+<a href="demo-visit.html">the contested visit</a> ·
+<a href="demo-receipts.html">the hash chain</a> ·
+<a href="vectors.html">the corpus</a> ·
+<a href="verify.html#verify-site">site attestation</a>.</p></noscript>
 <script>
 const BEATS=[
  {t:"What this is",u:"index.html",s:9000,
@@ -76,17 +84,17 @@ const BEATS=[
   statements, household statements, and the coordinator's conclusion kept
   <em>separate</em>, signed, and append-only.`,
   w:"Why judges care: the demo is the product — every artifact on this site verifies independently."},
- {t:"A pack verifies itself",u:"verify.html#sample-pack",s:14000,
+ {t:"A pack verifies itself",u:"verify.html?b=2#sample-pack",s:14000,
   p:`The exported dispute pack verifies in your browser — no install, nothing
   uploaded. The green <strong>VERIFIED</strong> stamp covers signatures, the hash
   chain, the Merkle log, witness cosignatures, and a mid-history key rotation.`,
   w:"Notice the verdict hedges honestly — integrity under a key, never physical truth."},
- {t:"The same pack, one field doctored",u:"verify.html#sample-pack-tampered",s:12000,
+ {t:"The same pack, one field doctored",u:"verify.html?b=3#sample-pack-tampered",s:12000,
   p:`Someone inflated a ~35-second observed span to ~70 minutes inside a signed
   bundle. The red <strong>FAILED</strong> stamp names the visit and the check that
   died: <code>payload hash mismatch</code>.`,
   w:"One byte moves, the math refuses — this is the whole product in one frame."},
- {t:"Commit the forgery yourself",u:"verify.html#tamper-lab",s:12000,
+ {t:"Commit the forgery yourself",u:"verify.html?b=4#tamper-lab",s:12000,
   p:`The tamper lab: pick a signed field, type your own value, and the page
   rebuilds a real zip around your edit — downloadable — then refuses it. The
   adversary is you.`,
@@ -106,12 +114,12 @@ const BEATS=[
   link landing on the verdict the oracle predicts. Bool/string/fractional
   <code>leaf_index</code>, padded hex, a 2⁴⁰ tree_size.`,
   w:"Two verifiers silently diverging is how a pack gets ruled valid in one room and invalid in another."},
- {t:"The site attests itself",u:"verify.html#verify-site",s:14000,
+ {t:"The site attests itself",u:"verify.html?b=8#verify-site",s:14000,
   p:`<code>site-manifest.json</code> is a signed receipt pinning the sha256 of
   every artifact we ship. One click verifies the manifest, then hashes every
   served file against it.`,
   w:"We hold the hosting surface to the same standard as the evidence: <strong>SITE VERIFIED</strong> or <strong>SITE TAMPER</strong>, drifted files named."},
- {t:"Where to go from here",u:"verify.html#verify-self",s:9000,
+ {t:"Where to go from here",u:"verify.html?b=9#verify-self",s:9000,
   p:`The verifier checking its own bytes against the pack's signed pin —
   <strong>PINNED</strong>. Beyond this tour: JUDGE.md maps every claim to its
   artifact; README runs the whole story in one terminal.`,
@@ -122,16 +130,17 @@ const frame=document.getElementById('frame'),bno=document.getElementById('bno'),
   bwhy=document.getElementById('bwhy'),bfull=document.getElementById('bfull'),
   bar=document.getElementById('bar'),dots=document.getElementById('dots'),
   play=document.getElementById('play');
-let i=0,timer=null,playing=true,t0=Date.now();
+let i=0,timer=null,t0=Date.now();
+let playing=!(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches);
 BEATS.forEach((b,k)=>{const d=document.createElement('span');d.className='dot';
   d.setAttribute('role','button');d.setAttribute('aria-label','go to beat '+(k+1));
-  d.tabIndex=0;d.onclick=()=>{go(k);reset();};
-  d.onkeydown=e=>{if(e.key==='Enter'){go(k);reset();}};dots.appendChild(d);});
+  d.tabIndex=0;d.onclick=()=>{pause();go(k);reset();};
+  d.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();pause();go(k);reset();}};dots.appendChild(d);});
 function go(n){
   i=(n+BEATS.length)%BEATS.length;const b=BEATS[i];
   bno.textContent='beat '+(i+1)+' of '+BEATS.length;
-  btitle.textContent=b.t;bprose.innerHTML=b.p;bwhy.textContent=b.w;
-  bfull.href=b.u;frame.src=b.u;
+  btitle.textContent=b.t;bprose.innerHTML=b.p;bwhy.innerHTML=b.w;
+  bfull.href=b.u.replace(/\?b=\d+/,"");frame.src=b.u;
   [...dots.children].forEach((d,k)=>d.classList.toggle('on',k===i));
   t0=Date.now();
 }
@@ -143,16 +152,18 @@ function tick(){
   if(p>=1){go(i+1);}
   requestAnimationFrame(tick);
 }
-document.getElementById('prev').onclick=()=>{go(i-1);reset();};
-document.getElementById('next').onclick=()=>{go(i+1);reset();};
+function pause(){if(playing){playing=false;play.textContent='play';bar.style.width='0';}}
+document.getElementById('prev').onclick=()=>{pause();go(i-1);reset();};
+document.getElementById('next').onclick=()=>{pause();go(i+1);reset();};
 play.onclick=()=>{playing=!playing;play.textContent=playing?'pause':'play';
   if(playing){reset();requestAnimationFrame(tick);}};
 document.addEventListener('keydown',e=>{
-  if(e.key==='ArrowRight'){go(i+1);reset();}
-  if(e.key==='ArrowLeft'){go(i-1);reset();}
+  if(e.key==='ArrowRight'){pause();go(i+1);reset();}
+  if(e.key==='ArrowLeft'){pause();go(i-1);reset();}
   if(e.key===' '&&e.target.tagName!=='BUTTON'){e.preventDefault();play.onclick();}
 });
 const m=location.hash.match(/^#(\d)$/);if(m)i=Math.min(BEATS.length-1,Math.max(0,+m[1]-1));
+play.textContent=playing?'pause':'play';
 go(i);requestAnimationFrame(tick);
 </script>
 </body>

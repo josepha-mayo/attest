@@ -23,6 +23,8 @@ pre{background:#0f172a;color:#e2e8f0;padding:.8rem 1rem;border-radius:8px;overfl
 .chip.cur{border-color:#2563eb;background:#eff6ff}
 select{font-size:.9rem;padding:.35rem .5rem;border:1px solid #d4d4d8;border-radius:6px;max-width:100%}
 .small{color:#6b6b70;font-size:.85rem}
+.okc{color:#166534}.badc{color:#991b1b}
+#vlink[hidden]{display:none}
 h1{margin-bottom:.2rem}
 </style>
 </head>
@@ -35,7 +37,11 @@ per-field, the chain links are real <code>prev_hash</code> edges, and the
 verifier the packs use. Nothing here is a mockup.</p>
 
 <p><label>receipt <select id="pick" aria-label="choose a receipt"></select></label>
-<a id="vlink" href="#">verify →</a></p>
+<a id="vlink" href="#" hidden>verify →</a></p>
+<noscript><p class="warnbox"><strong>This page needs JavaScript</strong> — it
+fetches the 58 signed receipts and rebuilds canonical payloads locally. The
+same anatomy verifies offline with <code>attest explain &lt;receipt-id&gt;</code>
+or in <a href="demo-receipts.html">the receipts index</a>.</p></noscript>
 
 <div class="chain" id="chain"></div>
 
@@ -47,10 +53,12 @@ verifier the packs use. Nothing here is a mockup.</p>
 
 <h2>What the signature actually covers</h2>
 <p>The Ed25519 signature signs <em>only</em> the payload's SHA-256. The payload
-is canonicalized first — fixed key order, fixed float spellings, ASCII
-timestamps — which is why two implementations produce the same bytes to sign.
-This is the canonical payload of the receipt above:</p>
-<pre id="canon"></pre>
+is canonicalized first — sorted keys, no whitespace, each literal's exact
+spelling preserved — which is why two implementations produce the same bytes
+to sign. Below is the canonical payload of the receipt above, rebuilt in your
+browser from the served file's raw bytes — and the hash recomputed live:</p>
+<pre id="canon" style="white-space:pre-wrap;word-break:break-all"></pre>
+<p id="canonhash" class="small"></p>
 
 <div class="warnbox" id="scope"><strong>The honest boundary.</strong> A valid
 signature proves these bytes existed under this issuer key at signing time.
@@ -79,7 +87,62 @@ const FIELDS={
 };
 const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-let receipts=[],byHash={};
+let receipts=[],byHash={},showSeq=0;
+/* Canonicalize the payload's RAW text — the signed bytes preserve each
+   literal's spelling ("fraction":0.0 stays 0.0, not 0). Working on the file
+   bytes rather than a re-serialization is what makes the hash recompute. */
+function topSplit(s,sep){
+  const out=[];let d=0,st=false,esc2=false,p=0;
+  for(let i=0;i<s.length;i++){const c=s[i];
+    if(esc2){esc2=false;continue;}
+    if(st){if(c==='\\')esc2=true;else if(c==='"')st=false;continue;}
+    if(c==='"')st=true;else if(c==='{'||c==='[')d++;else if(c==='}'||c===']')d--;
+    else if(c===sep&&d===0){out.push(s.slice(p,i));p=i+1;}}
+  out.push(s.slice(p));return out;}
+function topColon(s){
+  let d=0,st=false,esc2=false;
+  for(let i=0;i<s.length;i++){const c=s[i];
+    if(esc2){esc2=false;continue;}
+    if(st){if(c==='\\')esc2=true;else if(c==='"')st=false;continue;}
+    if(c==='"')st=true;else if(c==='{'||c==='[')d++;else if(c==='}'||c===']')d--;
+    else if(c===':'&&d===0)return i;}
+  return -1;}
+function canonRaw(raw){
+  const s=String(raw).trim(),c=s[0];
+  if(c==='"')return JSON.stringify(JSON.parse(s));
+  if(c!=='{'&&c!=='[')return s;
+  const inner=s.slice(1,-1).trim();
+  if(!inner)return c==='{'?'{}':'[]';
+  if(c==='[')return'['+topSplit(inner,',').map(canonRaw).join(',')+']';
+  const pairs=topSplit(inner,',').map(it=>{const i=topColon(it);
+    return[JSON.parse(it.slice(0,i).trim()),it.slice(i+1)];});
+  pairs.sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:0);
+  return'{'+pairs.map(p=>JSON.stringify(p[0])+':'+canonRaw(p[1])).join(',')+'}';}
+function memberRaw(raw,name){
+  /* extract the raw value text of a top-level member of a JSON object */
+  const re=new RegExp('"'+name+'"\\s*:','g');let m;
+  while((m=re.exec(raw))){let i=m.index,d=0,st=false,esc2=false;
+    for(let j=0;j<i;j++){const c=raw[j];
+      if(esc2){esc2=false;continue;}
+      if(st){if(c==='\\')esc2=true;else if(c==='"')st=false;continue;}
+      if(c==='"')st=true;else if(c==='{')d++;else if(c==='}')d--;}
+    if(d!==1||st)continue;
+    let k=re.lastIndex;while(/\s/.test(raw[k]))k++;
+    const start=k;d=0;st=false;esc2=false;
+    for(;k<raw.length;k++){const c=raw[k];
+      if(esc2){esc2=false;continue;}
+      if(st){if(c==='\\')esc2=true;else if(c==='"')st=false;continue;}
+      if(c==='"'){st=true;continue;}
+      if(c==='{'||c==='[')d++;
+      else if(c==='}'||c===']'){if(d===0)break;d--;}
+      else if((c===','||c==='}')&&d===0)break;}
+    return raw.slice(start,k);}}
+const rawCache={};
+async function canonOf(r){
+  if(!rawCache[r.id]){
+    const t=await(await fetch('demo-receipts/'+r.id+'.json')).text();
+    rawCache[r.id]=canonRaw(memberRaw(t,'payload'));}
+  return rawCache[r.id];}
 async function boot(){
   receipts=await(await fetch('demo-receipts.json')).json();
   receipts.forEach(r=>{byHash[r.payload_hash]=r;});
@@ -96,6 +159,7 @@ async function boot(){
 function show(r){
   $('rid').textContent=r.id;
   $('vlink').href='verify.html#demo-receipts/'+r.id;
+  $('vlink').hidden=false;
   history.replaceState(null,'','#'+r.id);
   const ch=$('chain');ch.innerHTML='';
   const mk=(rr,lab,cur)=>{
@@ -116,11 +180,28 @@ function show(r){
     const tr=document.createElement('tr');
     const v=f==='payload'?(r.payload&&r.payload.record_type||'—')+'  (canonical form below)'
       :JSON.stringify(r[f]);
-    tr.innerHTML='<th class="f">'+esc(f)+'</th><td><code>'+esc(v)+'</code></td><td>'+(FIELDS[f]||[''])[0]+'</td>';
+    tr.innerHTML='<th class="f" scope="row">'+esc(f)+'</th><td><code>'+esc(v)+'</code></td><td>'+(FIELDS[f]||[''])[0]+'</td>';
     tb.appendChild(tr);}
-  $('canon').textContent=JSON.stringify(r.payload,null,1);
+  const cp=$('canon');cp.textContent='canonicalizing…';
+  const hp=$('canonhash');hp.innerHTML='';
+  const seq=++showSeq;
+  canonOf(r).then(async txt=>{
+    if(seq!==showSeq)return;
+    cp.textContent=txt;
+    const dig=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(txt));
+    const hex=[...new Uint8Array(dig)].map(b=>b.toString(16).padStart(2,'0')).join('');
+    const ok=hex===r.payload_hash;
+    hp.innerHTML='SHA-256 of those bytes: <code>'+esc(hex.slice(0,32))+'…</code> → '
+      +(ok?'<strong class="okc">matches <code>payload_hash</code> — recomputed live in your browser</strong>'
+          :'<strong class="badc">MISMATCH</strong>');
+  }).catch(()=>{if(seq===showSeq)cp.textContent='(canonicalization unavailable — the per-receipt file did not load)';});
 }
 boot().catch(e=>{$('rows').innerHTML='<tr><td colspan="3">load failed: '+esc(e.message)+'</td></tr>';});
 </script>
+<p class="small">Elsewhere: <a href="index.html">landing</a> ·
+<a href="tour.html">two-minute tour</a> ·
+<a href="demo-receipts.html">all 58 receipts as the chain</a> ·
+<a href="vectors.html">adversarial corpus</a> ·
+<a href="verify.html">the verifier</a></p>
 </body>
 </html>

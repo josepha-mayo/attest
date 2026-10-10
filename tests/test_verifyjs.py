@@ -2481,3 +2481,48 @@ eval(src + `
     )
     assert proc2.returncode == 0, proc2.stderr
     assert "vec-fail: true true" in proc2.stdout, proc2.stdout
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_anatomy_page_canonicalizer_reproduces_payload_hashes(tmp_path):
+    """docs/anatomy.html rebuilds each receipt's canonical payload from the
+    served file's raw bytes and recomputes sha256 live — the page's central
+    claim is that the recomputed digest matches payload_hash for every one of
+    the 58 shipped receipts (literal spellings like 0.0 preserved). Extract
+    the page's own functions and run them against the real corpus."""
+    docs = Path(__file__).resolve().parents[1] / "docs"
+    html = (docs / "anatomy.html").read_text(encoding="utf-8")
+    m = re.search(r"<script>(.*)</script>", html, re.S)
+    assert m, "anatomy.html has no script block"
+    body = m.group(1)
+    start = body.index("function topSplit")
+    end = body.index("const rawCache")
+    funcs = body[start:end]
+    receipts_dir = docs / "demo-receipts"
+    files = sorted(receipts_dir.glob("rcpt_*.json"))
+    assert len(files) >= 50
+    driver = """
+const fs=require('fs'),crypto=require('crypto'),path=require('path');
+const funcs=fs.readFileSync(process.argv[2],'utf8');
+eval(funcs);
+const dir=process.argv[3];
+let ok=0,bad=[];
+for(const f of fs.readdirSync(dir).filter(f=>f.endsWith('.json'))){
+  const t=fs.readFileSync(path.join(dir,f),'utf8');
+  const r=JSON.parse(t);
+  const canon=canonRaw(memberRaw(t,'payload'));
+  const h=crypto.createHash('sha256').update(canon,'utf8').digest('hex');
+  if(h===r.payload_hash)ok++;else bad.push(f);}
+console.log('anat:',ok,bad.length===0?[]:bad.slice(0,3));
+"""
+    (tmp_path / "funcs.js").write_text(funcs, encoding="utf-8")
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "funcs.js", str(receipts_dir)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert f"anat: {len(files)} []" in proc.stdout, proc.stdout

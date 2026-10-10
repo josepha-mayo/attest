@@ -33,6 +33,11 @@
  @keyframes stampin{from{transform:scale(1.5);opacity:0}to{transform:scale(1);opacity:1}}
  @media (prefers-reduced-motion:reduce){.row.stamp{animation:none}}
  small{color:#666}
+ .muted{color:#666}
+ .pill{display:inline-block;border-radius:99px;padding:.05rem .6rem;font-size:.8rem;
+   background:#eee;color:#444}
+ .pill.warn{background:#fef3c7;color:#8a5a00}.pill.bad{background:#fee2e2;color:#b3261e}
+ #liveurl{max-width:100%}
 </style>
 <meta property="og:image"
   content="https://josepha-mayo.github.io/attest/og-image.png">
@@ -54,15 +59,17 @@ aria-label="Choose the extracted pack folder"><br>
 document too (from <code>/.well-known/attest-issuer.json</code> or
 <code>attest issuer --out</code>) — the pin arms for the pack, and the doc's
 signed lifecycle bridges pre-rotation exports.</small></div>
-<p><small>New to the math? <a href="anatomy.html">Anatomy of a signed
+<p><small>New here? <a href="index.html">The story</a> explains why the
+record exists. New to the math? <a href="anatomy.html">Anatomy of a signed
 receipt</a> decomposes one field-by-field — or take the <a
 href="tour.html">two-minute tour</a> of every feature on this page.</small></p>
 <p id="trysample-wrap" hidden><button id="trysample" type="button">Verify the bundled
 sample pack — one click, fetched from this site</button></p>
 <p id="trytamper-wrap" hidden><button id="trytamper" type="button">Verify the tampered
 twin — the same pack, but someone inflated a ~35-second observed span to ~70 minutes.
-Watch the signature catch it</button><br>
-<small>Or pick an attack — each is caught by a different layer:</small></p>
+Watch the signature catch it</button></p>
+<p id="tryatk-hint" hidden><small>Or pick an attack — each is caught by a
+different layer:</small></p>
 <p id="tryatk1-wrap" hidden><button id="tryatk1" type="button">Attack: deleted record
 — a visit bundle was removed, but the signed manifest still names its receipt</button></p>
 <p id="tryatk2-wrap" hidden><button id="tryatk2" type="button">Attack: smuggled file
@@ -1985,6 +1992,8 @@ if(location.protocol.indexOf("http")===0){
     fetch(file,{method:"HEAD"}).then(r=>{
       if(!r.ok)return;
       document.getElementById(bid+"-wrap").hidden=false;
+      if(bid==="tryatk1"){const h=document.getElementById("tryatk-hint");
+        if(h)h.hidden=false;}
       document.getElementById(bid).onclick=async()=>{
         try{
           /* Put the deep-link in the bar — the verdict URL is shareable. */
@@ -2012,10 +2021,13 @@ if(location.protocol.indexOf("http")===0){
   if(_rm){
     const path=_rm[1]?`demo-receipts/${_rm[1]}.json`:"demo-receipts.json";
     fetch(path).then(async r=>{
-      if(!r.ok)return;
+      if(!r.ok){document.getElementById("out").innerHTML=
+        "<div class='row bad'>deep link failed: <code>"+esc(path)+
+        "</code> returned HTTP "+r.status+"</div>";return;}
       const buf=await r.arrayBuffer();
       go([new File([buf],path.split("/").pop())]);
-    }).catch(()=>{});
+    }).catch(e=>{document.getElementById("out").innerHTML=
+      "<div class='row bad'>deep link failed: "+esc(e.message)+"</div>";});
   }
   /* Conformance-vector deep links: #vectors/<slug> fetches one of the
      Wycheproof-style packs the site ships under vectors/ (the index links
@@ -2024,10 +2036,13 @@ if(location.protocol.indexOf("http")===0){
   const _vm=location.hash.match(/^#vectors\/([a-z0-9-]{3,60})$/);
   if(_vm){
     fetch("vectors/"+_vm[1]+".zip").then(async r=>{
-      if(!r.ok)return;
+      if(!r.ok){document.getElementById("out").innerHTML=
+        "<div class='row bad'>deep link failed: <code>vectors/"+esc(_vm[1])+
+        ".zip</code> returned HTTP "+r.status+"</div>";return;}
       const buf=await r.arrayBuffer();
       go([new File([buf],_vm[1]+".zip")]);
-    }).catch(()=>{});
+    }).catch(e=>{document.getElementById("out").innerHTML=
+      "<div class='row bad'>deep link failed: "+esc(e.message)+"</div>";});
   }
   /* Out-of-band pin demo: the pack's trust anchor arrives over a different
      surface than the artifact it anchors — the issuer document this site
@@ -2114,29 +2129,35 @@ if(location.protocol.indexOf("http")===0){
   fetch("sample-pack.zip",{method:"HEAD"}).then(r=>{
     if(!r.ok)return;
     const lab=document.getElementById("lab");if(!lab)return;lab.hidden=false;
-    if(location.hash==="#tamper-lab")lab.open=true;
     const lout=document.getElementById("lab-out");
     const ldl=document.getElementById("lab-dl");
     const memb=document.getElementById("lab-member");
     const enc2=new TextEncoder();
-    let ents=null,packBytes=null;
+    let ents=null,packBytes=null,labLoading=null;
+    const loadLab=async()=>{
+      if(labLoading)return labLoading;
+      labLoading=(async()=>{
+        packBytes=await(await fetch("sample-pack.zip")).arrayBuffer();
+        ents=await readZipEntries(new File([packBytes],"sample-pack.zip"));
+        let first=null;
+        for(const e of ents){
+          if(!/^visits\/[^\/]+\/bundle\.json$/.test(e.name))continue;
+          const o=document.createElement("option");
+          o.value=e.name;o.textContent=e.name;memb.appendChild(o);
+          if(e.name.indexOf("vis_1071d3b1997a")>=0)first=e.name;
+        }
+        if(first)memb.value=first;
+        if(!memb.options.length)
+          lout.innerHTML="<div class='row warn'>no visit bundles in this pack</div>";
+        return ents;})();
+      return labLoading;};
+    if(lab.addEventListener)
+      lab.addEventListener("toggle",()=>{if(lab.open)loadLab();});
+    if(location.hash==="#tamper-lab"){lab.open=true;loadLab();}
     document.getElementById("lab-go").onclick=async()=>{
       try{
         lout.innerHTML="<p>rebuilding the pack around your edit…</p>";
-        if(!ents){
-          packBytes=await(await fetch("sample-pack.zip")).arrayBuffer();
-          ents=await readZipEntries(new File([packBytes],"sample-pack.zip"));
-          let first=null;
-          for(const e of ents){
-            if(!/^visits\/[^\/]+\/bundle\.json$/.test(e.name))continue;
-            const o=document.createElement("option");
-            o.value=e.name;o.textContent=e.name;memb.appendChild(o);
-            if(e.name.indexOf("vis_1071d3b1997a")>=0)first=e.name;
-          }
-          if(first)memb.value=first;
-          if(!memb.options.length)
-            lout.innerHTML="<div class='row warn'>no visit bundles in this pack</div>";
-        }
+        await loadLab();
         const field=document.getElementById("lab-field").value.trim();
         const vraw=document.getElementById("lab-value").value.trim();
         if(!field){lout.innerHTML="<div class='row warn'>name a field</div>";return;}
