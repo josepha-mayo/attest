@@ -367,7 +367,10 @@ pinned to the issuer document this site serves</a>. And the verifier page
 itself is pinned: every pack's signed <code>verifier_manifest.json</code>
 byte-pins <code>verify.html</code> — <code>sha256</code> the hosted page and
 compare it to the pin inside any pack; the checker can't be swapped behind
-your back.</p>
+your back. Or let the page do it: <a href="verify.html#verify-self">verify
+this page against the pack's pin</a> — it hashes its own bytes and stamps
+<strong>PINNED</strong> or <strong>PIN MISMATCH</strong>, and says plainly why
+that can never prove a hostile page honest.</p>
 
 <h2>Proof it talks to the real API</h2>
 <p><a href="live-sweep-receipt.json"><code>live-sweep-receipt.json</code></a> is the signed

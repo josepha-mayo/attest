@@ -2092,3 +2092,65 @@ global.document={getElementById:()=>out};
     )
     assert proc.returncode == 0, proc.stderr
     assert "escaped: true true" in proc.stdout, proc.stdout
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_verify_self_pins_page_bytes_to_pack_manifest(tmp_path):
+    """#verify-self: the hosted page fetches its own bytes and the bundled
+    pack's issuer-signed verifier_manifest, then stamps PINNED when they
+    byte-match and PIN MISMATCH when they don't — a swapped hosted verifier
+    is caught, not trusted."""
+    import zipfile as zf
+
+    pack = Path(__file__).resolve().parents[1] / "docs" / "sample-pack.zip"
+    manifest_member = zf.ZipFile(pack).read("verifier_manifest.json")
+    import json as _j
+
+    pin = _j.loads(manifest_member)["payload"]["tools"]["verify.html"]
+    import hashlib as _h
+
+    html = Path(__file__).resolve().parents[1] / "docs" / "verify.html"
+    real_page = html.read_bytes()
+    assert _h.sha256(real_page).hexdigest() == pin  # embed parity precondition
+    (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
+    (tmp_path / "pack.zip").write_bytes(pack.read_bytes())
+    (tmp_path / "page.html").write_bytes(real_page)
+    # page bytes fed to the fetch stub: first the real page (PINNED), then a
+    # doctored page (PIN MISMATCH) — the tampered self-check can't borrow trust
+    doctored = real_page.replace(b"pack verifier", b"pack verifi3r", 1)
+    (tmp_path / "doctored.html").write_bytes(doctored)
+    driver = r"""
+const fs=require('fs');
+let src=fs.readFileSync(process.argv[2],'utf8');
+const packB=fs.readFileSync(process.argv[3]);
+const pageB=fs.readFileSync(process.argv[4]);
+const badB=fs.readFileSync(process.argv[5]);
+let serve=pageB;
+global.location={protocol:'http:',pathname:'/verify.html',hash:'',origin:'http://x'};
+global.history={replaceState:()=>{}};
+global.fetch=async(u,o)=>{if(o&&o.method==='HEAD')return{ok:true};
+  const b=(u==='sample-pack.zip')?packB:serve;
+  return{ok:true,arrayBuffer:async()=>b.buffer.slice(b.byteOffset,b.byteOffset+b.byteLength),text:async()=>b.toString()};};
+const els={};const mk=id=>els[id]||(els[id]={hidden:true,innerHTML:'',value:'',
+  setAttribute:()=>{},focus:()=>{},onclick:null,dataset:{},click(){if(this.onclick)this.onclick()}});
+global.document={getElementById:mk,querySelectorAll:()=>[],createElement:()=>({setAttribute:()=>{},style:{}})};
+eval(src + `
+(async()=>{
+  await new Promise(r=>setTimeout(r,20));
+  const self=els['tryself'];if(!self||!self.onclick){console.log('no-button');return;}
+  await self.onclick();const pin=els['out'].innerHTML.includes('PINNED');
+  els['out'].innerHTML='';serve=badB;
+  await self.onclick();const mis=els['out'].innerHTML.includes('PIN MISMATCH');
+  console.log('selfcheck:',pin,mis);
+})();`);
+"""
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "verify.js", "pack.zip", "page.html", "doctored.html"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "selfcheck: true true" in proc.stdout, proc.stdout

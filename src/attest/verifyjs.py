@@ -1876,6 +1876,60 @@ if(location.protocol.indexOf("http")===0){
     if(location.hash==="#sample-pack-pinned")
       document.getElementById("trypin").click();
   }).catch(()=>{});
+  /* Self-check: this page's own bytes against the issuer-signed
+     verifier_manifest.json inside the bundled sample pack — proof the hosted
+     copy is the exact tool the issuer pinned at export. A swapped hosted
+     verifier shows PIN MISMATCH instead of a borrowed verdict. It cannot
+     prove the running copy is honest — a swapped page could swap the check
+     too — so the trust note below still stands. */
+  fetch("sample-pack.zip",{method:"HEAD"}).then(r=>{
+    if(!r.ok)return;
+    document.getElementById("tryself-wrap").hidden=false;
+    document.getElementById("tryself").onclick=async()=>{
+      const out=document.getElementById("out");
+      try{
+        history.replaceState(null,"",location.pathname+"#verify-self");
+        out.innerHTML="<p>hashing this page…</p>";
+        const [pageBytes,packBytes]=await Promise.all([
+          fetch(location.pathname).then(rr=>rr.arrayBuffer()),
+          fetch("sample-pack.zip").then(rr=>rr.arrayBuffer()),
+        ]);
+        const mine=await sha256hex(new Uint8Array(pageBytes));
+        const ents=await readZipEntries(new File([packBytes],"sample-pack.zip"));
+        let man=null;
+        for(const e of ents)if(e.name==="verifier_manifest.json")
+          man=JSON.parse(await e.text());
+        const pin=man&&man.payload&&man.payload.tools
+          &&man.payload.tools["verify.html"];
+        const say=(c,m)=>{out.innerHTML+="<div class='row "+c+"'>"+m+"</div>";};
+        out.innerHTML="";
+        if(!pin){say("warn","the bundled pack carries no verify.html pin — "
+          +"nothing to check against");return;}
+        say("","this page's sha256: <code>"+mine.slice(0,24)+"…</code>");
+        say("","issuer-signed pin: <code>"+esc(pin.slice(0,24))+"…</code>");
+        if(mine===pin){
+          say("ok","<strong>byte-identical</strong> — this hosted verifier is "
+            +"the exact tool the issuer pinned at export; a swapped page is "
+            +"caught, not trusted");
+          say("stamp ok","<strong>PINNED</strong> — page bytes match the "
+            +"signed manifest");
+        }else{
+          say("bad","the hosted page's bytes do NOT match the issuer-signed "
+            +"pin — the verifier was modified after export; do not rely on "
+            +"its verdicts");
+          say("stamp bad","<strong>PIN MISMATCH</strong>");
+        }
+        say("warn","honest scope: a signed pin was compared, not a running "
+          +"page proven honest — a hostile page could rewrite this check too. "
+          +"For a dispute that matters, the pack's own verify_case.py or an "
+          +"independently fetched copy remains the stronger path.");
+      }catch(e){
+        out.innerHTML="<div class='row bad'>self-check failed: "+esc(e.message)+"</div>";
+      }
+    };
+    if(location.hash==="#verify-self")
+      document.getElementById("tryself").click();
+  }).catch(()=>{});
 }
 """
 
@@ -1913,6 +1967,12 @@ proven inside its own signed tree head</button></p>
 <p id="trypin-wrap" hidden><button id="trypin" type="button">Verify the sample pack
 <em>pinned to this site's issuer document</em> — the trust anchor arrives over a
 different surface than the artifact it anchors</button></p>
+<p id="tryself-wrap" hidden><button id="tryself" type="button">Verify this page —
+hash the bytes you're reading against the issuer-signed <code>verify.html</code>
+pin inside the bundled sample pack</button><br>
+<small>Proves the hosted copy is the exact pinned tool — a swapped verifier is
+caught, not trusted. (A hostile page could rewrite this check too; for a real
+dispute, the pack's own <code>verify_case.py</code> stays the stronger path.)</small></p>
 <div id="out" role="status" aria-live="polite"></div>
 <div id="live-wrap" hidden>
 <h2>Is this still the log the deployment serves?</h2>

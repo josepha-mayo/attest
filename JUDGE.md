@@ -26,15 +26,22 @@ self-verifying evidence record. This is the fastest honest path through it.
    That's the "don't trust Attest" story made literal: the anchor comes over a
    different surface (a GitHub-Pages-hosted `.well-known` doc), and the signed
    lifecycle receipts extend that pin across the mid-history rotation.
-5. [Signed real-API sweep](https://josepha-mayo.github.io/attest/verify.html#live-sweep-receipt)
+5. [The verifier verifies itself](https://josepha-mayo.github.io/attest/verify.html#verify-self)
+   — one click hashes the page's *own bytes* and compares them to the
+   issuer-signed `verify.html` pin inside the bundled pack: **PINNED** means
+   the hosted tool is the exact bytes the issuer pinned at export;
+   **PIN MISMATCH** means the checker was swapped. It honestly discloses its
+   own limit — a hostile page could rewrite the check — and names the
+   stronger path (the pack's own `verify_case.py`).
+6. [Signed real-API sweep](https://josepha-mayo.github.io/attest/verify.html#live-sweep-receipt)
    — the `verify-live --sign` report from the actual `api.amazonvision.com`
    run, auto-verified in your browser on load like everything else.
-6. [The caught fork](https://josepha-mayo.github.io/attest/verify.html#divergence-checkpoint)
+7. [The caught fork](https://josepha-mayo.github.io/attest/verify.html#divergence-checkpoint)
    — the split-demo evidence doc: a signed `monitor_observation` recording two
    irreconcilable signed views of one log (witness pinned one root, monitor the
    other), itself proven inside a signed tree head. The math is real; only the
    endpoints are simulated.
-7. After the green stamp, click **open index.html** — the pack carries its own
+8. After the green stamp, click **open index.html** — the pack carries its own
    record browser that re-verifies every record and renders the timelines.
    Scroll to `vis_70e42116a4cf` (the contested visit): the voices line flags
    that the two household accounts *disagree* — a literal he-said/she-said,
@@ -45,7 +52,7 @@ self-verifying evidence record. This is the fastest honest path through it.
    Inside the contested visit you'll find all three voices: the worker's
    dispute, and *two household accounts that contradict each other* — he
    said / she said, signed and unrewritable.
-8. **The product face, zero install**: static snapshots of the running demo —
+9. **The product face, zero install**: static snapshots of the running demo —
    [the coordinator dashboard](https://josepha-mayo.github.io/attest/demo-dashboard.html),
    [the contested visit](https://josepha-mayo.github.io/attest/demo-visit.html)
    (divergence callout, signed worker dispute, suspect-window warning),
