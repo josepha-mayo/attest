@@ -32,7 +32,11 @@ self-verifying evidence record. This is the fastest honest path through it.
    the hosted tool is the exact bytes the issuer pinned at export;
    **PIN MISMATCH** means the checker was swapped. It honestly discloses its
    own limit — a hostile page could rewrite the check — and names the
-   stronger path (the pack's own `verify_case.py`).
+   stronger path (the pack's own `verify_case.py`). One click further:
+   [the whole site attests itself](https://josepha-mayo.github.io/attest/verify.html#verify-site)
+   — `site-manifest.json` is a signed receipt pinning every shipped artifact's
+   sha256; the page verifies the manifest, then hashes all 125 files against
+   it: **SITE VERIFIED** or **SITE TAMPER**, drifted files named.
 6. [Signed real-API sweep](https://josepha-mayo.github.io/attest/verify.html#live-sweep-receipt)
    — the `verify-live --sign` report from the actual `api.amazonvision.com`
    run, auto-verified in your browser on load like everything else.
@@ -71,6 +75,12 @@ self-verifying evidence record. This is the fastest honest path through it.
    — 36 Wycheproof-style conformance packs the shared oracle says must pass or
    fail (grammar traps: bool/string/fractional `leaf_index`, padded hex,
    2^40 tree_size). Each a `verify.html` deep link landing on the predicted verdict.
+12. **The tamper lab**: [verify.html#tamper-lab](https://josepha-mayo.github.io/attest/verify.html#tamper-lab)
+   — stop trusting our staged attacks and commit your own. Pick a signed field
+   in the sample pack, type any value; the page rebuilds a real zip around your
+   edit (byte-faithful — rewriting the field to its *own* value still passes),
+   hands you the doctored pack to download, and the signature refuses it.
+   The strongest kind of demo: the adversary is you.
 
 ## With the repo (8 minutes)
 

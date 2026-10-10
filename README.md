@@ -23,7 +23,7 @@ Why this problem is real: visit-verification records today are *editable*. New Y
 [JUDGE.md](JUDGE.md), or `attest judge` prints it after install.)*
 
 1. Open the hosted verifier's [deep link to the sample pack](https://josepha-mayo.github.io/attest/verify.html#sample-pack) → green **VERIFIED** stamp, no clicks needed → then the **open index.html** link under the stamp — the verified pack hands you its own record browser (it re-verifies every record itself).
-2. [Deep link to the tampered twin](https://josepha-mayo.github.io/attest/verify.html#sample-pack-tampered) → red **FAILED** stamp (`payload hash mismatch`). Then the attack gallery: deleted record, smuggled file, forged verifier — each caught by a different layer.
+2. [Deep link to the tampered twin](https://josepha-mayo.github.io/attest/verify.html#sample-pack-tampered) → red **FAILED** stamp (`payload hash mismatch`). Then the attack gallery: deleted record, smuggled file, forged verifier — each caught by a different layer. Or open the [tamper lab](https://josepha-mayo.github.io/attest/verify.html#tamper-lab) and commit the forgery yourself: rewrite any signed field in-page, get a real rebuilt zip to download, watch the signature refuse it.
 3. [Deep link to the signed live sweep](https://josepha-mayo.github.io/attest/verify.html#live-sweep-receipt) → the `verify-live --sign` report from the real `api.amazonvision.com` run, auto-verified.
 4. `attest demo` → open the printed dashboard → the contested visit shows the source-divergence callout and the worker's signed dispute.
 5. Download `pack.zip`, unzip, open `index.html` — every record self-verifies from `file://`.

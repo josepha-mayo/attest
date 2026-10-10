@@ -16,6 +16,7 @@ thead th{border-bottom:2px solid #a1a1aa}
 .snap{background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:.6rem .9rem;font-size:.85rem}
 .sum{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:.6rem .9rem;font-size:.85rem;margin:.8rem 0}
 .small{color:#6b6b70;font-size:.85rem}
+.tw{overflow-x:auto}
 </style>
 </head>
 <body>
@@ -177,7 +178,7 @@ The <code>rcpt_…</code> link is the raw signed JSON itself. To check them agai
 the ledger's chain and the transparency log, download
 <a href="sample-pack.zip">the export pack</a> — receipts alone carry no prev-hash
 context.</p>
-<table>
+<div class="tw"><table>
 <thead><tr><th scope="col">receipt</th><th scope="col">record_type</th>
 <th scope="col">visit</th><th scope="col">issued_at</th><th scope="col"></th></tr></thead>
 <tbody>
@@ -240,7 +241,7 @@ context.</p>
 <tr><th scope="row"><a href="demo-receipts/rcpt_47b438c0b5194c11867fd02c01760553.json"><code>rcpt_47b438c0b5194c11867fd02c01760553</code></a></th><td>log_checkpoint</td><td><code>log:44:2467f694ea58028d</code></td><td>2026-10-10 12:39:34Z</td><td><a class="plink" href="verify.html#demo-receipts/rcpt_47b438c0b5194c11867fd02c01760553" aria-label="verify receipt rcpt_47b438c0b5194c11867fd02c01760553 in the browser verifier">verify →</a></td></tr>
 <tr><th scope="row"><a href="demo-receipts/rcpt_612dc5f14ee44f88ac80af3770130a8b.json"><code>rcpt_612dc5f14ee44f88ac80af3770130a8b</code></a></th><td>verifier_manifest</td><td><code>export-tools:e3cafe14b4325e1b</code></td><td>2026-10-10 12:39:34Z</td><td><a class="plink" href="verify.html#demo-receipts/rcpt_612dc5f14ee44f88ac80af3770130a8b" aria-label="verify receipt rcpt_612dc5f14ee44f88ac80af3770130a8b in the browser verifier">verify →</a></td></tr>
 </tbody>
-</table>
+</table></div>
 <p class="small">Back to the <a href="index.html">landing page</a> ·
 <a href="demo-receipts.json">all 58 as one JSON array</a> ·
 <a href="verify.html">the verifier</a></p>

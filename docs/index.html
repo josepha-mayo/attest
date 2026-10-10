@@ -260,6 +260,14 @@ directly on the red FAILED stamp:</p>
 <p><small>Mint your own: <code>attest export --tamper-twin twin.zip --attack
 missing-record</code> — the twin self-check must refuse it before it ships.</small></p>
 
+<p>Or skip the shipped attacks entirely: <a
+href="verify.html#tamper-lab"><strong>the tamper lab</strong></a> lets you
+commit the forgery yourself — pick a signed field in the sample pack, type
+your own number, and the verifier rebuilds a real zip around your edit,
+downloads it for you, and refuses it. Nothing is staged: the doctored pack
+is a real artifact, and the same signature catches <em>your</em> number,
+not just ours.</p>
+
 <p>And the harder corpus, public: <a href="vectors.html"><strong>36
 conformance vectors</strong></a> — the Wycheproof-style packs every verifier
 surface must judge identically. The interesting attacks aren't obvious tampers;
@@ -396,7 +404,12 @@ compare it to the pin inside any pack; the checker can't be swapped behind
 your back. Or let the page do it: <a href="verify.html#verify-self">verify
 this page against the pack's pin</a> — it hashes its own bytes and stamps
 <strong>PINNED</strong> or <strong>PIN MISMATCH</strong>, and says plainly why
-that can never prove a hostile page honest.</p>
+that can never prove a hostile page honest. And the whole site attests
+itself: <a href="verify.html#verify-site"><code>site-manifest.json</code>
+pins the sha256 of every artifact we ship</a> — one click verifies the
+manifest's signature, then hashes every served file against it:
+<strong>SITE VERIFIED</strong> or <strong>SITE TAMPER</strong>, naming the
+drifted file.</p>
 
 <h2>Proof it talks to the real API</h2>
 <p><a href="live-sweep-receipt.json"><code>live-sweep-receipt.json</code></a> is the signed

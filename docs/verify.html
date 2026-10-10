@@ -81,6 +81,27 @@ pin inside the bundled sample pack</button><br>
 <small>Proves the hosted copy is the exact pinned tool — a swapped verifier is
 caught, not trusted. (A hostile page could rewrite this check too; for a real
 dispute, the pack's own <code>verify_case.py</code> stays the stronger path.)</small></p>
+<p id="trysite-wrap" hidden><button id="trysite" type="button">Verify this whole
+site — a signed manifest pins the sha256 of every artifact it ships; watch
+each file prove itself</button><br>
+<small>Extends the self-check to the whole deployment: the manifest's own
+signature verifies first, then every listed file is fetched and hashed.</small></p>
+<details id="lab" hidden>
+<summary><strong>Tamper lab — commit the attack yourself</strong></summary>
+<p>Pick a signed field in the bundled sample pack and set its new value. This
+page rebuilds a real pack around your edit — same members, same signatures,
+different bytes — then verifies it. The receipt refuses it. Download your
+doctored pack and the clean twin and diff them yourself; nothing here is
+simulated.</p>
+<p><label>member <select id="lab-member"></select></label>
+<label>field <input id="lab-field" size="22" value="observed_span_minutes"
+aria-label="Field name"></label>
+<label>new value <input id="lab-value" size="14" value="70.5833"
+aria-label="New value"></label>
+<button id="lab-go" type="button">tamper + verify</button></p>
+<div id="lab-out" role="status" aria-live="polite"></div>
+<p id="lab-dl"></p>
+</details>
 <div id="out" role="status" aria-live="polite"></div>
 <div id="live-wrap" hidden>
 <h2>Is this still the log the deployment serves?</h2>
@@ -1784,6 +1805,50 @@ async function readZipEntries(file){
     p+=46+nlen+elen+clen;
   }
   return files;}
+/* Tamper lab: a minimal stored-method zip writer — the lab rebuilds a real
+   pack around the judge's doctored member so the verifier can refuse it. */
+function crc32(u8){
+  if(!crc32.t){const t=new Uint32Array(256);
+    for(let n=0;n<256;n++){let c=n;
+      for(let k=0;k<8;k++)c=(c&1)?(0xedb88320^(c>>>1)):(c>>>1);t[n]=c;}
+    crc32.t=t;}
+  let c=0xffffffff;
+  for(let i=0;i<u8.length;i++)c=crc32.t[(c^u8[i])&0xff]^(c>>>8);
+  return (c^0xffffffff)>>>0;}
+function buildZip(entries){
+  /* entries: [{name,u8}] — stored (method 0) members only; UTF-8 name flag
+     set, timestamps zeroed, version 20 — inside the verifier's own
+     non-ZIP64 envelope. */
+  const enc2=new TextEncoder();let off=0;
+  const parts=[],cent=[];
+  for(const e of entries){
+    const nb=enc2.encode(e.name),crc=crc32(e.u8),n=e.u8.length;
+    const lh=new DataView(new ArrayBuffer(30));
+    lh.setUint32(0,0x04034b50,true);lh.setUint16(4,20,true);
+    lh.setUint16(6,0x0800,true);lh.setUint16(8,0,true);
+    lh.setUint32(14,crc,true);lh.setUint32(18,n,true);lh.setUint32(22,n,true);
+    lh.setUint16(26,nb.length,true);
+    parts.push(new Uint8Array(lh.buffer),nb,e.u8);
+    cent.push({nb,crc,n,off});
+    off+=30+nb.length+n;
+  }
+  const cdOff=off;const cdparts=[];
+  for(const c of cent){
+    const ch=new DataView(new ArrayBuffer(46));
+    ch.setUint32(0,0x02014b50,true);ch.setUint16(4,20,true);
+    ch.setUint16(6,20,true);ch.setUint16(8,0x0800,true);
+    ch.setUint16(10,0,true);ch.setUint16(12,0,true);ch.setUint16(14,0,true);
+    ch.setUint32(16,c.crc,true);ch.setUint32(20,c.n,true);ch.setUint32(24,c.n,true);
+    ch.setUint16(28,c.nb.length,true);ch.setUint32(42,c.off,true);
+    cdparts.push(new Uint8Array(ch.buffer),c.nb);off+=46+c.nb.length;
+  }
+  const eo=new DataView(new ArrayBuffer(22));
+  eo.setUint32(0,0x06054b50,true);eo.setUint16(8,cent.length,true);
+  eo.setUint16(10,cent.length,true);eo.setUint32(12,off-cdOff,true);
+  eo.setUint32(16,cdOff,true);
+  const outb=new Uint8Array(off+22);let p=0;
+  for(const b of[...parts,...cdparts,new Uint8Array(eo.buffer)]){outb.set(b,p);p+=b.length;}
+  return outb;}
 async function go(fileList){
   const out=document.getElementById("out");
   try{
@@ -2038,6 +2103,147 @@ if(location.protocol.indexOf("http")===0){
     };
     if(location.hash==="#verify-self")
       document.getElementById("tryself").click();
+  }).catch(()=>{});
+  /* Tamper lab — the judge commits the attack: pick a signed field in a real
+     bundle, rewrite it client-side, rebuild the pack as a stored zip, and run
+     the same verifier over it. Nothing is simulated: the doctored pack is a
+     real artifact you can download, and the signature genuinely refuses it. */
+  fetch("sample-pack.zip",{method:"HEAD"}).then(r=>{
+    if(!r.ok)return;
+    const lab=document.getElementById("lab");if(!lab)return;lab.hidden=false;
+    if(location.hash==="#tamper-lab")lab.open=true;
+    const lout=document.getElementById("lab-out");
+    const ldl=document.getElementById("lab-dl");
+    const memb=document.getElementById("lab-member");
+    const enc2=new TextEncoder();
+    let ents=null,packBytes=null;
+    document.getElementById("lab-go").onclick=async()=>{
+      try{
+        lout.innerHTML="<p>rebuilding the pack around your edit…</p>";
+        if(!ents){
+          packBytes=await(await fetch("sample-pack.zip")).arrayBuffer();
+          ents=await readZipEntries(new File([packBytes],"sample-pack.zip"));
+          let first=null;
+          for(const e of ents){
+            if(!/^visits\/[^\/]+\/bundle\.json$/.test(e.name))continue;
+            const o=document.createElement("option");
+            o.value=e.name;o.textContent=e.name;memb.appendChild(o);
+            if(e.name.indexOf("vis_1071d3b1997a")>=0)first=e.name;
+          }
+          if(first)memb.value=first;
+          if(!memb.options.length)
+            lout.innerHTML="<div class='row warn'>no visit bundles in this pack</div>";
+        }
+        const field=document.getElementById("lab-field").value.trim();
+        const vraw=document.getElementById("lab-value").value.trim();
+        if(!field){lout.innerHTML="<div class='row warn'>name a field</div>";return;}
+        let v;try{v=JSON.parse(vraw);}catch(e){v=vraw;}
+        let src=null;
+        for(const e of ents)if(e.name===memb.value)src=await e.text();
+        if(src===null){lout.innerHTML="<div class='row bad'>member missing</div>";return;}
+        const key=JSON.stringify(field);let edited=null;
+        const ki=src.indexOf(key);
+        if(ki>=0){
+          let j=ki+key.length;
+          while(j<src.length&&/\s/.test(src[j]))j++;
+          if(src[j]===":"){
+            j++;while(j<src.length&&/\s/.test(src[j]))j++;
+            let vend=j;
+            if(src[j]==='"'){let k=j+1;
+              while(k<src.length){if(src[k]==="\\")k++;
+                else if(src[k]==='"')break;k++;}
+              vend=k+1;
+            }else{let k=j;
+              while(k<src.length&&",}]".indexOf(src[k])<0&&!(/\s/.test(src[k])))k++;
+              vend=k;}
+            edited=src.slice(0,j)+JSON.stringify(v)+src.slice(vend);
+          }
+        }
+        if(edited===null){
+          const tail=src.lastIndexOf("}");
+          edited=src.slice(0,tail)+","+key+":"+JSON.stringify(v)+src.slice(tail);
+          lout.innerHTML="<div class='row warn'><code>"+esc(field)+
+            "</code> wasn't in this bundle — it was injected; unknown fields fail too</div>";
+        }else{
+          lout.innerHTML="";
+        }
+        const eu=enc2.encode(edited);
+        const rebuilt=[];
+        for(const e of ents)
+          rebuilt.push({name:e.name,
+            u8:e.name===memb.value?eu:new Uint8Array(await e.arrayBuffer())});
+        const zb=buildZip(rebuilt);
+        ldl.innerHTML="";
+        if(URL&&URL.createObjectURL){
+          for(const nm of["sample-pack.zip","tampered-by-you.zip"]){
+            const a=document.createElement("a");
+            a.href=URL.createObjectURL(new Blob(
+              [nm==="sample-pack.zip"?packBytes:zb],{type:"application/zip"}));
+            a.download=nm;a.textContent="download "+nm;
+            ldl.appendChild(a);ldl.appendChild(document.createTextNode(" "));
+          }
+        }
+        history.replaceState(null,"",location.pathname+"#tamper-lab");
+        await go([new File([zb],"tampered-by-you.zip")]);
+      }catch(e){
+        lout.innerHTML="<div class='row bad'>lab failed: "+esc(e.message)+"</div>";
+      }
+    };
+  }).catch(()=>{});
+  /* Site verification — the deployment attests itself: site-manifest.json is
+     a signed receipt pinning every artifact's sha256. Verify the manifest as
+     a lone receipt, then hash every file it names against the served bytes. */
+  fetch("site-manifest.json",{method:"HEAD"}).then(r=>{
+    if(!r.ok)return;
+    const w=document.getElementById("trysite-wrap");if(!w)return;w.hidden=false;
+    document.getElementById("trysite").onclick=async()=>{
+      const out=document.getElementById("out");
+      const say=(c,m)=>{out.innerHTML+="<div class='row "+c+"'>"+m+"</div>";};
+      try{
+        history.replaceState(null,"",location.pathname+"#verify-site");
+        out.innerHTML="<p>verifying the site's signed manifest…</p>";
+        const man=await(await fetch("site-manifest.json")).text();
+        out.innerHTML=await verifyFiles([{name:"site-manifest.json",
+          text:async()=>man}]);
+        const d=toJS(parseKeep(man));
+        const arts=d&&d.payload&&d.payload.artifacts;
+        if(!arts||typeof arts!=="object"||Array.isArray(arts)){
+          say("warn","manifest carries no artifact map — nothing to sweep");return;}
+        const names=Object.keys(arts);
+        if(names.length>512){say("bad","manifest lists "+names.length+
+          " artifacts — beyond the sweep bound");return;}
+        let bad=0,checked=0,total=0;
+        for(const nm of names){
+          if(!/^[A-Za-z0-9._\/-]+$/.test(nm)||nm.split("/").includes("..")
+            ||nm[0]==="/"||nm.includes(":")){
+            say("bad","unsafe artifact name in manifest: "+esc(nm));bad++;continue;}
+          const want=String(arts[nm]);
+          const rr=await fetch(nm);
+          if(!rr.ok){say("bad",esc(nm)+" — listed but not served");bad++;continue;}
+          const b=await rr.arrayBuffer();total+=b.byteLength;
+          if(total>256*1024*1024){say("bad","sweep exceeded the byte bound");break;}
+          const got=await sha256hex(new Uint8Array(b));
+          if(got===want)checked++;
+          else{bad++;
+            say("bad","<code>"+esc(nm)+"</code> — sha256 mismatch (signed "+
+              esc(want.slice(0,16))+"…, served "+got.slice(0,16)+"…)");}
+        }
+        if(!bad&&checked===names.length)
+          say("stamp ok","<strong>SITE VERIFIED</strong> — all "+checked+
+            " artifacts byte-match the issuer-signed manifest");
+        else
+          say("stamp bad","<strong>SITE TAMPER</strong> — "+bad+" of "+
+            names.length+" artifacts differ from the signed manifest");
+        say("warn","honest scope: the manifest signed by the site's own key "
+          +"verified above; matching hashes prove the served bytes are what "
+          +"the issuer shipped — a host forging BOTH manifest and files is "
+          +"caught only if you pin the issuer key out-of-band.");
+      }catch(e){
+        out.innerHTML="<div class='row bad'>site check failed: "+esc(e.message)+"</div>";
+      }
+    };
+    if(location.hash==="#verify-site")
+      document.getElementById("trysite").click();
   }).catch(()=>{});
 }
 </script>

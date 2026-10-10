@@ -5,6 +5,7 @@ chain — a valid chain verifies, a tampered payload and a wrong key both fail.
 Skipped when node is not installed (CI without a JS runtime still passes).
 """
 
+import hashlib
 import io
 import json
 import re
@@ -484,6 +485,34 @@ def test_live_sweep_receipt_artifact_verifies():
     ok, why = verify_receipt(receipt, public_key=receipt.public_key)
     assert ok, why
     assert receipt.payload["summary"]["pass"] > 0
+
+
+def test_site_manifest_is_signed_and_fresh():
+    """docs/site-manifest.json pins every shipped artifact's sha256 under the
+    demo issuer's key — the receipt must verify standalone, and the artifact
+    map must match the current bytes of every docs/ file or the site's
+    self-attestation goes stale."""
+    from attest.ledger import verify_receipt
+    from attest.models import Receipt
+
+    docs = Path(__file__).resolve().parents[1] / "docs"
+    path = docs / "site-manifest.json"
+    receipt = Receipt.model_validate_json(path.read_bytes())
+    assert receipt.payload["record_type"] == "site_manifest"
+    ok, why = verify_receipt(receipt, public_key=receipt.public_key)
+    assert ok, why
+    arts = receipt.payload["artifacts"]
+    assert "site-manifest.json" not in arts
+    actual = {
+        p.relative_to(docs).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in sorted(docs.rglob("*"))
+        if p.is_file() and p.name != "site-manifest.json" and "__pycache__" not in p.parts
+    }
+    drift = {n for n in set(arts) | set(actual) if arts.get(n) != actual.get(n)}
+    assert not drift, (
+        "site-manifest.json drifted from docs/ bytes — regenerate via "
+        f"tools/make_site_manifest.py: {sorted(drift)[:5]}"
+    )
 
 
 def test_sample_pack_artifact_verifies():
@@ -2264,6 +2293,129 @@ eval(src + `
     assert proc.returncode == 0, proc.stderr
     assert "arr-good: true true true" in proc.stdout, proc.stdout
     assert "arr-bad: true true true" in proc.stdout, proc.stdout
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_tamper_lab_rebuild_verifies_then_edit_fails(tmp_path):
+    """The tamper lab rebuilds a real stored zip around the judge's edit —
+    two proofs in one: rewriting observed_span_minutes to its own value must
+    still VERIFY (the zip writer is byte-faithful), and rewriting it to
+    70.5833 must FAIL on payload hash (the signature refuses the attack the
+    judge just committed)."""
+    docs = Path(__file__).resolve().parents[1] / "docs"
+    pack = docs / "sample-pack.zip"
+    (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
+    (tmp_path / "pack.zip").write_bytes(pack.read_bytes())
+    driver = r"""
+const fs=require('fs');
+const src=fs.readFileSync(process.argv[2],'utf8');
+const packB=fs.readFileSync(process.argv[3]);
+global.location={protocol:'http:',pathname:'/verify.html',hash:'',origin:'http://x'};
+global.history={replaceState:()=>{}};
+global.fetch=async(u,o)=>{if(o&&o.method==='HEAD')return{ok:u==='sample-pack.zip'};
+  if(u!=='sample-pack.zip')return{ok:false};
+  return{ok:true,arrayBuffer:async()=>packB.buffer.slice(packB.byteOffset,packB.byteOffset+packB.byteLength),text:async()=>packB.toString()};};
+const mkel=()=>({hidden:true,innerHTML:'',value:'',open:false,options:[],
+  setAttribute:()=>{},focus:()=>{},onclick:null,dataset:{},textContent:'',
+  appendChild(c){if(this.options)this.options.push(c)},
+  click(){if(this.onclick)this.onclick()}});
+const els={};const mk=id=>els[id]||(els[id]=mkel());
+global.document={getElementById:mk,querySelectorAll:()=>[],
+  createElement:mkel,createTextNode:t=>({text:t})};
+eval(src + `
+(async()=>{
+  for(let i=0;i<100;i++){if(els['lab-go']&&els['lab-go'].onclick)break;
+    await new Promise(r=>setTimeout(r,20));}
+  if(!els['lab-go']||!els['lab-go'].onclick){console.log('lab: no button');return;}
+  mk('lab-field').value='observed_span_minutes';
+  mk('lab-value').value='0.5833333333333334';
+  await els['lab-go'].onclick();
+  const same=els['out'].innerHTML;
+  console.log('lab-same:',same.includes('VERIFIED'),!same.includes('FAILED'));
+  els['lab-value'].value='70.5833';
+  await els['lab-go'].onclick();
+  const atk=els['out'].innerHTML;
+  console.log('lab-edit:',atk.includes('FAILED'),!atk.includes('VERIFIED'),
+    atk.includes('tampered-by-you.zip'));
+})();`);
+"""
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "verify.js", "pack.zip"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "lab-same: true true" in proc.stdout, proc.stdout
+    assert "lab-edit: true true true" in proc.stdout, proc.stdout
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_verify_site_manifest_sweep(tmp_path):
+    """#verify-site: the signed site-manifest.json verifies as a lone receipt,
+    then every artifact it pins is fetched and hashed — all-real bytes stamp
+    SITE VERIFIED; one doctored artifact flips the verdict to SITE TAMPER and
+    names the file."""
+    docs = Path(__file__).resolve().parents[1] / "docs"
+    man = docs / "site-manifest.json"
+    assert man.exists(), "run tools/make_site_manifest.py"
+    arts = json.loads(man.read_text(encoding="utf-8"))["payload"]["artifacts"]
+    assert len(arts) > 50
+    (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
+    (tmp_path / "site-manifest.json").write_bytes(man.read_bytes())
+    driver = r"""
+const fs=require('fs'),path=require('path');
+const src=fs.readFileSync(process.argv[2],'utf8');
+const manB=fs.readFileSync(process.argv[3]);
+const docsDir=process.argv[4];
+let badName=null;
+global.location={protocol:'http:',pathname:'/verify.html',hash:'',origin:'http://x'};
+global.history={replaceState:()=>{}};
+global.fetch=async(u,o)=>{
+  if(o&&o.method==='HEAD')return{ok:u==='site-manifest.json'};
+  if(u==='site-manifest.json')
+    return{ok:true,text:async()=>manB.toString(),
+      arrayBuffer:async()=>manB.buffer.slice(manB.byteOffset,manB.byteOffset+manB.byteLength)};
+  try{
+    let b=fs.readFileSync(path.join(docsDir,String(u).split('/').join(path.sep)));
+    if(String(u)===badName)b=Buffer.concat([b,Buffer.from('x')]);
+    return{ok:true,arrayBuffer:async()=>b.buffer.slice(b.byteOffset,b.byteOffset+b.byteLength)};
+  }catch(e){return{ok:false};}};
+const mkel=()=>({hidden:true,innerHTML:'',value:'',open:false,options:[],
+  setAttribute:()=>{},focus:()=>{},onclick:null,dataset:{},textContent:'',
+  appendChild(c){if(this.options)this.options.push(c)},
+  click(){if(this.onclick)this.onclick()}});
+const els={};const mk=id=>els[id]||(els[id]=mkel());
+global.document={getElementById:mk,querySelectorAll:()=>[],
+  createElement:mkel,createTextNode:t=>({text:t})};
+eval(src + `
+(async()=>{
+  for(let i=0;i<100;i++){if(els['trysite']&&els['trysite'].onclick)break;
+    await new Promise(r=>setTimeout(r,20));}
+  if(!els['trysite']||!els['trysite'].onclick){console.log('site: no button');return;}
+  await els['trysite'].onclick();
+  const good=els['out'].innerHTML;
+  console.log('site-good:',good.includes('SITE VERIFIED'),
+    good.includes('artifacts byte-match'),!good.includes('SITE TAMPER'));
+  badName='index.html';
+  await els['trysite'].onclick();
+  const bad=els['out'].innerHTML;
+  console.log('site-bad:',bad.includes('SITE TAMPER'),bad.includes('index.html'));
+})();`);
+"""
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "verify.js", "site-manifest.json", str(docs)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "site-good: true true true" in proc.stdout, proc.stdout
+    assert "site-bad: true true" in proc.stdout, proc.stdout
 
 
 @pytest.mark.skipif(NODE is None, reason="node runtime not available")
