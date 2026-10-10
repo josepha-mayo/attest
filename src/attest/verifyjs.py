@@ -50,6 +50,10 @@ _HEAD = """<!doctype html>
    border-radius:10px;padding:.7rem 1rem;margin:.9rem 0;animation:stampin .28s ease-out}
  .row.stamp.ok{border-color:#146c2e;background:#f0fdf4}
  .row.stamp.bad{border-color:#b3261e;background:#fef2f2}
+ .copybtn{display:block;margin-top:.6rem;font:inherit;font-size:.82rem;
+   padding:.3rem .7rem;border:1px solid #999;border-radius:6px;
+   background:#fff;color:#1c1c1e;cursor:pointer}
+ .copybtn:hover{background:#f4f4f5}
  @keyframes stampin{from{transform:scale(1.5);opacity:0}to{transform:scale(1);opacity:1}}
  @media (prefers-reduced-motion:reduce){.row.stamp{animation:none}}
  small{color:#666}
@@ -1770,6 +1774,24 @@ async function go(fileList){
     });
     out.innerHTML="<p>verifying "+files.length+" file(s)…</p>";
     out.innerHTML=await verifyFiles(files);
+    try{
+    /* Cite the verdict verbatim — a judge can paste the exact stamp + detail
+       rows into notes or an issue. Text only; the verdict is claims, not a
+       signed artifact itself. Post-render affordances are best-effort: the
+       conformance harness runs this under node with a stub document, and
+       nothing here may corrupt a rendered verdict. */
+    if(typeof navigator!=="undefined"&&navigator.clipboard&&navigator.clipboard.writeText){
+      const cp=document.createElement("button");
+      cp.className="copybtn";cp.textContent="copy verdict";
+      cp.onclick=async()=>{try{
+        await navigator.clipboard.writeText(out.innerText);
+        cp.textContent="copied";setTimeout(()=>cp.textContent="copy verdict",1600);
+      }catch(e){cp.textContent="copy failed";}};
+      out.appendChild(cp);}
+    /* Move focus+scroll to the verdict — the stamp lands last and a keyboard
+       user at the button shouldn't have to hunt for it. */
+    if(out.setAttribute){out.setAttribute("tabindex","-1");if(out.focus)out.focus();}
+    }catch(e){/* non-DOM host — the verdict above already stands */}
     /* A pack with a validated signed head can answer the fork question —
        reveal the live cross-check; a checkpoint-less pack cannot. */
     const lw=document.getElementById("live-wrap");
@@ -1916,7 +1938,27 @@ the issuing deployment, or the operator's hosted verifier — never trust only t
 pack carries about itself.</small></p>
 """
 
-VERIFY_HTML = _HEAD + _VERIFY_BODY + _JS_OPEN + _JS_LIB + _VERIFY_DRIVER + "</script>\n</body>\n</html>\n"
+_OG = (
+    '<meta property="og:image"\n'
+    '  content="https://josepha-mayo.github.io/attest/og-image.png">\n'
+    '<meta name="twitter:card" content="summary_large_image">\n'
+)
+
+# Packs' index.html shares _HEAD and must stay strictly offline — no external
+# URL anywhere (a test enforces it) — so the social card lives on the hosted
+# verifier page only.
+VERIFY_HTML = (
+    _HEAD.replace("</head>", _OG + "</head>")
+    + '<main id="main">\n'
+    + "<noscript><p>This verifier is dependency-free JavaScript and needs JS "
+    "enabled. The same pack verifies offline with <code>verify_case.py</code> "
+    "on a stock Python install, or <code>attest verify</code>.</p></noscript>\n"
+    + _VERIFY_BODY
+    + _JS_OPEN
+    + _JS_LIB
+    + _VERIFY_DRIVER
+    + "</script>\n</main>\n</body>\n</html>\n"
+)
 
 _INDEX_BODY = """<h1 id="site">Attest case record</h1>
 <noscript><p><strong>This page is the verifier</strong> — it needs JavaScript to check
@@ -1953,8 +1995,9 @@ for a dispute that matters, re-verify the pack with a verifier obtained independ
  .pill{display:inline-block;border-radius:99px;padding:.05rem .6rem;font-size:.8rem;
    background:#eef1f6;border:1px solid #ccd3df}
  .corr{width:100%;border-collapse:collapse;margin-top:.5rem;font-size:.85rem}
- .corr td{border-top:1px solid #eee;padding:.15rem .4rem .15rem 0;vertical-align:top}
- .corr td:first-child{white-space:nowrap;font-weight:600;width:1%}
+ .corr td,.corr th{border-top:1px solid #eee;padding:.15rem .4rem .15rem 0;
+   vertical-align:top;text-align:left;font-weight:400}
+ .corr th{white-space:nowrap;font-weight:600;width:1%}
  .stmt{border-left:3px solid #ccd3df;padding:.15rem .6rem;margin:.4rem 0;font-size:.85rem}
  .plain-hero{text-align:center;padding:1.2rem .5rem .8rem}
  .plain-mark{width:52px;height:52px;border-radius:50%;display:inline-flex;align-items:center;
@@ -1965,8 +2008,9 @@ for a dispute that matters, re-verify the pack with a verifier obtained independ
  .plain-h2{font-size:1.2rem;font-weight:600;line-height:1.3;margin-bottom:.3rem}
  .plain-p{color:#5c6b7a;font-size:.9rem}
  .plain-facts{border-collapse:collapse;margin:.8rem 0;font-size:.9rem}
- .plain-facts td{padding:.25rem .8rem .25rem 0;vertical-align:top;border-bottom:1px solid #eef1f6}
- .plain-facts td.k{color:#5c6b7a;white-space:nowrap}
+ .plain-facts td,.plain-facts th{padding:.25rem .8rem .25rem 0;vertical-align:top;
+   border-bottom:1px solid #eef1f6;text-align:left;font-weight:400}
+ .plain-facts th.k{color:#5c6b7a;white-space:nowrap;font-weight:600}
  .plain-quote{border-left:3px solid #b4740c;padding:.3rem .8rem;margin:.5rem 0;
   font-style:italic;color:#4a3d28}
  .plain-quote.household{border-left-color:#2563a8;color:#26374a}
@@ -1980,8 +2024,9 @@ for a dispute that matters, re-verify the pack with a verifier obtained independ
  .view-tab.on{background:#3b4a63;color:#fff}
  .anchors{margin-top:.6rem}
  .anchors .kv{width:100%;border-collapse:collapse;font-size:.82rem}
- .anchors .kv td{border-top:1px solid #eee;padding:.12rem .4rem .12rem 0;vertical-align:top}
- .anchors .kv td.k{white-space:nowrap;font-weight:600;width:1%;color:#5c6b7a}
+ .anchors .kv td,.anchors .kv th{border-top:1px solid #eee;padding:.12rem .4rem .12rem 0;
+   vertical-align:top;text-align:left;font-weight:400}
+ .anchors .kv th.k{white-space:nowrap;font-weight:600;width:1%;color:#5c6b7a}
  .print-btn{margin-left:auto;border:1px solid #ccd3df;border-radius:8px;
    background:#eef1f6;color:#3b4a63;padding:.2rem .7rem;font-size:.8rem;cursor:pointer}
  .week-row{display:flex;align-items:center;gap:.6rem;margin:1px 0}
@@ -1992,7 +2037,8 @@ for a dispute that matters, re-verify the pack with a verifier obtained independ
  .voices{font-size:.85rem;margin:.35rem 0 .1rem}
  .flag{display:inline-block;border-radius:6px;padding:0 .45rem;font-size:.78rem;
    background:#f9edd4;color:#8a5a00;border:1px solid #e8d3a8}
- .plink{color:#8a93a3;text-decoration:none;font-size:.78rem;font-weight:400}
+ .plink{color:#5f6e7c;text-decoration:none;font-size:.78rem;font-weight:400}
+ .plink:focus-visible{outline:2px solid #5f6e7c;outline-offset:2px}
  .plink:hover{text-decoration:underline}
  .tl{border-bottom:1px dotted #9aa3b2}
  @media print{
@@ -2086,7 +2132,8 @@ function corroborationHTML(p){
       "first device observation vs. worker check-in — neither source is authoritative"]);
   }
   return '<table class="corr">'+rows.map(r=>
-    `<tr><td>${esc(r[0])}</td><td>${cell(r[1])}</td><td class="muted"><small>${esc(r[2])}</small></td></tr>`
+    `<tr><th scope="row">${esc(r[0])}</th><td>${cell(r[1])}</td>`
+    +`<td class="muted"><small>${esc(r[2])}</small></td></tr>`
   ).join("")+"</table>";
 }
 /* Voices rollup — one compact line naming who has spoken on this record and
@@ -2238,9 +2285,9 @@ function plainHTML(p,js){
       +` observations or the worker's account</div>`;
   }
   return `<div class="plain-hero ${hero[3]}"><div class="plain-mark" aria-hidden="true">${hero[0]}</div>`
-    +`<div class="plain-h2">${esc(hero[1])}</div><div class="plain-p">${hero[2]}</div></div>`
+    +`<h3 class="plain-h2">${esc(hero[1])}</h3><div class="plain-p">${hero[2]}</div></div>`
     +`<table class="plain-facts">${facts.map(f=>
-      `<tr><td class="k">${esc(f[0])}</td><td>${f[1]}</td></tr>`).join("")}</table>`
+      `<tr><th scope="row" class="k">${esc(f[0])}</th><td>${f[1]}</td></tr>`).join("")}</table>`
     +quote
     +`<div class="plain-foot">The camera's report, the schedule, the worker's account, and the household's
     account are kept separate.
@@ -2254,7 +2301,7 @@ function plainHTML(p,js){
    parseKeep node so the sequence renders its verbatim literal spelling. */
 function anchorsHTML(oNode,o,p){
   const rows=[];
-  const row=(k,v,note)=>rows.push(`<tr><td class="k">${k}</td><td>${v}</td>`
+  const row=(k,v,note)=>rows.push(`<tr><th scope="row" class="k">${k}</th><td>${v}</td>`
     +`<td class="muted"><small>${esc(note||"")}</small></td></tr>`);
   const hash=String(o.payload_hash||"");
   const seqN=get(oNode,"sequence");
@@ -2556,7 +2603,7 @@ async function renderIndex(){
       +`<span class="pill">${esc(p.state||"?")}</span> `
       +`<strong>${esc(tag.dataset.vid)}</strong>`
       +` <a class="plink" href="#v-${esc(tag.dataset.vid)}" `
-      +`title="link to this record" aria-label="link to this record">#</a>`
+      +`title="link to this record" aria-label="link to record ${esc(tag.dataset.vid)}">#</a>`
       +(p.scheduled_worker?` · worker ${esc(p.scheduled_worker.name||"")}`:"")
       +(stance!=="no_statement"?` · statement: ${esc(stance)}`:"")
       +` — ${esc(c.why)}</div>`
@@ -2727,13 +2774,14 @@ def case_index_html(
         meta_tag += f'<script type="text/plain" id="packmanifest">{enc(manifest_text)}</script>\n'
     return (
         _HEAD.replace("<title>Attest pack verifier</title>", "<title>Attest case record</title>")
+        + '<main id="main">\n'
         + _INDEX_BODY
         + meta_tag
         + tags
         + _JS_OPEN
         + _JS_LIB
         + _INDEX_DRIVER
-        + "</script>\n</body>\n</html>\n"
+        + "</script>\n</main>\n</body>\n</html>\n"
     )
 
 

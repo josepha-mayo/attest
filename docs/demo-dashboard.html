@@ -75,7 +75,7 @@
 
 <header>
   <div class="brand">Attest<span>.</span></div>
-  <nav><a href="/" aria-current="page">Records</a><a href="/setup">Setup &amp; schedules</a><a href="/integrity">Integrity</a><a href="/verify">Verify</a><a href="/verify-pack">Pack verifier</a><a href="/about">Claim boundary</a><a href="/receipts.json" download>Receipts (JSON)</a></nav>
+  <nav><a href="demo-dashboard.html" aria-current="page">Records</a><a href="/setup">Setup &amp; schedules</a><a href="demo-integrity.html">Integrity</a><a href="/verify">Verify</a><a href="/verify-pack">Pack verifier</a><a href="/about">Claim boundary</a><a href="/receipts.json" download>Receipts (JSON)</a></nav>
   <div class="meta">Local / test data &middot; configured summary provider: template</div>
 </header>
 <div class="replay-banner">LOCAL REPLAY — not a live visit. Event clock: 2026-10-08T20:37:03.318922+00:00. Security expiry and signature issuance use real time.</div>
@@ -93,10 +93,10 @@
     
     <br><span class="muted">Queue: 0 pending · 0 in flight · 0 failed</span>
     
-    <br><a href="/sites/site_a55d249ad6dd/pack.zip" style="color:var(--accent)" title="Every signed record for this site, one manifest, offline verifier">Case pack: Alvarez residence</a>
+    <br><a data-dead="/sites/site_a55d249ad6dd/pack.zip" title="live deployment only — inert in this snapshot" style="color:var(--accent)" title="Every signed record for this site, one manifest, offline verifier">Case pack: Alvarez residence</a>
     <span class="muted">— unzip and open index.html: it verifies every record in the browser, no install</span>
     
-    <br><a href="/integrity" style="color:var(--accent)" title="Chain, journal, custody, coverage — the runtime's self-audit">Integrity posture &rarr;</a>
+    <br><a href="demo-integrity.html" style="color:var(--accent)" title="Chain, journal, custody, coverage — the runtime's self-audit">Integrity posture &rarr;</a>
     <br><a href="/verify-pack" style="color:var(--accent)" title="The same verifier every pack embeds — drop a .zip; nothing uploads">Verify a pack in-browser</a>
     <br><button id="refresh-toggle" class="muted" style="background:none;border:0;padding:6px 2px;cursor:pointer;text-decoration:underline;font-size:13px;min-height:24px">Pause auto-refresh</button>
   </div>
@@ -112,66 +112,61 @@
   <tbody>
   
   <tr class="link" tabindex="0"
-      onclick="location.href='/visits/vis_70e42116a4cf'"
-      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();location.href='/visits/vis_70e42116a4cf'}">
+      onclick="location.href='demo-visit.html'"
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();location.href='demo-visit.html'}">
     <td><span class="flag critical">urgent</span></td>
-    <td><a href="/visits/vis_70e42116a4cf">Oct 2, 11:31 AM</a>
-      <a href="/sites/site_a55d249ad6dd" class="muted small" onclick="event.stopPropagation()"> — Alvarez residence</a>
+    <td><a href="demo-visit.html">Oct 2, 11:31 AM</a>
+      <a data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot" class="muted small" onclick="event.stopPropagation()"> — Alvarez residence</a>
       <span class="muted small"> · Maria Chen</span></td>
     <td>worker disputes this record</td>
     <td class="muted small">Open record &rarr;</td>
   </tr>
   
   <tr class="link" tabindex="0"
-      onclick="location.href='/visits/vis_5b7958271e00'"
-      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();location.href='/visits/vis_5b7958271e00'}">
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();}">
     <td><span class="flag warn">needs review</span></td>
-    <td><a href="/visits/vis_5b7958271e00">Oct 7, 1:46 PM</a>
-      <a href="/sites/site_a55d249ad6dd" class="muted small" onclick="event.stopPropagation()"> — Alvarez residence</a>
+    <td><a data-dead="/visits/vis_5b7958271e00" title="live deployment only — inert in this snapshot">Oct 7, 1:46 PM</a>
+      <a data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot" class="muted small" onclick="event.stopPropagation()"> — Alvarez residence</a>
       </td>
     <td>observation matched no schedule</td>
     <td class="muted small">Open record &rarr;</td>
   </tr>
   
   <tr class="link" tabindex="0"
-      onclick="location.href='/visits/vis_3feab06a831b'"
-      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();location.href='/visits/vis_3feab06a831b'}">
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();}">
     <td><span class="flag warn">needs review</span></td>
-    <td><a href="/visits/vis_3feab06a831b">Oct 6, 11:06 AM</a>
-      <a href="/sites/site_a55d249ad6dd" class="muted small" onclick="event.stopPropagation()"> — Alvarez residence</a>
+    <td><a data-dead="/visits/vis_3feab06a831b" title="live deployment only — inert in this snapshot">Oct 6, 11:06 AM</a>
+      <a data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot" class="muted small" onclick="event.stopPropagation()"> — Alvarez residence</a>
       <span class="muted small"> · Maria Chen</span></td>
     <td>1 review note(s): observed_interval_short</td>
     <td class="muted small">Open record &rarr;</td>
   </tr>
   
   <tr class="link" tabindex="0"
-      onclick="location.href='/visits/vis_32a86d6fdbe4'"
-      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();location.href='/visits/vis_32a86d6fdbe4'}">
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();}">
     <td><span class="flag warn">needs review</span></td>
-    <td><a href="/visits/vis_32a86d6fdbe4">Oct 9, 11:06 AM</a>
-      <a href="/sites/site_a55d249ad6dd" class="muted small" onclick="event.stopPropagation()"> — Alvarez residence</a>
+    <td><a data-dead="/visits/vis_32a86d6fdbe4" title="live deployment only — inert in this snapshot">Oct 9, 11:06 AM</a>
+      <a data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot" class="muted small" onclick="event.stopPropagation()"> — Alvarez residence</a>
       </td>
     <td>1 review note(s): no_observation</td>
     <td class="muted small">Open record &rarr;</td>
   </tr>
   
   <tr class="link" tabindex="0"
-      onclick="location.href='/visits/vis_1071d3b1997a'"
-      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();location.href='/visits/vis_1071d3b1997a'}">
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();}">
     <td><span class="flag warn">needs review</span></td>
-    <td><a href="/visits/vis_1071d3b1997a">Oct 4, 11:06 AM</a>
-      <a href="/sites/site_a55d249ad6dd" class="muted small" onclick="event.stopPropagation()"> — Alvarez residence</a>
+    <td><a data-dead="/visits/vis_1071d3b1997a" title="live deployment only — inert in this snapshot">Oct 4, 11:06 AM</a>
+      <a data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot" class="muted small" onclick="event.stopPropagation()"> — Alvarez residence</a>
       <span class="muted small"> · Maria Chen</span></td>
     <td>1 review note(s): observed_interval_short</td>
     <td class="muted small">Open record &rarr;</td>
   </tr>
   
   <tr class="link" tabindex="0"
-      onclick="location.href='/visits/vis_6a79c8145c2e'"
-      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();location.href='/visits/vis_6a79c8145c2e'}">
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();}">
     <td><span class="flag warn">needs review</span></td>
-    <td><a href="/visits/vis_6a79c8145c2e">Oct 3, 11:06 AM</a>
-      <a href="/sites/site_a55d249ad6dd" class="muted small" onclick="event.stopPropagation()"> — Alvarez residence</a>
+    <td><a data-dead="/visits/vis_6a79c8145c2e" title="live deployment only — inert in this snapshot">Oct 3, 11:06 AM</a>
+      <a data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot" class="muted small" onclick="event.stopPropagation()"> — Alvarez residence</a>
       <span class="muted small"> · Maria Chen</span></td>
     <td>1 review note(s): observed_interval_short</td>
     <td class="muted small">Open record &rarr;</td>
@@ -239,36 +234,36 @@ document.getElementById("triage-run").addEventListener("click", async () => {
   <tbody>
   
   <tr>
-    <td><a href="/sites/site_a55d249ad6dd" style="color:var(--accent)">Alvarez residence</a></td>
+    <td><a data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot" style="color:var(--accent)">Alvarez residence</a></td>
     <td>Maria Chen</td>
     <td>Oct 8, 11:06 AM</td>
     <td>Oct 8, 12:36 PM</td>
     <td>90 min</td>
-    <td><a href="/visits/vis_ac04986742ad" style="text-decoration:none"><span class="pill closed">closed</span></a></td>
+    <td><a data-dead="/visits/vis_ac04986742ad" title="live deployment only — inert in this snapshot" style="text-decoration:none"><span class="pill closed">closed</span></a></td>
     <td>
       <span class="muted">Not requested</span></td>
     <td><span class="flag warn">departure_unconfirmed</span></td>
   </tr>
   
   <tr>
-    <td><a href="/sites/site_a55d249ad6dd" style="color:var(--accent)">Alvarez residence</a></td>
+    <td><a data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot" style="color:var(--accent)">Alvarez residence</a></td>
     <td>Unknown</td>
     <td>Oct 7, 1:46 PM</td>
     <td>Oct 7, 3:16 PM</td>
     <td>90 min</td>
-    <td><a href="/visits/vis_5b7958271e00" style="text-decoration:none"><span class="pill closed">closed</span></a></td>
+    <td><a data-dead="/visits/vis_5b7958271e00" title="live deployment only — inert in this snapshot" style="text-decoration:none"><span class="pill closed">closed</span></a></td>
     <td>
       <span class="muted">Not requested</span></td>
     <td><span class="flag warn">unscheduled</span><span class="flag warn">departure_unconfirmed</span></td>
   </tr>
   
   <tr>
-    <td><a href="/sites/site_a55d249ad6dd" style="color:var(--accent)">Alvarez residence</a></td>
+    <td><a data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot" style="color:var(--accent)">Alvarez residence</a></td>
     <td>Unknown</td>
     <td>None received</td>
     <td>None received</td>
     <td>Unknown</td>
-    <td><a href="/visits/vis_f34460136366" style="text-decoration:none"><span class="pill no_observation">no observation</span></a></td>
+    <td><a data-dead="/visits/vis_f34460136366" title="live deployment only — inert in this snapshot" style="text-decoration:none"><span class="pill no_observation">no observation</span></a></td>
     <td>
       <span class="ok">Resolved</span>
       </td>
@@ -276,60 +271,60 @@ document.getElementById("triage-run").addEventListener("click", async () => {
   </tr>
   
   <tr>
-    <td><a href="/sites/site_a55d249ad6dd" style="color:var(--accent)">Alvarez residence</a></td>
+    <td><a data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot" style="color:var(--accent)">Alvarez residence</a></td>
     <td>Maria Chen</td>
     <td>Oct 6, 11:06 AM</td>
     <td>Oct 6, 11:06 AM</td>
     <td>1 min</td>
-    <td><a href="/visits/vis_3feab06a831b" style="text-decoration:none"><span class="pill closed">closed</span></a></td>
+    <td><a data-dead="/visits/vis_3feab06a831b" title="live deployment only — inert in this snapshot" style="text-decoration:none"><span class="pill closed">closed</span></a></td>
     <td>
       <span class="muted">Not requested</span></td>
     <td><span class="flag warn">departure_unconfirmed</span><span class="flag warn">observed_interval_short</span></td>
   </tr>
   
   <tr>
-    <td><a href="/sites/site_a55d249ad6dd" style="color:var(--accent)">Alvarez residence</a></td>
+    <td><a data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot" style="color:var(--accent)">Alvarez residence</a></td>
     <td>Unknown</td>
     <td>None received</td>
     <td>None received</td>
     <td>Unknown</td>
-    <td><a href="/visits/vis_32a86d6fdbe4" style="text-decoration:none"><span class="pill no_observation">no observation</span></a></td>
+    <td><a data-dead="/visits/vis_32a86d6fdbe4" title="live deployment only — inert in this snapshot" style="text-decoration:none"><span class="pill no_observation">no observation</span></a></td>
     <td>
       <span class="muted">Not requested</span></td>
     <td><span class="flag warn">no_observation</span></td>
   </tr>
   
   <tr>
-    <td><a href="/sites/site_a55d249ad6dd" style="color:var(--accent)">Alvarez residence</a></td>
+    <td><a data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot" style="color:var(--accent)">Alvarez residence</a></td>
     <td>Maria Chen</td>
     <td>Oct 4, 11:06 AM</td>
     <td>Oct 4, 11:06 AM</td>
     <td>1 min</td>
-    <td><a href="/visits/vis_1071d3b1997a" style="text-decoration:none"><span class="pill closed">closed</span></a></td>
+    <td><a data-dead="/visits/vis_1071d3b1997a" title="live deployment only — inert in this snapshot" style="text-decoration:none"><span class="pill closed">closed</span></a></td>
     <td>
       <span class="muted">Not requested</span></td>
     <td><span class="flag warn">departure_unconfirmed</span><span class="flag warn">observed_interval_short</span></td>
   </tr>
   
   <tr>
-    <td><a href="/sites/site_a55d249ad6dd" style="color:var(--accent)">Alvarez residence</a></td>
+    <td><a data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot" style="color:var(--accent)">Alvarez residence</a></td>
     <td>Maria Chen</td>
     <td>Oct 3, 11:06 AM</td>
     <td>Oct 3, 11:06 AM</td>
     <td>1 min</td>
-    <td><a href="/visits/vis_6a79c8145c2e" style="text-decoration:none"><span class="pill closed">closed</span></a></td>
+    <td><a data-dead="/visits/vis_6a79c8145c2e" title="live deployment only — inert in this snapshot" style="text-decoration:none"><span class="pill closed">closed</span></a></td>
     <td>
       <span class="muted">Not requested</span></td>
     <td><span class="flag warn">departure_unconfirmed</span><span class="flag warn">observed_interval_short</span></td>
   </tr>
   
   <tr>
-    <td><a href="/sites/site_a55d249ad6dd" style="color:var(--accent)">Alvarez residence</a></td>
+    <td><a data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot" style="color:var(--accent)">Alvarez residence</a></td>
     <td>Maria Chen</td>
     <td>Oct 2, 11:31 AM</td>
     <td>Oct 2, 12:36 PM</td>
     <td>65 min</td>
-    <td><a href="/visits/vis_70e42116a4cf" style="text-decoration:none"><span class="pill closed">closed</span></a></td>
+    <td><a href="demo-visit.html" style="text-decoration:none"><span class="pill closed">closed</span></a></td>
     <td>
       <span class="bad">Contested</span>
       </td>
@@ -337,12 +332,12 @@ document.getElementById("triage-run").addEventListener("click", async () => {
   </tr>
   
   <tr>
-    <td><a href="/sites/site_a55d249ad6dd" style="color:var(--accent)">Alvarez residence</a></td>
+    <td><a data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot" style="color:var(--accent)">Alvarez residence</a></td>
     <td>Maria Chen</td>
     <td>Oct 1, 11:06 AM</td>
     <td>Oct 1, 12:36 PM</td>
     <td>90 min</td>
-    <td><a href="/visits/vis_8243499a3a78" style="text-decoration:none"><span class="pill closed">closed</span></a></td>
+    <td><a data-dead="/visits/vis_8243499a3a78" title="live deployment only — inert in this snapshot" style="text-decoration:none"><span class="pill closed">closed</span></a></td>
     <td>
       <span class="muted">Not requested</span></td>
     <td><span class="flag warn">departure_unconfirmed</span></td>

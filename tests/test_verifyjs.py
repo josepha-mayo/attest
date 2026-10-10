@@ -458,6 +458,18 @@ def test_hosted_verifier_copy_stays_in_sync():
     )
 
 
+def test_verifier_page_accessible_landmarks():
+    # The hosted + embedded verifier is a judge surface: landmark, noscript
+    # path, named output region, and a keyboard-visible verdict target.
+    for marker in (
+        '<main id="main">',
+        "<noscript>",
+        'id="out" role="status" aria-live="polite"',
+        'cp.className="copybtn"',
+    ):
+        assert marker in VERIFY_HTML, marker
+
+
 def test_live_sweep_receipt_artifact_verifies():
     """docs/live-sweep-receipt.json is the signed verify-live report from the
     real api.amazonvision.com run — it must verify offline under its embedded

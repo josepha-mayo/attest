@@ -396,18 +396,18 @@
 <h2>Review and corrections</h2>
 <div class="card">
 <p class="ok">original and 3 append-only reviews verified (integrity only)</p>
-<a class="btn secondary" href="/visits/vis_70e42116a4cf/bundle.json">Export original + review chain</a>
-<a class="btn secondary" href="/visits/vis_70e42116a4cf/pack.zip" title="bundle + media + offline verifier in one zip">Download dispute pack</a>
-<a class="btn secondary" href="/visits/vis_70e42116a4cf/pack.zip?redact_media=1" title="media withheld, signed digests kept">Privacy export</a>
+<a class="btn secondary" data-dead="/visits/vis_70e42116a4cf/bundle.json" title="live deployment only — inert in this snapshot">Export original + review chain</a>
+<a class="btn secondary" data-dead="/visits/vis_70e42116a4cf/pack.zip" title="live deployment only — inert in this snapshot" title="bundle + media + offline verifier in one zip">Download dispute pack</a>
+<a class="btn secondary" data-dead="/visits/vis_70e42116a4cf/pack.zip?redact_media=1" title="live deployment only — inert in this snapshot" title="media withheld, signed digests kept">Privacy export</a>
 <a class="btn secondary" href="demo-visit-brief.html" title="one printable page for a mediator or filing — anchors and verification steps, no media bytes">Printable brief</a>
 
-<button class="btn secondary" id="issue-review">Request worker's account</button>
+<button class="btn secondary" disabled title="live deployment only — inert in this snapshot" id="issue-review">Request worker's account</button>
 <a id="worker-review-link" style="display:block;overflow-wrap:anywhere;color:var(--accent)"></a>
 <img id="worker-review-qr" alt="QR code for the worker review link" style="display:none;width:120px;height:120px;margin-top:8px;border:1px solid var(--line);border-radius:8px">
 <p id="review-link-status" role="status" class="small muted"></p>
 
-<button class="btn secondary" id="issue-family">Share the household view</button>
-<button class="btn secondary" id="revoke-family" title="Kills the existing family link — anyone holding it loses access immediately">Revoke family link</button>
+<button class="btn secondary" disabled title="live deployment only — inert in this snapshot" id="issue-family">Share the household view</button>
+<button class="btn secondary" disabled title="live deployment only — inert in this snapshot" id="revoke-family" title="Kills the existing family link — anyone holding it loses access immediately">Revoke family link</button>
 <a id="family-view-link" style="display:block;overflow-wrap:anywhere;color:var(--accent)"></a>
 <a id="family-mailto" class="muted small" style="display:none" href="#">Send by email</a>
 <img id="family-view-qr" alt="QR code for the household view link" style="display:none;width:120px;height:120px;margin-top:8px;border:1px solid var(--line);border-radius:8px">
@@ -451,7 +451,7 @@
 <form id="coordinator-review" class="card" style="margin-top:16px">
 <h2>Append coordinator statement</h2>
 <label>Assessment
-<select name="decision" required>
+<select disabled name="decision" required>
 
 <option value="inconclusive" >Inconclusive — more context needed</option>
 
@@ -463,35 +463,35 @@
 
 </select></label>
 <label>Reason code <span class="muted">(optional — the coded explanation you are stating; never a verified cause)</span>
-<select name="reason_code">
+<select disabled name="reason_code">
 <option value="">No coded reason — statement carries it</option>
 <option value="device_fault" >device_fault — Camera or sensor faulted — channel interruption recorded</option><option value="worker_error" >worker_error — Worker forgot the check-in step or used it wrong</option><option value="service_outside_home" >service_outside_home — Service happened away from the camera&#39;s view</option><option value="no_electronic_confirmation" >no_electronic_confirmation — No device confirmation exists — unexplained gap</option><option value="participant_unavailable" >participant_unavailable — Household wasn&#39;t home or didn&#39;t answer</option><option value="schedule_difference" >schedule_difference — Service or timing differed from the plan</option><option value="authorization_gap" >authorization_gap — Plan/authorization coverage lapsed or ended</option><option value="subscription_lapse" >subscription_lapse — Ring subscription ended mid-window</option><option value="mobile_or_network_issue" >mobile_or_network_issue — Worker&#39;s phone/app or the home network failed</option><option value="worker_unavailable" >worker_unavailable — Worker was unavailable or reassigned</option><option value="participant_refused" >participant_refused — Household declined the visit or the device</option><option value="weather_or_disaster" >weather_or_disaster — Weather/emergency prevented the visit</option><option value="other" >other — Other — the statement carries the detail</option>
 </select></label>
-<label>Statement <textarea name="statement" rows="4" maxlength="2000" required placeholder="Explain what you know and what should be corrected."></textarea></label>
+<label>Statement <textarea disabled name="statement" rows="4" maxlength="2000" required placeholder="Explain what you know and what should be corrected."></textarea></label>
 <div class="row">
-<label>Reported start (optional, include UTC offset)<input name="reported_start" value="" placeholder="2026-09-15T09:00:00-07:00"></label>
-<label>Reported end (optional, include UTC offset)<input name="reported_end" value="" placeholder="2026-09-15T10:30:00-07:00"></label>
+<label>Reported start (optional, include UTC offset)<input disabled name="reported_start" value="" placeholder="2026-09-15T09:00:00-07:00"></label>
+<label>Reported end (optional, include UTC offset)<input disabled name="reported_end" value="" placeholder="2026-09-15T10:30:00-07:00"></label>
 </div>
 <p class="muted small">Supply both times or neither. These are reported times, not independently measured work duration. Original observations will not change.</p>
-<button class="btn">Append signed review</button>
+<button disabled class="btn">Append signed review</button>
 <p id="review-status" role="status"></p>
 </form>
 <form id="coordinator-resolve" class="card" style="margin-top:16px">
 <h2>Conclude the record</h2>
 <p class="muted small">A resolution appends the coordinator's signed conclusion. It never edits or removes the worker's statement — a later worker statement re-opens the record.</p>
 <label>Conclusion
-<select name="outcome" required>
+<select disabled name="outcome" required>
 <option value="record_upheld">Record upheld — the signed record stands as the conclusion</option>
 <option value="account_accepted">Worker's account accepted — their statement is the operative conclusion</option>
 <option value="inconclusive">Inconclusive — the ambiguity itself is the conclusion</option>
 </select></label>
 <label>Reason <span class="muted">(coded — classifies your explanation, never asserts what happened)</span>
-<select name="reason_code">
+<select disabled name="reason_code">
 <option value="">No coded reason — statement carries it</option>
 <option value="device_fault">device_fault — Camera or sensor faulted — channel interruption recorded</option><option value="worker_error">worker_error — Worker forgot the check-in step or used it wrong</option><option value="service_outside_home">service_outside_home — Service happened away from the camera&#39;s view</option><option value="no_electronic_confirmation">no_electronic_confirmation — No device confirmation exists — unexplained gap</option><option value="participant_unavailable">participant_unavailable — Household wasn&#39;t home or didn&#39;t answer</option><option value="schedule_difference">schedule_difference — Service or timing differed from the plan</option><option value="authorization_gap">authorization_gap — Plan/authorization coverage lapsed or ended</option><option value="subscription_lapse">subscription_lapse — Ring subscription ended mid-window</option><option value="mobile_or_network_issue">mobile_or_network_issue — Worker&#39;s phone/app or the home network failed</option><option value="worker_unavailable">worker_unavailable — Worker was unavailable or reassigned</option><option value="participant_refused">participant_refused — Household declined the visit or the device</option><option value="weather_or_disaster">weather_or_disaster — Weather/emergency prevented the visit</option><option value="other">other — Other — the statement carries the detail</option>
 </select></label>
-<label>Statement <textarea name="statement" rows="4" maxlength="2000" required placeholder="Why this conclusion, and what evidence weighed on it."></textarea></label>
-<button class="btn">Sign conclusion</button>
+<label>Statement <textarea disabled name="statement" rows="4" maxlength="2000" required placeholder="Why this conclusion, and what evidence weighed on it."></textarea></label>
+<button disabled class="btn">Sign conclusion</button>
 <p id="resolve-status" role="status"></p>
 </form>
 <script>

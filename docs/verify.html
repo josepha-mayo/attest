@@ -24,12 +24,21 @@
    border-radius:10px;padding:.7rem 1rem;margin:.9rem 0;animation:stampin .28s ease-out}
  .row.stamp.ok{border-color:#146c2e;background:#f0fdf4}
  .row.stamp.bad{border-color:#b3261e;background:#fef2f2}
+ .copybtn{display:block;margin-top:.6rem;font:inherit;font-size:.82rem;
+   padding:.3rem .7rem;border:1px solid #999;border-radius:6px;
+   background:#fff;color:#1c1c1e;cursor:pointer}
+ .copybtn:hover{background:#f4f4f5}
  @keyframes stampin{from{transform:scale(1.5);opacity:0}to{transform:scale(1);opacity:1}}
  @media (prefers-reduced-motion:reduce){.row.stamp{animation:none}}
  small{color:#666}
 </style>
+<meta property="og:image"
+  content="https://josepha-mayo.github.io/attest/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
 </head>
 <body>
+<main id="main">
+<noscript><p>This verifier is dependency-free JavaScript and needs JS enabled. The same pack verifies offline with <code>verify_case.py</code> on a stock Python install, or <code>attest verify</code>.</p></noscript>
 <h1>Attest pack verifier</h1>
 <p>This page verifies an exported Attest pack <strong>in your browser</strong>. Nothing is
 uploaded — all hashing and signature checks run locally, offline. Drop the
@@ -1799,6 +1808,24 @@ async function go(fileList){
     });
     out.innerHTML="<p>verifying "+files.length+" file(s)…</p>";
     out.innerHTML=await verifyFiles(files);
+    try{
+    /* Cite the verdict verbatim — a judge can paste the exact stamp + detail
+       rows into notes or an issue. Text only; the verdict is claims, not a
+       signed artifact itself. Post-render affordances are best-effort: the
+       conformance harness runs this under node with a stub document, and
+       nothing here may corrupt a rendered verdict. */
+    if(typeof navigator!=="undefined"&&navigator.clipboard&&navigator.clipboard.writeText){
+      const cp=document.createElement("button");
+      cp.className="copybtn";cp.textContent="copy verdict";
+      cp.onclick=async()=>{try{
+        await navigator.clipboard.writeText(out.innerText);
+        cp.textContent="copied";setTimeout(()=>cp.textContent="copy verdict",1600);
+      }catch(e){cp.textContent="copy failed";}};
+      out.appendChild(cp);}
+    /* Move focus+scroll to the verdict — the stamp lands last and a keyboard
+       user at the button shouldn't have to hunt for it. */
+    if(out.setAttribute){out.setAttribute("tabindex","-1");if(out.focus)out.focus();}
+    }catch(e){/* non-DOM host — the verdict above already stands */}
     /* A pack with a validated signed head can answer the fork question —
        reveal the live cross-check; a checkpoint-less pack cannot. */
     const lw=document.getElementById("live-wrap");
@@ -1883,5 +1910,6 @@ if(location.protocol.indexOf("http")===0){
   }).catch(()=>{});
 }
 </script>
+</main>
 </body>
 </html>

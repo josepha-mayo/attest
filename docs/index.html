@@ -7,6 +7,8 @@
 <meta property="og:title" content="Attest — records, not verdicts">
 <meta property="og:description" content="Verify a signed evidence pack in your browser — then watch the tampered copies fail. Records, not verdicts.">
 <meta property="og:type" content="website">
+<meta property="og:image" content="https://josepha-mayo.github.io/attest/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1l6 2v5c0 3.5-2.6 6-6 7-3.4-1-6-3.5-6-7V3z' fill='%231c1c1e'/%3E%3Cpath d='M4.6 8.2l2.2 2.2 4.6-4.9' stroke='%23fff' stroke-width='1.5' fill='none'/%3E%3C/svg%3E">
 <title>Attest — records, not verdicts</title>
 <style>
@@ -46,6 +48,7 @@ summary{cursor:pointer;color:#2563eb}
 </style>
 </head>
 <body>
+<main>
 <h1>Attest</h1>
 <p class="tag">Tamper-evident visit records for home services, built on the Ring Partner API —
 what the devices observed, what the worker reported, what a human concluded.
@@ -99,7 +102,7 @@ Deep link — lands on a red FAILED stamp.</small>
 </a>
 </div>
 
-<div class="term" aria-label="Terminal demo of the CLI flow">
+<div class="term" role="region" aria-label="Terminal demo of the CLI flow">
   <div class="bar" aria-hidden="true"><i></i><i></i><i></i></div>
   <pre id="termbody"></pre>
 </div>
@@ -258,7 +261,7 @@ emits the same evidence document.</p>
 re-verifies a posted pack in AWS using the project's pinned verifier, never the
 pack's embedded script — data and code come from different parties:</li>
 </ul>
-<div class="term" aria-label="Lambda invoke transcript">
+<div class="term" role="region" aria-label="Lambda invoke transcript">
   <div class="bar" aria-hidden="true"><i></i><i></i><i></i></div>
   <pre style="min-height:0"><span class="p">$ aws lambda invoke --function-name attest-verify-pack \
     --payload fileb://pack.json out.json</span>
@@ -386,5 +389,6 @@ disputes, not an attendance-verification or EVV product. Source:
 emulator: <a href="https://github.com/josepha-mayo/ring-sandbox">ring-sandbox</a> ·
 judging: <a href="https://github.com/josepha-mayo/attest/blob/main/JUDGE.md">JUDGE.md</a>
 (the ten-minute path + scoring map).</p>
+</main>
 </body>
 </html>
