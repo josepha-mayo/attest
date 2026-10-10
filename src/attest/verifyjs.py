@@ -35,8 +35,6 @@ _HEAD = """<!doctype html>
 <meta property="og:description" content="Drop a signed evidence pack; the browser runs Ed25519
   and Merkle checks locally. Records, not verdicts.">
 <meta property="og:type" content="website">
-<meta property="og:image" content="https://josepha-mayo.github.io/attest/og-image.png">
-<meta name="theme-color" content="#146c2e">
 <link rel="icon" href="{_FAVICON}">
 <title>Attest pack verifier</title>
 <style>
@@ -2327,6 +2325,7 @@ _OG = (
     '<meta property="og:image"\n'
     '  content="https://josepha-mayo.github.io/attest/og-image.png">\n'
     '<meta name="twitter:card" content="summary_large_image">\n'
+    '<meta name="theme-color" content="#146c2e">\n'
 )
 
 # Packs' index.html shares _HEAD and must stay strictly offline — no external
