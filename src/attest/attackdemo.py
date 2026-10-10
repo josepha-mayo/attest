@@ -553,7 +553,7 @@ def run(store: Store, media_root: Path | None = None, inbox=None, engine=None) -
             "SELECT id, visit_id, body FROM reviews ORDER BY revision DESC"
         ).fetchall():
             parsed = json.loads(r[2])
-            rv = parsed.get("payload", {}).get("review")
+            rv = parsed.get("receipt", {}).get("payload", {}).get("review")
             if isinstance(rv, dict) and rv.get("kind") == "resolution":
                 row = (r[0], r[1], r[2])
                 break
@@ -561,7 +561,7 @@ def run(store: Store, media_root: Path | None = None, inbox=None, engine=None) -
             return None, "no signed resolution to forge"
         review_id, visit_id, body = row
         forged = json.loads(body)
-        rv = forged["payload"].get("review", {})
+        rv = forged["receipt"]["payload"].get("review", {})
         rv["reason_code"] = (
             "participant_refused" if rv.get("reason_code") != "participant_refused" else "other"
         )

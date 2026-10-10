@@ -47,6 +47,16 @@ def test_battery_catches_everything_and_leaves_store_unchanged(store, seeded, en
         assert r["caught"] is not False, f"{r['attack']} went undetected: {r['detail']}"
 
 
+def test_battery_catches_forged_resolution_reason(store, seeded, engine, tmp_path):
+    """The reason-code forge must actually fire when a signed resolution
+    exists — the reviews row wraps the receipt, so a probe that reads
+    payload.review directly off the entry body can only ever skip."""
+    out = run(store, tmp_path / "media", engine=engine)
+    hit = next(r for r in out["results"] if "reason code" in r["attack"])
+    assert hit["caught"] is True, hit["detail"]
+    assert out["unchanged"], out
+
+
 def test_battery_catches_forged_pack_verifier(store, seeded, engine, tmp_path):
     """The flagship pack attack — a doctored always-green verify.html inside a
     genuine pack — fails on the issuer-signed tooling pin, never on membership:

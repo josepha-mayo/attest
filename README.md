@@ -29,7 +29,7 @@ And where incumbent EVV tracks *the worker's phone* — GPS at check-in, spoofab
 3. [Deep link to the signed live sweep](https://josepha-mayo.github.io/attest/verify.html#live-sweep-receipt) → the `verify-live --sign` report from the real `api.amazonvision.com` run, auto-verified.
 4. `attest demo` → open the printed dashboard → the contested visit shows the source-divergence callout and the worker's signed dispute.
 5. Download `pack.zip`, unzip, open `index.html` — every record self-verifies from `file://`.
-6. `attest attack-demo` — twenty-one real tamper attempts against the store: nineteen applicable on the demo store, all caught and rolled back (two need resolution/media rows the store lacks — reported as skips). `attest status` for the self-audit.
+6. `attest attack-demo` — twenty-one real tamper attempts against the store — all twenty-one applicable on the demo store, all caught and rolled back (no skips: it carries signed resolutions and media to attack). `attest status` for the self-audit.
 
 </details>
 
