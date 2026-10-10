@@ -35,6 +35,8 @@ _HEAD = """<!doctype html>
 <meta property="og:description" content="Drop a signed evidence pack; the browser runs Ed25519
   and Merkle checks locally. Records, not verdicts.">
 <meta property="og:type" content="website">
+<meta property="og:image" content="https://josepha-mayo.github.io/attest/og-image.png">
+<meta name="theme-color" content="#146c2e">
 <link rel="icon" href="{_FAVICON}">
 <title>Attest pack verifier</title>
 <style>
@@ -2170,7 +2172,7 @@ if(location.protocol.indexOf("http")===0){
         const names=Object.keys(arts);
         if(names.length>512){say("bad","manifest lists "+names.length+
           " artifacts — beyond the sweep bound");return;}
-        /* Sweep 8-at-a-time — 127 serial fetches is seconds of silence;
+        /* Sweep 8-at-a-time — a hundred-plus serial fetches is seconds of silence;
            results collect in deterministic order before verdict lines emit. */
         const results=[];
         let checked=0,total=0,idx=0;
@@ -2242,7 +2244,8 @@ document too (from <code>/.well-known/attest-issuer.json</code> or
 signed lifecycle bridges pre-rotation exports.</small></div>
 <p><small>New here? <a href="index.html">The story</a> explains why the
 record exists. New to the math? <a href="anatomy.html">Anatomy of a signed
-receipt</a> decomposes one field-by-field — or take the <a
+receipt</a> decomposes one field-by-field, <a href="pipeline.svg">the seven
+gates</a> show which check kills which attack — or take the <a
 href="tour.html">two-minute tour</a> of every feature on this page.</small></p>
 <p id="trysample-wrap" hidden><button id="trysample" type="button">Verify the bundled
 sample pack — one click, fetched from this site</button></p>

@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://josepha-mayo.github.io/attest/sitemap.xml

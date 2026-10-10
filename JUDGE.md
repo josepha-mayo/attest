@@ -45,7 +45,7 @@ self-verifying evidence record. This is the fastest honest path through it.
    stronger path (the pack's own `verify_case.py`). One click further:
    [the whole site attests itself](https://josepha-mayo.github.io/attest/verify.html#verify-site)
    — `site-manifest.json` is a signed receipt pinning every shipped artifact's
-   sha256; the page verifies the manifest, then hashes all 127 files against
+   sha256; the page verifies the manifest, then hashes all 130 files against
    it: **SITE VERIFIED** or **SITE TAMPER**, drifted files named.
 6. [Signed real-API sweep](https://josepha-mayo.github.io/attest/verify.html#live-sweep-receipt)
    — the `verify-live --sign` report from the actual `api.amazonvision.com`

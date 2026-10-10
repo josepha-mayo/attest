@@ -1,0 +1,52 @@
+<svg viewBox="0 0 672 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The seven verification gates and which attacks die at each">
+<style>text{font-family:system-ui,sans-serif}.g{font-size:13px;font-weight:700;fill:#1c1c1e}.d{font-size:11.5px;fill:#6b6b70}.a{font-size:10.5px;fill:#b3261e;font-weight:600}.n{font-size:13px;font-weight:800;fill:#fff}</style>
+<text class="g" x="20" y="24" font-size="14">Every verify runs every gate — the attack determines which one kills it</text>
+<rect x="20" y="44" width="632" height="54" rx="9" fill="#fff" stroke="#d4d4d8"/>
+<circle cx="42" cy="71" r="13" fill="#2563eb"/><text class="n" x="42" y="75.5" text-anchor="middle">1</text>
+<text class="g" x="64" y="66">parse &amp; unpack</text>
+<text class="d" x="64" y="83">zip members parse · names bounded · no path tricks</text>
+<a href="vectors.html"><text class="a" x="640" y="58" text-anchor="end" text-decoration="underline">malformed-grammar vectors ✗</text></a>
+<line x1="346" y1="98" x2="346" y2="106" stroke="#94a3b8" stroke-width="1.5"/>
+<rect x="20" y="106" width="632" height="54" rx="9" fill="#fff" stroke="#d4d4d8"/>
+<circle cx="42" cy="133" r="13" fill="#2563eb"/><text class="n" x="42" y="137.5" text-anchor="middle">2</text>
+<text class="g" x="64" y="128">signed manifest</text>
+<text class="d" x="64" y="145">manifest.json verifies · every member committed to · nothing extra</text>
+<a href="verify.html#sample-pack-attack-smuggled-file"><text class="a" x="640" y="120" text-anchor="end" text-decoration="underline">smuggled file ✗</text></a>
+<a href="verify.html#sample-pack-attack-missing-record"><text class="a" x="640" y="133" text-anchor="end" text-decoration="underline">deleted record ✗</text></a>
+<line x1="346" y1="160" x2="346" y2="168" stroke="#94a3b8" stroke-width="1.5"/>
+<rect x="20" y="168" width="632" height="54" rx="9" fill="#fff" stroke="#d4d4d8"/>
+<circle cx="42" cy="195" r="13" fill="#2563eb"/><text class="n" x="42" y="199.5" text-anchor="middle">3</text>
+<text class="g" x="64" y="190">receipt math</text>
+<text class="d" x="64" y="207">Ed25519 over sha256(canonical payload) · envelope agrees with payload</text>
+<a href="verify.html#sample-pack-tampered"><text class="a" x="640" y="182" text-anchor="end" text-decoration="underline">doctored field ✗</text></a>
+<a href="vectors.html"><text class="a" x="640" y="195" text-anchor="end" text-decoration="underline">re-sign under another key ✗</text></a>
+<line x1="346" y1="222" x2="346" y2="230" stroke="#94a3b8" stroke-width="1.5"/>
+<rect x="20" y="230" width="632" height="54" rx="9" fill="#fff" stroke="#d4d4d8"/>
+<circle cx="42" cy="257" r="13" fill="#2563eb"/><text class="n" x="42" y="261.5" text-anchor="middle">4</text>
+<text class="g" x="64" y="252">hash chain</text>
+<text class="d" x="64" y="269">each prev_hash is the previous receipt's payload hash — order is proof</text>
+<a href="vectors.html"><text class="a" x="640" y="244" text-anchor="end" text-decoration="underline">reorder / insert / delete ✗</text></a>
+<line x1="346" y1="284" x2="346" y2="292" stroke="#94a3b8" stroke-width="1.5"/>
+<rect x="20" y="292" width="632" height="54" rx="9" fill="#fff" stroke="#d4d4d8"/>
+<circle cx="42" cy="319" r="13" fill="#2563eb"/><text class="n" x="42" y="323.5" text-anchor="middle">5</text>
+<text class="g" x="64" y="314">transparency log</text>
+<text class="d" x="64" y="331">RFC 6962 inclusion proofs under a cosigned tree head</text>
+<a href="vectors.html"><text class="a" x="640" y="306" text-anchor="end" text-decoration="underline">grafted receipt ✗</text></a>
+<a href="verify.html#vectors/fail-missing-log-proof"><text class="a" x="640" y="319" text-anchor="end" text-decoration="underline">missing proof ✗</text></a>
+<a href="verify.html#vectors/fail-oversize-tree-size"><text class="a" x="640" y="332" text-anchor="end" text-decoration="underline">2⁴⁰ tree_size ✗</text></a>
+<line x1="346" y1="346" x2="346" y2="354" stroke="#94a3b8" stroke-width="1.5"/>
+<rect x="20" y="354" width="632" height="54" rx="9" fill="#fff" stroke="#d4d4d8"/>
+<circle cx="42" cy="381" r="13" fill="#2563eb"/><text class="n" x="42" y="385.5" text-anchor="middle">6</text>
+<text class="g" x="64" y="376">key lifecycle</text>
+<text class="d" x="64" y="393">rotation pivots consented · revoked-key windows annotated, not erased</text>
+<a href="verify.html#vectors/fail-orphan-rotation"><text class="a" x="640" y="368" text-anchor="end" text-decoration="underline">orphan pivot ✗</text></a>
+<a href="demo-integrity.html"><text class="a" x="640" y="381" text-anchor="end" text-decoration="underline">suspect window ✗</text></a>
+<line x1="346" y1="408" x2="346" y2="416" stroke="#94a3b8" stroke-width="1.5"/>
+<rect x="20" y="416" width="632" height="54" rx="9" fill="#fff" stroke="#d4d4d8"/>
+<circle cx="42" cy="443" r="13" fill="#2563eb"/><text class="n" x="42" y="447.5" text-anchor="middle">7</text>
+<text class="g" x="64" y="438">tooling &amp; media</text>
+<text class="d" x="64" y="455">verifier_manifest pins the checker's own bytes · media digests match or withheld</text>
+<a href="verify.html#sample-pack-attack-forged-verifier"><text class="a" x="640" y="430" text-anchor="end" text-decoration="underline">forged verifier ✗</text></a>
+<a href="verify.html#vectors/fail-missing-pinned-tool"><text class="a" x="640" y="443" text-anchor="end" text-decoration="underline">missing tool ✗</text></a>
+<text class="d" x="20" y="498">…then the verdict — <tspan fill="#146c2e" font-weight="700">VERIFIED</tspan> only when every gate passed. Two attacks skip honestly where this store has nothing to forge.</text>
+</svg>
