@@ -3711,6 +3711,8 @@ Attest — records, not verdicts. The ten-minute path:
     5. the product face, no install: demo-dashboard.html, demo-visit.html (the
        contested record), demo-household.html (+ -es), demo-integrity.html —
        snapshots of the running app on the same site
+    6. the raw layer: demo-receipts.html — all 58 signed receipts, each a
+       one-click verify.html deep link
 
   With the repo:
     attest demo           # emulator + server + an eight-day story, prints a URL
