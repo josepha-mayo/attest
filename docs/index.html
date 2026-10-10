@@ -51,10 +51,16 @@ summary{cursor:pointer;color:#2563eb}
 what the devices observed, what the worker reported, what a human concluded.
 <strong>Records, not verdicts.</strong></p>
 
-<p>"He said / she said" disputes get resolved from signed evidence instead of memory:
+<p>"He said / she said" disputes stop being memory contests:
 every observation, statement, and conclusion is a separate Ed25519-signed receipt on a
-hash-chained ledger — and the pack you're about to verify carries its own verifier,
-so nobody has to trust this site either.</p>
+hash-chained ledger — disagreements stay on the record, flagged and verbatim, because
+the record never adjudicates. And the pack you're about to verify carries its own
+verifier, so nobody has to trust this site either.</p>
+<p><small>The regulated version of this gap is already a documented failure: New York's
+comptroller found <strong>$14.5B</strong> paid against <strong>82M</strong> personal-care
+visits with no matching record, and Ohio's auditor found <strong>34%</strong> of EVV
+entries manually adjusted — invisibly. Editable records are the problem; Attest makes
+them tamper-evident.</small></p>
 
 <p><small><strong>Ring surface called at runtime:</strong> signed webhooks ·
 Event History · media &amp; snapshots (regional redirect handled) ·
@@ -342,6 +348,19 @@ per-visit signed anchors and deep links, a plain-language tab that prints clean,
 viewer-local times with the signed UTC literal on hover, and a six-element
 Cures Act crosswalk — the federal EVV statute mapped to evidence fields,
 labelled as corroboration, never as submission.</p>
+
+<p><strong>Pin the issuer out-of-band.</strong> This site also publishes the demo
+deployment's signed issuer document:
+<a href=".well-known/attest-issuer.json"><code>attest-issuer.json</code></a>
+— the same document a live deployment serves at its origin well-known.
+Fetch it over an independent transport, then verify against it instead of the
+pack's self-declared key: <code>attest verify pack.zip
+--issuer-url attest-issuer.json</code> (or <code>--issuer attest-issuer.json</code>
+on the stdlib script inside the zip). The signed lifecycle receipts extend
+trust both directions across the rotation — the pack and its trust anchor
+arrive by different surfaces, which is the whole point of pinning. Or see it
+one-click: <a href="verify.html#sample-pack-pinned">verify the sample pack
+pinned to the issuer document this site serves</a>.</p>
 
 <h2>Proof it talks to the real API</h2>
 <p><a href="live-sweep-receipt.json"><code>live-sweep-receipt.json</code></a> is the signed

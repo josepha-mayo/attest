@@ -61,6 +61,9 @@ by the same math</button></p>
 <p id="tryfork-wrap" hidden><button id="tryfork" type="button">Verify the caught fork
 — a signed monitor observation documenting two irreconcilable views of one log,
 proven inside its own signed tree head</button></p>
+<p id="trypin-wrap" hidden><button id="trypin" type="button">Verify the sample pack
+<em>pinned to this site's issuer document</em> — the trust anchor arrives over a
+different surface than the artifact it anchors</button></p>
 <div id="out" role="status" aria-live="polite"></div>
 <div id="live-wrap" hidden>
 <h2>Is this still the log the deployment serves?</h2>
@@ -1854,6 +1857,30 @@ if(location.protocol.indexOf("http")===0){
         document.getElementById(bid).click();
     }).catch(()=>{});
   }
+  /* Out-of-band pin demo: the pack's trust anchor arrives over a different
+     surface than the artifact it anchors — the issuer document this site
+     serves at .well-known/ (attest issuer --out output, hosted as a
+     downloadable because the well-known convention is origin-rooted and
+     project pages can't serve it). Loose .json drops arm the pin, so the
+     two-File batch goes through the ordinary drop path. */
+  fetch(".well-known/attest-issuer.json",{method:"HEAD"}).then(r=>{
+    if(!r.ok)return;
+    document.getElementById("trypin-wrap").hidden=false;
+    document.getElementById("trypin").onclick=async()=>{
+      try{
+        history.replaceState(null,"",location.pathname+"#sample-pack-pinned");
+        const pk=await(await fetch("sample-pack.zip")).arrayBuffer();
+        const dc=await(await fetch(".well-known/attest-issuer.json")).text();
+        go([new File([pk],"sample-pack.zip"),
+            new File([dc],"attest-issuer.json")]);
+      }catch(e){
+        document.getElementById("out").innerHTML=
+          "<div class='row bad'>sample fetch failed: "+esc(e.message)+"</div>";
+      }
+    };
+    if(location.hash==="#sample-pack-pinned")
+      document.getElementById("trypin").click();
+  }).catch(()=>{});
 }
 </script>
 </body>

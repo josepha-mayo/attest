@@ -1,0 +1,31 @@
+name: verify-evidence-pack
+# Drop-in CI gate: verify an Attest case pack with the stdlib-only verifier
+# embedded inside the pack itself. No pip install, no network, no trust in
+# us — the pack proves itself or it fails the job.
+on:
+  workflow_dispatch:
+  pull_request:
+
+jobs:
+  verify-pack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify evidence pack (stdlib verifier embedded in the pack)
+        env:
+          PACK: docs/sample-pack.zip   # point at the pack under review
+          # Optional: pin the issuer out-of-band — a signed issuer doc served
+          # elsewhere (or committed) so the pack's self-declared key isn't
+          # the only anchor. Unset = self-declared-key check.
+          ISSUER_DOC: ""               # e.g. docs/.well-known/attest-issuer.json
+        run: |
+          python - <<'PY'
+          import zipfile
+          zipfile.ZipFile("$PACK").extractall("pack-out")
+          PY
+          if [ -n "$ISSUER_DOC" ]; then
+            python pack-out/verify_case.py pack-out --issuer "$ISSUER_DOC"
+          else
+            python pack-out/verify_case.py pack-out
+          fi

@@ -69,6 +69,11 @@ attest demo        # boots emulator + server + an eight-day story, prints a URL
   accessibility is a Ring priority category.
 - **Download `pack.zip`, unzip, open `index.html`** — every record
   self-verifies from `file://`, with a plain-language family view.
+- **Pin the issuer out-of-band** — `docs/.well-known/attest-issuer.json` is the
+  demo deployment's signed issuer doc (hosted on Pages as a downloadable —
+  the well-known convention is origin-rooted, which project pages can't
+  serve). `attest verify pack.zip --issuer-url docs/.well-known/attest-issuer.json`
+  verifies the pack against a trust anchor that didn't come from inside it.
 - **`attest attack-demo`** — twenty-one real tamper attempts against the store
   (forge, delete, mid-chain erase, key swap, media swap, …) — all caught, all
   rolled back.
