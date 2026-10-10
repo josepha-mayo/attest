@@ -34,7 +34,7 @@ Why this problem is real: visit-verification records today are *editable*. New Y
 
 - A schedule records an expectation, not the identity of a person at the camera.
 - Ring motion, button, and contact-sensor events are observations. They do not establish direction of travel, identity, continuous presence, or work performed.
-- A check-in is a self-report made through a visit-specific link. It is not independent identity or location verification.
+- A check-in is a self-report made through a visit-specific link. It is not independent identity or location verification — and it can never *open* a record: the server rejects (`checkin_precedes_observation`) any self-report timestamped before the first device observation, so a link click from home can't mint a visit.
 - The observed interval measures time between received observations, not time worked.
 - A door cycle followed by motion is only a candidate departure. Closing a record sends it for review; it does not certify departure.
 - No matching observations means attendance is unknown, not that the worker failed to show up. A missing event can reflect connectivity, consent, recording, or ingestion gaps.
@@ -94,7 +94,8 @@ The signing key itself can be wrapped under an AWS KMS CMK (`ATTEST_KMS_KEY_ID`)
 - Agency exports: `GET /sites/{id}/schedule.ics` publishes the schedule feed (calendar-subscribable; honest disclaimer — expectations, not attendance) and `GET /sites/{id}/visits.csv` exports the visit register pinned to receipt hashes (observed spans and check-in lag, `worker_self_reported` naming, formula-injection-safe cells). Every signed receipt carries a six-element statutory crosswalk (`service_type`, `service_date`, `individual`, `provider`, `service_times_observed`, `visit_times`) with per-element basis qualifiers like `scheduled_expectation` vs `camera_event_window` — a mapping, never a compliance claim.
 - Consent revocation: disconnecting a Ring source tombstones the binding, signs a `source_disconnected` receipt naming what was unbound, and stops both ingestion and Event History polling. One-way; reconnecting is a new site.
 - Authenticated setup screens for device discovery, site binding, worker creation, and schedule creation/cancellation. Device permissions and camera/contact capabilities are checked. Duplicate identifiers and ambiguous arrival windows are rejected. Used schedules cannot be rewritten through cancellation.
-- Strands agent triage over Bedrock: the weekly brief reads the ledger through real tools (sites, records, integrity) and labels whether the agent or the deterministic fallback wrote it.
+- Strands agent triage over Bedrock: the weekly brief reads the ledger through real tools (sites, records, integrity) and labels whether the agent or the deterministic fallback wrote it. The agent reads *untrusted* record content — the system prompt declares it so and gives the agent no mutating tools; the loop is bounded (≤12 turns, 2 retries) so a hostile record can't burn quota.
+- Retention with a cryptographic two-phase delete: `attest retention` previews a purge and emits an `apply_token` — a sha256 of the exact candidate set and policy; `attest retention --apply TOKEN` refuses (409) if anything changed since the preview, so the token can only ever delete the set the operator just reviewed. Chain-linked records are never deleted in place; poll rows, lifecycle events, and live-view sessions purge while the signed claims they fed survive.
 
 ## 60-second demo
 

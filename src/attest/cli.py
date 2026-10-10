@@ -3714,8 +3714,12 @@ Attest — records, not verdicts. The ten-minute path:
     attest demo           # emulator + server + an eight-day story, prints a URL
       … open /integrity   # the deployment auditing itself, each section signed
       … append ?lang=es   # household/worker surfaces in Spanish (accessibility)
+    attest tamper-demo    # 5 seconds: forge a visit in-place, watch the
+                          # journal catch it, roll back — non-destructive
     attest attack-demo    # twenty-one real tamper attacks — all caught
     attest split-demo     # a witness + monitor catching a forked log
+    attest verify pack.zip --witness-url <w> --witness-threshold 2
+                          # require k-of-n named witnesses to have vouched
     attest export --tamper-twin twin.zip --attack forged-verifier
     attest status && attest doctor
 

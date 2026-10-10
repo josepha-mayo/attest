@@ -80,9 +80,20 @@ attest demo        # boots emulator + server + an eight-day story, prints a URL
   the well-known convention is origin-rooted, which project pages can't
   serve). `attest verify pack.zip --issuer-url docs/.well-known/attest-issuer.json`
   verifies the pack against a trust anchor that didn't come from inside it.
+- **`attest tamper-demo`** — five seconds: forges a visit's state inside a
+  transaction, prints `verify_journal` catching it, rolls the transaction
+  back. The mutation journal's elevator pitch.
 - **`attest attack-demo`** — twenty-one real tamper attempts against the store
   (forge, delete, mid-chain erase, key swap, media swap, …) — all caught, all
   rolled back.
+- **`attest verify pack.zip --witness-url W --witness-threshold 2`** — don't
+  just collect witness cosignatures: *require* k-of-n named witnesses to have
+  vouched for the pack's log head. Rotated witness keys count once; a revoked
+  lineage key never counts; the issuer can't vouch for itself.
+- **`attest monitor <log-url> --journal`** — the auditor keeps its own signed
+  trail: every watch cycle (including outages and unverifiable heads) mints a
+  `monitor_observation` receipt you can export and verify. Detection that is
+  itself evidence.
 - **`attest status`** and **`attest doctor`** — the deployment's self-audit and
   preflight.
 - **`attest export --tamper-twin twin.zip --attack forged-verifier`** — mint
