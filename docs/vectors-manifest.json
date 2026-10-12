@@ -62,7 +62,7 @@
  {
   "name": "fail-missing-log-proof",
   "verdict": "fail",
-  "note": "a pack receipt silently dropped from log_proofs.json \u2014 the pack cannot claim log membership it does not prove"
+  "note": "a pack receipt silently dropped from log_checkpoint.json \u2014 the pack cannot claim log membership it does not prove"
  },
  {
   "name": "fail-missing-pinned-tool",

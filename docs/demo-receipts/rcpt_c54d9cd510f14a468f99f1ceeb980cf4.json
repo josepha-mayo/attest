@@ -10,7 +10,7 @@
       "id": "rcpt_10b8bda583df441cb500ad2091d45639",
       "hash": "45731905a5b3820eff8dd380f3c6fcf8bb6cc536c4ba004c45d6c755d097a7ad"
     },
-    "boundary": "A signed statement that the holder of the new signing key executed the named rotation \u2014 together with the retiring key's endorsement it binds both sides of the transition.",
+    "boundary": "A signed statement that the holder of the new signing key executed the named rotation — together with the retiring key's endorsement it binds both sides of the transition.",
     "journal_head": "b6ab25d9dafcb2d847051c6d3d7313cf98d04a6b7b492f529b307fdcace1f696",
     "schema": "attest.receipt/2",
     "sequence": 17,

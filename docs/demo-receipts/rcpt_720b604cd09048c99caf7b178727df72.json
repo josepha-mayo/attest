@@ -8,7 +8,7 @@
     "tree_size": 24,
     "root_sha256": "15fe54d4562e3f6750c628931cc420a4a8c4bc77156f05b5e0dd24caaac981f6",
     "leaf_input": "receipt.payload_hash (raw bytes, sequence order)",
-    "boundary": "A signed commitment that exactly these receipts, in this order, formed the log at this size \u2014 receipts in an export can prove inclusion, and a later checkpoint can prove it extends this one without rewriting history.",
+    "boundary": "A signed commitment that exactly these receipts, in this order, formed the log at this size — receipts in an export can prove inclusion, and a later checkpoint can prove it extends this one without rewriting history.",
     "journal_head": "59202aa8d8c9e394fde0e30841cb50b1af14e4c40fc6456f0bba448f487ea66d",
     "extends": {
       "first": 22,

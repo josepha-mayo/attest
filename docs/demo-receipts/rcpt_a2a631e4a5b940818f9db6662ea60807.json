@@ -1,0 +1,37 @@
+{
+  "id": "rcpt_a2a631e4a5b940818f9db6662ea60807",
+  "visit_id": "log:64:8d2a0a4acf4e3736",
+  "sequence": 88,
+  "prev_hash": "f8a55b2d81624eb6194f1e2a2533c1cc616b781b572b3836ec1a0b664604e330",
+  "payload": {
+    "record_type": "log_checkpoint",
+    "tree_size": 64,
+    "root_sha256": "8d2a0a4acf4e373680747e2e27b1becec57a1707356f2a3c1732fcd144565e59",
+    "leaf_input": "receipt.payload_hash (raw bytes, sequence order)",
+    "boundary": "A signed commitment that exactly these receipts, in this order, formed the log at this size — receipts in an export can prove inclusion, and a later checkpoint can prove it extends this one without rewriting history.",
+    "journal_head": "a05713826ae58c0380c157f7bc308a8206d1fa1bc08a3be67269d1632441e043",
+    "extends": {
+      "first": 62,
+      "first_root_sha256": "93f7549c478210a5d63aa825b3d8b4f19637f71388575ad1a284b23998d72c6d",
+      "checkpoint_id": "rcpt_95d96f28bb944affb98ba282aa2725fb",
+      "proof": [
+        "fc906a299f8d494648d335e599286bc8c8ee78bd3a01cff1979a4d22174363c5",
+        "81bed31d6bb83fd762b88967d00736f72183a067bba4df5baff7e32d81ee59a4",
+        "e9511c00a7c6534521283e5ba15dfe673a3516e1f43f383f18086aab749ecbd7",
+        "56dd31d3ffe612cec34587ca60da8760e9680904e377fb71ed3054bf045d3299",
+        "23564ecc54310b6aa8c3e7c21b5780ef0264e6d79637a396959db866db51a9f5",
+        "e0836ed1b0241bce9abe741d4149ffa82b962e30a073ea747556459ec6e4f601"
+      ]
+    },
+    "schema": "attest.receipt/2",
+    "sequence": 88,
+    "prev_hash": "f8a55b2d81624eb6194f1e2a2533c1cc616b781b572b3836ec1a0b664604e330",
+    "visit_id": "log:64:8d2a0a4acf4e3736",
+    "receipt_id": "rcpt_a2a631e4a5b940818f9db6662ea60807",
+    "issued_at": "2026-10-10T15:04:20.724875+00:00"
+  },
+  "payload_hash": "f4f893718f50eb996e9be48fed5302bc7a2a3da8c86b531ff8cc5893b13aab40",
+  "signature": "bqJlq1eRGKAj1dYiwnQJkhijWOPGCIKeaf85U7CAwBu39t4eTycc8lTAO0JgvATA5PRjPf7vvme6GSshqAzcBA==",
+  "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+  "issued_at": "2026-10-10T15:04:20.724875Z"
+}

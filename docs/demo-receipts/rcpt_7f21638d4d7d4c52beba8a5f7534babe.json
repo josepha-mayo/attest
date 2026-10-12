@@ -24,7 +24,7 @@
       "vis_8243499a3a78": "c54b4aa30fdb05172fe02eaac09b09ef2167a1eca227da9a892eccd432187d6f"
     },
     "media_redacted": true,
-    "boundary": "A signed statement that exactly these records existed at export time \u2014 dropping or swapping one invalidates the pack.",
+    "boundary": "A signed statement that exactly these records existed at export time — dropping or swapping one invalidates the pack.",
     "journal_head": "905fab8fdd3b29b848c2d4ca0bef710f7d74c2d2ccf1d3707f8fc6296cd54c6f",
     "schema": "attest.receipt/2",
     "sequence": 13,

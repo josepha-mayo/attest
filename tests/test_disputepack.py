@@ -41,6 +41,7 @@ def _run(pack_dir, *args):
         cwd=pack_dir,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
 
 
@@ -139,6 +140,7 @@ def _run_case(pack_dir, *args):
         cwd=pack_dir,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
 
 

@@ -8,7 +8,7 @@
     "revoked_key": "3uHpTKgOowQVzIcK5/AQosYY2RFwvc2GA1vYGRRkkw8=",
     "suspect_after": "2026-10-09T18:06:11.905000+00:00",
     "reason": "incident review: custody log gap found for the retired key's final minutes",
-    "boundary": "A signed statement that the issuer declares the named key's signatures suspect for records timestamped after the given instant \u2014 a trust annotation, never proof the records are false, and it never erases them.",
+    "boundary": "A signed statement that the issuer declares the named key's signatures suspect for records timestamped after the given instant — a trust annotation, never proof the records are false, and it never erases them.",
     "journal_head": "6d6ce0ab34f5265d489a0d43d2bed6bdcc8296cd473226b0742033caa33bdb91",
     "schema": "attest.receipt/2",
     "sequence": 19,

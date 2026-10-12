@@ -300,7 +300,7 @@
         }
       ]
     },
-    "boundary": "Counts the signed records this deployment wrote in the interval \u2014 a statement about the ledger, never about physical presence or absence.",
+    "boundary": "Counts the signed records this deployment wrote in the interval — a statement about the ledger, never about physical presence or absence.",
     "journal_head": "8e153aa907ac796b62e33978e634ea4d3d1e6739fc166a6e8ac2ef1f24adac36",
     "schema": "attest.receipt/2",
     "sequence": 12,

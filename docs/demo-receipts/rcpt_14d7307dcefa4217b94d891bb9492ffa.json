@@ -12,7 +12,7 @@
       "index.html": "b031694c1b1aa8f292bc3be2db31c673ae0bfe7004ce44b264d19a821c809ba2",
       "README.txt": "f87a0c4345e9450b053d7e865c434595fc7c9f064efb52c6ff8da32a0798ce8e"
     },
-    "boundary": "The named files must byte-match these sha256 digests \u2014 a verifier inside a pack that doesn't match was modified after export and must not be trusted to report honestly.",
+    "boundary": "The named files must byte-match these sha256 digests — a verifier inside a pack that doesn't match was modified after export and must not be trusted to report honestly.",
     "journal_head": "6b78f7734f191e2b3105c661f9f7c819a889df83ae07d9eeb92f76728e35d667",
     "schema": "attest.receipt/2",
     "sequence": 21,

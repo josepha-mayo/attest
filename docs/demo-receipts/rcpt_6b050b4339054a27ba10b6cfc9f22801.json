@@ -1,0 +1,40 @@
+{
+  "id": "rcpt_6b050b4339054a27ba10b6cfc9f22801",
+  "visit_id": "export:site_a55d249ad6dd:34ff5d9b7b94f03b",
+  "sequence": 101,
+  "prev_hash": "75e3866d032bd41a19a7b33c24526bbff49842d89621f6dd8340cddfce89a08a",
+  "payload": {
+    "record_type": "case_export",
+    "site": {
+      "id": "site_a55d249ad6dd",
+      "name": "Alvarez residence"
+    },
+    "generated_at": "2026-10-10T18:31:34.936618+00:00",
+    "manifest_sha256": "34ff5d9b7b94f03baad1fe499a1bd612843f73e777bd6c29d0bb2811d3d6ab9f",
+    "visit_count": 9,
+    "receipt_hashes": {
+      "vis_ac04986742ad": "ea87131a2deff012f4e78d6c2abc748f4673a3c0a233e80d12d35d01204ab6be",
+      "vis_5b7958271e00": "c82ffd07d0219f96a4f26850ae1089ebe915fb31eac8a20248f0ae9d2a5a1bc5",
+      "vis_f34460136366": "cbb5b0b265c65a4434fd6dc6ace06a3be08f760977d217f979b3598046eb7e42",
+      "vis_3feab06a831b": "303b9cdbadc1bfbce1279bfa89d5b8f847b0cd811013e038b20d8087ee0be471",
+      "vis_32a86d6fdbe4": "8fb2aa777b744f80b3497033b52081518db78c07d358e932fbc9625a449dad00",
+      "vis_1071d3b1997a": "bcf835aa9474ec1bb4581bc07f3568f5e5e781cc3c6df2eae28137c0960129ec",
+      "vis_6a79c8145c2e": "436d39bdc5b2f8d61655cde29d3b4bcbb53d8e1a1ff1a0f0eebe8b5db0a0c418",
+      "vis_70e42116a4cf": "6eb91537d98252e89178633a219d0326171e697406f459bc52e6178bc0ff3344",
+      "vis_8243499a3a78": "c54b4aa30fdb05172fe02eaac09b09ef2167a1eca227da9a892eccd432187d6f"
+    },
+    "media_redacted": true,
+    "boundary": "A signed statement that exactly these records existed at export time — dropping or swapping one invalidates the pack.",
+    "journal_head": "7f11142d523009985894cc597a671ae88593ea4e70d3806ad9522723289d700e",
+    "schema": "attest.receipt/2",
+    "sequence": 101,
+    "prev_hash": "75e3866d032bd41a19a7b33c24526bbff49842d89621f6dd8340cddfce89a08a",
+    "visit_id": "export:site_a55d249ad6dd:34ff5d9b7b94f03b",
+    "receipt_id": "rcpt_6b050b4339054a27ba10b6cfc9f22801",
+    "issued_at": "2026-10-10T18:31:34.937383+00:00"
+  },
+  "payload_hash": "c20515a5cfde126244c5e0c1d5357546fb20fd0b10ff32f2bf1fc947978e9bc0",
+  "signature": "zgTM52jx2v8vHEuHu+0VVQxUQ1msPJyTAtYDFeDJJPUXLBeXz6LqKY8ZEIQV3Ww5pZmSI69Rs0WznNjNc14sAA==",
+  "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+  "issued_at": "2026-10-10T18:31:34.937383Z"
+}

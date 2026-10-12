@@ -94,6 +94,12 @@ import re
 import sys
 from pathlib import Path
 
+# Verdict text carries — and …; make the byte stream UTF-8 no matter the
+# console codepage so piped/redirected output never arrives as cp1252 mojibake.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 
 def _loads(s):
     """``json.loads`` minus the bare NaN/Infinity/-Infinity literals CPython

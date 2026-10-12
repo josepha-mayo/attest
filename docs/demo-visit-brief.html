@@ -48,7 +48,7 @@ svg { break-inside:avoid }
 </head>
 <body><div style="background:#f9edd4;border-bottom:1px solid #d9a83c;color:#6b4d0f;font:13px/1.5 system-ui,sans-serif;padding:8px 16px;text-align:center">Snapshot of the live <code>attest demo</code> product — served from a local Ring emulator. Run <code>attest demo</code> for the real thing; <a href="index.html" style="color:#6b4d0f">back to the demo page</a>.</div>
 
-<div class="printbar" style="justify-content:space-between"><a href="demo-visit.html" style="font-size:13px">&lsaquo; back to the record</a><button onclick="window.print()">Print / save as PDF</button></div>
+<div class="printbar" style="justify-content:space-between"><a href="demo-visit.html" style="font-size:13px">&lsaquo; back to the record</a><button onclick="window.print()" disabled title="live deployment only — inert in this snapshot">Print / save as PDF</button></div>
 <main class="sheet">
 <div class="brand"><span class="logo">Attest &mdash; visit record brief</span><span class="gen">generated 2026-10-08 13:37 PDT</span></div>
 
@@ -279,6 +279,15 @@ svg { break-inside:avoid }
 
 
 
+<div>
+  <div class="quote household">&ldquo;I was home that afternoon; I heard the doorbell a little after six and saw someone at the door. I can&#39;t say how long she stayed. (Re-sending — my earlier message had a garbled character.)&rdquo;</div>
+  <div class="byline">&mdash; household account (saw someone), Household member — signed 11:57 AM · self-reported, appended verbatim, never edited</div>
+</div>
+
+
+
+
+
 
 <h2>Media digests (bytes not included)</h2>
 <table>
@@ -356,7 +365,7 @@ the strongest basis this record establishes. A corroboration map, never an EVV s
 <tr><th scope="row" class="k">Receipt</th><td class="mono">rcpt_8af58f6242d04e13a94147ddc2c70a19</td></tr>
 <tr><th scope="row" class="k">Payload hash</th><td class="mono">6eb91537d98252e89178633a219d0326171e697406f459bc52e6178bc0ff3344</td></tr>
 <tr><th scope="row" class="k">Issuer key</th><td class="mono">3uHpTKgOowQVzIcK5/AQosYY2RFwvc2GA1vYGRRkkw8=</td></tr>
-<tr><th scope="row" class="k">Chain</th><td>sequence #2, hash-linked to the previous receipt — verified: original and 3 append-only reviews verified (integrity only)</td></tr>
+<tr><th scope="row" class="k">Chain</th><td>sequence #2, hash-linked to the previous receipt — verified: original and 4 append-only reviews verified (integrity only)</td></tr>
 <tr><th scope="row" class="k">Signed at</th><td>2026-10-09 11:06:05 PDT</td></tr>
 <tr><th scope="row" class="k">Journal head</th><td class="mono">21db708bfb80dd53e4f32a634070fe25b140e9ee94ef349a5e49284b63bb6f74</td></tr>
 

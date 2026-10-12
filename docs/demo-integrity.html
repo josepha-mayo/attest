@@ -75,7 +75,7 @@
 
 <header>
   <div class="brand">Attest<span>.</span></div>
-  <nav><a href="demo-dashboard.html">Records</a><a data-dead="setup" >Setup &amp; schedules</a><a href="demo-integrity.html" aria-current="page">Integrity</a><a href="verify.html">Verify</a><a href="verify.html">Pack verifier</a><a href="index.html">Claim boundary</a><a href="demo-receipts.json" download>Receipts (JSON)</a></nav>
+  <nav><a href="demo-dashboard.html">Records</a><a  data-dead="/setup" title="live deployment only — inert in this snapshot">Setup &amp; schedules</a><a href="demo-integrity.html" aria-current="page">Integrity</a><a href="verify.html">Verify</a><a href="verify.html">Pack verifier</a><a href="index.html">Claim boundary</a><a href="demo-receipts.json" download>Receipts (JSON)</a></nav>
   <div class="meta">Local / test data &middot; configured summary provider: template</div>
 </header>
 <div class="replay-banner">LOCAL REPLAY — not a live visit. Event clock: 2026-10-08T20:37:03.318922+00:00. Security expiry and signature issuance use real time.</div>
@@ -84,7 +84,7 @@
 
 <h1>Integrity posture</h1>
 <div class="muted">The runtime's own audit — the same checks <code>attest status</code> runs
-offline, rendered live (<a href="demo-integrity.json">raw JSON</a> for scripted checks).
+offline, rendered live (<a  data-dead="/integrity.json" title="live deployment only — inert in this snapshot">raw JSON</a> for scripted checks).
 This page describes the evidence system's health, not whether any worker was honest.</div>
 
 <div class="card" style="margin-top:14px">
@@ -96,31 +96,31 @@ This page describes the evidence system's health, not whether any worker was hon
 <div class="grid" style="margin-top:16px">
   <div class="card">
     <h2 style="margin-top:0;font-size:1.05rem">Receipt chain</h2>
-    <span class="ok">&#10003; 22 receipts, chain intact across 1 signed key rotation</span>
+    <span class="ok">&#10003; 109 receipts, chain intact across 1 signed key rotation</span>
     
     <div class="muted small" style="margin-top:.5rem">
-      22 signed receipts · latest sequence #22
+      109 signed receipts · latest sequence #109
     </div>
   </div>
   <div class="card">
     <h2 style="margin-top:0;font-size:1.05rem">Mutation journal</h2>
-    <span class="ok">&#10003; 336 entries, intact</span>
+    <span class="ok">&#10003; 442 entries, intact</span>
     
     <div class="muted small" style="margin-top:.5rem">
-      26 signature-pinned heads · head <code>f06781a81abc…</code>
-      <br>3 newest entries not yet covered by a signed head — `attest anchor` pins them
+      114 signature-pinned heads · head <code>fde9339b598e…</code>
+      <br>4 newest entries not yet covered by a signed head — `attest anchor` pins them
       
     </div>
   </div>
   <div class="card">
     <h2 style="margin-top:0;font-size:1.05rem">Transparency log</h2>
     
-      <span class="ok">&#10003; 2 signed checkpoint(s)</span>
+      <span class="ok">&#10003; 31 signed checkpoint(s)</span>
     
     <div class="muted small" style="margin-top:.5rem">
-      20 receipts in the Merkle tree · head <code>e6fb7df7fa3f…</code>
-      <br>latest checkpoint <code>rcpt_77f1278e333…</code> · Oct 9, 11:46 AM
-        — covers 20 leaves
+      78 receipts in the Merkle tree · head <code>5f56bd1c5291…</code>
+      <br>latest checkpoint <code>rcpt_4d3fa335dd4…</code> · Oct 12, 9:08 AM
+        — covers 78 leaves
       <br>Inclusion + consistency proofs at <code>/api/log/*</code> — <code>attest monitor</code> pins this head and catches a rewrite.
       <br><span class="muted">No witness pins yet — another deployment can ask this one to cosign via <code>/api/witness/cosign</code>.</span>
     </div>
@@ -156,7 +156,7 @@ This page describes the evidence system's health, not whether any worker was hon
   <thead><tr><th scope="col">Kind</th><th scope="col">Count</th><th scope="col">Latest issued</th></tr></thead>
   <tbody>
   
-  <tr><td>case export</td><td>2</td><td class="muted">Oct 9, 11:46 AM · <a href="demo-receipts/rcpt_a1a3eef477cf46f08b96424edf26e956.json">receipt</a></td></tr>
+  <tr><td>case export</td><td>31</td><td class="muted">Oct 12, 9:08 AM · <a href="demo-receipts/rcpt_fc7e5432478b41f0b18c1a11716393e1.json">receipt</a></td></tr>
   
   <tr><td>coverage attestation</td><td>2</td><td class="muted">Oct 9, 11:45 AM · <a href="demo-receipts/rcpt_170eba68fbe845939f715be5a27d83ad.json">receipt</a></td></tr>
   
@@ -166,13 +166,13 @@ This page describes the evidence system's health, not whether any worker was hon
   
   <tr><td>key rotation</td><td>1</td><td class="muted">Oct 9, 11:44 AM · <a href="demo-receipts/rcpt_10b8bda583df441cb500ad2091d45639.json">receipt</a></td></tr>
   
-  <tr><td>log checkpoint</td><td>2</td><td class="muted">Oct 9, 11:46 AM · <a href="demo-receipts/rcpt_77f1278e3339461d8df8b44f0e77ba28.json">receipt</a></td></tr>
+  <tr><td>log checkpoint</td><td>31</td><td class="muted">Oct 12, 9:08 AM · <a href="demo-receipts/rcpt_4d3fa335dd454fac818f07e6a6dd1e85.json">receipt</a></td></tr>
   
   <tr><td>period digest</td><td>1</td><td class="muted">Oct 9, 11:06 AM · <a href="demo-receipts/rcpt_c44581e230574aa5919a280f808f489c.json">receipt</a></td></tr>
   
   <tr><td>verification report</td><td>1</td><td class="muted">Oct 9, 11:06 AM · <a href="demo-receipts/rcpt_8836cc13a0b34f908d765d445bdaa82d.json">receipt</a></td></tr>
   
-  <tr><td>verifier manifest</td><td>2</td><td class="muted">Oct 9, 11:46 AM · <a href="demo-receipts/rcpt_14d7307dcefa4217b94d891bb9492ffa.json">receipt</a></td></tr>
+  <tr><td>verifier manifest</td><td>31</td><td class="muted">Oct 12, 9:08 AM · <a href="demo-receipts/rcpt_abc5fb0a621f41359575e39afe16378e.json">receipt</a></td></tr>
   
   </tbody>
 </table>
@@ -186,7 +186,7 @@ This page describes the evidence system's health, not whether any worker was hon
   <tbody>
   
   <tr>
-    <td><a data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot" style="color:var(--accent)">Alvarez residence</a></td>
+    <td><a  style="color:var(--accent)" data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot">Alvarez residence</a></td>
     <td>56</td>
     <td class="muted">2026-10-08 19:36:18.318922+00:00</td>
     <td class="muted">subscription deactivated · Oct 4, 11:41 AM</td>
@@ -205,7 +205,7 @@ This page describes the evidence system's health, not whether any worker was hon
   <tr><td class="muted">Visits</td><td>9</td>
       <td class="muted small">closed=7 no_observation=2 </td></tr>
   <tr><td class="muted">Evidence rows</td><td>57</td><td></td></tr>
-  <tr><td class="muted">Reviews</td><td>4</td><td></td></tr>
+  <tr><td class="muted">Reviews</td><td>5</td><td></td></tr>
   <tr><td class="muted">Late events retained</td><td>0</td>
       <td class="muted small">arrived after close — kept for review, never silently dropped</td></tr>
   <tr><td class="muted">Coverage events</td><td>3</td>

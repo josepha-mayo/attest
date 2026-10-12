@@ -173,7 +173,7 @@ Corrections are separate human statements, not edits to camera evidence. Verific
 
 ## Ring integration status
 
-**Verified against the live Playground (2026-09-15):** `users/me`, `devices`, Event History (three real `on_demand` entries from Playground motion triggers), media download via the 303 redirect to `*.phoenix.devices.amazon.dev` (a real 68 KB JPEG), and the full poll → visit → snapshot → signed-receipt flow (receipt `rcpt_…` cites real Ring history event ids).
+**Verified against the live Playground (2026-09-15):** `users/me`, `devices`, Event History (three real `on_demand` entries from Playground motion triggers), media download via the 303 redirect to `*.phoenix.devices.amazon.dev` (a real 68 KB JPEG), and the full poll → visit → snapshot → signed-receipt flow (receipt `rcpt_06a69f4e` cites real Ring history event ids).
 
 **Expanded 2026-09-30 with a signed sweep:** `verify-live --sign` ran users/me, app-integration, subscriptions, devices, device status, Event History, media download, and WHEP against the real API — 5 pass / 3 fail (the fails are honest Playground scope limits: `ava.v1:read` tokens get 403 on app-integrations and 422 on subscriptions; WHEP needs streaming hardware on the account). The media check rode a real redirect to `download-eu-south-2.prod.phoenix.devices.amazon.dev` — proof the regional-host allowlist matters. The signed report itself ships at [`docs/live-sweep-receipt.json`](docs/live-sweep-receipt.json) — `attest verify` it, or drop it on the [hosted verifier](https://josepha-mayo.github.io/attest/verify.html): the signature proves the report is exactly what the API returned, and can't be edited to upgrade a fail to a pass. Findings folded back into the product: the API ignores the `event_types` history filter so the poller maps `event_type` client-side, and `on_demand` records (media requests) are kept as their own evidence kind — never mislabeled as doorbell/motion, and never allowed to open a visit (our own snapshot fetches would otherwise loop). The emulator now also writes `on_demand` entries on media requests.
 
@@ -196,8 +196,9 @@ Install the `aws` extra for boto3 and `botocore[crt]`, which supports `aws login
 
 The default model is `us.amazon.nova-lite-v1:0`, a first-party multimodal model that needs no
 use-case form. Latest live check on this account: Anthropic models still require the Anthropic
-use-case submission, and Nova calls are authorized but return `ThrottlingException` (daily
-free-tier token cap reached — retry after the cap resets or the account is upgraded). No
+use-case submission, and Nova calls are authorized but return `ThrottlingException` — this
+account's on-demand inference quota is effectively zero, so the only fix is a
+Service Quotas increase (days, still pending). No
 successful AWS model invocation has been demonstrated yet. The application identifies template
 fallback separately from successful Bedrock generation; local fallback tests do not qualify as a
 live AWS integration demonstration.

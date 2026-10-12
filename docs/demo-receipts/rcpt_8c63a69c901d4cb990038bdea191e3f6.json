@@ -270,7 +270,7 @@
         }
       ]
     },
-    "boundary": "Attests what the pipeline observed and when it was blind \u2014 never identity, attendance, or absence.",
+    "boundary": "Attests what the pipeline observed and when it was blind — never identity, attendance, or absence.",
     "journal_head": "b3d79b4d4ee3c470e8d877d363e94eac4c220f1a6297c3be99ea941c2f0f6a32",
     "schema": "attest.receipt/2",
     "sequence": 10,

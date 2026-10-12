@@ -3711,7 +3711,7 @@ Attest — records, not verdicts. The ten-minute path:
        + #verify-self — the page hashes its own bytes against the pack's
          signed pin: PINNED or PIN MISMATCH
        + #verify-site — the site attests itself: a signed manifest pins all
-         130 artifacts' sha256; hash every file → SITE VERIFIED or TAMPER
+         185 artifacts' sha256; hash every file → SITE VERIFIED or TAMPER
        + #tamper-lab — commit the attack yourself: rewrite a signed field
          in-page, download your doctored pack, watch the signature refuse it
     4. after a green stamp: open index.html — the pack hands you its own
@@ -3719,7 +3719,7 @@ Attest — records, not verdicts. The ten-minute path:
     5. the product face, no install: demo-dashboard.html, demo-visit.html (the
        contested record), demo-household.html (+ -es), demo-integrity.html —
        snapshots of the running app on the same site
-    6. the raw layer: demo-receipts.html — all 58 signed receipts, drawn as
+    6. the raw layer: demo-receipts.html — all 109 signed receipts, drawn as
        the hash chain itself, each a one-click verify.html deep link
        (+ anatomy.html — one receipt decomposed field-by-field, chain links
        walkable)
@@ -3732,9 +3732,9 @@ Attest — records, not verdicts. The ten-minute path:
       … append ?lang=es   # household/worker surfaces in Spanish (accessibility)
     attest tamper-demo    # 5 seconds: forge a visit in-place, watch the
                           # journal catch it, roll back — non-destructive
-    attest attack-demo    # 21 real tamper attacks — all caught on the demo
-                          # store (attacks on absent resolutions/media report
-                          # SKIPPED rather than claimed)
+    attest attack-demo    # 21 real tamper attacks — 21/21 caught on the
+                          # demo store, zero skips (a SKIPPED row means the
+                          # fixture lacked a target, never a pass)
     attest split-demo     # a witness + monitor catching a forked log
     attest verify pack.zip --witness-url <w> --witness-threshold 2
                           # require k-of-n named witnesses to have vouched

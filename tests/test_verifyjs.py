@@ -2259,7 +2259,9 @@ def test_receipt_array_verifies_all_and_fails_on_one_bad(tmp_path):
     signature must flip the batch to FAILED with the bad id named."""
     docs = Path(__file__).resolve().parents[1] / "docs"
     arr = json.loads((docs / "demo-receipts.json").read_text(encoding="utf-8"))
-    assert len(arr) == 58
+    # The corpus grows with every demo export — pin consistency with the
+    # shipped per-receipt files, not a count that drifts on each regen.
+    assert len(arr) == len(list((docs / "demo-receipts").glob("rcpt_*.json"))) > 0
     bad = json.loads(json.dumps(arr))
     sig = bad[0]["signature"]
     bad[0]["signature"] = ("A" if sig[0] != "A" else "B") + sig[1:]
@@ -2275,11 +2277,12 @@ eval(src + `
     constructor(){super();this.name=f;this._b=require('fs').readFileSync(f)}
     text(){return Promise.resolve(this._b.toString())}})();
   global.document={getElementById:()=>({innerHTML:''}),createElement:()=>({setAttribute:()=>{},style:{}})};
+  const n=JSON.parse(require('fs').readFileSync(process.argv[3],'utf8')).length;
   const h1=await verifyFiles([await load(process.argv[3])]);
-  console.log('arr-good:',h1.includes('VERIFIED'),h1.includes('all 58 receipts'),!h1.includes('FAILED'));
+  console.log('arr-good:',h1.includes('VERIFIED'),h1.includes('all '+n+' receipts'),!h1.includes('FAILED'));
   const h2=await verifyFiles([await load(process.argv[4])]);
   const badId=JSON.parse(require('fs').readFileSync(process.argv[4],'utf8'))[0].id;
-  console.log('arr-bad:',h2.includes('FAILED'),h2.includes('of 58 receipts'),h2.includes(badId));
+  console.log('arr-bad:',h2.includes('FAILED'),h2.includes('of '+n+' receipts'),h2.includes(badId));
 })();`);
 """
     (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
@@ -2288,7 +2291,8 @@ eval(src + `
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=120,
+        # 100+ receipts in pure-BigInt Ed25519 is legitimately slow.
+        timeout=360,
     )
     assert proc.returncode == 0, proc.stderr
     assert "arr-good: true true true" in proc.stdout, proc.stdout
@@ -2488,7 +2492,7 @@ def test_anatomy_page_canonicalizer_reproduces_payload_hashes(tmp_path):
     """docs/anatomy.html rebuilds each receipt's canonical payload from the
     served file's raw bytes and recomputes sha256 live — the page's central
     claim is that the recomputed digest matches payload_hash for every one of
-    the 58 shipped receipts (literal spellings like 0.0 preserved). Extract
+    the shipped receipts (literal spellings like 0.0 preserved). Extract
     the page's own functions and run them against the real corpus."""
     docs = Path(__file__).resolve().parents[1] / "docs"
     html = (docs / "anatomy.html").read_text(encoding="utf-8")

@@ -31,7 +31,7 @@
       {
         "check": "device status",
         "status": "pass",
-        "detail": "device ava1.rin\u2026 status endpoint returned"
+        "detail": "device ava1.rin… status endpoint returned"
       },
       {
         "check": "event history",
@@ -55,7 +55,7 @@
       "warn": 0,
       "skip": 0
     },
-    "boundary": "A signed statement that these checks ran at this time and returned these results \u2014 a PASS attests the API call succeeded, never the semantics beyond it.",
+    "boundary": "A signed statement that these checks ran at this time and returned these results — a PASS attests the API call succeeded, never the semantics beyond it.",
     "journal_head": "e7aa2dfab5a8f91952ee56ca0a94673d216078abeed6c143a1b1aebdad103dbc",
     "schema": "attest.receipt/2",
     "sequence": 11,
