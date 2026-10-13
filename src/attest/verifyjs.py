@@ -1943,6 +1943,17 @@ async function diffPacks(fileA,fileB,out){
       +"is what separates proven append-only growth from a provable fork, and "
       +"each pack's own verdict says whether either copy is already forged.");
   }
+  /* The stamp lands ~30 rows down — bring it into view like the verdict
+     path does. Direct children only: the per-pack <details> carry inner
+     stamps that must not steal the scroll target. */
+  try{
+    let st=null;
+    if(out.children)for(const ch of out.children)
+      if(ch.classList&&ch.classList.contains&&ch.classList.contains("stamp"))
+        st=ch;
+    if(st&&st.scrollIntoView)
+      st.scrollIntoView({behavior:"smooth",block:"nearest"});
+  }catch(e){}
 }
 /* ---------- minimal zip reader: stored + deflate via DecompressionStream ---------- */
 async function inflate(raw){

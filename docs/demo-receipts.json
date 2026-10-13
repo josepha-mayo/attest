@@ -10889,5 +10889,420 @@
     "signature": "0Z8wQfeJ8UalgMAQVzkYK1GLtU0gpVjebfCvyTZvzEJ7ygtsW8la3QkmUflUr1NJLRQ+IFqWfj69OW41yp3DDw==",
     "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
     "issued_at": "2026-10-13T13:18:43.642390Z"
+  },
+  {
+    "id": "rcpt_c9a16ec568cf40c59120b1aa4b643d9a",
+    "visit_id": "export:site_a55d249ad6dd:9d734719eb35d3f7",
+    "sequence": 242,
+    "prev_hash": "e905129b69770e7443c431022b28b47c505fa5ac266e5ebf9632e9a1e8c64820",
+    "payload": {
+      "record_type": "case_export",
+      "site": {
+        "id": "site_a55d249ad6dd",
+        "name": "Alvarez residence"
+      },
+      "generated_at": "2026-10-13T13:22:34.267652+00:00",
+      "manifest_sha256": "9d734719eb35d3f7272d63c17186a1984b95b9856c18c8ea61a94ccfebb118af",
+      "visit_count": 9,
+      "receipt_hashes": {
+        "vis_ac04986742ad": "ea87131a2deff012f4e78d6c2abc748f4673a3c0a233e80d12d35d01204ab6be",
+        "vis_5b7958271e00": "c82ffd07d0219f96a4f26850ae1089ebe915fb31eac8a20248f0ae9d2a5a1bc5",
+        "vis_f34460136366": "cbb5b0b265c65a4434fd6dc6ace06a3be08f760977d217f979b3598046eb7e42",
+        "vis_3feab06a831b": "303b9cdbadc1bfbce1279bfa89d5b8f847b0cd811013e038b20d8087ee0be471",
+        "vis_32a86d6fdbe4": "8fb2aa777b744f80b3497033b52081518db78c07d358e932fbc9625a449dad00",
+        "vis_1071d3b1997a": "bcf835aa9474ec1bb4581bc07f3568f5e5e781cc3c6df2eae28137c0960129ec",
+        "vis_6a79c8145c2e": "436d39bdc5b2f8d61655cde29d3b4bcbb53d8e1a1ff1a0f0eebe8b5db0a0c418",
+        "vis_70e42116a4cf": "6eb91537d98252e89178633a219d0326171e697406f459bc52e6178bc0ff3344",
+        "vis_8243499a3a78": "c54b4aa30fdb05172fe02eaac09b09ef2167a1eca227da9a892eccd432187d6f"
+      },
+      "media_redacted": true,
+      "boundary": "A signed statement that exactly these records existed at export time — dropping or swapping one invalidates the pack.",
+      "journal_head": "b96d06d116ae5bf8a9483726f056a0d9c862b9de61c940cf443f607a273dacd3",
+      "schema": "attest.receipt/2",
+      "sequence": 242,
+      "prev_hash": "e905129b69770e7443c431022b28b47c505fa5ac266e5ebf9632e9a1e8c64820",
+      "visit_id": "export:site_a55d249ad6dd:9d734719eb35d3f7",
+      "receipt_id": "rcpt_c9a16ec568cf40c59120b1aa4b643d9a",
+      "issued_at": "2026-10-13T13:22:34.268646+00:00"
+    },
+    "payload_hash": "dc49d0e8b25cd90ff7083816982c740b277ea4552266b52b31275cc4887a4400",
+    "signature": "K6OCyHXTKkCV8n2YkIRrraM3+rR7ZLmOwNcFDlnOhc4K6sZDT0iJVxTndNQl8t2c03B6cm0az8Y7x+KQrv0ZDw==",
+    "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+    "issued_at": "2026-10-13T13:22:34.268646Z"
+  },
+  {
+    "id": "rcpt_56e5b80b239e4fcd8392cb4328527b2f",
+    "visit_id": "export-tools:c06907cbdb5b1efb",
+    "sequence": 243,
+    "prev_hash": "dc49d0e8b25cd90ff7083816982c740b277ea4552266b52b31275cc4887a4400",
+    "payload": {
+      "record_type": "verifier_manifest",
+      "scope": "site:site_a55d249ad6dd",
+      "tools": {
+        "verify_case.py": "ff7861a50764f6f15793927e7e171855f28ac35573a79132919668104abe2435",
+        "verify.html": "7f2c9d16f384e6af9a74f9ad9f5d28b429b5197f37b0309fe43d23b6884620e4",
+        "index.html": "294a100fe981066db8deaffbc1b8b2d5527ac963de7970d9c93b7e391febf740",
+        "README.txt": "6b5ce4f032c59b349463789db22f20b47f91e682929a95bbaafc3f6ab28851ce"
+      },
+      "boundary": "The named files must byte-match these sha256 digests — a verifier inside a pack that doesn't match was modified after export and must not be trusted to report honestly.",
+      "journal_head": "f831452367713db142159602d6a75135e91ec8a97c7f0183d9c08a3a77fc21d6",
+      "schema": "attest.receipt/2",
+      "sequence": 243,
+      "prev_hash": "dc49d0e8b25cd90ff7083816982c740b277ea4552266b52b31275cc4887a4400",
+      "visit_id": "export-tools:c06907cbdb5b1efb",
+      "receipt_id": "rcpt_56e5b80b239e4fcd8392cb4328527b2f",
+      "issued_at": "2026-10-13T13:22:34.283406+00:00"
+    },
+    "payload_hash": "3d9f1fd70642fb36f1d15331060f7fd8fc6b61db3d2e28141ab6fd3fcbffa022",
+    "signature": "oxlgyTBqL8sGEzFxidnTeVmr8B/c6UdUnvZykz0Km85k4h7hAf/2S8r16wEFJG82N7RSybUzoNRQHEr79U2kAQ==",
+    "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+    "issued_at": "2026-10-13T13:22:34.283406Z"
+  },
+  {
+    "id": "rcpt_d92cdd9e3b864f209961fe6e00c9afdb",
+    "visit_id": "log:168:7b301858e857bec2",
+    "sequence": 244,
+    "prev_hash": "3d9f1fd70642fb36f1d15331060f7fd8fc6b61db3d2e28141ab6fd3fcbffa022",
+    "payload": {
+      "record_type": "log_checkpoint",
+      "tree_size": 168,
+      "root_sha256": "7b301858e857bec2ae34c761898659f756f8a2babaea95cab1fd5027a1f9d18a",
+      "leaf_input": "receipt.payload_hash (raw bytes, sequence order)",
+      "boundary": "A signed commitment that exactly these receipts, in this order, formed the log at this size — receipts in an export can prove inclusion, and a later checkpoint can prove it extends this one without rewriting history.",
+      "journal_head": "f785dff4279a70b30b81987c21403bc1bede3f82743c2ef539b24da863a4777b",
+      "extends": {
+        "first": 166,
+        "first_root_sha256": "e176eec71eac32c98041dd9cd1fb576dd52e4c25ce9c52d68a92ff055f709fe8",
+        "checkpoint_id": "rcpt_ed2e5dd489e1454787f0e125262a0fd3",
+        "proof": [
+          "70ca59491fadd418122fd71ce139dec37e00b920e20c7d0d5d3ca2986c36c7d1",
+          "1c5e18cb23ebeed400e47c066f8ee742fecdd2c4ecfd644e25c726627a7bc0e8",
+          "395dbb769b9b4df66e0d32a9394b245dd43203c7405d06a6cbba1bbcd08fee8a",
+          "fad5a3920523f059f7f4bcd1407e5ca21334959875f9f11dbf97adac98847b8d",
+          "c0cd7f5d7ed43d9d0dc8fa2b492d2656463d5debf13578ec5decf0d4dafc7855"
+        ]
+      },
+      "schema": "attest.receipt/2",
+      "sequence": 244,
+      "prev_hash": "3d9f1fd70642fb36f1d15331060f7fd8fc6b61db3d2e28141ab6fd3fcbffa022",
+      "visit_id": "log:168:7b301858e857bec2",
+      "receipt_id": "rcpt_d92cdd9e3b864f209961fe6e00c9afdb",
+      "issued_at": "2026-10-13T13:22:34.304655+00:00"
+    },
+    "payload_hash": "bc4a925e87d674ec248477394b71c536d7942a6098d3a84240537ed28467e688",
+    "signature": "CrVa/E2oK8Vv+qXOKV+As7To5cWEcRbVwokH+kVBHp4nqtg2m5w08PghLXQhFSDbfSoqTuk7d9JIwiIIVwpiBw==",
+    "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+    "issued_at": "2026-10-13T13:22:34.304655Z"
+  },
+  {
+    "id": "rcpt_92057a127b224024b3dd2b6f47e7b26d",
+    "visit_id": "export:site_a55d249ad6dd:8bc85b841b64dd68",
+    "sequence": 245,
+    "prev_hash": "bc4a925e87d674ec248477394b71c536d7942a6098d3a84240537ed28467e688",
+    "payload": {
+      "record_type": "case_export",
+      "site": {
+        "id": "site_a55d249ad6dd",
+        "name": "Alvarez residence"
+      },
+      "generated_at": "2026-10-13T13:22:36.045652+00:00",
+      "manifest_sha256": "8bc85b841b64dd685f6594d31f1903305b775cc9f3b7d344bd3bdac08b1312e6",
+      "visit_count": 9,
+      "receipt_hashes": {
+        "vis_ac04986742ad": "ea87131a2deff012f4e78d6c2abc748f4673a3c0a233e80d12d35d01204ab6be",
+        "vis_5b7958271e00": "c82ffd07d0219f96a4f26850ae1089ebe915fb31eac8a20248f0ae9d2a5a1bc5",
+        "vis_f34460136366": "cbb5b0b265c65a4434fd6dc6ace06a3be08f760977d217f979b3598046eb7e42",
+        "vis_3feab06a831b": "303b9cdbadc1bfbce1279bfa89d5b8f847b0cd811013e038b20d8087ee0be471",
+        "vis_32a86d6fdbe4": "8fb2aa777b744f80b3497033b52081518db78c07d358e932fbc9625a449dad00",
+        "vis_1071d3b1997a": "bcf835aa9474ec1bb4581bc07f3568f5e5e781cc3c6df2eae28137c0960129ec",
+        "vis_6a79c8145c2e": "436d39bdc5b2f8d61655cde29d3b4bcbb53d8e1a1ff1a0f0eebe8b5db0a0c418",
+        "vis_70e42116a4cf": "6eb91537d98252e89178633a219d0326171e697406f459bc52e6178bc0ff3344",
+        "vis_8243499a3a78": "c54b4aa30fdb05172fe02eaac09b09ef2167a1eca227da9a892eccd432187d6f"
+      },
+      "media_redacted": true,
+      "boundary": "A signed statement that exactly these records existed at export time — dropping or swapping one invalidates the pack.",
+      "journal_head": "26697361980a06357b978e87414ef135d9a532b7924b0040c0a193cebd06e41b",
+      "schema": "attest.receipt/2",
+      "sequence": 245,
+      "prev_hash": "bc4a925e87d674ec248477394b71c536d7942a6098d3a84240537ed28467e688",
+      "visit_id": "export:site_a55d249ad6dd:8bc85b841b64dd68",
+      "receipt_id": "rcpt_92057a127b224024b3dd2b6f47e7b26d",
+      "issued_at": "2026-10-13T13:22:36.046569+00:00"
+    },
+    "payload_hash": "6ba47592e005c6833cd3198b77d4ec4573b99955d64119effdaa6e16206b6d71",
+    "signature": "SGp74gT6f5lVzkhfiTW1weDKnzPpQb+zGLC7DmXZTyR+oW/BecdZIUQLmDd8pWzhZ/BH6vpD5MnFHwfqh6fvBg==",
+    "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+    "issued_at": "2026-10-13T13:22:36.046569Z"
+  },
+  {
+    "id": "rcpt_c034cd551edb4251ad59265c5f5c4a4e",
+    "visit_id": "export-tools:ed970d950b57bc98",
+    "sequence": 246,
+    "prev_hash": "6ba47592e005c6833cd3198b77d4ec4573b99955d64119effdaa6e16206b6d71",
+    "payload": {
+      "record_type": "verifier_manifest",
+      "scope": "site:site_a55d249ad6dd",
+      "tools": {
+        "verify_case.py": "ff7861a50764f6f15793927e7e171855f28ac35573a79132919668104abe2435",
+        "verify.html": "7f2c9d16f384e6af9a74f9ad9f5d28b429b5197f37b0309fe43d23b6884620e4",
+        "index.html": "bbeb5e334dca651f89b3cb6f89a5b1065c47695d02c9c63ce788e83d09f8827d",
+        "README.txt": "6b5ce4f032c59b349463789db22f20b47f91e682929a95bbaafc3f6ab28851ce"
+      },
+      "boundary": "The named files must byte-match these sha256 digests — a verifier inside a pack that doesn't match was modified after export and must not be trusted to report honestly.",
+      "journal_head": "fc06649785ca45bbc492b6774fb25c967e3c73bf9be44301a591bf7a1f46ed4c",
+      "schema": "attest.receipt/2",
+      "sequence": 246,
+      "prev_hash": "6ba47592e005c6833cd3198b77d4ec4573b99955d64119effdaa6e16206b6d71",
+      "visit_id": "export-tools:ed970d950b57bc98",
+      "receipt_id": "rcpt_c034cd551edb4251ad59265c5f5c4a4e",
+      "issued_at": "2026-10-13T13:22:36.069086+00:00"
+    },
+    "payload_hash": "7db5b84d94345a2a0674cfd38b8b18f3e5ef1580a563b5aa57e8d407b7a24311",
+    "signature": "4s7sDX9Txbb/UbmDXfaJdFW6HNPdgD6XfXEvGf4hzUz1rKXnsJTO+kG/kEi983IXdYtz+Xs0DOjF7+FqodbyAw==",
+    "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+    "issued_at": "2026-10-13T13:22:36.069086Z"
+  },
+  {
+    "id": "rcpt_8df6870acc4c4d59bb6b32e353890832",
+    "visit_id": "log:170:d3efb1a010e9fd5f",
+    "sequence": 247,
+    "prev_hash": "7db5b84d94345a2a0674cfd38b8b18f3e5ef1580a563b5aa57e8d407b7a24311",
+    "payload": {
+      "record_type": "log_checkpoint",
+      "tree_size": 170,
+      "root_sha256": "d3efb1a010e9fd5f69605f3e80688c6950a9ba1235a7a5e4590bd23016d1f190",
+      "leaf_input": "receipt.payload_hash (raw bytes, sequence order)",
+      "boundary": "A signed commitment that exactly these receipts, in this order, formed the log at this size — receipts in an export can prove inclusion, and a later checkpoint can prove it extends this one without rewriting history.",
+      "journal_head": "0addd4083e254d8060f26a6a38154be68d1d627afd16af066f760aa4faa6230b",
+      "extends": {
+        "first": 168,
+        "first_root_sha256": "7b301858e857bec2ae34c761898659f756f8a2babaea95cab1fd5027a1f9d18a",
+        "checkpoint_id": "rcpt_d92cdd9e3b864f209961fe6e00c9afdb",
+        "proof": [
+          "d565a84e93a8a5189913f92c65ede34902a96e08308dfed32560353889da1cae",
+          "611f2dc340de9219ee614a7f573b11c0c593eabea6762bd2957b60d89608d93c",
+          "fad5a3920523f059f7f4bcd1407e5ca21334959875f9f11dbf97adac98847b8d",
+          "c0cd7f5d7ed43d9d0dc8fa2b492d2656463d5debf13578ec5decf0d4dafc7855"
+        ]
+      },
+      "schema": "attest.receipt/2",
+      "sequence": 247,
+      "prev_hash": "7db5b84d94345a2a0674cfd38b8b18f3e5ef1580a563b5aa57e8d407b7a24311",
+      "visit_id": "log:170:d3efb1a010e9fd5f",
+      "receipt_id": "rcpt_8df6870acc4c4d59bb6b32e353890832",
+      "issued_at": "2026-10-13T13:22:36.091824+00:00"
+    },
+    "payload_hash": "18d4c50e0e24a669affb12e62c2684bba5a0188015fe7c4da0146767689b5833",
+    "signature": "ClE8Ek7n12jOQt2ji63o0juurNW9oiQe/gDxbMVjrSyirOw9luEMsv0MskS9HGQGj0kiAq5mlYFJnRm4LHQ6Ag==",
+    "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+    "issued_at": "2026-10-13T13:22:36.091824Z"
+  },
+  {
+    "id": "rcpt_8fe28425520d4bb1a27ff94779255aad",
+    "visit_id": "export:site_a55d249ad6dd:dd6da200b4d2e546",
+    "sequence": 248,
+    "prev_hash": "18d4c50e0e24a669affb12e62c2684bba5a0188015fe7c4da0146767689b5833",
+    "payload": {
+      "record_type": "case_export",
+      "site": {
+        "id": "site_a55d249ad6dd",
+        "name": "Alvarez residence"
+      },
+      "generated_at": "2026-10-13T13:22:37.793968+00:00",
+      "manifest_sha256": "dd6da200b4d2e5465015b2e106ab056f831d007d23d8b6445e688b80755c65f7",
+      "visit_count": 9,
+      "receipt_hashes": {
+        "vis_ac04986742ad": "ea87131a2deff012f4e78d6c2abc748f4673a3c0a233e80d12d35d01204ab6be",
+        "vis_5b7958271e00": "c82ffd07d0219f96a4f26850ae1089ebe915fb31eac8a20248f0ae9d2a5a1bc5",
+        "vis_f34460136366": "cbb5b0b265c65a4434fd6dc6ace06a3be08f760977d217f979b3598046eb7e42",
+        "vis_3feab06a831b": "303b9cdbadc1bfbce1279bfa89d5b8f847b0cd811013e038b20d8087ee0be471",
+        "vis_32a86d6fdbe4": "8fb2aa777b744f80b3497033b52081518db78c07d358e932fbc9625a449dad00",
+        "vis_1071d3b1997a": "bcf835aa9474ec1bb4581bc07f3568f5e5e781cc3c6df2eae28137c0960129ec",
+        "vis_6a79c8145c2e": "436d39bdc5b2f8d61655cde29d3b4bcbb53d8e1a1ff1a0f0eebe8b5db0a0c418",
+        "vis_70e42116a4cf": "6eb91537d98252e89178633a219d0326171e697406f459bc52e6178bc0ff3344",
+        "vis_8243499a3a78": "c54b4aa30fdb05172fe02eaac09b09ef2167a1eca227da9a892eccd432187d6f"
+      },
+      "media_redacted": true,
+      "boundary": "A signed statement that exactly these records existed at export time — dropping or swapping one invalidates the pack.",
+      "journal_head": "975e2f57ed21d0a2228cc14b1cb1cf6eb809e5d70435647687950fe6234ef3f0",
+      "schema": "attest.receipt/2",
+      "sequence": 248,
+      "prev_hash": "18d4c50e0e24a669affb12e62c2684bba5a0188015fe7c4da0146767689b5833",
+      "visit_id": "export:site_a55d249ad6dd:dd6da200b4d2e546",
+      "receipt_id": "rcpt_8fe28425520d4bb1a27ff94779255aad",
+      "issued_at": "2026-10-13T13:22:37.795111+00:00"
+    },
+    "payload_hash": "b76aad8e5ddddb34746f3fd4d532b3e0a41845fadeebfed313a920c4133d696f",
+    "signature": "Yjzi1PTjTMxivlSQDpr8vv9dnl+KmZKGEYaY4YA8NWCWicKcNdl/3F0yvns8BaOcTeYkOoY5B150zV0fG0dICQ==",
+    "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+    "issued_at": "2026-10-13T13:22:37.795111Z"
+  },
+  {
+    "id": "rcpt_4ef5f153638b478288314c1d119f74cc",
+    "visit_id": "export-tools:d6c106320df99c72",
+    "sequence": 249,
+    "prev_hash": "b76aad8e5ddddb34746f3fd4d532b3e0a41845fadeebfed313a920c4133d696f",
+    "payload": {
+      "record_type": "verifier_manifest",
+      "scope": "site:site_a55d249ad6dd",
+      "tools": {
+        "verify_case.py": "ff7861a50764f6f15793927e7e171855f28ac35573a79132919668104abe2435",
+        "verify.html": "7f2c9d16f384e6af9a74f9ad9f5d28b429b5197f37b0309fe43d23b6884620e4",
+        "index.html": "c9a15f23ba4ba19ac79f4f00c79054d82b00eb23a8ab7a36bbdacbb3e24daa79",
+        "README.txt": "6b5ce4f032c59b349463789db22f20b47f91e682929a95bbaafc3f6ab28851ce"
+      },
+      "boundary": "The named files must byte-match these sha256 digests — a verifier inside a pack that doesn't match was modified after export and must not be trusted to report honestly.",
+      "journal_head": "9605947d83750faa6884d00e81ff38a8808b8d7b61ca3559e36caaad16ddbda8",
+      "schema": "attest.receipt/2",
+      "sequence": 249,
+      "prev_hash": "b76aad8e5ddddb34746f3fd4d532b3e0a41845fadeebfed313a920c4133d696f",
+      "visit_id": "export-tools:d6c106320df99c72",
+      "receipt_id": "rcpt_4ef5f153638b478288314c1d119f74cc",
+      "issued_at": "2026-10-13T13:22:37.814163+00:00"
+    },
+    "payload_hash": "1b6d1f26e330db6b6cb1ebfd19337208af9bc11998d09d8ddc311cc76f31eb64",
+    "signature": "X/w4TiXBV7uHSVf8QjzNjddDk36AHzN7//wWJ31zX8KLQdN1Dj7CQR2tC3d1CMFvnbMX4sQtB64Lmt3k2OdyAQ==",
+    "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+    "issued_at": "2026-10-13T13:22:37.814163Z"
+  },
+  {
+    "id": "rcpt_daebf49e4b744df9b002948cd88c9239",
+    "visit_id": "log:172:d00d0467efb5ff8c",
+    "sequence": 250,
+    "prev_hash": "1b6d1f26e330db6b6cb1ebfd19337208af9bc11998d09d8ddc311cc76f31eb64",
+    "payload": {
+      "record_type": "log_checkpoint",
+      "tree_size": 172,
+      "root_sha256": "d00d0467efb5ff8c88220c288f1d4a4de49aa8499cf4ca66eda76633589632f7",
+      "leaf_input": "receipt.payload_hash (raw bytes, sequence order)",
+      "boundary": "A signed commitment that exactly these receipts, in this order, formed the log at this size — receipts in an export can prove inclusion, and a later checkpoint can prove it extends this one without rewriting history.",
+      "journal_head": "b0a2b7db26634fe428a69dacd6e9c22f22d8a1d589ecfbe6763d36ad8eaa96dc",
+      "extends": {
+        "first": 170,
+        "first_root_sha256": "d3efb1a010e9fd5f69605f3e80688c6950a9ba1235a7a5e4590bd23016d1f190",
+        "checkpoint_id": "rcpt_8df6870acc4c4d59bb6b32e353890832",
+        "proof": [
+          "611f2dc340de9219ee614a7f573b11c0c593eabea6762bd2957b60d89608d93c",
+          "922745e7a65cb9d8b7a3fbebaf9b99c6db180da091ede362fcdcb3eb28cf78d0",
+          "d565a84e93a8a5189913f92c65ede34902a96e08308dfed32560353889da1cae",
+          "fad5a3920523f059f7f4bcd1407e5ca21334959875f9f11dbf97adac98847b8d",
+          "c0cd7f5d7ed43d9d0dc8fa2b492d2656463d5debf13578ec5decf0d4dafc7855"
+        ]
+      },
+      "schema": "attest.receipt/2",
+      "sequence": 250,
+      "prev_hash": "1b6d1f26e330db6b6cb1ebfd19337208af9bc11998d09d8ddc311cc76f31eb64",
+      "visit_id": "log:172:d00d0467efb5ff8c",
+      "receipt_id": "rcpt_daebf49e4b744df9b002948cd88c9239",
+      "issued_at": "2026-10-13T13:22:37.846419+00:00"
+    },
+    "payload_hash": "5dcd5955432f86591a4c3ba59921ab5805db323d8d6999b9feda83b961031f05",
+    "signature": "Wh23R6GAJ0/+1zK9MJClD7nVcvKcE2xhJjcvVzHLBKweVEgTyK058kzxIhBTz37l8OwpBlhjLOtpHBC6Ayt4Cg==",
+    "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+    "issued_at": "2026-10-13T13:22:37.846419Z"
+  },
+  {
+    "id": "rcpt_ffdda7f44f814301852f8cfb3016877b",
+    "visit_id": "export:site_a55d249ad6dd:73b0085e956d9478",
+    "sequence": 251,
+    "prev_hash": "5dcd5955432f86591a4c3ba59921ab5805db323d8d6999b9feda83b961031f05",
+    "payload": {
+      "record_type": "case_export",
+      "site": {
+        "id": "site_a55d249ad6dd",
+        "name": "Alvarez residence"
+      },
+      "generated_at": "2026-10-13T13:22:39.441776+00:00",
+      "manifest_sha256": "73b0085e956d9478aaad5ee137b710b52ba39d272b07340a783d188a5fde1355",
+      "visit_count": 9,
+      "receipt_hashes": {
+        "vis_ac04986742ad": "ea87131a2deff012f4e78d6c2abc748f4673a3c0a233e80d12d35d01204ab6be",
+        "vis_5b7958271e00": "c82ffd07d0219f96a4f26850ae1089ebe915fb31eac8a20248f0ae9d2a5a1bc5",
+        "vis_f34460136366": "cbb5b0b265c65a4434fd6dc6ace06a3be08f760977d217f979b3598046eb7e42",
+        "vis_3feab06a831b": "303b9cdbadc1bfbce1279bfa89d5b8f847b0cd811013e038b20d8087ee0be471",
+        "vis_32a86d6fdbe4": "8fb2aa777b744f80b3497033b52081518db78c07d358e932fbc9625a449dad00",
+        "vis_1071d3b1997a": "bcf835aa9474ec1bb4581bc07f3568f5e5e781cc3c6df2eae28137c0960129ec",
+        "vis_6a79c8145c2e": "436d39bdc5b2f8d61655cde29d3b4bcbb53d8e1a1ff1a0f0eebe8b5db0a0c418",
+        "vis_70e42116a4cf": "6eb91537d98252e89178633a219d0326171e697406f459bc52e6178bc0ff3344",
+        "vis_8243499a3a78": "c54b4aa30fdb05172fe02eaac09b09ef2167a1eca227da9a892eccd432187d6f"
+      },
+      "media_redacted": true,
+      "boundary": "A signed statement that exactly these records existed at export time — dropping or swapping one invalidates the pack.",
+      "journal_head": "cc2a3bdb12a5fbf11cba36fa8d3b11bb23f9cafdee8aea74cf8f3a977dea6f7d",
+      "schema": "attest.receipt/2",
+      "sequence": 251,
+      "prev_hash": "5dcd5955432f86591a4c3ba59921ab5805db323d8d6999b9feda83b961031f05",
+      "visit_id": "export:site_a55d249ad6dd:73b0085e956d9478",
+      "receipt_id": "rcpt_ffdda7f44f814301852f8cfb3016877b",
+      "issued_at": "2026-10-13T13:22:39.442730+00:00"
+    },
+    "payload_hash": "ea9aabf03c5f220aaf75c3980d8fcc846fdef623a9d97566098f35629633d28f",
+    "signature": "0cLBMEu6LmcXvdE7oWlap6uYR6kSBagqZQrJuaC/+2VdHjrIhyX7MkBJSW4N8OTwOnVX8wM5/DeiFET39+8DDA==",
+    "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+    "issued_at": "2026-10-13T13:22:39.442730Z"
+  },
+  {
+    "id": "rcpt_1129dfcf1c9b4ff0bc8dc81f3ac3edfc",
+    "visit_id": "export-tools:05caff23a72e4819",
+    "sequence": 252,
+    "prev_hash": "ea9aabf03c5f220aaf75c3980d8fcc846fdef623a9d97566098f35629633d28f",
+    "payload": {
+      "record_type": "verifier_manifest",
+      "scope": "site:site_a55d249ad6dd",
+      "tools": {
+        "verify_case.py": "ff7861a50764f6f15793927e7e171855f28ac35573a79132919668104abe2435",
+        "verify.html": "7f2c9d16f384e6af9a74f9ad9f5d28b429b5197f37b0309fe43d23b6884620e4",
+        "index.html": "acaf48f1b9476ba42ca9cf27f9b53c5e894e851138a32768a5e6d69e4158ebfb",
+        "README.txt": "6b5ce4f032c59b349463789db22f20b47f91e682929a95bbaafc3f6ab28851ce"
+      },
+      "boundary": "The named files must byte-match these sha256 digests — a verifier inside a pack that doesn't match was modified after export and must not be trusted to report honestly.",
+      "journal_head": "31500110ce29742fe3d42568805adbf9ef82ef6b8faebc646a63d7ada5f2bf7a",
+      "schema": "attest.receipt/2",
+      "sequence": 252,
+      "prev_hash": "ea9aabf03c5f220aaf75c3980d8fcc846fdef623a9d97566098f35629633d28f",
+      "visit_id": "export-tools:05caff23a72e4819",
+      "receipt_id": "rcpt_1129dfcf1c9b4ff0bc8dc81f3ac3edfc",
+      "issued_at": "2026-10-13T13:22:39.458437+00:00"
+    },
+    "payload_hash": "b705126718c33fb62e0bae482b64a3f0f47cef4708508179257a9ecf3212c57d",
+    "signature": "R7iegtbeXV/ce2+sfUe91NTWsMHPp1Ke8xmiFgVtWZ5apFU9bw7sK7cI1d2vk9b19i9kGyqN46h/AdRK3/TTCA==",
+    "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+    "issued_at": "2026-10-13T13:22:39.458437Z"
+  },
+  {
+    "id": "rcpt_5f83f4b2c4554a93aabd74be759fddab",
+    "visit_id": "log:174:c154c339e61adc54",
+    "sequence": 253,
+    "prev_hash": "b705126718c33fb62e0bae482b64a3f0f47cef4708508179257a9ecf3212c57d",
+    "payload": {
+      "record_type": "log_checkpoint",
+      "tree_size": 174,
+      "root_sha256": "c154c339e61adc54751eee17e3ba454735eb9e4eef405fcbf20acf971b65f545",
+      "leaf_input": "receipt.payload_hash (raw bytes, sequence order)",
+      "boundary": "A signed commitment that exactly these receipts, in this order, formed the log at this size — receipts in an export can prove inclusion, and a later checkpoint can prove it extends this one without rewriting history.",
+      "journal_head": "18339497e417d3968ec781507b60e493fe21ff64b0787ab13cb2c0ab019a0235",
+      "extends": {
+        "first": 172,
+        "first_root_sha256": "d00d0467efb5ff8c88220c288f1d4a4de49aa8499cf4ca66eda76633589632f7",
+        "checkpoint_id": "rcpt_daebf49e4b744df9b002948cd88c9239",
+        "proof": [
+          "937edc8979cc2f3f251878f8b5181c75c215cf050db66d13de0415b8e1124640",
+          "80d63f942bbbfdb1941f54276fca8e829e4f325a2b70641872e84225490ef71a",
+          "d565a84e93a8a5189913f92c65ede34902a96e08308dfed32560353889da1cae",
+          "fad5a3920523f059f7f4bcd1407e5ca21334959875f9f11dbf97adac98847b8d",
+          "c0cd7f5d7ed43d9d0dc8fa2b492d2656463d5debf13578ec5decf0d4dafc7855"
+        ]
+      },
+      "schema": "attest.receipt/2",
+      "sequence": 253,
+      "prev_hash": "b705126718c33fb62e0bae482b64a3f0f47cef4708508179257a9ecf3212c57d",
+      "visit_id": "log:174:c154c339e61adc54",
+      "receipt_id": "rcpt_5f83f4b2c4554a93aabd74be759fddab",
+      "issued_at": "2026-10-13T13:22:39.477839+00:00"
+    },
+    "payload_hash": "2cfd93aca77b39efde6bb36cbbe5e891b6dcfea8d87b17cb2ce55e9798024ec7",
+    "signature": "M+vMP/AwOa8Eg9VZYhGO4X1a6RLyVzizrhe/sf608nJldVawquDN1D71nFb/xgOAdSWJL/9eCVj+m9ljdBnRCA==",
+    "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+    "issued_at": "2026-10-13T13:22:39.477839Z"
   }
 ]
