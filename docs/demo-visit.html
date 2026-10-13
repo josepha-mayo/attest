@@ -69,13 +69,13 @@
   @media(prefers-reduced-motion:reduce) { * { animation:none!important; transition:none!important; scroll-behavior:auto!important } }
   @media(max-width:720px) { header { flex-wrap:wrap; padding:14px 16px } header .meta { margin-left:0; width:100% } main { padding:20px 16px } .row label { width:100% } }
 </style>
-</head>
-<body><div style="background:#f9edd4;border-bottom:1px solid #d9a83c;color:#6b4d0f;font:13px/1.5 system-ui,sans-serif;padding:8px 16px;text-align:center">Snapshot of the live <code>attest demo</code> product — served from a local Ring emulator. Run <code>attest demo</code> for the real thing; <a href="index.html" style="color:#6b4d0f">back to the demo page</a>.</div>
+<style>a[data-dead]{opacity:.55;cursor:not-allowed;text-decoration:line-through}[disabled]{cursor:not-allowed}.snap-note{font-size:12px;color:var(--muted,#5c6b7a);margin:4px 0 8px}@media print{.snap-banner{display:none}}</style></head>
+<body><div class="snap-banner" style="background:#f9edd4;border-bottom:1px solid #d9a83c;color:#6b4d0f;font:13px/1.5 system-ui,sans-serif;padding:8px 16px;text-align:center">Captura estática del producto <code>attest demo</code> en vivo — servida desde un emulador Ring local. Los enlaces tachados y los controles deshabilitados son rutas de la aplicación en vivo. Ejecuta <code>attest demo</code> para la versión real; <a href="index.html" style="color:#6b4d0f">volver a la página de demostración</a>.</div>
 <a class="skip-link" href="#main">Skip to content</a>
 
 <header>
   <div class="brand">Attest<span>.</span></div>
-  <nav><a href="demo-dashboard.html">Records</a><a  data-dead="/setup" title="live deployment only — inert in this snapshot">Setup &amp; schedules</a><a href="demo-integrity.html">Integrity</a><a href="verify.html">Verify</a><a href="verify.html">Pack verifier</a><a href="index.html">Claim boundary</a><a href="demo-receipts.json" download>Receipts (JSON)</a></nav>
+  <nav><a href="demo-dashboard.html">Records</a><a  data-dead="/setup" title="live deployment only — inert in this snapshot">Setup &amp; schedules</a><a href="demo-integrity.html">Integrity</a><a href="verify.html">Verify (journal)</a><a href="verify.html">Verify (pack)</a><a href="index.html">Claim boundary</a><a href="demo-receipts.json" download>Receipts (JSON)</a></nav>
   <div class="meta">Local / test data &middot; configured summary provider: template</div>
 </header>
 <div class="replay-banner">LOCAL REPLAY — not a live visit. Event clock: 2026-10-08T20:37:03.318922+00:00. Security expiry and signature issuance use real time.</div>
@@ -96,7 +96,7 @@
 </div>
 <p class="muted">A valid signature proves record integrity, not identity, attendance, or time worked. Review observations alongside the worker's account.</p>
 <p class="summary" style="margin:22px 0">Door activity was observed at Alvarez residence from 6:31 PM to 7:36 PM, spanning about 65 minutes. The link issued to Maria Chen was used to self-report presence at 7:36 PM; identity was not independently verified. These observations do not establish departure, continuous presence, or time worked. Review notes: Record closed for review; direction, identity, and continuous presence are not established; Observations span 65 min; 90 min scheduled. Time worked is unknown.</p>
-<div class="small muted">Summary source: template</div>
+<div class="small muted">Summary source: template — times UTC; all other times on this page render in the display timezone</div>
 <div class="grid" style="margin-top:14px">
   <div class="card"><div class="muted small">First observation</div><div class="kpi" style="font-size:20px">11:31:03 AM</div></div>
   <div class="card"><div class="muted small">Self-reported check-in</div><div class="kpi" style="font-size:20px">12:36:03 PM</div></div>
@@ -214,10 +214,10 @@
 
 
 <svg viewBox="0 0 100 34" preserveAspectRatio="none" style="width:100%;height:96px;display:block" role="img"
-     aria-label="Timeline — scheduled 11:01am–1:06pm; 2 watched interval(s), 2 coverage gap(s); 1 motion, 2 snapshot, 1 doorbell, 2 door opened, 2 door closed, 2 worker check-in, 1 departure cue">
+     aria-label="Timeline — scheduled 11:01am–1:06pm; 2 watched interval(s), 2 coverage gap(s); 1 motion, 2 snapshot, 1 doorbell, 2 door opened, 2 door closed, 1 worker check-in, 1 departure cue">
   
   <rect x="3.7" y="4" width="92.6" height="20" rx="1.5"
-        fill="#3b4a63" opacity="0.55"><title>scheduled window</title></rect>
+        fill="#3b4a63" opacity="0.55"><title>scheduled window — wider than the expected duration (includes lead/lag)</title></rect>
   
   
   <rect x="25.93" y="25" width="0.43" height="3.2"
@@ -331,24 +331,15 @@
       <title>snapshot — 2026-10-02T19:36:18.318000+00:00</title></circle>
   </g>
   
-  <g>
-    <line x1="74.07" y1="8" x2="74.07" y2="24"
-          stroke="#e8b93e"
-          stroke-width="0.7"><title>worker check-in — 2026-10-02T19:36:03.318922+00:00</title></line>
-    <circle cx="74.07" cy="7" r="1.1"
-            fill="#e8b93e">
-      <title>worker check-in — 2026-10-02T19:36:03.318922+00:00</title></circle>
-  </g>
-  
 </svg>
 
 <div class="row" aria-hidden="true" style="justify-content:space-between;font-size:11px;color:var(--muted);margin-top:2px">
   <span>10:56am</span><span>11:29am</span><span>12:03pm</span><span>12:37pm</span><span>1:11pm</span>
 </div>
 <div class="row" style="gap:16px;font-size:11px;color:var(--muted);margin:6px 2px 4px">
-  <span><span style="color:#8fa3c8">&#9632;</span> scheduled window</span>
-  <span><span style="color:#2f9e63">&#9632;</span> watched &nbsp;<span style="color:#9aa3b2">&#9632;</span> gap</span>
-  <span><span style="color:#5aa2e8">&#9679;</span> observation &nbsp;<span style="color:#e8b93e">&#9679;</span> self-reported check-in</span>
+  <span><span aria-hidden="true" style="color:#8fa3c8">&#9632;</span> scheduled window (with lead/lag)</span>
+  <span><span aria-hidden="true" style="color:#2f9e63">&#9632;</span> watched &nbsp;<span aria-hidden="true" style="color:#9aa3b2">&#9632;</span> gap</span>
+  <span><span aria-hidden="true" style="color:#5aa2e8">&#9679;</span> observation &nbsp;<span aria-hidden="true" style="color:#e8b93e">&#9679;</span> self-reported check-in</span>
   
 </div>
 
@@ -397,8 +388,8 @@
 <div class="card">
 <p class="ok">original and 4 append-only reviews verified (integrity only)</p>
 <a class="btn secondary"  data-dead="/visits/vis_70e42116a4cf/bundle.json" title="live deployment only — inert in this snapshot">Export original + review chain</a>
-<a class="btn secondary"   data-dead="/visits/vis_70e42116a4cf/pack.zip" title="live deployment only — inert in this snapshot — bundle + media + offline verifier in one zip">Download dispute pack</a>
-<a class="btn secondary"   data-dead="/visits/vis_70e42116a4cf/pack.zip?redact_media=1" title="live deployment only — inert in this snapshot — media withheld, signed digests kept">Privacy export</a>
+<a class="btn secondary" href="sample-pack.zip" title="bundle + media + offline verifier in one zip">Download dispute pack</a>
+<a class="btn secondary" href="sample-pack.zip" title="media withheld, signed digests kept">Privacy export</a>
 <a class="btn secondary" href="demo-visit-brief.html" title="one printable page for a mediator or filing — anchors and verification steps, no media bytes">Printable brief</a>
 
 <button class="btn secondary" id="issue-review" disabled title="live deployment only — inert in this snapshot">Request worker's account</button>
@@ -407,7 +398,7 @@
 <p id="review-link-status" role="status" class="small muted"></p>
 
 <button class="btn secondary" id="issue-family" disabled title="live deployment only — inert in this snapshot">Share the household view</button>
-<button class="btn secondary" id="revoke-family" title="Kills the existing family link — anyone holding it loses access immediately" disabled>Revoke family link</button>
+<button class="btn secondary" id="revoke-family" title="live deployment only — inert in this snapshot — Kills the existing family link — anyone holding it loses access immediately" disabled>Revoke family link</button>
 <a id="family-view-link" style="display:block;overflow-wrap:anywhere;color:var(--accent)"></a>
 <a id="family-mailto" class="muted small" style="display:none" href="#">Send by email</a>
 <img id="family-view-qr" alt="QR code for the household view link" style="display:none;width:120px;height:120px;margin-top:8px;border:1px solid var(--line);border-radius:8px">
@@ -459,10 +450,10 @@
 </article>
 
 </div>
-<form id="coordinator-review" class="card" style="margin-top:16px">
+<form id="coordinator-review" class="card" style="margin-top:16px" title="live deployment only — inert in this snapshot"><p class='snap-note'>This form is inert in the snapshot — on a live deployment it posts a signed entry.</p>
 <h2>Append coordinator statement</h2>
 <label>Assessment
-<select name="decision" required disabled>
+<select name="decision" required disabled title="live deployment only — inert in this snapshot">
 
 <option value="inconclusive" >Inconclusive — more context needed</option>
 
@@ -474,38 +465,38 @@
 
 </select></label>
 <label>Reason code <span class="muted">(optional — the coded explanation you are stating; never a verified cause)</span>
-<select name="reason_code" disabled>
+<select name="reason_code" disabled title="live deployment only — inert in this snapshot">
 <option value="">No coded reason — statement carries it</option>
 <option value="device_fault" >device_fault — Camera or sensor faulted — channel interruption recorded</option><option value="worker_error" >worker_error — Worker forgot the check-in step or used it wrong</option><option value="service_outside_home" >service_outside_home — Service happened away from the camera&#39;s view</option><option value="no_electronic_confirmation" >no_electronic_confirmation — No device confirmation exists — unexplained gap</option><option value="participant_unavailable" >participant_unavailable — Household wasn&#39;t home or didn&#39;t answer</option><option value="schedule_difference" >schedule_difference — Service or timing differed from the plan</option><option value="authorization_gap" >authorization_gap — Plan/authorization coverage lapsed or ended</option><option value="subscription_lapse" >subscription_lapse — Ring subscription ended mid-window</option><option value="mobile_or_network_issue" >mobile_or_network_issue — Worker&#39;s phone/app or the home network failed</option><option value="worker_unavailable" >worker_unavailable — Worker was unavailable or reassigned</option><option value="participant_refused" >participant_refused — Household declined the visit or the device</option><option value="weather_or_disaster" >weather_or_disaster — Weather/emergency prevented the visit</option><option value="other" >other — Other — the statement carries the detail</option>
 </select></label>
-<label>Statement <textarea name="statement" rows="4" maxlength="2000" required placeholder="Explain what you know and what should be corrected." disabled></textarea></label>
+<label>Statement <textarea name="statement" rows="4" maxlength="2000" required placeholder="Explain what you know and what should be corrected." disabled title="live deployment only — inert in this snapshot"></textarea></label>
 <div class="row">
-<label>Reported start (optional, include UTC offset)<input name="reported_start" value="" placeholder="2026-09-15T09:00:00-07:00" disabled></label>
-<label>Reported end (optional, include UTC offset)<input name="reported_end" value="" placeholder="2026-09-15T10:30:00-07:00" disabled></label>
+<label>Reported start (optional, include UTC offset)<input name="reported_start" value="" placeholder="2026-09-15T09:00:00-07:00" disabled title="live deployment only — inert in this snapshot"></label>
+<label>Reported end (optional, include UTC offset)<input name="reported_end" value="" placeholder="2026-09-15T10:30:00-07:00" disabled title="live deployment only — inert in this snapshot"></label>
 </div>
 <p class="muted small">Supply both times or neither. These are reported times, not independently measured work duration. Original observations will not change.</p>
 <button class="btn" disabled title="live deployment only — inert in this snapshot">Append signed review</button>
 <p id="review-status" role="status"></p>
 </form>
-<form id="coordinator-resolve" class="card" style="margin-top:16px">
+<form id="coordinator-resolve" class="card" style="margin-top:16px" title="live deployment only — inert in this snapshot"><p class='snap-note'>This form is inert in the snapshot — on a live deployment it posts a signed entry.</p>
 <h2>Conclude the record</h2>
 <p class="muted small">A resolution appends the coordinator's signed conclusion. It never edits or removes the worker's statement — a later worker statement re-opens the record.</p>
 <label>Conclusion
-<select name="outcome" required disabled>
+<select name="outcome" required disabled title="live deployment only — inert in this snapshot">
 <option value="record_upheld">Record upheld — the signed record stands as the conclusion</option>
 <option value="account_accepted">Worker's account accepted — their statement is the operative conclusion</option>
 <option value="inconclusive">Inconclusive — the ambiguity itself is the conclusion</option>
 </select></label>
 <label>Reason <span class="muted">(coded — classifies your explanation, never asserts what happened)</span>
-<select name="reason_code" disabled>
+<select name="reason_code" disabled title="live deployment only — inert in this snapshot">
 <option value="">No coded reason — statement carries it</option>
 <option value="device_fault">device_fault — Camera or sensor faulted — channel interruption recorded</option><option value="worker_error">worker_error — Worker forgot the check-in step or used it wrong</option><option value="service_outside_home">service_outside_home — Service happened away from the camera&#39;s view</option><option value="no_electronic_confirmation">no_electronic_confirmation — No device confirmation exists — unexplained gap</option><option value="participant_unavailable">participant_unavailable — Household wasn&#39;t home or didn&#39;t answer</option><option value="schedule_difference">schedule_difference — Service or timing differed from the plan</option><option value="authorization_gap">authorization_gap — Plan/authorization coverage lapsed or ended</option><option value="subscription_lapse">subscription_lapse — Ring subscription ended mid-window</option><option value="mobile_or_network_issue">mobile_or_network_issue — Worker&#39;s phone/app or the home network failed</option><option value="worker_unavailable">worker_unavailable — Worker was unavailable or reassigned</option><option value="participant_refused">participant_refused — Household declined the visit or the device</option><option value="weather_or_disaster">weather_or_disaster — Weather/emergency prevented the visit</option><option value="other">other — Other — the statement carries the detail</option>
 </select></label>
-<label>Statement <textarea name="statement" rows="4" maxlength="2000" required placeholder="Why this conclusion, and what evidence weighed on it." disabled></textarea></label>
+<label>Statement <textarea name="statement" rows="4" maxlength="2000" required placeholder="Why this conclusion, and what evidence weighed on it." disabled title="live deployment only — inert in this snapshot"></textarea></label>
 <button class="btn" disabled title="live deployment only — inert in this snapshot">Sign conclusion</button>
 <p id="resolve-status" role="status"></p>
 </form>
-<script>
+<script>if (false) {
 const requestReview = document.getElementById('issue-review');
 if (requestReview) requestReview.onclick = async () => {
   const response = await fetch('/api/visits/vis_70e42116a4cf/review-link', {method: 'POST'});
@@ -581,7 +572,7 @@ document.getElementById('coordinator-resolve').onsubmit = async event => {
   const data = await response.json();
   document.getElementById('resolve-status').textContent = typeof data.detail === 'string' ? data.detail : 'Check the required conclusion fields.';
 };
-</script>
+}</script>
 
 
 <h2>Observation coverage</h2>

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% macro t(dt) %}{% if dt %}{% set _v = (dt|iso).astimezone(tz).strftime(s.time_fmt if s.time_fmt else "%I:%M %p") %}{{ _v[1:] if _v.startswith("0") and not s.time_fmt else _v }}{% else %}—{% endif %}{% endmacro %}
 {% block title %}{{ s.wk_checkin_brand }} — {{ worker.name }}{% endblock %}
-{% block chrome %}<header><div class="brand">Attest<span>.</span> · <a href="?lang={{ "es" if s.lang == "en" else "en" }}" style="letter-spacing:normal;text-transform:none">{{ s.lang_toggle }}</a></div></header>{% endblock %}
+{% block chrome %}<header><div class="brand">Attest<span>.</span> · <a href="?lang={{ "es" if s.lang == "en" else "en" }}" lang="{{ "es" if s.lang == "en" else "en" }}" hreflang="{{ "es" if s.lang == "en" else "en" }}" style="letter-spacing:normal;text-transform:none">{{ s.lang_toggle }}</a></div></header>{% endblock %}
 {% block body %}
 <div style="max-width:480px;margin:40px auto">
   <div class="card" style="padding:26px">

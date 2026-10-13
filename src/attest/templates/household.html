@@ -18,6 +18,10 @@ body{font:16px/1.55 -apple-system,"Segoe UI",Roboto,sans-serif;background:var(--
 .brand{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--quiet);margin-bottom:26px}
 h1{font-size:26px;line-height:1.25;margin-bottom:4px}
 .date{color:var(--muted);font-size:15px}
+.muted{color:var(--muted)}
+.flag.warn{display:inline-block;padding:2px 8px;border-radius:6px;font-size:12px;background:#f9edd4;color:#7a4f07}
+.skip-link{position:absolute;left:-9999px;top:0;background:var(--ok);color:#fff;padding:8px 16px;z-index:10;font-weight:700;border-radius:0 0 8px 0}
+.skip-link:focus{left:0}
 .hero{text-align:center;padding:30px 20px}
 .hero .mark{width:56px;height:56px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:28px;margin-bottom:12px}
 .hero.ok .mark{background:#e2f4ea;color:var(--ok)}
@@ -59,13 +63,17 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible{
 </style>
 </head>
 <body>
-<main class="wrap">
+<a class="skip-link" href="#main">{{ s.skip_link }}</a>
+<main class="wrap" id="main" tabindex="-1">
 {% if not via_link %}<div class="small" style="margin-bottom:14px"><a href="/visits/{{ visit.id }}">&lsaquo; {% if s.lang == "es" %}volver al registro{% else %}back to the record{% endif %}</a></div>{% endif %}
 {% macro t(dt) %}{% if dt %}{% set _v = (dt|iso).astimezone(tz).strftime(s.time_fmt if s.time_fmt else "%I:%M %p") %}{{ _v[1:] if _v.startswith("0") and not s.time_fmt else _v }}{% else %}—{% endif %}{% endmacro %}
 {% macro dayline(dt) %}{% if s.weekdays %}{{ s.weekdays[dt.astimezone(tz).weekday()] }}, {{ dt.astimezone(tz).day }} de {{ s.months[dt.astimezone(tz).month - 1] }}{% else %}{{ dt.astimezone(tz).strftime("%A, %B %d").replace(" 0", " ") }}{% endif %}{% endmacro %}
-<div class="brand">{{ s.brand }} · <a href="?lang={{ "es" if s.lang == "en" else "en" }}" style="letter-spacing:normal;text-transform:none">{{ s.lang_toggle }}</a></div>
+<div class="brand">{{ s.brand }} · <a href="?lang={{ "es" if s.lang == "en" else "en" }}" lang="{{ "es" if s.lang == "en" else "en" }}" hreflang="{{ "es" if s.lang == "en" else "en" }}" style="letter-spacing:normal;text-transform:none">{{ s.lang_toggle }}</a></div>
 <h1>{{ site.name }}</h1>
 <div class="date">{% if schedule %}{{ dayline(schedule.window_start) }} · {{ s.scheduled }} {{ t(schedule.window_start) }}–{{ t(schedule.window_end) }}{% else %}{{ s.unscheduled }}{% endif %}{% if schedule and schedule.service %} · {{ schedule.service }}{% endif %}</div>
+{% if via_link %}<p class="muted small">{{ s.link_intro }}</p>{% endif %}
+{% set pclock = receipt.payload.get("clock") if receipt else none %}
+{% if pclock and pclock.mode == "replay" %}<p class="flag warn">{{ s.hh_replay }}</p>{% endif %}
 
 <div style="height:18px"></div>
 

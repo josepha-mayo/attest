@@ -1959,13 +1959,16 @@ def build_case_pack(
 TAMPER_ATTACKS = ("duration", "missing-record", "smuggled-file", "forged-verifier")
 
 
-def tamper_twin(pack: bytes, attack: str = "duration") -> tuple[bytes, str]:
+def tamper_twin(pack: bytes, attack: str = "duration", visit: str | None = None) -> tuple[bytes, str]:
     """A hostile copy of a pack: byte-identical except one deliberate attack,
     so the copy must FAIL verification. Each ``attack`` exercises a different
     verification layer — ``duration`` doctors a signed payload field,
     ``missing-record`` deletes a record the manifest commits to,
     ``smuggled-file`` injects a member no signed content names, and
     ``forged-verifier`` swaps the embedded checker for an always-green stub.
+    ``visit`` names the record the ``duration`` attack doctors — default is
+    the bundle with the shortest observed stay; passing the contested visit
+    makes the twin hit the record the story is about.
     Used for demos and verifier QA — ``export --tamper-twin`` writes one, and
     the ``docs/sample-pack-*`` twins are built this way.
     Returns ``(zip_bytes, description_of_the_attack)``."""
@@ -1991,10 +1994,15 @@ def tamper_twin(pack: bytes, attack: str = "duration") -> tuple[bytes, str]:
             # signs `observed_span_minutes` (first→last camera observation),
             # so doctor whichever numeric stay-field exists.
             best: tuple[float, str, bytes, bytes, int, int, bytes] | None = None
+            ordered = (
+                [f"visits/{visit}/bundle.json"]
+                if visit and f"visits/{visit}/bundle.json" in bundles
+                else bundles
+            )
             for field in (b'"duration_minutes": ', b'"observed_span_minutes": '):
                 if best is not None:
                     break
-                for name in bundles:
+                for name in ordered:
                     raw = src.read(name)
                     i = raw.find(field)
                     if i < 0:
@@ -2007,7 +2015,7 @@ def tamper_twin(pack: bytes, attack: str = "duration") -> tuple[bytes, str]:
                         val = float(raw[j:k])
                     except ValueError:
                         continue
-                    if best is None or val < best[0]:
+                    if best is None or (visit is None and val < best[0]):
                         best = (val, name, raw, raw[j:k], j, k, field)
             if best is not None:
                 val, name, raw, span, j, k, field = best
@@ -2017,7 +2025,7 @@ def tamper_twin(pack: bytes, attack: str = "duration") -> tuple[bytes, str]:
                 fname = field.decode().strip('": ')
                 desc = f"{vid}: {fname} {span.decode()} -> {new}"
             else:
-                for name in bundles:
+                for name in ordered:
                     raw = src.read(name)
                     wmark = b'"worker": "'
                     i = raw.find(wmark)

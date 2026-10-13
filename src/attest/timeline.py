@@ -174,12 +174,14 @@ def timeline_strip(
                 )
 
     marks = []
+    plotted: set[tuple[str, datetime]] = set()
     for e in evidence:
         at = _iso(_get(e, "at"))
         if bounds and not lo <= at <= hi:
             continue
         kind = _get(e, "kind") or "activity"
         kind = getattr(kind, "value", kind)
+        plotted.add((kind, at))
         marks.append(
             {
                 "x": x(at),
@@ -188,7 +190,13 @@ def timeline_strip(
                 "title": f"{_k(kind)} — {at.isoformat()}",
             }
         )
-    if checked_in_at and (not bounds or lo <= checked_in_at <= hi):
+    # The payload's checked_in_at often restates a checkin evidence item's
+    # instant — one tick per real event, not one per field naming it.
+    if (
+        checked_in_at
+        and (not bounds or lo <= checked_in_at <= hi)
+        and ("checkin", checked_in_at) not in plotted
+    ):
         marks.append(
             {
                 "x": x(checked_in_at),
@@ -299,12 +307,18 @@ def day_strips(
             items.append((ws, we, "schedule", sch))
     for v in visits:
         vid = _get(v, "id")
+        ci_raw = _get(v, "checked_in_at")
+        ci = _iso(ci_raw) if ci_raw else None
         for e in evidence_by_visit.get(vid, []):
             at = _iso(_get(e, "at"))
+            # a checkin evidence item at checked_in_at is the same event —
+            # one mark per real event, not one per field naming it
+            ek = _get(e, "kind")
+            if ci and at == ci and getattr(ek, "value", ek) == "checkin":
+                continue
             items.append((at, at, "evidence", e))
-        ci = _get(v, "checked_in_at")
         if ci:
-            items.append((_iso(ci), _iso(ci), "checkin", v))
+            items.append((ci, ci, "checkin", v))
         cov = coverage_by_visit.get(vid) or {}
         for key, watched in (("covered", True), ("gaps", False)):
             for iv in cov.get(key, []):

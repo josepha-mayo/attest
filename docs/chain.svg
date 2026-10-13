@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg viewBox="0 0 672 707" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Hash chain of the 109 signed receipts">
+<svg viewBox="0 0 672 759" xmlns="http://www.w3.org/2000/svg" role="group" aria-label="Hash chain of the 115 signed receipts">
 <line x1="57" y1="52" x2="119" y2="52" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
 <line x1="119" y1="52" x2="181" y2="52" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
 <line x1="181" y1="52" x2="243" y2="52" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
@@ -108,27 +108,33 @@
 <line x1="367" y1="572" x2="429" y2="572" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
 <line x1="429" y1="572" x2="491" y2="572" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
 <line x1="491" y1="572" x2="553" y2="572" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="553" y1="572" x2="615" y2="572" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="615" y1="572" x2="615" y2="624" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="615" y1="624" x2="553" y2="624" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="553" y1="624" x2="491" y2="624" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="491" y1="624" x2="429" y2="624" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="429" y1="624" x2="367" y2="624" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
 <g font-family="system-ui,sans-serif" font-size="11">
-<rect x="26" y="655" width="9" height="9" rx="2" fill="#7c3aed"/>
-<text x="38" y="663" fill="#475569">case_export</text>
-<rect x="154" y="655" width="9" height="9" rx="2" fill="#94a3b8"/>
-<text x="166" y="663" fill="#475569">verifier_manifest</text>
-<rect x="282" y="655" width="9" height="9" rx="2" fill="#0d9488"/>
-<text x="294" y="663" fill="#475569">log_checkpoint</text>
-<rect x="410" y="655" width="9" height="9" rx="2" fill="#2563eb"/>
-<text x="422" y="663" fill="#475569">visit_record</text>
-<rect x="538" y="655" width="9" height="9" rx="2" fill="#d97706"/>
-<text x="550" y="663" fill="#475569">coverage_attestation</text>
-<rect x="26" y="677" width="9" height="9" rx="2" fill="#16a34a"/>
-<text x="38" y="685" fill="#475569">verification_report</text>
-<rect x="154" y="677" width="9" height="9" rx="2" fill="#db2777"/>
-<text x="166" y="685" fill="#475569">period_digest</text>
-<rect x="282" y="677" width="9" height="9" rx="2" fill="#dc2626"/>
-<text x="294" y="685" fill="#475569">key_rotation</text>
-<rect x="410" y="677" width="9" height="9" rx="2" fill="#ea580c"/>
-<text x="422" y="685" fill="#475569">key_adoption</text>
-<rect x="538" y="677" width="9" height="9" rx="2" fill="#991b1b"/>
-<text x="550" y="685" fill="#475569">key_revocation</text>
+<rect x="26" y="707" width="9" height="9" rx="2" fill="#7c3aed"/>
+<text x="38" y="715" fill="#475569">case_export</text>
+<rect x="154" y="707" width="9" height="9" rx="2" fill="#94a3b8"/>
+<text x="166" y="715" fill="#475569">verifier_manifest</text>
+<rect x="282" y="707" width="9" height="9" rx="2" fill="#0d9488"/>
+<text x="294" y="715" fill="#475569">log_checkpoint</text>
+<rect x="410" y="707" width="9" height="9" rx="2" fill="#2563eb"/>
+<text x="422" y="715" fill="#475569">visit_record</text>
+<rect x="538" y="707" width="9" height="9" rx="2" fill="#d97706"/>
+<text x="550" y="715" fill="#475569">coverage_attestation</text>
+<rect x="26" y="729" width="9" height="9" rx="2" fill="#16a34a"/>
+<text x="38" y="737" fill="#475569">verification_report</text>
+<rect x="154" y="729" width="9" height="9" rx="2" fill="#db2777"/>
+<text x="166" y="737" fill="#475569">period_digest</text>
+<rect x="282" y="729" width="9" height="9" rx="2" fill="#dc2626"/>
+<text x="294" y="737" fill="#475569">key_rotation</text>
+<rect x="410" y="729" width="9" height="9" rx="2" fill="#ea580c"/>
+<text x="422" y="737" fill="#475569">key_adoption</text>
+<rect x="538" y="729" width="9" height="9" rx="2" fill="#991b1b"/>
+<text x="550" y="737" fill="#475569">key_revocation</text>
 </g>
 <a href="verify.html#demo-receipts/rcpt_12c9510dfc604236b880b034fce4af7e"><rect x="48" y="43" width="18" height="18" rx="4" fill="#2563eb" stroke="#fff" stroke-width="1.2"><title>rcpt_12c9510dfc604236b880b034fce4af7e · visit_record · seq 1 · 2026-10-09T18:06:04.725773Z</title></rect></a>
 <a href="verify.html#demo-receipts/rcpt_8af58f6242d04e13a94147ddc2c70a19"><rect x="110" y="43" width="18" height="18" rx="4" fill="#2563eb" stroke="#fff" stroke-width="1.2"><title>rcpt_8af58f6242d04e13a94147ddc2c70a19 · visit_record · seq 2 · 2026-10-09T18:06:05.909358Z</title></rect></a>
@@ -239,4 +245,10 @@
 <a href="verify.html#demo-receipts/rcpt_fc7e5432478b41f0b18c1a11716393e1"><rect x="420" y="563" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_fc7e5432478b41f0b18c1a11716393e1 · case_export · seq 107 · 2026-10-12T16:08:08.636097Z</title></rect></a>
 <a href="verify.html#demo-receipts/rcpt_abc5fb0a621f41359575e39afe16378e"><rect x="482" y="563" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_abc5fb0a621f41359575e39afe16378e · verifier_manifest · seq 108 · 2026-10-12T16:08:08.646361Z</title></rect></a>
 <a href="verify.html#demo-receipts/rcpt_4d3fa335dd454fac818f07e6a6dd1e85"><rect x="544" y="563" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_4d3fa335dd454fac818f07e6a6dd1e85 · log_checkpoint · seq 109 · 2026-10-12T16:08:08.652787Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_e4caae30239344edb6c599d2a34fd0d5"><rect x="606" y="563" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_e4caae30239344edb6c599d2a34fd0d5 · case_export · seq 110 · 2026-10-13T06:54:53.329045Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_6aaad1f9a3134411b83aaf96d24d17a5"><rect x="606" y="615" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_6aaad1f9a3134411b83aaf96d24d17a5 · verifier_manifest · seq 111 · 2026-10-13T06:54:53.353164Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_705a58d56c844a8bb843301a25171e7d"><rect x="544" y="615" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_705a58d56c844a8bb843301a25171e7d · log_checkpoint · seq 112 · 2026-10-13T06:54:53.373719Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_58431818d8a54e8e8b6e4e25739020ec"><rect x="482" y="615" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_58431818d8a54e8e8b6e4e25739020ec · case_export · seq 113 · 2026-10-13T07:15:51.993039Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_03fc9c1b849940df82ddd5b9ca6e73cd"><rect x="420" y="615" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_03fc9c1b849940df82ddd5b9ca6e73cd · verifier_manifest · seq 114 · 2026-10-13T07:15:52.014113Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_53b87b08b77a44c3830a61bbba74e9c8"><rect x="358" y="615" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_53b87b08b77a44c3830a61bbba74e9c8 · log_checkpoint · seq 115 · 2026-10-13T07:15:52.024520Z</title></rect></a>
 </svg>

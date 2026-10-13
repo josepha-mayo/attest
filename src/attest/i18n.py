@@ -13,6 +13,8 @@ statements are never translated — the signed words render as written.
 
 from __future__ import annotations
 
+from .taxonomy import REASON_CODES as _REASON_CODES
+
 SUPPORTED = ("en", "es")
 
 
@@ -112,15 +114,18 @@ _EN = {
     "foot_verify": "Anyone can check this record without trusting us: ask the service for the export pack and open it in a browser — it verifies itself.",
     "err_incomplete": "Your account needs both parts — pick what happened and write it in your own words (2000 characters max).",
     "err_limit": "This record has reached its statement limit — the view link still works, but no further accounts can be added. Contact the coordinator if something needs correcting.",
+    "link_intro": "You opened this page through a private link sent to your household — it shows this record only, it can expire, and the service can revoke it.",
+    "hh_replay": "Local replay: event times use a simulated clock — this is not a live visit.",
+    "skip_link": "Skip to content",
     "lang_toggle": "Español",
-    "tl_window": "scheduled window",
+    "tl_window": "scheduled window (with lead/lag)",
     "tl_watched": "watched",
     "tl_gap": "gap",
     "tl_obs": "observation",
     "tl_checkin": "self-reported check-in",
     "tl_live": "live view — stream established, never viewership",
     "tl_aria_prefix": "Timeline — ",
-    "tl_title_window": "scheduled window",
+    "tl_title_window": "scheduled window — wider than the expected duration (includes lead/lag)",
     "tl_title_watched": "watched by polling",
     "tl_title_gap": "coverage gap — not watched",
     "counter": {
@@ -286,15 +291,31 @@ _ES = {
     "foot_verify": "Cualquiera puede comprobar este registro sin confiar en nosotros: pide al servicio el paquete de exportación y ábrelo en un navegador — se verifica a sí mismo.",
     "err_incomplete": "Tu relato necesita ambas partes: elige qué pasó y escríbelo con tus propias palabras (2000 caracteres como máximo).",
     "err_limit": "Este registro alcanzó su límite de relatos — el enlace de consulta sigue funcionando, pero no se pueden añadir más. Contacta al coordinador si algo necesita corrección.",
+    "link_intro": "Abriste esta página con un enlace privado enviado a tu hogar — muestra solo este registro, puede caducar y el servicio puede revocarlo.",
+    "hh_replay": "Repetición local: las horas de los eventos usan un reloj simulado — esta no es una visita en vivo.",
+    "skip_link": "Saltar al contenido",
+    "rc_schedule_difference": "El servicio o el horario difirieron del plan",
+    "rc_authorization_gap": "La cobertura del plan o la autorización caducó o terminó",
+    "rc_device_fault": "La cámara o el sensor fallaron — interrupción del canal registrada",
+    "rc_subscription_lapse": "La suscripción de Ring terminó a media ventana",
+    "rc_mobile_or_network_issue": "Falló el teléfono/app de la persona o la red del hogar",
+    "rc_service_outside_home": "El servicio ocurrió fuera de la vista de la cámara",
+    "rc_worker_error": "La persona olvidó el paso de registro o lo usó incorrectamente",
+    "rc_worker_unavailable": "La persona asignada no estaba disponible o fue reasignada",
+    "rc_participant_unavailable": "Nadie estaba en casa o nadie respondió",
+    "rc_participant_refused": "El hogar rechazó la visita o el dispositivo",
+    "rc_weather_or_disaster": "El clima o una emergencia impidió la visita",
+    "rc_no_electronic_confirmation": "No existe confirmación del dispositivo — brecha sin explicar",
+    "rc_other": "Otro — el relato lleva el detalle",
     "lang_toggle": "English",
-    "tl_window": "ventana programada",
+    "tl_window": "ventana programada (con margen)",
     "tl_watched": "supervisada",
     "tl_gap": "brecha",
     "tl_obs": "observación",
     "tl_checkin": "registro autodeclarado",
     "tl_live": "vista en vivo — transmisión establecida, nunca audiencia",
     "tl_aria_prefix": "Línea de tiempo — ",
-    "tl_title_window": "ventana programada",
+    "tl_title_window": "ventana programada — más amplia que la duración esperada (incluye margen)",
     "tl_title_watched": "observada por sondeo",
     "tl_title_gap": "brecha de cobertura — no observada",
     "counter": {
@@ -419,6 +440,13 @@ _MONTHS = {
         "diciembre",
     ],
 }
+
+# Reason-code option labels: English mirrors the canonical taxonomy verbatim,
+# Spanish hand-translates every code above. Injecting the EN keys from the
+# taxonomy keeps one source of truth — and a new code with no ES translation
+# breaks the _EN/_ES parity test loudly instead of silently rendering English.
+for _code, _label in _REASON_CODES.items():
+    _EN.setdefault(f"rc_{_code}", _label)
 
 
 def strings(lang: str | None) -> dict:

@@ -15,6 +15,8 @@ body{font:14px/1.5 "Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink)
 .brand .gen{font-size:12px;color:var(--muted)}
 h1{font-size:21px;margin-bottom:2px}
 .sub{color:var(--muted);font-size:13px;margin-bottom:16px}
+.muted{color:var(--muted)}
+.small{font-size:12px}
 h2{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:20px 0 8px;border-bottom:1px solid var(--line);padding-bottom:4px}
 table{width:100%;border-collapse:collapse}
 td,th{padding:5px 10px 5px 0;vertical-align:top;font-size:13px;text-align:left}
@@ -153,6 +155,7 @@ the strongest basis this record establishes. A corroboration map, never an EVV s
 {% if receipt.payload.get("journal_head") %}<tr><th scope="row" class="k">Journal head</th><td class="mono">{{ receipt.payload.journal_head }}</td></tr>{% endif %}
 {% if receipt.payload.get("signature_scope") %}<tr><th scope="row" class="k">Signature scope</th><td>{{ receipt.payload.signature_scope.replace("_", " ") }}</td></tr>{% endif %}
 {% if receipt.payload.get("data_origin") %}<tr><th scope="row" class="k">Data origin</th><td>{{ "Ring API" if receipt.payload.data_origin == "ring_api" else "local or test data" }}</td></tr>{% endif %}
+{% if receipt.payload.get("clock") and receipt.payload.clock.mode == "replay" %}<tr><th scope="row" class="k">Event clock</th><td>simulated (replay) — event times are not wall-clock time; signature issuance used real time</td></tr>{% endif %}
 </table>
 {% endif %}
 

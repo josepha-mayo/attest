@@ -407,6 +407,9 @@ function timelineSVG(p){
   /* role=img hides child <title>s from screen readers — build a prose
      aria-label from the same data so the strip reads for everyone. */
   const counts=Object.create(null);for(const e of p.evidence||[]){
+    /* a checkin evidence item at the payload's own checked_in_at instant is
+       the same event the self-reported count below names — skip the dup */
+    if(e.kind==="checkin"&&ci&&iso(e.at)===ci)continue;
     const lbl=KIND_LBL[e.kind]||String(e.kind||"activity").replace(/_/g," ");
     counts[lbl]=(counts[lbl]||0)+1;}
   if(p.checked_in_at)counts["worker check-in (self-reported)"]=
@@ -445,6 +448,8 @@ function timelineSVG(p){
     }
   }
   for(const e of p.evidence||[]){
+    /* same dedup: the gold checkin tick below already draws this instant */
+    if(e.kind==="checkin"&&ci&&iso(e.at)===ci)continue;
     const k=KIND_LBL[e.kind]||String(e.kind||"activity").replace(/_/g," ");
     const col=String(e.kind).indexOf("departure")===0?"#c05a5a"
       :e.kind==="late"?"#9aa3b2":"#5aa2e8";
@@ -1664,7 +1669,9 @@ async function verifyFiles(files){
       const idx=await byName["index.html"].text();
       const url=_idxUrl=URL.createObjectURL(new Blob([idx],{type:"text/html"}));
       say("ok","this pack carries its own record browser — "
-        +`<a href="${url}" target="_blank" rel="noopener">open index.html</a>`
+        +`<a href="${url}" target="_blank" rel="noopener" `
+        +'aria-label="open index.html — the pack\u2019s record browser, in a new tab">'
+        +"open index.html \u2197</a>"
         +" — it re-verifies every record and renders the timelines");
     }catch(e){/* no Blob URLs in this host — the verdict stands alone */}
   }
@@ -1900,6 +1907,16 @@ document.getElementById("pickdir").onchange=e=>go(e.target.files);
 const _lgo=document.getElementById("livego");
 if(_lgo)_lgo.onclick=()=>liveCheck(document.getElementById("liveurl").value,
   (c,m)=>{document.getElementById("liveout").innerHTML="<div class='row "+c+"'>"+m+"</div>";});
+/* file:// copies can't fetch — every hosted feature below stays hidden.
+   An unconsumed deep link must say why instead of dying silently. */
+if(location.protocol.indexOf("http")!==0&&location.hash.length>1){
+  const _h=location.hash.slice(1);
+  if(/^(tamper-lab|verify-self|verify-site|sample-pack|demo-receipts|vectors)/.test(_h))
+    document.getElementById("out").innerHTML="<div class='row warn'>"+
+      "This copy is running as a local file — the one-click demos named by "+
+      "#"+esc(_h)+" need a hosted copy, which can fetch its sibling files. "+
+      "Verification itself still works: drop a pack above.</div>";
+}
 /* Hosted copies (Pages, a deployment's /verify-pack) sit next to
    sample-pack.zip — offer one-click verification. file:// embedded copies
    can't fetch; the button stays hidden. */
@@ -1923,6 +1940,7 @@ if(location.protocol.indexOf("http")===0){
     ["divergence-checkpoint.json","tryfork"],
   ];
   for(const [file,bid] of _samples){
+
     fetch(file,{method:"HEAD"}).then(r=>{
       if(!r.ok)return;
       document.getElementById(bid+"-wrap").hidden=false;
@@ -2078,12 +2096,13 @@ if(location.protocol.indexOf("http")===0){
           if(!/^visits\\/[^\\/]+\\/bundle\\.json$/.test(e.name))continue;
           const o=document.createElement("option");
           o.value=e.name;o.textContent=e.name;memb.appendChild(o);
-          if(e.name.indexOf("vis_1071d3b1997a")>=0)first=e.name;
+          if(e.name.indexOf("vis_70e42116a4cf")>=0)first=e.name;
         }
         if(first)memb.value=first;
         if(!memb.options.length)
           lout.innerHTML="<div class='row warn'>no visit bundles in this pack</div>";
         return ents;})();
+      labLoading.catch(()=>{labLoading=null;});
       return labLoading;};
     if(lab.addEventListener)
       lab.addEventListener("toggle",()=>{if(lab.open)loadLab();});
@@ -2248,7 +2267,7 @@ href="tour.html">two-minute tour</a> of every feature on this page.</small></p>
 <p id="trysample-wrap" hidden><button id="trysample" type="button">Verify the bundled
 sample pack — one click, fetched from this site</button></p>
 <p id="trytamper-wrap" hidden><button id="trytamper" type="button">Verify the tampered
-twin — the same pack, but someone inflated a ~35-second observed span to ~70 minutes.
+twin — the same pack, but someone inflated the contested visit's observed span to 135 minutes.
 Watch the signature catch it</button></p>
 <p id="tryatk-hint" hidden><small>Or pick an attack — each is caught by a
 different layer:</small></p>
@@ -2280,17 +2299,22 @@ each file prove itself</button><br>
 signature verifies first, then every listed file is fetched and hashed.</small></p>
 <details id="lab" hidden>
 <summary><strong>Tamper lab — commit the attack yourself</strong></summary>
-<p>Pick a signed field in the bundled sample pack and set its new value. This
-page rebuilds a real pack around your edit — same members, same signatures,
-different bytes — then verifies it. The receipt refuses it. Download your
-doctored pack and the clean twin and diff them yourself; nothing here is
-simulated.</p>
-<p><label>member <select id="lab-member"></select></label>
+<p>Pick a visit's signed bundle, a field in it, and a new value. This page
+rebuilds a real pack around your edit — same members, same signatures,
+different bytes — then verifies it. Change the value and the signed hash
+refuses it; write the exact signed value back and it verifies — the math
+checks bytes, not intentions. Download your doctored pack and the clean twin
+and diff them yourself; nothing here is simulated.</p>
+<p><label>record bundle <select id="lab-member"></select></label>
 <label>field <input id="lab-field" size="22" value="observed_span_minutes"
 aria-label="Field name"></label>
-<label>new value <input id="lab-value" size="14" value="70.5833"
+<label>new value <input id="lab-value" size="14" value="135.25"
 aria-label="New value"></label>
 <button id="lab-go" type="button">tamper + verify</button></p>
+<p><small>fields worth forging: <code>observed_span_minutes</code> (how long
+cameras observed, in minutes — the contested visit signed 65.25; the shipped
+twin sets 135.25), <code>state</code>, <code>duration_minutes</code>. A field
+the bundle lacks gets injected — and still fails.</small></p>
 <div id="lab-out" role="status" aria-live="polite"></div>
 <p id="lab-dl"></p>
 </details>
@@ -2794,8 +2818,13 @@ function weekSVG(payloads){
       if(!a)continue;
       if(b&&b>a)eachDay(a,b,(d,ca,cb)=>slot(ca,"live",[ca,cb,s.device_id,false]));
       else slot(a,"live",[a,null,s.device_id,true]); /* open or zero-length: a point mark */}
-    for(const e of p.evidence||[]){const t=iso(e.at);if(t)slot(t,"ev",e);}
     const ci=iso(p.checked_in_at);
+    for(const e of p.evidence||[]){
+      const t=iso(e.at);if(!t)continue;
+      /* a checkin evidence item at the checked_in_at instant is the same
+         event the checkin mark below names — don't slot it twice */
+      if(e.kind==="checkin"&&ci&&t===ci)continue;
+      slot(t,"ev",e);}
     if(ci)slot(ci,"ev",{kind:"checkin",at:p.checked_in_at});
   }
   const keys=Object.keys(days).sort();

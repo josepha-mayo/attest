@@ -515,6 +515,27 @@ def test_site_manifest_is_signed_and_fresh():
     )
 
 
+def test_demo_snapshots_stay_inert_and_token_free():
+    """docs/demo-*.html snapshots must carry no live controls and no real
+    scoped-link tokens — every form element gets a disclosure title (the
+    print button is the deliberate exception that stays functional), every
+    data-dead marker its inert title, and scoped pages reference only the
+    deterministic `scoped-demo-link` placeholder."""
+    docs = Path(__file__).resolve().parents[1] / "docs"
+    pages = [p for p in sorted(docs.glob("demo-*.html")) if p.name != "demo-receipts.html"]
+    assert len(pages) >= 10, "run tools/make_snapshots.py"
+    for page in pages:
+        html = page.read_text(encoding="utf-8")
+        assert "snap-banner" in html, f"{page.name}: no snapshot banner"
+        assert "[data-dead]" in html, f"{page.name}: no dead-link styling"
+        for m in re.finditer(r"<(input|button|select|textarea|form)\b[^>]*>", html, re.I):
+            assert "title=" in m.group(0), f"{page.name}: untitled {m.group(0)[:60]}"
+        for m in re.finditer(r"<[a-z]+\b[^>]*\bdata-dead\b[^>]*>", html, re.I):
+            assert "title=" in m.group(0), f"{page.name}: dead element without disclosure"
+        leak = re.search(r"/(?:family|review)/(?!scoped-demo-link)[\w?-]{8,}", html)
+        assert not leak, f"{page.name}: live scoped grant token {leak.group(0)}"
+
+
 def test_sample_pack_artifact_verifies():
     """docs/sample-pack.zip is the zero-install sample on the hosted verifier —
     it must always verify end-to-end or the landing page demo breaks."""
@@ -574,15 +595,19 @@ def test_sample_pack_attack_gallery_fails(artifact, expect):
     with zipfile.ZipFile(docs / artifact) as z:
         issuer = json.loads(z.read("manifest.json"))["issuer_key"]
         if artifact == "sample-pack-tampered.zip":
-            # the one doctoring the demo advertises: a stay field inflated on
-            # the shortest visit (observed_span_minutes ~0.58 -> ~70.58 today;
-            # packs with durations doctor duration_minutes 12.2 -> 82.2 instead)
+            # the doctoring the demo advertises: the contested visit's observed
+            # span inflated (65.25 -> 135.25 in vis_70e42116a4cf today; older
+            # packs doctor duration_minutes 12.2 -> 82.2 instead)
             names = [n for n in z.namelist() if n.startswith("visits/") and n.endswith("bundle.json")]
             with zipfile.ZipFile(docs / "sample-pack.zip") as clean:
                 differ = [n for n in names if z.read(n) != clean.read(n)]
             assert len(differ) == 1
+            # the twin must doctor the contested visit — the demo's story
+            # unifies when the same visit the vignette describes is the one
+            # the attack inflated
+            assert "vis_70e42116a4cf" in differ[0]
             data = z.read(differ[0])
-            assert b'"observed_span_minutes": 70.5' in data or b'"duration_minutes": 82.2' in data
+            assert b'"observed_span_minutes": 135.25' in data or b'"duration_minutes": 82.2' in data
     ok, detail = _verify_pack((docs / artifact).read_bytes(), issuer)
     assert not ok and expect in detail, detail
 
@@ -2262,7 +2287,11 @@ def test_receipt_array_verifies_all_and_fails_on_one_bad(tmp_path):
     # The corpus grows with every demo export — pin consistency with the
     # shipped per-receipt files, not a count that drifts on each regen.
     assert len(arr) == len(list((docs / "demo-receipts").glob("rcpt_*.json"))) > 0
-    bad = json.loads(json.dumps(arr))
+    # The failure path doesn't need the whole corpus: one bad signature must
+    # flip the batch and name the bad id — a dozen receipts proves it at a
+    # fraction of the ~1.7 s/receipt pure-BigInt cost, keeping the test under
+    # its timeout as the corpus grows with each export cycle.
+    bad = json.loads(json.dumps(arr[:12]))
     sig = bad[0]["signature"]
     bad[0]["signature"] = ("A" if sig[0] != "A" else "B") + sig[1:]
     (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
@@ -2278,11 +2307,12 @@ eval(src + `
     text(){return Promise.resolve(this._b.toString())}})();
   global.document={getElementById:()=>({innerHTML:''}),createElement:()=>({setAttribute:()=>{},style:{}})};
   const n=JSON.parse(require('fs').readFileSync(process.argv[3],'utf8')).length;
+  const nb=JSON.parse(require('fs').readFileSync(process.argv[4],'utf8')).length;
   const h1=await verifyFiles([await load(process.argv[3])]);
   console.log('arr-good:',h1.includes('VERIFIED'),h1.includes('all '+n+' receipts'),!h1.includes('FAILED'));
   const h2=await verifyFiles([await load(process.argv[4])]);
   const badId=JSON.parse(require('fs').readFileSync(process.argv[4],'utf8'))[0].id;
-  console.log('arr-bad:',h2.includes('FAILED'),h2.includes('of '+n+' receipts'),h2.includes(badId));
+  console.log('arr-bad:',h2.includes('FAILED'),h2.includes('of '+nb+' receipts'),h2.includes(badId));
 })();`);
 """
     (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
@@ -2303,9 +2333,9 @@ eval(src + `
 def test_tamper_lab_rebuild_verifies_then_edit_fails(tmp_path):
     """The tamper lab rebuilds a real stored zip around the judge's edit —
     two proofs in one: rewriting observed_span_minutes to its own value must
-    still VERIFY (the zip writer is byte-faithful), and rewriting it to
-    70.5833 must FAIL on payload hash (the signature refuses the attack the
-    judge just committed)."""
+    still VERIFY (the zip writer is byte-faithful — the math checks bytes,
+    not intentions), and rewriting it to 135.25 must FAIL on payload hash
+    (the signature refuses the attack the judge just committed)."""
     docs = Path(__file__).resolve().parents[1] / "docs"
     pack = docs / "sample-pack.zip"
     (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
@@ -2332,11 +2362,11 @@ eval(src + `
     await new Promise(r=>setTimeout(r,20));}
   if(!els['lab-go']||!els['lab-go'].onclick){console.log('lab: no button');return;}
   mk('lab-field').value='observed_span_minutes';
-  mk('lab-value').value='0.5833333333333334';
+  mk('lab-value').value='65.25';
   await els['lab-go'].onclick();
   const same=els['out'].innerHTML;
   console.log('lab-same:',same.includes('VERIFIED'),!same.includes('FAILED'));
-  els['lab-value'].value='70.5833';
+  els['lab-value'].value='135.25';
   await els['lab-go'].onclick();
   const atk=els['out'].innerHTML;
   console.log('lab-edit:',atk.includes('FAILED'),!atk.includes('VERIFIED'),
@@ -2349,7 +2379,9 @@ eval(src + `
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=120,
+        # Two full pack verifications in pure-BigInt Ed25519 (~50 receipts)
+        # — the same budget the batch test needs.
+        timeout=300,
     )
     assert proc.returncode == 0, proc.stderr
     assert "lab-same: true true" in proc.stdout, proc.stdout

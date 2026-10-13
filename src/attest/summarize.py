@@ -83,10 +83,12 @@ class TemplateSummarizer:
         visit.summary_model = None
         visit.summary_fallback_reason = None
         f = facts_for_prompt(visit, site, schedule, worker_name, evidence, self.tz)
+        sm = f["observed_span_minutes"]
+        span = "under a minute" if sm is not None and sm < 1 else f"about {sm} minute{'s' if sm != 1 else ''}"
         parts = (
             [
                 f"Door activity was observed at {site.name} from {f['first_observed_at']} "
-                f"to {f['last_observed_at']}, spanning about {f['observed_span_minutes']} minutes."
+                f"to {f['last_observed_at']}, spanning {span}."
             ]
             if visit.has_observations
             else ["No matching observation was received."]

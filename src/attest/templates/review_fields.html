@@ -11,7 +11,7 @@
 <label>{{ s.rf_reason }} <span class="muted">({{ s.rf_reason_opt_coord if review_voice == "coordinator" else s.rf_reason_opt_worker }}; {{ s.rf_reason_never }})</span>
 <select name="reason_code">
 <option value="">{{ s.rf_reason_none }}</option>
-{% for code, label in reason_options or [] %}<option value="{{ code }}" {% if form and form.reason_code == code %}selected{% endif %}>{{ code }} — {{ label }}</option>{% endfor %}
+{% for code, label in reason_options or [] %}<option value="{{ code }}" {% if form and form.reason_code == code %}selected{% endif %}>{{ code }} — {{ s['rc_' ~ code] or label }}</option>{% endfor %}
 </select></label>
 <label>{{ s.rf_statement }} <textarea name="statement" rows="4" maxlength="2000" required placeholder="{{ s.rf_statement_ph }}">{{ form.statement if form }}</textarea></label>
 <div class="row">

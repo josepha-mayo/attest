@@ -18,6 +18,10 @@ body{font:16px/1.55 -apple-system,"Segoe UI",Roboto,sans-serif;background:var(--
 .brand{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--quiet);margin-bottom:26px}
 h1{font-size:26px;line-height:1.25;margin-bottom:4px}
 .date{color:var(--muted);font-size:15px}
+.muted{color:var(--muted)}
+.flag.warn{display:inline-block;padding:2px 8px;border-radius:6px;font-size:12px;background:#f9edd4;color:#7a4f07}
+.skip-link{position:absolute;left:-9999px;top:0;background:var(--ok);color:#fff;padding:8px 16px;z-index:10;font-weight:700;border-radius:0 0 8px 0}
+.skip-link:focus{left:0}
 .hero{text-align:center;padding:30px 20px}
 .hero .mark{width:56px;height:56px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:28px;margin-bottom:12px}
 .hero.ok .mark{background:#e2f4ea;color:var(--ok)}
@@ -57,15 +61,19 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible{
 @media(prefers-contrast:more){:root{--muted:#3f4c58;--quiet:#55636f;--line:#b8c2cc}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 </style>
-</head>
-<body><div style="background:#f9edd4;border-bottom:1px solid #d9a83c;color:#6b4d0f;font:13px/1.5 system-ui,sans-serif;padding:8px 16px;text-align:center">Snapshot of the live <code>attest demo</code> product — served from a local Ring emulator. Run <code>attest demo</code> for the real thing; <a href="index.html" style="color:#6b4d0f">back to the demo page</a>.</div>
-<main class="wrap">
+<style>a[data-dead]{opacity:.55;cursor:not-allowed;text-decoration:line-through}[disabled]{cursor:not-allowed}.snap-note{font-size:12px;color:var(--muted,#5c6b7a);margin:4px 0 8px}@media print{.snap-banner{display:none}}</style></head>
+<body><div class="snap-banner" style="background:#f9edd4;border-bottom:1px solid #d9a83c;color:#6b4d0f;font:13px/1.5 system-ui,sans-serif;padding:8px 16px;text-align:center">Captura estática del producto <code>attest demo</code> en vivo — servida desde un emulador Ring local. Los enlaces tachados y los controles deshabilitados son rutas de la aplicación en vivo. Ejecuta <code>attest demo</code> para la versión real; <a href="index.html" style="color:#6b4d0f">volver a la página de demostración</a>.</div>
+<a class="skip-link" href="#main">Skip to content</a>
+<main class="wrap" id="main" tabindex="-1">
 
 
 
-<div class="brand">Attest · observation record · <a href="demo-family-es.html" style="letter-spacing:normal;text-transform:none">Español</a></div>
+<div class="brand">Attest · observation record · <a href="demo-family-es.html" lang="es" hreflang="es" style="letter-spacing:normal;text-transform:none">Español</a></div>
 <h1>Alvarez residence</h1>
 <div class="date">Friday, October 2 · scheduled 11:01 AM–1:06 PM · Morning care visit</div>
+<p class="muted small">You opened this page through a private link sent to your household — it shows this record only, it can expire, and the service can revoke it.</p>
+
+<p class="flag warn">Local replay: event times use a simulated clock — this is not a live visit.</p>
 
 <div style="height:18px"></div>
 
@@ -140,16 +148,16 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible{
 
 
 <div class="card">
-  <form method="post" action="">
+  <form method="post" data-action="/family/scoped-demo-link/statement?lang=en" title="live deployment only — inert in this snapshot"><p class='snap-note'>This form is inert in the snapshot — on a live deployment it posts a signed entry.</p>
     <fieldset>
       <legend>What did you see or hear around this visit?</legend>
-      <label class="choice"><input type="radio" name="perception" value="saw_someone" required disabled> <span><strong>I saw or heard someone there</strong> — a person at the door</span></label>
-      <label class="choice"><input type="radio" name="perception" value="no_one_seen" disabled> <span><strong>I didn&#39;t see or hear anyone</strong> — as far as you know, nobody came</span></label>
-      <label class="choice"><input type="radio" name="perception" value="unsure" disabled> <span><strong>Not sure</strong> — you can&#39;t say either way</span></label>
+      <label class="choice"><input type="radio" name="perception" value="saw_someone" required disabled title="live deployment only — inert in this snapshot"> <span><strong>I saw or heard someone there</strong> — a person at the door</span></label>
+      <label class="choice"><input type="radio" name="perception" value="no_one_seen" disabled title="live deployment only — inert in this snapshot"> <span><strong>I didn&#39;t see or hear anyone</strong> — as far as you know, nobody came</span></label>
+      <label class="choice"><input type="radio" name="perception" value="unsure" disabled title="live deployment only — inert in this snapshot"> <span><strong>Not sure</strong> — you can&#39;t say either way</span></label>
     </fieldset>
     <label class="lab" for="hh-statement">In your own words</label>
     <textarea id="hh-statement" name="statement" rows="4" maxlength="2000" required
-      placeholder="What you saw, heard, or know — e.g. “I was home and the doorbell never rang” or “My neighbor saw someone at 10:15”." disabled></textarea>
+      placeholder="What you saw, heard, or know — e.g. “I was home and the doorbell never rang” or “My neighbor saw someone at 10:15”." disabled title="live deployment only — inert in this snapshot"></textarea>
     <div style="height:12px"></div>
     <button class="btn" type="submit" disabled title="live deployment only — inert in this snapshot">Add your account to the record</button>
     <p class="note">This is appended to the signed record as the household&#39;s own account — like the worker&#39;s statement, it&#39;s self-reported. It isn&#39;t proof on its own and never changes what the camera reported; a coordinator weighs all three separately. You can come back to this page until the link expires.</p>
@@ -162,10 +170,10 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible{
 
 
 <svg viewBox="0 0 100 34" preserveAspectRatio="none" style="width:100%;height:96px;display:block" role="img"
-     aria-label="Timeline — scheduled 11:01am–1:06pm; 2 watched interval(s), 2 coverage gap(s); 1 motion, 2 snapshot, 1 doorbell, 2 door opened, 2 door closed, 2 worker check-in, 1 departure cue">
+     aria-label="Timeline — scheduled 11:01am–1:06pm; 2 watched interval(s), 2 coverage gap(s); 1 motion, 2 snapshot, 1 doorbell, 2 door opened, 2 door closed, 1 worker check-in, 1 departure cue">
   
   <rect x="3.7" y="4" width="92.6" height="20" rx="1.5"
-        fill="#3b4a63" opacity="0.55"><title>scheduled window</title></rect>
+        fill="#3b4a63" opacity="0.55"><title>scheduled window — wider than the expected duration (includes lead/lag)</title></rect>
   
   
   <rect x="25.93" y="25" width="0.43" height="3.2"
@@ -279,24 +287,15 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible{
       <title>snapshot — 2026-10-02T19:36:18.318000+00:00</title></circle>
   </g>
   
-  <g>
-    <line x1="74.07" y1="8" x2="74.07" y2="24"
-          stroke="#e8b93e"
-          stroke-width="0.7"><title>worker check-in — 2026-10-02T19:36:03.318922+00:00</title></line>
-    <circle cx="74.07" cy="7" r="1.1"
-            fill="#e8b93e">
-      <title>worker check-in — 2026-10-02T19:36:03.318922+00:00</title></circle>
-  </g>
-  
 </svg>
 
 <div class="row" aria-hidden="true" style="justify-content:space-between;font-size:11px;color:var(--muted);margin-top:2px">
   <span>10:56am</span><span>11:29am</span><span>12:03pm</span><span>12:37pm</span><span>1:11pm</span>
 </div>
 <div class="row" style="gap:16px;font-size:11px;color:var(--muted);margin:6px 2px 4px">
-  <span><span style="color:#8fa3c8">&#9632;</span> scheduled window</span>
-  <span><span style="color:#2f9e63">&#9632;</span> watched &nbsp;<span style="color:#9aa3b2">&#9632;</span> gap</span>
-  <span><span style="color:#5aa2e8">&#9679;</span> observation &nbsp;<span style="color:#e8b93e">&#9679;</span> self-reported check-in</span>
+  <span><span aria-hidden="true" style="color:#8fa3c8">&#9632;</span> scheduled window (with lead/lag)</span>
+  <span><span aria-hidden="true" style="color:#2f9e63">&#9632;</span> watched &nbsp;<span aria-hidden="true" style="color:#9aa3b2">&#9632;</span> gap</span>
+  <span><span aria-hidden="true" style="color:#5aa2e8">&#9679;</span> observation &nbsp;<span aria-hidden="true" style="color:#e8b93e">&#9679;</span> self-reported check-in</span>
   
 </div>
 

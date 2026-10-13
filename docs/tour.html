@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>The Attest tour — nine beats, all real</title>
+<title>The Attest tour — ten beats, all real</title>
 <meta name="description" content="A self-playing walkthrough of Attest's verification story — every frame is the live artifact, not a screenshot.">
-<meta property="og:title" content="The Attest tour — nine beats, all real">
+<meta property="og:title" content="The Attest tour — ten beats, all real">
 <meta property="og:description" content="Self-playing walkthrough: signed packs verify, doctored packs fail, and judges can commit the forgery themselves — every frame a live artifact.">
 <meta property="og:type" content="website">
 <meta property="og:image" content="https://josepha-mayo.github.io/attest/og-image.png">
@@ -44,11 +44,12 @@ a{color:#2563eb}
 </style>
 </head>
 <body>
+<main>
 <div class="wrap">
 <aside class="side" aria-live="polite">
   <div>
     <h1>The Attest tour</h1>
-    <p class="tag">Nine beats, ~two minutes — every frame is the live artifact, not a
+    <p class="tag">Ten beats, ~two minutes — every frame is the live artifact, not a
     screenshot. The verifier runs for real inside each panel.</p>
   </div>
   <div id="card">
@@ -63,7 +64,7 @@ a{color:#2563eb}
     <button id="play" class="primary" type="button">pause</button>
     <button id="next" type="button">next →</button>
   </div>
-  <div class="prog"><i id="bar"></i></div>
+  <div class="prog" role="progressbar" aria-hidden="true"><i id="bar"></i></div>
   <div class="dots" id="dots"></div>
 </aside>
 <div class="stage"><iframe id="frame" title="live artifact"></iframe></div>
@@ -92,7 +93,7 @@ const BEATS=[
   chain, the Merkle log, witness cosignatures, and a mid-history key rotation.`,
   w:"Notice the verdict hedges honestly — integrity under a key, never physical truth."},
  {t:"The same pack, one field doctored",u:"verify.html?b=3#sample-pack-tampered",s:12000,
-  p:`Someone inflated a ~35-second observed span to ~70 minutes inside a signed
+  p:`Someone inflated the contested visit's observed span — 65 to 135 minutes, past its 90-minute schedule — inside a signed
   bundle. The red <strong>FAILED</strong> stamp names the visit and the check that
   died: <code>payload hash mismatch</code>.`,
   w:"One byte moves, the math refuses — this is the whole product in one frame."},
@@ -103,8 +104,9 @@ const BEATS=[
   w:"Nothing staged: the same verifier that passed the clean pack kills yours."},
  {t:"The product face",u:"demo-visit.html",s:12000,
   p:`The contested visit as a coordinator sees it: source divergence flagged,
-  the worker's signed dispute, two household accounts that contradict each
-  other — kept verbatim, never merged.`,
+  the worker's signed dispute, and the household's own account changing
+  mid-record — first "the doorbell never rang", then a re-sent statement
+  that heard it ring. Every version kept verbatim, never merged.`,
   w:"He said / she said is preserved, not adjudicated — that's the product thesis."},
  {t:"What each side sees",u:"demo-family.html",s:12000,
   p:`Scoped links carry the dispute to each side: the household gets a texted
@@ -114,7 +116,7 @@ const BEATS=[
   contest. Tokens are hashed at rest, expiring, revocable.`,
   w:"Three audiences, three surfaces — nobody needs a login to be heard on the record."},
  {t:"The raw layer",u:"demo-receipts.html",s:10000,
-  p:`All 106 signed receipts of the demo deployment, drawn as the literal hash
+  p:`All 115 signed receipts of the demo deployment, drawn as the literal hash
   chain — every edge a real <code>prev_hash</code>. Click any row or node for a
   one-click verdict on that single receipt.`,
   w:"A judge can drill to the byte level without trusting the site."},
@@ -150,7 +152,9 @@ function go(n){
   bno.textContent='beat '+(i+1)+' of '+BEATS.length;
   btitle.textContent=b.t;bprose.innerHTML=b.p;bwhy.innerHTML=b.w;
   bfull.href=b.u.replace(/\?b=\d+/,"");frame.src=b.u;
-  [...dots.children].forEach((d,k)=>d.classList.toggle('on',k===i));
+  frame.title='live artifact — '+b.t;
+  [...dots.children].forEach((d,k)=>{d.classList.toggle('on',k===i);
+    if(k===i)d.setAttribute('aria-current','true');else d.removeAttribute('aria-current');});
   t0=Date.now();
 }
 function reset(){t0=Date.now();}
@@ -169,11 +173,12 @@ play.onclick=()=>{playing=!playing;play.textContent=playing?'pause':'play';
 document.addEventListener('keydown',e=>{
   if(e.key==='ArrowRight'){pause();go(i+1);reset();}
   if(e.key==='ArrowLeft'){pause();go(i-1);reset();}
-  if(e.key===' '&&e.target.tagName!=='BUTTON'){e.preventDefault();play.onclick();}
+  if(e.key===' '&&!e.defaultPrevented&&!e.target.closest('button,[role=button],a,input,select,textarea')){e.preventDefault();play.onclick();}
 });
-const m=location.hash.match(/^#(\d)$/);if(m)i=Math.min(BEATS.length-1,Math.max(0,+m[1]-1));
+const m=location.hash.match(/^#(\d{1,2})$/);if(m)i=Math.min(BEATS.length-1,Math.max(0,+m[1]-1));
 play.textContent=playing?'pause':'play';
 go(i);requestAnimationFrame(tick);
 </script>
+</main>
 </body>
 </html>

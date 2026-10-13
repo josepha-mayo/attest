@@ -23,9 +23,11 @@ thead th{border-bottom:2px solid #a1a1aa}
 .snap{background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:.6rem .9rem;font-size:.85rem}
 .small{color:#6b6b70;font-size:.85rem}
 .tw{overflow-x:auto}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 </style>
 </head>
 <body>
+<main>
 <p class="snap"><strong>The adversarial corpus, public.</strong> These are the
 Wycheproof-style conformance vectors every Attest verifier — browser JavaScript,
 stdlib Python, and AWS Lambda — must judge <em>identically</em>. Each row ships
@@ -41,7 +43,7 @@ space-padded hex, a tree_size of 2<sup>40</sup> that kills JS bitwise ops. These
 the cases where two verifiers silently diverge — the corpus exists so ours can't.</p>
 <h2>Expected: PASS (13)</h2>
 <div class="tw"><table><thead><tr><th scope="col">vector</th><th scope="col">oracle</th>
-<th scope="col">what it exercises</th><th scope="col"></th></tr></thead>
+<th scope="col">what it exercises</th><th scope="col"><span class="sr-only">verify</span></th></tr></thead>
 <tbody><tr><th scope="row"><a href="vectors/ok-clean-bundle.zip"><code>ok-clean-bundle</code></a></th><td><span class="b ok">must PASS</span></td><td>one visit, one key, media digests all present — the baseline</td><td><a class="plink" href="verify.html#vectors/ok-clean-bundle" aria-label="verify vector ok-clean-bundle in the browser verifier">verify →</a></td></tr>
 <tr><th scope="row"><a href="vectors/ok-decoy-successor-order.zip"><code>ok-decoy-successor-order</code></a></th><td><span class="b ok">must PASS</span></td><td>a consented decoy successor listed FIRST in key_rotations.json — only the highest-sequence consented pivot (K_A-&gt;K_B) may inherit trust; a first-match-in-pool verifier would pick the attacker and fail this pack</td><td><a class="plink" href="verify.html#vectors/ok-decoy-successor-order" aria-label="verify vector ok-decoy-successor-order in the browser verifier">verify →</a></td></tr>
 <tr><th scope="row"><a href="vectors/ok-embedded-monitor-trail.zip"><code>ok-embedded-monitor-trail</code></a></th><td><span class="b ok">must PASS</span></td><td>monitor_observation receipts embedded in the checkpoint doc — each verified under the issuer lineage and proven inside the signed head, so the watch trail travels with the pack</td><td><a class="plink" href="verify.html#vectors/ok-embedded-monitor-trail" aria-label="verify vector ok-embedded-monitor-trail in the browser verifier">verify →</a></td></tr>
@@ -57,7 +59,7 @@ the cases where two verifiers silently diverge — the corpus exists so ours can
 <tr><th scope="row"><a href="vectors/ok-witness-cosigned.zip"><code>ok-witness-cosigned</code></a></th><td><span class="b ok">must PASS</span></td><td>an independent witness&#x27;s counter-signature rides the checkpoint doc — verified under its own key, reported as an auxiliary attestation, never a gate</td><td><a class="plink" href="verify.html#vectors/ok-witness-cosigned" aria-label="verify vector ok-witness-cosigned in the browser verifier">verify →</a></td></tr></tbody></table></div>
 <h2>Expected: FAIL (23)</h2>
 <div class="tw"><table><thead><tr><th scope="col">vector</th><th scope="col">oracle</th>
-<th scope="col">what it exercises</th><th scope="col"></th></tr></thead>
+<th scope="col">what it exercises</th><th scope="col"><span class="sr-only">verify</span></th></tr></thead>
 <tbody><tr><th scope="row"><a href="vectors/fail-anchor-proof-graft.zip"><code>fail-anchor-proof-graft</code></a></th><td><span class="b bad">must FAIL</span></td><td>a packed anchor whose cosig cannot reach the anchor&#x27;s signed head — a claimed anchor is either verifiable or a lie; every verifier fails closed</td><td><a class="plink" href="verify.html#vectors/fail-anchor-proof-graft" aria-label="verify vector fail-anchor-proof-graft in the browser verifier">verify →</a></td></tr>
 <tr><th scope="row"><a href="vectors/fail-bool-leaf-index.zip"><code>fail-bool-leaf-index</code></a></th><td><span class="b bad">must FAIL</span></td><td>leaf_index true — bool is an int subclass in Python but not an integer in JSON; Number.isInteger parity rejects it</td><td><a class="plink" href="verify.html#vectors/fail-bool-leaf-index" aria-label="verify vector fail-bool-leaf-index in the browser verifier">verify →</a></td></tr>
 <tr><th scope="row"><a href="vectors/fail-doctored-verifier.zip"><code>fail-doctored-verifier</code></a></th><td><span class="b bad">must FAIL</span></td><td>a post-export edit to verify_case.py — membership checks names, only the signed pin checks the bytes</td><td><a class="plink" href="verify.html#vectors/fail-doctored-verifier" aria-label="verify vector fail-doctored-verifier in the browser verifier">verify →</a></td></tr>
@@ -84,5 +86,6 @@ the cases where two verifiers silently diverge — the corpus exists so ours can
 <p class="small">Back to the <a href="index.html">landing page</a> ·
 <a href="vectors-manifest.json">the oracle as JSON</a> · regenerate:
 <code>tools/make_vectors.py</code> (never hand-edit the zips).</p>
+</main>
 </body>
 </html>

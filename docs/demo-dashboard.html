@@ -69,13 +69,13 @@
   @media(prefers-reduced-motion:reduce) { * { animation:none!important; transition:none!important; scroll-behavior:auto!important } }
   @media(max-width:720px) { header { flex-wrap:wrap; padding:14px 16px } header .meta { margin-left:0; width:100% } main { padding:20px 16px } .row label { width:100% } }
 </style>
-</head>
-<body><div style="background:#f9edd4;border-bottom:1px solid #d9a83c;color:#6b4d0f;font:13px/1.5 system-ui,sans-serif;padding:8px 16px;text-align:center">Snapshot of the live <code>attest demo</code> product — served from a local Ring emulator. Run <code>attest demo</code> for the real thing; <a href="index.html" style="color:#6b4d0f">back to the demo page</a>.</div>
+<style>a[data-dead]{opacity:.55;cursor:not-allowed;text-decoration:line-through}[disabled]{cursor:not-allowed}.snap-note{font-size:12px;color:var(--muted,#5c6b7a);margin:4px 0 8px}@media print{.snap-banner{display:none}}</style></head>
+<body><div class="snap-banner" style="background:#f9edd4;border-bottom:1px solid #d9a83c;color:#6b4d0f;font:13px/1.5 system-ui,sans-serif;padding:8px 16px;text-align:center">Captura estática del producto <code>attest demo</code> en vivo — servida desde un emulador Ring local. Los enlaces tachados y los controles deshabilitados son rutas de la aplicación en vivo. Ejecuta <code>attest demo</code> para la versión real; <a href="index.html" style="color:#6b4d0f">volver a la página de demostración</a>.</div>
 <a class="skip-link" href="#main">Skip to content</a>
 
 <header>
   <div class="brand">Attest<span>.</span></div>
-  <nav><a href="demo-dashboard.html" aria-current="page">Records</a><a  data-dead="/setup" title="live deployment only — inert in this snapshot">Setup &amp; schedules</a><a href="demo-integrity.html">Integrity</a><a href="verify.html">Verify</a><a href="verify.html">Pack verifier</a><a href="index.html">Claim boundary</a><a href="demo-receipts.json" download>Receipts (JSON)</a></nav>
+  <nav><a href="demo-dashboard.html" aria-current="page">Records</a><a  data-dead="/setup" title="live deployment only — inert in this snapshot">Setup &amp; schedules</a><a href="demo-integrity.html">Integrity</a><a href="verify.html">Verify (journal)</a><a href="verify.html">Verify (pack)</a><a href="index.html">Claim boundary</a><a href="demo-receipts.json" download>Receipts (JSON)</a></nav>
   <div class="meta">Local / test data &middot; configured summary provider: template</div>
 </header>
 <div class="replay-banner">LOCAL REPLAY — not a live visit. Event clock: 2026-10-08T20:37:03.318922+00:00. Security expiry and signature issuance use real time.</div>
@@ -88,17 +88,17 @@
     <div class="muted">Ring observations and worker self-reports around scheduled home-service visits — signed, reviewable, correctable. Records preserve what was received; they do not certify identity, attendance, or time worked.</div>
   </div>
   <div class="card small">
-    Ledger: <span class="ok">&#10003; 109 receipts, chain intact across 1 signed key rotation</span>
-    <br>Audit log: <span class="ok">&#10003; 442 entries, intact</span>
+    Ledger: <span class="ok">&#10003; 115 receipts, chain intact across 1 signed key rotation</span>
+    <br>Audit log: <span class="ok">&#10003; 484 entries, intact</span>
     
     <br><span class="muted">Queue: 0 pending · 0 in flight · 0 failed</span>
     
-    <br><a  style="color:var(--accent)"  data-dead="/sites/site_a55d249ad6dd/pack.zip" title="live deployment only — inert in this snapshot — Every signed record for this site, one manifest, offline verifier">Case pack: Alvarez residence</a>
+    <br><a href="sample-pack.zip" style="color:var(--accent)" title="Every signed record for this site, one manifest, offline verifier">Case pack: Alvarez residence</a>
     <span class="muted">— unzip and open index.html: it verifies every record in the browser, no install</span>
     
     <br><a href="demo-integrity.html" style="color:var(--accent)" title="Chain, journal, custody, coverage — the runtime's self-audit">Integrity posture &rarr;</a>
     <br><a href="verify.html" style="color:var(--accent)" title="The same verifier every pack embeds — drop a .zip; nothing uploads">Verify a pack in-browser</a>
-    <br><button id="refresh-toggle" class="muted" style="background:none;border:0;padding:6px 2px;cursor:pointer;text-decoration:underline;font-size:13px;min-height:24px" disabled title="static snapshot — nothing reloads here">Pause auto-refresh</button>
+    <br><button id="refresh-toggle" class="muted" style="background:none;border:0;padding:6px 2px;cursor:pointer;text-decoration:underline;font-size:13px;min-height:24px" disabled title="live deployment only — inert in this snapshot — nothing reloads here">Pause auto-refresh</button>
   </div>
 </div>
 
@@ -107,74 +107,65 @@
 <div class="card table-wrap" style="padding:0">
 <table>
   <thead>
-    <tr><th scope="col">Priority</th><th scope="col">Record</th><th scope="col">Why flagged</th><th scope="col"></th></tr>
+    <tr><th scope="col">Priority</th><th scope="col">Record</th><th scope="col">Why flagged</th><th scope="col"><span class="sr-only">Action</span></th></tr>
   </thead>
   <tbody>
   
-  <tr class="link" tabindex="0"
+  <tr class="link" tabindex="0" role="link"
+      aria-label="Open record vis_70e42116a4cf"
       onclick="location.href='demo-visit.html'"
       onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();location.href='demo-visit.html'}">
     <td><span class="flag critical">urgent</span></td>
     <td><a href="demo-visit.html">Oct 2, 11:31 AM</a>
-      <a  class="muted small" onclick="event.stopPropagation()" data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot"> — Alvarez residence</a>
+      <a  class="muted small" data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot"> — Alvarez residence</a>
       <span class="muted small"> · Maria Chen</span></td>
     <td>worker disputes this record</td>
     <td class="muted small">Open record &rarr;</td>
   </tr>
   
-  <tr class="link" tabindex="0"
-     
-      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();}">
+  <tr aria-label="Open record vis_5b7958271e00"   data-dead="/visits/vis_5b7958271e00" title="live deployment only — inert in this snapshot">
     <td><span class="flag warn">needs review</span></td>
     <td><a  data-dead="/visits/vis_5b7958271e00" title="live deployment only — inert in this snapshot">Oct 7, 1:46 PM</a>
-      <a  class="muted small" onclick="event.stopPropagation()" data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot"> — Alvarez residence</a>
+      <a  class="muted small" data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot"> — Alvarez residence</a>
       </td>
     <td>observation matched no schedule</td>
-    <td class="muted small">Open record &rarr;</td>
+    <td></td>
   </tr>
   
-  <tr class="link" tabindex="0"
-     
-      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();}">
+  <tr aria-label="Open record vis_3feab06a831b"   data-dead="/visits/vis_3feab06a831b" title="live deployment only — inert in this snapshot">
     <td><span class="flag warn">needs review</span></td>
     <td><a  data-dead="/visits/vis_3feab06a831b" title="live deployment only — inert in this snapshot">Oct 6, 11:06 AM</a>
-      <a  class="muted small" onclick="event.stopPropagation()" data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot"> — Alvarez residence</a>
+      <a  class="muted small" data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot"> — Alvarez residence</a>
       <span class="muted small"> · Maria Chen</span></td>
     <td>1 review note(s): observed_interval_short</td>
-    <td class="muted small">Open record &rarr;</td>
+    <td></td>
   </tr>
   
-  <tr class="link" tabindex="0"
-     
-      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();}">
+  <tr aria-label="Open record vis_32a86d6fdbe4"   data-dead="/visits/vis_32a86d6fdbe4" title="live deployment only — inert in this snapshot">
     <td><span class="flag warn">needs review</span></td>
     <td><a  data-dead="/visits/vis_32a86d6fdbe4" title="live deployment only — inert in this snapshot">Oct 9, 11:06 AM</a>
-      <a  class="muted small" onclick="event.stopPropagation()" data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot"> — Alvarez residence</a>
+      <a  class="muted small" data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot"> — Alvarez residence</a>
       </td>
     <td>1 review note(s): no_observation</td>
-    <td class="muted small">Open record &rarr;</td>
+    <td></td>
   </tr>
   
-  <tr class="link" tabindex="0"
-     
-      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();}">
+  <tr aria-label="Open record vis_1071d3b1997a"   data-dead="/visits/vis_1071d3b1997a" title="live deployment only — inert in this snapshot">
     <td><span class="flag warn">needs review</span></td>
     <td><a  data-dead="/visits/vis_1071d3b1997a" title="live deployment only — inert in this snapshot">Oct 4, 11:06 AM</a>
-      <a  class="muted small" onclick="event.stopPropagation()" data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot"> — Alvarez residence</a>
+      <a  class="muted small" data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot"> — Alvarez residence</a>
       <span class="muted small"> · Maria Chen</span></td>
     <td>1 review note(s): observed_interval_short</td>
-    <td class="muted small">Open record &rarr;</td>
+    <td></td>
   </tr>
   
-  <tr class="link" tabindex="0"
-     
-      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();}">
+  <tr aria-label="Open record vis_6a79c8145c2e"   data-dead="/visits/vis_6a79c8145c2e" title="live deployment only — inert in this snapshot">
     <td><span class="flag warn">needs review</span></td>
     <td><a  data-dead="/visits/vis_6a79c8145c2e" title="live deployment only — inert in this snapshot">Oct 3, 11:06 AM</a>
-      <a  class="muted small" onclick="event.stopPropagation()" data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot"> — Alvarez residence</a>
+      <a  class="muted small" data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot"> — Alvarez residence</a>
       <span class="muted small"> · Maria Chen</span></td>
     <td>1 review note(s): observed_interval_short</td>
-    <td class="muted small">Open record &rarr;</td>
+    <td></td>
   </tr>
   
   </tbody>
@@ -207,7 +198,7 @@
   <button id="triage-run" class="btn" style="margin-top:.75rem" type="button" disabled title="live deployment only — inert in this snapshot">Run agent brief</button>
   <span class="muted small" style="margin-left:.5rem">Strands agent over Bedrock reads the ledger through tools; falls back honestly.</span>
 </div>
-<script>
+<script>if (false) {
 document.getElementById("triage-run").addEventListener("click", async () => {
   const btn = document.getElementById("triage-run");
   btn.disabled = true;
@@ -230,7 +221,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
     btn.textContent = "Run agent brief";
   }
 });
-</script>
+}</script>
 
 <h2>Recent visits</h2>
 <div class="card table-wrap" style="padding:0">

@@ -27,11 +27,12 @@
 <div class="card table-wrap" style="padding:0">
 <table>
   <thead>
-    <tr><th scope="col">Priority</th><th scope="col">Record</th><th scope="col">Why flagged</th><th scope="col"></th></tr>
+    <tr><th scope="col">Priority</th><th scope="col">Record</th><th scope="col">Why flagged</th><th scope="col"><span class="sr-only">Action</span></th></tr>
   </thead>
   <tbody>
   {% for a in attention %}
-  <tr class="link" tabindex="0"
+  <tr class="link" tabindex="0" role="link"
+      aria-label="Open record {{ a.visit.id }}"
       onclick="location.href='/visits/{{ a.visit.id }}'"
       onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();location.href='/visits/{{ a.visit.id }}'}">
     <td><span class="flag {{ {'warn': 'warn', 'bad': 'critical'}.get(a.level, 'info') }}">{{ {'warn': 'needs review', 'bad': 'urgent'}.get(a.level, a.level) }}</span></td>

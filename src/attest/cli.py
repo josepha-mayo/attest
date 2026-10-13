@@ -3599,7 +3599,7 @@ def _export(args: argparse.Namespace) -> None:
         if args.tamper_twin:
             from .disputepack import tamper_twin
 
-            tdata, desc = tamper_twin(data, attack=args.attack)
+            tdata, desc = tamper_twin(data, attack=args.attack, visit=getattr(args, "tamper_visit", None))
             tpath = Path(args.tamper_twin)
             tpath.write_bytes(tdata)
             print(f"wrote {tpath} — doctored: {desc}")
@@ -3693,16 +3693,36 @@ def _split_demo(args: argparse.Namespace) -> None:
 def _judge(args: argparse.Namespace) -> None:
     """The judge's walkthrough, printed where a judge actually looks: the
     terminal. Pure output — reads nothing, locks nothing."""
+    # These counts shift whenever the demo corpus regrows — read the shipped
+    # artifacts so the printed numbers can never stale.
+    from pathlib import Path
+
+    n, nr, nv = "every", "every", "every"
+    docs = Path(__file__).resolve().parents[2] / "docs"
+    try:
+        _mf = json.loads((docs / "site-manifest.json").read_text(encoding="utf-8"))
+        n = str(len(_mf["payload"]["artifacts"]))
+    except Exception:
+        pass
+    try:
+        nr = str(len(list((docs / "demo-receipts").glob("*.json"))))
+    except Exception:
+        pass
+    try:
+        _vm = json.loads((docs / "vectors-manifest.json").read_text(encoding="utf-8"))
+        nv = str(len(_vm if isinstance(_vm, list) else _vm["vectors"]))
+    except Exception:
+        pass
     print(
         """\
 Attest — records, not verdicts. The ten-minute path:
 
   Zero install (hosted):
     0. rather watch than click? https://josepha-mayo.github.io/attest/tour.html
-       — nine self-playing beats, every frame the live artifact
+       — ten self-playing beats, every frame the live artifact
     1. green VERIFIED … https://josepha-mayo.github.io/attest/verify.html#sample-pack
     2. red FAILED   … https://josepha-mayo.github.io/attest/verify.html#sample-pack-tampered
-       (one doctored field — a ~35s observed span inflated to ~70min — caught)
+       (one doctored field — the contested visit's observed span padded past its schedule — caught)
     3. the attack gallery + caught fork + real-API sweep: same page, one click each
        + pipeline.svg — the seven verification gates, each attack pinned to
          the gate that kills it
@@ -3710,20 +3730,21 @@ Attest — records, not verdicts. The ten-minute path:
          didn't ship (TOFU over a second transport)
        + #verify-self — the page hashes its own bytes against the pack's
          signed pin: PINNED or PIN MISMATCH
-       + #verify-site — the site attests itself: a signed manifest pins all
-         185 artifacts' sha256; hash every file → SITE VERIFIED or TAMPER
+       + #verify-site — the site attests itself: a signed manifest pins
+         __N__ artifact sha256s; hash every file → SITE VERIFIED or TAMPER
        + #tamper-lab — commit the attack yourself: rewrite a signed field
          in-page, download your doctored pack, watch the signature refuse it
     4. after a green stamp: open index.html — the pack hands you its own
        record browser, which re-verifies every record itself
     5. the product face, no install: demo-dashboard.html, demo-visit.html (the
        contested record), demo-household.html (+ -es), demo-integrity.html —
-       snapshots of the running app on the same site
-    6. the raw layer: demo-receipts.html — all 109 signed receipts, drawn as
+       plus the scoped links each side gets texted: demo-family.html (+ -es)
+       and demo-worker.html (+ -es) — snapshots of the running app
+    6. the raw layer: demo-receipts.html — all __R__ signed receipts, drawn as
        the hash chain itself, each a one-click verify.html deep link
        (+ anatomy.html — one receipt decomposed field-by-field, chain links
        walkable)
-    7. the adversarial corpus: vectors.html — 36 conformance packs the oracle
+    7. the adversarial corpus: vectors.html — __V__ conformance packs the oracle
        says must pass or fail; each a deep link landing on the verdict
 
   With the repo:
@@ -3743,7 +3764,9 @@ Attest — records, not verdicts. The ten-minute path:
 
   To read: JUDGE.md (scoring map) · THREATMODEL.md (limits are the point) ·
            FRICTIONLOG.md (17 API-friction entries)
-"""
+""".replace("__N__", n)
+        .replace("__R__", nr)
+        .replace("__V__", nv)
     )
 
 
@@ -4416,6 +4439,13 @@ def main(argv: list[str] | None = None) -> None:
         help="which attack --tamper-twin plants: duration doctors a signed field, "
         "missing-record deletes a committed record, smuggled-file injects an "
         "uncommitted member, forged-verifier swaps the embedded checker",
+    )
+    s.add_argument(
+        "--tamper-visit",
+        default=None,
+        metavar="VISIT_ID",
+        help="for --attack duration: doctor this visit's bundle instead of the "
+        "shortest observed stay — e.g. the story's contested visit",
     )
     s.set_defaults(fn=_export)
 
