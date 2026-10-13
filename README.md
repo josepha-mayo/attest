@@ -267,4 +267,5 @@ How this project sits against the hackathon's four criteria:
 - **Potential Impact** — disputed-visit claims are a real field-service problem (cleaners, caregivers, contractors) with no product anchored to the household's own Ring events; the Ring Appstore is the named beyond-hackathon venue, and the Configure→Certify→Publish path is understood — [`extras/appstore/LISTING.md`](extras/appstore/LISTING.md) is a full draft listing: per-surface permissions grounded in the signed live sweep, data-boundary disclosures, and the explicit "does NOT do" list. `ring-sandbox` is independently useful to every developer integrating the Partner API (published on PyPI).
 - **Quality of the Idea** — the rubric's "creative" ring, not the "obvious" one: caretaking monitoring + business-system integration + event-based triggers. The differentiated bet is *honest uncertainty as a product feature* — the record refuses to call motion "presence" or silence "absence," and signs exactly how much of the window was watched.
 
-MIT licensed.
+MIT licensed — [CONTRIBUTING.md](CONTRIBUTING.md) covers the setup, the
+five-surface parity contract, and the artifact regen order.
