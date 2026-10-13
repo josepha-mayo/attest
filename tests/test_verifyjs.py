@@ -2756,7 +2756,14 @@ const mkel=()=>({hidden:true,innerHTML:'',innerText:'',value:'',open:false,
   setAttribute:()=>{},getAttribute:()=>null,removeAttribute:()=>{},
   appendChild(k){this.kids.push(k);return k;},
   insertAdjacentHTML(p,h){this.innerHTML+=h;},
-  querySelector:()=>null,focus:()=>{},onclick:null});
+  querySelector:function(s){
+    // diffPacks reads .stamp off the rendered inner verdict — parse it back
+    // the way a browser would (first div whose class list carries .stamp)
+    if(s!=='.stamp')return null;
+    const m=this.innerHTML.match(/<div class="row (stamp[^"]*)">([\s\S]*?)<\/div>/);
+    return m?{classList:{contains:c=>m[1].split(/\s+/).includes(c)},
+      textContent:m[2].replace(/<[^>]+>/g,'')}:null;},
+  focus:()=>{},onclick:null});
 const out=mkel();
 globalThis.document={createElement:()=>mkel(),createTextNode:t=>({textContent:t}),
   getElementById:()=>null,addEventListener:()=>{}};
@@ -2794,3 +2801,6 @@ const mk=(n)=>new File([fs.readFileSync(path.join(dir,n))],n);
     assert "PACKS DIFFER" in t1, t1
     assert "IDENTICAL EVIDENCE" in t2, t2
     assert "same signed log head" in t2, t2
+    # each pack's own verdict surfaces — the twin's FAILED stamp must name it
+    assert "pack A self-verdict: VERIFIED" in t1 or "self-verdict: " in t1, t1
+    assert "pack B self-verdict: FAILED" in t1, t1
