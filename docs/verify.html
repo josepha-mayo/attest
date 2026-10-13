@@ -84,6 +84,13 @@ signed fork, the Bitcoin anchor — scored against the shared oracle</button><br
 <small class="mut">the oracle is the verdict each artifact was built to
 produce — agreement means the verifier and the published spec say the same
 thing about all eight.</small></p>
+<p id="trycompare-wrap" hidden><button id="trycompare" type="button"><strong>Compare
+two packs</strong> — the clean pack vs its doctored twin: each verifies on its
+own merits, then their signed membership diffs member-by-member — the moved
+field named — and the two signed log heads reconcile</button><br>
+<small class="mut">"the copy the agency produced" vs "the copy I kept" — two
+packs that both verify can still carry different records. Or drop any two
+exported zips at once for the same compare.</small></p>
 <p id="tryatk-hint" hidden><small>Or pick an attack — each is caught by a
 different layer:</small></p>
 <p id="tryatk1-wrap" hidden><button id="tryatk1" type="button">Attack: deleted record
@@ -2529,33 +2536,44 @@ if(location.protocol.indexOf("http")===0){
   /* The Bitcoin-anchored journal head: #anchor-demo verifies the signed
      anchor receipt the landing links — the .ots proof is a sidecar the
      browser can't complete, so the row names the honest limit. */
-  /* #compare-packs: the clean pack vs its doctored twin, fetched and diffed —
-     the whole dispute in one link: the twin verifies FAILED on its own, the
-     diff names observed_span_minutes as the moved field, and the signed heads
-     prove the log only appended between the two exports. */
-  if(location.hash==="#compare-packs"){
+  /* #compare-packs / the compare button: the clean pack vs its doctored twin,
+     fetched and diffed — the whole dispute in one click: the twin verifies
+     FAILED on its own, the diff names observed_span_minutes as the moved
+     field, and the signed heads prove the log only appended between the two
+     exports. */
+  const comparePacks=async()=>{
     const out=document.getElementById("out");
-    (async()=>{
-      /* diffPacks writes #out for ~seconds — hold the flag or a mid-compare
-         drop interleaves a whole second verdict into the report. */
-      if(_busy)return;_busy=true;
-      try{
-      out.innerHTML="<p>fetching both packs for comparison…</p>";
-      const fa=fetch("sample-pack.zip").then(r=>{
-        if(!r.ok)throw new Error("sample-pack.zip HTTP "+r.status);
-        return r.arrayBuffer().then(b=>new File([b],"sample-pack.zip"));});
-      const fb=fetch("sample-pack-tampered.zip").then(r=>{
-        if(!r.ok)throw new Error("sample-pack-tampered.zip HTTP "+r.status);
-        return r.arrayBuffer().then(b=>new File([b],"sample-pack-tampered.zip"));});
-      const[a,b]=await Promise.all([fa,fb]);
-      out.innerHTML="";
-      await diffPacks(a,b,out);
-      }catch(e){
-        out.innerHTML="<div class='row bad'>compare link failed: "+
-          esc(e.message||e)+"</div>";
-      }finally{_busy=false;}
-    })();
+    /* diffPacks writes #out for ~seconds — hold the flag or a mid-compare
+       drop interleaves a whole second verdict into the report. */
+    if(_busy)return;_busy=true;
+    try{
+    out.innerHTML="<p>fetching both packs for comparison…</p>";
+    const fa=fetch("sample-pack.zip").then(r=>{
+      if(!r.ok)throw new Error("sample-pack.zip HTTP "+r.status);
+      return r.arrayBuffer().then(b=>new File([b],"sample-pack.zip"));});
+    const fb=fetch("sample-pack-tampered.zip").then(r=>{
+      if(!r.ok)throw new Error("sample-pack-tampered.zip HTTP "+r.status);
+      return r.arrayBuffer().then(b=>new File([b],"sample-pack-tampered.zip"));});
+    const[a,b]=await Promise.all([fa,fb]);
+    out.innerHTML="";
+    await diffPacks(a,b,out);
+    }catch(e){
+      out.innerHTML="<div class='row bad'>compare link failed: "+
+        esc(e.message||e)+"</div>";
+    }finally{_busy=false;}
+  };
+  /* The button shows only where fetches can succeed — http gate, same as the
+     gauntlet. */
+  if(location.protocol.startsWith("http")){
+    const cw=document.getElementById("trycompare-wrap");
+    if(cw){cw.hidden=false;
+      document.getElementById("trycompare").onclick=()=>{
+        if(_busy)return;
+        try{history.replaceState(null,"",location.pathname+"#compare-packs");}
+        catch(e){}
+        comparePacks();};}
   }
+  if(location.hash==="#compare-packs")comparePacks();
   if(location.hash==="#anchor-demo"){
     fetch("anchor-demo.json").then(async r=>{
       if(!r.ok){_failOut(

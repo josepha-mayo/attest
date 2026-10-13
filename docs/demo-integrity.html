@@ -96,18 +96,18 @@ This page describes the evidence system's health, not whether any worker was hon
 <div class="grid" style="margin-top:16px">
   <div class="card">
     <h2 style="margin-top:0;font-size:1.05rem">Receipt chain</h2>
-    <span class="ok">&#10003; 229 receipts, chain intact across 1 signed key rotation</span>
+    <span class="ok">&#10003; 241 receipts, chain intact across 1 signed key rotation</span>
     
     <div class="muted small" style="margin-top:.5rem">
-      229 signed receipts · latest sequence #229
+      241 signed receipts · latest sequence #241
     </div>
   </div>
   <div class="card">
     <h2 style="margin-top:0;font-size:1.05rem">Mutation journal</h2>
-    <span class="ok">&#10003; 637 entries, intact</span>
+    <span class="ok">&#10003; 652 entries, intact</span>
     
     <div class="muted small" style="margin-top:.5rem">
-      234 signature-pinned heads · head <code>d1579c2b5738…</code>
+      246 signature-pinned heads · head <code>b96d06d116ae…</code>
       <br>4 newest entries not yet covered by a signed head — `attest anchor` pins them
       
     </div>
@@ -115,12 +115,12 @@ This page describes the evidence system's health, not whether any worker was hon
   <div class="card">
     <h2 style="margin-top:0;font-size:1.05rem">Transparency log</h2>
     
-      <span class="ok">&#10003; 71 signed checkpoint(s)</span>
+      <span class="ok">&#10003; 75 signed checkpoint(s)</span>
     
     <div class="muted small" style="margin-top:.5rem">
-      158 receipts in the Merkle tree · head <code>327e40f079d6…</code>
-      <br>latest checkpoint <code>rcpt_32ff45215df…</code> · Oct 13, 6:06 AM
-        — covers 158 leaves
+      166 receipts in the Merkle tree · head <code>e176eec71eac…</code>
+      <br>latest checkpoint <code>rcpt_ed2e5dd489e…</code> · Oct 13, 6:18 AM
+        — covers 166 leaves
       <br>Inclusion + consistency proofs at <code>/api/log/*</code> — <code>attest monitor</code> pins this head and catches a rewrite.
       <br><span class="muted">No witness pins yet — another deployment can ask this one to cosign via <code>/api/witness/cosign</code>.</span>
     </div>
@@ -157,7 +157,7 @@ This page describes the evidence system's health, not whether any worker was hon
   <thead><tr><th scope="col">Kind</th><th scope="col">Count</th><th scope="col">Latest issued</th></tr></thead>
   <tbody>
   
-  <tr><td>case export</td><td>71</td><td class="muted">Oct 13, 6:06 AM · <a href="demo-receipts/rcpt_2c8d5bf6582240158b5f7280a20d4ba8.json">receipt</a></td></tr>
+  <tr><td>case export</td><td>75</td><td class="muted">Oct 13, 6:18 AM · <a href="demo-receipts/rcpt_458fc90bf769484eb1fd4780b7696919.json">receipt</a></td></tr>
   
   <tr><td>coverage attestation</td><td>2</td><td class="muted">Oct 9, 11:45 AM · <a href="demo-receipts/rcpt_170eba68fbe845939f715be5a27d83ad.json">receipt</a></td></tr>
   
@@ -167,13 +167,13 @@ This page describes the evidence system's health, not whether any worker was hon
   
   <tr><td>key rotation</td><td>1</td><td class="muted">Oct 9, 11:44 AM · <a href="demo-receipts/rcpt_10b8bda583df441cb500ad2091d45639.json">receipt</a></td></tr>
   
-  <tr><td>log checkpoint</td><td>71</td><td class="muted">Oct 13, 6:06 AM · <a href="demo-receipts/rcpt_32ff45215df44c22865716d7b37c0a70.json">receipt</a></td></tr>
+  <tr><td>log checkpoint</td><td>75</td><td class="muted">Oct 13, 6:18 AM · <a href="demo-receipts/rcpt_ed2e5dd489e1454787f0e125262a0fd3.json">receipt</a></td></tr>
   
   <tr><td>period digest</td><td>1</td><td class="muted">Oct 9, 11:06 AM · <a href="demo-receipts/rcpt_c44581e230574aa5919a280f808f489c.json">receipt</a></td></tr>
   
   <tr><td>verification report</td><td>1</td><td class="muted">Oct 9, 11:06 AM · <a href="demo-receipts/rcpt_8836cc13a0b34f908d765d445bdaa82d.json">receipt</a></td></tr>
   
-  <tr><td>verifier manifest</td><td>71</td><td class="muted">Oct 13, 6:06 AM · <a href="demo-receipts/rcpt_b5291de68fb7421f9bf9439dbeede76b.json">receipt</a></td></tr>
+  <tr><td>verifier manifest</td><td>75</td><td class="muted">Oct 13, 6:18 AM · <a href="demo-receipts/rcpt_a39794aa27704bfb8b121a144b862417.json">receipt</a></td></tr>
   
   </tbody>
 </table>
