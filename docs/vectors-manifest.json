@@ -112,6 +112,7 @@
  {
   "name": "fail-wrong-pin",
   "verdict": "fail",
+  "pin_required": true,
   "note": "pinning an unrelated key must not bless the pack"
  },
  {

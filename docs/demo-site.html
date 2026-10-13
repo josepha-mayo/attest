@@ -1,0 +1,1358 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23171a21'/%3E%3Cpath d='M4 8.5l2.5 2.5L12 5.5' stroke='%237c9cff' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<title>Alvarez residence — Attest</title>
+<style>
+  :root { --bg:#0f1115; --panel:#171a21; --line:#262b36; --fg:#e7eaf0; --muted:#8b94a7;
+          --ok:#3ddc97; --warn:#f5b342; --crit:#ff5c7a; --info:#6ea8fe; --accent:#7c9cff; }
+  * { box-sizing:border-box }
+  body { margin:0; font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--fg) }
+  header { display:flex; align-items:center; gap:18px; padding:14px 28px; border-bottom:1px solid var(--line); background:var(--panel) }
+  header .brand { font-weight:700; letter-spacing:.3px; font-size:18px }
+  header .brand span { color:var(--accent) }
+  header nav a { color:var(--muted); text-decoration:none; margin-right:16px }
+  header nav a:hover { color:var(--fg) }
+  header .meta { margin-left:auto; color:var(--muted); font-size:13px }
+  main { max-width:1100px; margin:0 auto; padding:26px 28px 60px }
+  h1 { font-size:22px; margin:0 0 6px } h2 { font-size:16px; color:var(--muted); font-weight:600; margin:26px 0 10px; text-transform:uppercase; letter-spacing:.6px }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:14px }
+  a { color:#9db4ff }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px }
+  .card a { color:var(--accent); text-decoration:underline }
+  .card a.btn { text-decoration:none }
+  .flash { padding:11px 14px; border-radius:9px; margin-bottom:14px }
+  .flash.err { background:#3f1620; color:#f0a5b3; border:1px solid #c05a5a }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap }
+  .muted { color:var(--muted) } .small { font-size:13px }
+  .sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap }
+  .pill { display:inline-block; padding:2px 9px; border-radius:999px; font-size:12px; font-weight:600; border:1px solid var(--line) }
+  .pill.open, .pill.in_progress { color:var(--info); border-color:var(--info) }
+  .pill.closed { color:var(--ok); border-color:var(--ok) }
+  .pill.unmatched { color:var(--warn); border-color:var(--warn) }
+  /* no_observation is absence of evidence — a watched silence, not an alarm.
+     Amber, not red: the coverage column says how much the silence means. */
+  .pill.no_observation, .pill.no_show { color:var(--warn); border-color:var(--warn) }
+  .pill.failed { color:var(--crit); border-color:var(--crit) }
+  .flag { display:inline-block; padding:2px 8px; border-radius:6px; font-size:12px; margin:2px 4px 2px 0 }
+  .flag.info { background:#1d2a44; color:var(--info) } .flag.warn { background:#3b2f14; color:var(--warn) } .flag.critical { background:#3f1620; color:var(--crit) }
+  table { width:100%; border-collapse:collapse } td, th { padding:9px 10px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top } th { color:var(--muted); font-weight:600; font-size:13px }
+  tr.link:hover { background:#1c2029; cursor:pointer }
+  .timeline { list-style:none; padding:0; margin:0 } .timeline li { display:grid; grid-template-columns:110px 1fr; gap:12px; padding:7px 0; border-bottom:1px dashed var(--line) }
+  .timeline time { color:var(--muted); font-variant-numeric:tabular-nums }
+  .snap { display:flex; gap:14px; flex-wrap:wrap } .snap figure { margin:0; width:240px } .snap img { width:100%; border-radius:8px; border:1px solid var(--line); background:#000 }
+  .snap figcaption { font-size:12px; color:var(--muted); word-break:break-all; margin-top:4px }
+  .snap .mediafail { display:none } .snap figure.mediafailed img { display:none } .snap figure.mediafailed .mediafail { display:block; padding:26px 12px; border:1px dashed var(--crit); border-radius:8px; color:var(--crit); font-size:12px }
+  pre { background:#0b0d11; border:1px solid var(--line); border-radius:8px; padding:12px; overflow:auto; font-size:12px }
+  code { word-break:break-all }
+  .btn { display:inline-block; background:var(--accent); color:#0b0d11; font-weight:700; padding:10px 18px; border-radius:8px; border:0; cursor:pointer; text-decoration:none }
+  .btn.secondary { background:transparent; color:var(--fg); border:1px solid var(--line) }
+  .ok { color:var(--ok) } .bad { color:var(--crit) } .warn { color:var(--warn) }
+  .kpi { font-size:28px; font-weight:700 } .kpi + .muted { margin-top:-4px }
+  textarea, input[type=file] { width:100%; background:#0b0d11; color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:10px; font:13px ui-monospace,monospace }
+  .summary { font-size:16px; line-height:1.6; border-left:3px solid var(--accent); padding-left:14px }
+  .dispute-quote { font-size:16px; line-height:1.55; border-left:3px solid var(--warn); padding-left:14px; margin:12px 0 }
+  label { display:block; margin:10px 0; font-size:13px; color:var(--muted) }
+  input:not([type=file]):not([type=radio]):not([type=checkbox]), select { display:block; width:100%; margin-top:5px; padding:10px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg) }
+  fieldset { border:0; padding:0; margin:0; min-width:0 }
+  button:disabled, fieldset:disabled { opacity:.5; cursor:not-allowed }
+  .table-wrap { overflow-x:auto }
+  .replay-banner { padding:10px 28px; background:#332810; color:var(--warn); font-size:13px }
+  a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible, tr.link:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:4px }
+  tr.link:focus-visible { background:#1c2029 }
+  .skip-link { position:absolute; left:-9999px; top:0; background:var(--accent); color:#0b0d11; padding:8px 16px; z-index:10; font-weight:700; border-radius:0 0 8px 0 }
+  .skip-link:focus { left:0 }
+  @media(prefers-contrast:more) { :root { --muted:#c3cadb; --line:#4a5265 } .flag { border:1px solid currentColor } }
+  @media(prefers-reduced-motion:reduce) { * { animation:none!important; transition:none!important; scroll-behavior:auto!important } }
+  @media(max-width:720px) { header { flex-wrap:wrap; padding:14px 16px } header .meta { margin-left:0; width:100% } main { padding:20px 16px } .row label { width:100% } }
+</style>
+<style>a[data-dead]{opacity:.55;cursor:not-allowed;text-decoration:line-through}[disabled]{cursor:not-allowed}.snap-note{font-size:12px;color:var(--muted,#5c6b7a);margin:4px 0 8px}@media print{.snap-banner{display:none}}</style></head>
+<body><div class="snap-banner" style="background:#f9edd4;border-bottom:1px solid #d9a83c;color:#6b4d0f;font:13px/1.5 system-ui,sans-serif;padding:8px 16px;text-align:center">Snapshot of the live <code>attest demo</code> product — served from a local Ring emulator. Struck-through links and disabled controls are live-app routes. Run <code>attest demo</code> for the real thing; <a href="index.html" style="color:#6b4d0f">back to the demo page</a>.</div>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header>
+  <div class="brand">Attest<span>.</span></div>
+  <nav><a href="demo-dashboard.html">Records</a><a  data-dead="/setup" title="live deployment only — inert in this snapshot">Setup &amp; schedules</a><a href="demo-integrity.html">Integrity</a><a href="verify.html">Verify (journal)</a><a href="verify.html">Verify (pack)</a><a href="index.html">Claim boundary</a><a href="demo-receipts.json" download>Receipts (JSON)</a></nav>
+  <div class="meta">Local / test data &middot; configured summary provider: template</div>
+</header>
+<div class="replay-banner">LOCAL REPLAY — not a live visit. Event clock: 2026-10-08T20:37:03.318922+00:00. Security expiry and signature issuance use real time.</div>
+
+<main id="main" tabindex="-1">
+
+<a href="demo-dashboard.html" class="muted small">&larr; all records</a>
+<div class="row" style="justify-content:space-between;margin-top:8px">
+  <div>
+    <h1>Alvarez residence</h1>
+    <div class="muted">
+      Ruth Alvarez · daughter: +1 555 0142
+      <br>camera <code class="small">ava1.ring.device.0F9EB1CB06604797A169</code> · sensor <code class="small">ava1.ring.device.1C5AE0F5809743D9A4D9</code>
+    </div>
+  </div>
+  <div>
+    
+    <a class="btn secondary" href="sample-pack.zip">Export case pack</a>
+    <a class="btn secondary" href="sample-pack.zip">Privacy export</a>
+    
+    <button class="btn secondary" onclick="signDigest()" disabled title="live deployment only — inert in this snapshot">Sign records digest</button>
+    <a class="btn secondary"   data-dead="/sites/site_a55d249ad6dd/visits.csv" title="live deployment only — inert in this snapshot — Every record as a spreadsheet row — each line pinned to its signed receipt hash">Visit register (CSV)</a>
+    <a class="btn secondary"   data-dead="/sites/site_a55d249ad6dd/schedule.ics" title="live deployment only — inert in this snapshot — Subscribe in any calendar app — windows are expectations, never evidence">Calendar feed (ICS)</a>
+    
+    <button class="btn secondary" onclick="disconnectSource()" disabled title="live deployment only — inert in this snapshot">Disconnect Ring source</button>
+    
+  </div>
+</div>
+
+
+<div id="digest-result" role="status" class="muted small" style="margin-top:6px"></div>
+
+<div class="muted small" style="margin-top:4px">
+  Digest <a href="demo-receipts/rcpt_c44581e230574aa5919a280f808f489c.json"><code>rcpt_c44581e230574aa5919a280f808f489c</code></a> — 6 observed,
+  2 no-observation,
+  1 unmatched,
+  1 worker dispute(s),
+  1 resolved,
+  1 live session(s) over
+  9 receipt(s) — verifies offline with the issuer key.
+  <div class="muted small">Coded reasons on resolved records:
+    <code>no_electronic_confirmation</code>×1
+    — the coordinator's stated explanations, never verified causes.</div>
+</div>
+
+
+<div class="muted small" style="margin-top:4px">
+  71 case export(s) signed — each export is itself a chain event
+  naming exactly which receipt hashes it carried
+  (latest: <a href="demo-receipts/rcpt_2c8d5bf6582240158b5f7280a20d4ba8.json"><code>rcpt_2c8d5bf6582240158b5f7280a20d4ba8</code></a>).
+</div>
+
+
+
+<div class="muted small" style="margin-top:4px">
+  Coverage <a href="demo-receipts/rcpt_8c63a69c901d4cb990038bdea191e3f6.json"><code>rcpt_8c63a69c901d4cb990038bdea191e3f6</code></a> — watched
+  5% of Sep 30, 12:37 PM to
+  Oct 8, 1:37 PM — 56 poll(s), 94 event(s),
+  16 gap(s). What was watched — never a claim of absence.
+</div>
+
+
+<div class="muted small" style="margin-top:4px">
+  Coverage <a href="demo-receipts/rcpt_170eba68fbe845939f715be5a27d83ad.json"><code>rcpt_170eba68fbe845939f715be5a27d83ad</code></a> — watched
+  6% of Oct 1, 11:00 AM to
+  Oct 8, 1:37 PM — 56 poll(s), 94 event(s),
+  15 gap(s). What was watched — never a claim of absence.
+</div>
+
+<script>if (false) {
+async function signDigest() {
+  const box = document.getElementById('digest-result');
+  box.textContent = 'Signing digest of the shown records…';
+  const response = await fetch('/api/sites/site_a55d249ad6dd/digest', {method: 'POST'});
+  let receipt = {};
+  try { receipt = await response.json(); } catch (e) { /* non-JSON error body */ }
+  if (!response.ok) {
+    box.textContent = 'Digest refused: ' + (receipt.detail || response.status);
+    return;
+  }
+  const c = receipt.payload.counts;
+  box.textContent = '';
+  const code = document.createElement('code');
+  code.textContent = receipt.id;
+  box.append('Signed ', code, ' — ' + c.visits_observed +
+    ' observed, ' + c.visits_no_observation + ' no-observation, ' + c.visits_unmatched +
+    ' unmatched, ' + c.worker_disputes + '/' + c.worker_statements +
+    ' worker disputes/statements, ' + (c.household_statements || 0) +
+    ' household statement(s). Counts of records, not physical presence.');
+}
+async function disconnectSource() {
+  if (!confirm('Disconnect this Ring source? Ingestion and polling stop; the ' +
+    'binding stays on record and the disconnect is signed into the chain.')) return;
+  const reason = prompt('Reason (optional):', 'household revoked access') || '';
+  const response = await fetch('/api/sites/site_a55d249ad6dd/disconnect', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({reason}),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (response.ok) { location.reload(); return; }
+  alert('Disconnect refused: ' + (data.detail || response.status));
+}
+}</script>
+
+<div class="grid" style="margin-top:14px">
+  
+  
+  
+  
+  <div class="card"><div class="kpi">9</div><div class="muted">visit records</div></div>
+  <div class="card"><div class="kpi">7</div><div class="muted">with observations</div></div>
+  <div class="card"><div class="kpi">2</div><div class="muted">no observation (not absence)</div></div>
+  <div class="card"><div class="kpi">1</div><div class="muted">worker disputes</div></div>
+</div>
+
+
+<h2>Records by day</h2>
+<div class="card" style="padding:10px 14px">
+  
+  <div class="row" style="align-items:baseline;gap:12px;margin-top:2px">
+    <div style="width:86px;flex:none" class="muted small">Thu Oct 08</div>
+    <div style="flex:1">
+      
+      
+      
+      
+
+<svg viewBox="0 0 100 34" preserveAspectRatio="none" style="width:100%;height:44px;display:block" role="img"
+     aria-label="Timeline — scheduled 11:01am–1:06pm; 2 watched interval(s), 2 coverage gap(s); 1 live-view session(s) (provenance only); 1 motion, 2 snapshot, 1 doorbell, 2 door opened, 2 door closed, 1 departure cue, 1 worker check-in">
+  
+  <rect x="45.91" y="4" width="8.68" height="20" rx="1.5"
+        fill="#3b4a63" opacity="0.55"><title>scheduled window</title></rect>
+  
+  
+  <rect x="46.25" y="25" width="0.4" height="3.2"
+        fill="#2f9e63" opacity="0.9">
+    <title>watched by polling</title>
+  </rect>
+  
+  <rect x="50.42" y="25" width="2.1" height="3.2"
+        fill="#2f9e63" opacity="0.9">
+    <title>watched by polling</title>
+  </rect>
+  
+  <rect x="46.29" y="25" width="4.13" height="3.2"
+        fill="#9aa3b2" opacity="0.9">
+    <title>coverage gap — not watched</title>
+  </rect>
+  
+  <rect x="52.52" y="25" width="2.07" height="3.2"
+        fill="#9aa3b2" opacity="0.9">
+    <title>coverage gap — not watched</title>
+  </rect>
+  
+  <rect x="47.34" y="21" width="0.69" height="3.2"
+        fill="#22b8cf" opacity="0.9">
+    <title>live view — a stream was established 2026-10-08T18:21:38.318922+00:00 -&gt; 2026-10-08T18:31:38.318922+00:00; viewership not shown</title>
+  </rect>
+  
+  
+  <g>
+    <line x1="46.25" y1="8" x2="46.25" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>motion — 2026-10-08T18:06:03.318000+00:00</title></line>
+    <circle cx="46.25" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>motion — 2026-10-08T18:06:03.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="46.25" y1="8" x2="46.25" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>snapshot — 2026-10-08T18:06:03.318000+00:00</title></line>
+    <circle cx="46.25" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>snapshot — 2026-10-08T18:06:03.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="46.26" y1="8" x2="46.26" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>doorbell — 2026-10-08T18:06:09.318000+00:00</title></line>
+    <circle cx="46.26" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>doorbell — 2026-10-08T18:06:09.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="46.28" y1="8" x2="46.28" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>door opened — 2026-10-08T18:06:23.318000+00:00</title></line>
+    <circle cx="46.28" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>door opened — 2026-10-08T18:06:23.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="46.29" y1="8" x2="46.29" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>door closed — 2026-10-08T18:06:38.318000+00:00</title></line>
+    <circle cx="46.29" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>door closed — 2026-10-08T18:06:38.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="52.5" y1="8" x2="52.5" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>door opened — 2026-10-08T19:36:03.318000+00:00</title></line>
+    <circle cx="52.5" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>door opened — 2026-10-08T19:36:03.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="52.52" y1="8" x2="52.52" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>door closed — 2026-10-08T19:36:15.318000+00:00</title></line>
+    <circle cx="52.52" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>door closed — 2026-10-08T19:36:15.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="52.52" y1="8" x2="52.52" y2="24"
+          stroke="#c05a5a"
+          stroke-width="0.7"><title>departure cue — 2026-10-08T19:36:18.318000+00:00</title></line>
+    <circle cx="52.52" cy="7" r="1.1"
+            fill="#c05a5a">
+      <title>departure cue — 2026-10-08T19:36:18.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="52.52" y1="8" x2="52.52" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>snapshot — 2026-10-08T19:36:18.318000+00:00</title></line>
+    <circle cx="52.52" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>snapshot — 2026-10-08T19:36:18.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="46.25" y1="8" x2="46.25" y2="24"
+          stroke="#e8b93e"
+          stroke-width="0.7"><title>worker check-in — 2026-10-08T18:06:03.318922+00:00</title></line>
+    <circle cx="46.25" cy="7" r="1.1"
+            fill="#e8b93e">
+      <title>worker check-in — 2026-10-08T18:06:03.318922+00:00</title></circle>
+  </g>
+  
+</svg>
+
+
+    </div>
+  </div>
+  
+  <div class="row" style="align-items:baseline;gap:12px;margin-top:10px">
+    <div style="width:86px;flex:none" class="muted small">Wed Oct 07</div>
+    <div style="flex:1">
+      
+      
+      
+      
+
+<svg viewBox="0 0 100 34" preserveAspectRatio="none" style="width:100%;height:44px;display:block" role="img"
+     aria-label="Timeline — scheduled 11:01am–1:06pm; 2 watched interval(s), 3 coverage gap(s); 1 motion, 2 snapshot, 1 doorbell, 2 door opened, 2 door closed, 1 departure cue">
+  
+  <rect x="45.91" y="4" width="8.68" height="20" rx="1.5"
+        fill="#3b4a63" opacity="0.55"><title>scheduled window</title></rect>
+  
+  
+  <rect x="57.36" y="25" width="0.4" height="3.2"
+        fill="#2f9e63" opacity="0.9">
+    <title>watched by polling</title>
+  </rect>
+  
+  <rect x="61.53" y="25" width="2.1" height="3.2"
+        fill="#2f9e63" opacity="0.9">
+    <title>watched by polling</title>
+  </rect>
+  
+  <rect x="57.41" y="25" width="4.12" height="3.2"
+        fill="#9aa3b2" opacity="0.9">
+    <title>coverage gap — not watched</title>
+  </rect>
+  
+  <rect x="63.63" y="25" width="0.4" height="3.2"
+        fill="#9aa3b2" opacity="0.9">
+    <title>coverage gap — not watched</title>
+  </rect>
+  
+  <rect x="45.91" y="25" width="8.68" height="3.2"
+        fill="#9aa3b2" opacity="0.9">
+    <title>coverage gap — not watched</title>
+  </rect>
+  
+  
+  <g>
+    <line x1="57.36" y1="8" x2="57.36" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>motion — 2026-10-07T20:46:03.318000+00:00</title></line>
+    <circle cx="57.36" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>motion — 2026-10-07T20:46:03.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="57.36" y1="8" x2="57.36" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>snapshot — 2026-10-07T20:46:03.318000+00:00</title></line>
+    <circle cx="57.36" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>snapshot — 2026-10-07T20:46:03.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="57.37" y1="8" x2="57.37" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>doorbell — 2026-10-07T20:46:09.318000+00:00</title></line>
+    <circle cx="57.37" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>doorbell — 2026-10-07T20:46:09.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="57.39" y1="8" x2="57.39" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>door opened — 2026-10-07T20:46:23.318000+00:00</title></line>
+    <circle cx="57.39" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>door opened — 2026-10-07T20:46:23.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="57.41" y1="8" x2="57.41" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>door closed — 2026-10-07T20:46:38.318000+00:00</title></line>
+    <circle cx="57.41" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>door closed — 2026-10-07T20:46:38.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="63.61" y1="8" x2="63.61" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>door opened — 2026-10-07T22:16:03.318000+00:00</title></line>
+    <circle cx="63.61" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>door opened — 2026-10-07T22:16:03.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="63.63" y1="8" x2="63.63" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>door closed — 2026-10-07T22:16:15.318000+00:00</title></line>
+    <circle cx="63.63" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>door closed — 2026-10-07T22:16:15.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="63.63" y1="8" x2="63.63" y2="24"
+          stroke="#c05a5a"
+          stroke-width="0.7"><title>departure cue — 2026-10-07T22:16:18.318000+00:00</title></line>
+    <circle cx="63.63" cy="7" r="1.1"
+            fill="#c05a5a">
+      <title>departure cue — 2026-10-07T22:16:18.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="63.63" y1="8" x2="63.63" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>snapshot — 2026-10-07T22:16:18.318000+00:00</title></line>
+    <circle cx="63.63" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>snapshot — 2026-10-07T22:16:18.318000+00:00</title></circle>
+  </g>
+  
+</svg>
+
+
+    </div>
+  </div>
+  
+  <div class="row" style="align-items:baseline;gap:12px;margin-top:10px">
+    <div style="width:86px;flex:none" class="muted small">Tue Oct 06</div>
+    <div style="flex:1">
+      
+      
+      
+      
+
+<svg viewBox="0 0 100 34" preserveAspectRatio="none" style="width:100%;height:44px;display:block" role="img"
+     aria-label="Timeline — scheduled 11:01am–1:06pm; 1 watched interval(s), 1 coverage gap(s); 1 motion, 1 snapshot, 1 doorbell, 1 door opened, 1 door closed, 1 worker check-in">
+  
+  <rect x="45.91" y="4" width="8.68" height="20" rx="1.5"
+        fill="#3b4a63" opacity="0.55"><title>scheduled window</title></rect>
+  
+  
+  <rect x="46.25" y="25" width="0.4" height="3.2"
+        fill="#2f9e63" opacity="0.9">
+    <title>watched by polling</title>
+  </rect>
+  
+  <rect x="46.29" y="25" width="8.3" height="3.2"
+        fill="#9aa3b2" opacity="0.9">
+    <title>coverage gap — not watched</title>
+  </rect>
+  
+  
+  <g>
+    <line x1="46.25" y1="8" x2="46.25" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>motion — 2026-10-06T18:06:03.318000+00:00</title></line>
+    <circle cx="46.25" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>motion — 2026-10-06T18:06:03.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="46.25" y1="8" x2="46.25" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>snapshot — 2026-10-06T18:06:03.318000+00:00</title></line>
+    <circle cx="46.25" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>snapshot — 2026-10-06T18:06:03.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="46.26" y1="8" x2="46.26" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>doorbell — 2026-10-06T18:06:09.318000+00:00</title></line>
+    <circle cx="46.26" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>doorbell — 2026-10-06T18:06:09.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="46.28" y1="8" x2="46.28" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>door opened — 2026-10-06T18:06:23.318000+00:00</title></line>
+    <circle cx="46.28" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>door opened — 2026-10-06T18:06:23.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="46.29" y1="8" x2="46.29" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>door closed — 2026-10-06T18:06:38.318000+00:00</title></line>
+    <circle cx="46.29" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>door closed — 2026-10-06T18:06:38.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="46.25" y1="8" x2="46.25" y2="24"
+          stroke="#e8b93e"
+          stroke-width="0.7"><title>worker check-in — 2026-10-06T18:06:03.318922+00:00</title></line>
+    <circle cx="46.25" cy="7" r="1.1"
+            fill="#e8b93e">
+      <title>worker check-in — 2026-10-06T18:06:03.318922+00:00</title></circle>
+  </g>
+  
+</svg>
+
+
+    </div>
+  </div>
+  
+  <div class="row" style="align-items:baseline;gap:12px;margin-top:10px">
+    <div style="width:86px;flex:none" class="muted small">Mon Oct 05</div>
+    <div style="flex:1">
+      
+      
+      
+      
+
+<svg viewBox="0 0 100 34" preserveAspectRatio="none" style="width:100%;height:44px;display:block" role="img"
+     aria-label="Timeline — scheduled 11:01am–1:06pm; 1 watched interval(s), 0 coverage gap(s)">
+  
+  <rect x="45.91" y="4" width="8.68" height="20" rx="1.5"
+        fill="#3b4a63" opacity="0.55"><title>scheduled window</title></rect>
+  
+  
+  <rect x="45.91" y="25" width="8.68" height="3.2"
+        fill="#2f9e63" opacity="0.9">
+    <title>watched by polling</title>
+  </rect>
+  
+  
+</svg>
+
+
+    </div>
+  </div>
+  
+  <div class="row" style="align-items:baseline;gap:12px;margin-top:10px">
+    <div style="width:86px;flex:none" class="muted small">Sun Oct 04</div>
+    <div style="flex:1">
+      
+      
+      
+      
+
+<svg viewBox="0 0 100 34" preserveAspectRatio="none" style="width:100%;height:44px;display:block" role="img"
+     aria-label="Timeline — scheduled 11:01am–1:06pm; 2 watched interval(s), 2 coverage gap(s); 1 motion, 1 snapshot, 1 doorbell, 1 door opened, 1 door closed, 1 worker check-in">
+  
+  <rect x="45.91" y="4" width="8.68" height="20" rx="1.5"
+        fill="#3b4a63" opacity="0.55"><title>scheduled window</title></rect>
+  
+  
+  <rect x="46.25" y="25" width="0.4" height="3.2"
+        fill="#2f9e63" opacity="0.9">
+    <title>watched by polling</title>
+  </rect>
+  
+  <rect x="46.6" y="25" width="2.08" height="3.2"
+        fill="#2f9e63" opacity="0.9">
+    <title>watched by polling</title>
+  </rect>
+  
+  <rect x="46.29" y="25" width="0.4" height="3.2"
+        fill="#9aa3b2" opacity="0.9">
+    <title>coverage gap — not watched</title>
+  </rect>
+  
+  <rect x="48.68" y="25" width="5.91" height="3.2"
+        fill="#9aa3b2" opacity="0.9">
+    <title>coverage gap — not watched</title>
+  </rect>
+  
+  
+  <g>
+    <line x1="46.25" y1="8" x2="46.25" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>motion — 2026-10-04T18:06:03.318000+00:00</title></line>
+    <circle cx="46.25" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>motion — 2026-10-04T18:06:03.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="46.25" y1="8" x2="46.25" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>snapshot — 2026-10-04T18:06:03.318000+00:00</title></line>
+    <circle cx="46.25" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>snapshot — 2026-10-04T18:06:03.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="46.26" y1="8" x2="46.26" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>doorbell — 2026-10-04T18:06:09.318000+00:00</title></line>
+    <circle cx="46.26" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>doorbell — 2026-10-04T18:06:09.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="46.28" y1="8" x2="46.28" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>door opened — 2026-10-04T18:06:23.318000+00:00</title></line>
+    <circle cx="46.28" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>door opened — 2026-10-04T18:06:23.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="46.29" y1="8" x2="46.29" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>door closed — 2026-10-04T18:06:38.318000+00:00</title></line>
+    <circle cx="46.29" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>door closed — 2026-10-04T18:06:38.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="46.25" y1="8" x2="46.25" y2="24"
+          stroke="#e8b93e"
+          stroke-width="0.7"><title>worker check-in — 2026-10-04T18:06:03.318922+00:00</title></line>
+    <circle cx="46.25" cy="7" r="1.1"
+            fill="#e8b93e">
+      <title>worker check-in — 2026-10-04T18:06:03.318922+00:00</title></circle>
+  </g>
+  
+</svg>
+
+
+    </div>
+  </div>
+  
+  <div class="row" style="align-items:baseline;gap:12px;margin-top:10px">
+    <div style="width:86px;flex:none" class="muted small">Sat Oct 03</div>
+    <div style="flex:1">
+      
+      
+      
+      
+
+<svg viewBox="0 0 100 34" preserveAspectRatio="none" style="width:100%;height:44px;display:block" role="img"
+     aria-label="Timeline — scheduled 11:01am–1:06pm; 2 watched interval(s), 2 coverage gap(s); 1 motion, 1 snapshot, 1 doorbell, 1 door opened, 1 door closed, 1 worker check-in">
+  
+  <rect x="45.91" y="4" width="8.68" height="20" rx="1.5"
+        fill="#3b4a63" opacity="0.55"><title>scheduled window</title></rect>
+  
+  
+  <rect x="46.25" y="25" width="1.74" height="3.2"
+        fill="#2f9e63" opacity="0.9">
+    <title>watched by polling</title>
+  </rect>
+  
+  <rect x="51.11" y="25" width="2.09" height="3.2"
+        fill="#2f9e63" opacity="0.9">
+    <title>watched by polling</title>
+  </rect>
+  
+  <rect x="47.99" y="25" width="3.12" height="3.2"
+        fill="#9aa3b2" opacity="0.9">
+    <title>coverage gap — not watched</title>
+  </rect>
+  
+  <rect x="53.2" y="25" width="1.39" height="3.2"
+        fill="#9aa3b2" opacity="0.9">
+    <title>coverage gap — not watched</title>
+  </rect>
+  
+  
+  <g>
+    <line x1="46.25" y1="8" x2="46.25" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>motion — 2026-10-03T18:06:03.318000+00:00</title></line>
+    <circle cx="46.25" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>motion — 2026-10-03T18:06:03.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="46.25" y1="8" x2="46.25" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>snapshot — 2026-10-03T18:06:03.318000+00:00</title></line>
+    <circle cx="46.25" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>snapshot — 2026-10-03T18:06:03.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="46.26" y1="8" x2="46.26" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>doorbell — 2026-10-03T18:06:09.318000+00:00</title></line>
+    <circle cx="46.26" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>doorbell — 2026-10-03T18:06:09.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="46.28" y1="8" x2="46.28" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>door opened — 2026-10-03T18:06:23.318000+00:00</title></line>
+    <circle cx="46.28" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>door opened — 2026-10-03T18:06:23.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="46.29" y1="8" x2="46.29" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>door closed — 2026-10-03T18:06:38.318000+00:00</title></line>
+    <circle cx="46.29" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>door closed — 2026-10-03T18:06:38.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="46.25" y1="8" x2="46.25" y2="24"
+          stroke="#e8b93e"
+          stroke-width="0.7"><title>worker check-in — 2026-10-03T18:06:03.318922+00:00</title></line>
+    <circle cx="46.25" cy="7" r="1.1"
+            fill="#e8b93e">
+      <title>worker check-in — 2026-10-03T18:06:03.318922+00:00</title></circle>
+  </g>
+  
+</svg>
+
+
+    </div>
+  </div>
+  
+  <div class="row" style="align-items:baseline;gap:12px;margin-top:10px">
+    <div style="width:86px;flex:none" class="muted small">Fri Oct 02</div>
+    <div style="flex:1">
+      
+      
+      
+      
+
+<svg viewBox="0 0 100 34" preserveAspectRatio="none" style="width:100%;height:44px;display:block" role="img"
+     aria-label="Timeline — scheduled 11:01am–1:06pm; 2 watched interval(s), 2 coverage gap(s); 1 motion, 2 snapshot, 1 doorbell, 2 door opened, 2 door closed, 1 departure cue, 1 worker check-in">
+  
+  <rect x="45.91" y="4" width="8.68" height="20" rx="1.5"
+        fill="#3b4a63" opacity="0.55"><title>scheduled window</title></rect>
+  
+  
+  <rect x="47.99" y="25" width="0.4" height="3.2"
+        fill="#2f9e63" opacity="0.9">
+    <title>watched by polling</title>
+  </rect>
+  
+  <rect x="50.42" y="25" width="2.1" height="3.2"
+        fill="#2f9e63" opacity="0.9">
+    <title>watched by polling</title>
+  </rect>
+  
+  <rect x="48.03" y="25" width="2.39" height="3.2"
+        fill="#9aa3b2" opacity="0.9">
+    <title>coverage gap — not watched</title>
+  </rect>
+  
+  <rect x="52.52" y="25" width="2.07" height="3.2"
+        fill="#9aa3b2" opacity="0.9">
+    <title>coverage gap — not watched</title>
+  </rect>
+  
+  
+  <g>
+    <line x1="47.99" y1="8" x2="47.99" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>motion — 2026-10-02T18:31:03.318000+00:00</title></line>
+    <circle cx="47.99" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>motion — 2026-10-02T18:31:03.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="47.99" y1="8" x2="47.99" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>snapshot — 2026-10-02T18:31:03.318000+00:00</title></line>
+    <circle cx="47.99" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>snapshot — 2026-10-02T18:31:03.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="48.0" y1="8" x2="48.0" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>doorbell — 2026-10-02T18:31:09.318000+00:00</title></line>
+    <circle cx="48.0" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>doorbell — 2026-10-02T18:31:09.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="48.01" y1="8" x2="48.01" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>door opened — 2026-10-02T18:31:23.318000+00:00</title></line>
+    <circle cx="48.01" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>door opened — 2026-10-02T18:31:23.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="48.03" y1="8" x2="48.03" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>door closed — 2026-10-02T18:31:38.318000+00:00</title></line>
+    <circle cx="48.03" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>door closed — 2026-10-02T18:31:38.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="52.5" y1="8" x2="52.5" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>door opened — 2026-10-02T19:36:03.318000+00:00</title></line>
+    <circle cx="52.5" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>door opened — 2026-10-02T19:36:03.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="52.52" y1="8" x2="52.52" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>door closed — 2026-10-02T19:36:15.318000+00:00</title></line>
+    <circle cx="52.52" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>door closed — 2026-10-02T19:36:15.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="52.52" y1="8" x2="52.52" y2="24"
+          stroke="#c05a5a"
+          stroke-width="0.7"><title>departure cue — 2026-10-02T19:36:18.318000+00:00</title></line>
+    <circle cx="52.52" cy="7" r="1.1"
+            fill="#c05a5a">
+      <title>departure cue — 2026-10-02T19:36:18.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="52.52" y1="8" x2="52.52" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>snapshot — 2026-10-02T19:36:18.318000+00:00</title></line>
+    <circle cx="52.52" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>snapshot — 2026-10-02T19:36:18.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="52.5" y1="8" x2="52.5" y2="24"
+          stroke="#e8b93e"
+          stroke-width="0.7"><title>worker check-in — 2026-10-02T19:36:03.318922+00:00</title></line>
+    <circle cx="52.5" cy="7" r="1.1"
+            fill="#e8b93e">
+      <title>worker check-in — 2026-10-02T19:36:03.318922+00:00</title></circle>
+  </g>
+  
+</svg>
+
+
+    </div>
+  </div>
+  
+  <div class="row" style="align-items:baseline;gap:12px;margin-top:10px">
+    <div style="width:86px;flex:none" class="muted small">Thu Oct 01</div>
+    <div style="flex:1">
+      
+      
+      
+      
+
+<svg viewBox="0 0 100 34" preserveAspectRatio="none" style="width:100%;height:44px;display:block" role="img"
+     aria-label="Timeline — scheduled 11:01am–1:06pm; 2 watched interval(s), 2 coverage gap(s); 1 motion, 2 snapshot, 1 doorbell, 2 door opened, 2 door closed, 1 departure cue, 1 worker check-in">
+  
+  <rect x="45.91" y="4" width="8.68" height="20" rx="1.5"
+        fill="#3b4a63" opacity="0.55"><title>scheduled window</title></rect>
+  
+  
+  <rect x="46.25" y="25" width="0.4" height="3.2"
+        fill="#2f9e63" opacity="0.9">
+    <title>watched by polling</title>
+  </rect>
+  
+  <rect x="50.42" y="25" width="2.1" height="3.2"
+        fill="#2f9e63" opacity="0.9">
+    <title>watched by polling</title>
+  </rect>
+  
+  <rect x="46.29" y="25" width="4.13" height="3.2"
+        fill="#9aa3b2" opacity="0.9">
+    <title>coverage gap — not watched</title>
+  </rect>
+  
+  <rect x="52.52" y="25" width="2.07" height="3.2"
+        fill="#9aa3b2" opacity="0.9">
+    <title>coverage gap — not watched</title>
+  </rect>
+  
+  
+  <g>
+    <line x1="46.25" y1="8" x2="46.25" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>motion — 2026-10-01T18:06:03.318000+00:00</title></line>
+    <circle cx="46.25" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>motion — 2026-10-01T18:06:03.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="46.25" y1="8" x2="46.25" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>snapshot — 2026-10-01T18:06:03.318000+00:00</title></line>
+    <circle cx="46.25" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>snapshot — 2026-10-01T18:06:03.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="46.26" y1="8" x2="46.26" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>doorbell — 2026-10-01T18:06:09.318000+00:00</title></line>
+    <circle cx="46.26" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>doorbell — 2026-10-01T18:06:09.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="46.28" y1="8" x2="46.28" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>door opened — 2026-10-01T18:06:23.318000+00:00</title></line>
+    <circle cx="46.28" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>door opened — 2026-10-01T18:06:23.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="46.29" y1="8" x2="46.29" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>door closed — 2026-10-01T18:06:38.318000+00:00</title></line>
+    <circle cx="46.29" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>door closed — 2026-10-01T18:06:38.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="52.5" y1="8" x2="52.5" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>door opened — 2026-10-01T19:36:03.318000+00:00</title></line>
+    <circle cx="52.5" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>door opened — 2026-10-01T19:36:03.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="52.52" y1="8" x2="52.52" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>door closed — 2026-10-01T19:36:15.318000+00:00</title></line>
+    <circle cx="52.52" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>door closed — 2026-10-01T19:36:15.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="52.52" y1="8" x2="52.52" y2="24"
+          stroke="#c05a5a"
+          stroke-width="0.7"><title>departure cue — 2026-10-01T19:36:18.318000+00:00</title></line>
+    <circle cx="52.52" cy="7" r="1.1"
+            fill="#c05a5a">
+      <title>departure cue — 2026-10-01T19:36:18.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="52.52" y1="8" x2="52.52" y2="24"
+          stroke="#5aa2e8"
+          stroke-width="0.7"><title>snapshot — 2026-10-01T19:36:18.318000+00:00</title></line>
+    <circle cx="52.52" cy="7" r="1.1"
+            fill="#5aa2e8">
+      <title>snapshot — 2026-10-01T19:36:18.318000+00:00</title></circle>
+  </g>
+  
+  <g>
+    <line x1="46.25" y1="8" x2="46.25" y2="24"
+          stroke="#e8b93e"
+          stroke-width="0.7"><title>worker check-in — 2026-10-01T18:06:03.318922+00:00</title></line>
+    <circle cx="46.25" cy="7" r="1.1"
+            fill="#e8b93e">
+      <title>worker check-in — 2026-10-01T18:06:03.318922+00:00</title></circle>
+  </g>
+  
+</svg>
+
+
+    </div>
+  </div>
+  
+  
+  <div class="row" style="gap:16px;font-size:11px;color:var(--muted);margin:10px 2px 0">
+    <span><span aria-hidden="true" style="color:#8fa3c8">&#9632;</span> scheduled window</span>
+    <span><span aria-hidden="true" style="color:#2f9e63">&#9632;</span> watched &nbsp;<span aria-hidden="true" style="color:#9aa3b2">&#9632;</span> gap</span>
+    <span><span aria-hidden="true" style="color:#5aa2e8">&#9679;</span> observation &nbsp;<span aria-hidden="true" style="color:#e8b93e">&#9679;</span> self-reported check-in</span>
+    <span><span aria-hidden="true" style="color:#22b8cf">&#9632;</span> live view (provenance only)</span>
+    <span><span aria-hidden="true" style="color:#c05a5a">&#9679;</span> departure cue &nbsp;<span aria-hidden="true" style="color:#9aa3b2">&#9679;</span> late event</span>
+  </div>
+  <p class="small muted" style="margin:8px 2px 0">Each row is one local day (midnight–midnight). Scheduled
+  windows, poll coverage, and observations — observed intervals are not time worked; gaps are blind spots, not absence.</p>
+  
+</div>
+
+
+
+<h2>Ring lifecycle events</h2>
+<div class="card">
+  <p class="small muted" style="margin-top:0">Signed-channel facts that explain observation coverage — a camera offline or a subscription ending says *why* events stopped; it never says nobody came.</p>
+  <table>
+    <thead>
+      <tr><th scope="col">When</th><th scope="col">Event</th><th scope="col">Scope</th></tr>
+    </thead>
+    <tbody>
+    
+      <tr>
+        <td class="small muted">Oct 4, 11:41 AM</td>
+        <td><span class="pill warn">subscription deactivated</span></td>
+        <td class="small muted">ava1.ring.device.0F9EB1CB06604797A169</td>
+      </tr>
+    
+      <tr>
+        <td class="small muted">Oct 3, 12:46 PM</td>
+        <td><span class="pill ok">device online</span></td>
+        <td class="small muted">ava1.ring.device.0F9EB1CB06604797A169</td>
+      </tr>
+    
+      <tr>
+        <td class="small muted">Oct 3, 11:31 AM</td>
+        <td><span class="pill warn">device offline</span></td>
+        <td class="small muted">ava1.ring.device.0F9EB1CB06604797A169</td>
+      </tr>
+    
+    </tbody>
+  </table>
+</div>
+
+
+
+<h2>Live view</h2>
+<div class="card">
+  <p class="small muted" style="margin-top:0">Open a WHEP live view on the door camera — brokered through
+  Attest so the session itself is journaled. The record proves a stream was established with Ring and
+  for how long; it never proves anyone watched or what was on screen. Sessions also surface in Ring
+  Event History as on-demand entries, so a signed visit overlapping one carries it as corroboration.</p>
+  <button class="btn secondary" id="lv-open" disabled title="live deployment only — inert in this snapshot">Open live view</button>
+  <button class="btn secondary" id="lv-close" style="display:none" disabled title="live deployment only — inert in this snapshot">End session</button>
+  <video id="lv-video" autoplay muted playsinline controls
+         style="display:none;width:100%;max-width:480px;border-radius:8px;background:#111;margin-top:10px"></video>
+  <p id="lv-status" class="small muted" role="status"></p>
+  
+  <table style="margin-top:10px">
+    <thead>
+      <tr><th scope="col">Opened</th><th scope="col">Outcome</th><th scope="col">Device</th><th scope="col"></th></tr>
+    </thead>
+    <tbody>
+    
+    <tr>
+      <td class="small muted">Oct 8, 11:21 AM</td>
+      <td class="small">10.0 min session
+        </td>
+      <td class="small muted">ava1.ring.device.0F9EB1CB06604797A169</td>
+      <td></td>
+    </tr>
+    
+    </tbody>
+  </table>
+  
+</div>
+<script>if (false) {
+(function(){
+  let pc = null, sid = null;
+  const status = document.getElementById('lv-status');
+  const openBtn = document.getElementById('lv-open'), closeBtn = document.getElementById('lv-close');
+  const closeSession = async id => {
+    await fetch('/api/sites/site_a55d249ad6dd/liveview/' + id + '/close', {method: 'POST'});
+    if (pc) { pc.close(); pc = null; }
+    location.reload();
+  };
+  document.querySelectorAll('.lv-close-row').forEach(b => b.onclick = () => closeSession(b.dataset.sid));
+  window.addEventListener('pagehide', () => {
+    if (sid) navigator.sendBeacon('/api/sites/site_a55d249ad6dd/liveview/' + sid + '/close', new Blob([]));
+  });
+  openBtn.onclick = async () => {
+    openBtn.disabled = true;
+    try {
+      status.textContent = 'Creating WebRTC offer…';
+      pc = new RTCPeerConnection();
+      pc.addTransceiver('video', {direction: 'recvonly'});
+      pc.ontrack = e => {
+        const v = document.getElementById('lv-video');
+        v.srcObject = e.streams[0]; v.style.display = 'block';
+      };
+      await pc.setLocalDescription(await pc.createOffer());
+      status.textContent = 'Establishing session with Ring…';
+      const r = await fetch('/api/sites/site_a55d249ad6dd/liveview', {
+        method: 'POST', headers: {'Content-Type': 'application/sdp'}, body: pc.localDescription.sdp});
+      const d = await r.json();
+      if (!r.ok) { status.textContent = d.detail || ('Could not open live view (' + r.status + ')'); pc.close(); pc = null; openBtn.disabled = false; return; }
+      sid = d.session_id;
+      try { await pc.setRemoteDescription({type: 'answer', sdp: d.sdp_answer}); }
+      catch (e) { status.textContent = 'Session established and journaled — this browser could not attach the stream (the record stands either way).'; }
+      else status.textContent = 'Live view open — journaled as a human-attention record: session time is attested, viewership is not.';
+      openBtn.style.display = 'none'; closeBtn.style.display = 'inline-block';
+      closeBtn.onclick = () => closeSession(sid);
+    } catch (e) { status.textContent = 'Live view failed: ' + e; if (pc) { pc.close(); pc = null; } openBtn.disabled = false; }
+  };
+})();
+}</script>
+
+
+<h2>Visit records</h2>
+<div class="card table-wrap" style="padding:0">
+<table>
+  <thead><tr><th scope="col">Visit</th><th scope="col">Worker</th><th scope="col">First observed</th><th scope="col">Observed interval</th><th scope="col">Coverage</th><th scope="col">State</th><th scope="col">Worker stance</th></tr></thead>
+  <tbody>
+  
+  <tr>
+    <td><a  style="color:var(--accent)" data-dead="/visits/vis_ac04986742ad" title="live deployment only — inert in this snapshot">vis_ac04986742…</a></td>
+    <td>Maria Chen</td>
+    <td>Oct 8, 11:06 AM</td>
+    <td>90 min</td>
+    <td class="small">
+      <span class="bad">26%</span>
+      </td>
+    <td><span class="pill closed">closed</span></td>
+    <td>
+      <span class="muted">unrequested</span></td>
+  </tr>
+  
+  <tr>
+    <td><a  style="color:var(--accent)" data-dead="/visits/vis_5b7958271e00" title="live deployment only — inert in this snapshot">vis_5b7958271e…</a></td>
+    <td>—</td>
+    <td>Oct 7, 1:46 PM</td>
+    <td>90 min</td>
+    <td class="small">
+      <span class="warn">34%</span>
+      </td>
+    <td><span class="pill closed">closed</span></td>
+    <td>
+      <span class="muted">unrequested</span></td>
+  </tr>
+  
+  <tr>
+    <td><a  style="color:var(--accent)" data-dead="/visits/vis_f34460136366" title="live deployment only — inert in this snapshot">vis_f344601363…</a></td>
+    <td>—</td>
+    <td>None</td>
+    <td>—</td>
+    <td class="small">
+      <span class="bad">0%</span>
+      </td>
+    <td><span class="pill no_observation">no observation</span></td>
+    <td>
+      <span class="ok">Resolved</span>
+      </td>
+  </tr>
+  
+  <tr>
+    <td><a  style="color:var(--accent)" data-dead="/visits/vis_3feab06a831b" title="live deployment only — inert in this snapshot">vis_3feab06a83…</a></td>
+    <td>Maria Chen</td>
+    <td>Oct 6, 11:06 AM</td>
+    <td>1 min</td>
+    <td class="small">
+      <span class="bad">0%</span>
+      </td>
+    <td><span class="pill closed">closed</span></td>
+    <td>
+      <span class="muted">unrequested</span></td>
+  </tr>
+  
+  <tr>
+    <td><a  style="color:var(--accent)" data-dead="/visits/vis_32a86d6fdbe4" title="live deployment only — inert in this snapshot">vis_32a86d6fdb…</a></td>
+    <td>—</td>
+    <td>None</td>
+    <td>—</td>
+    <td class="small">
+      <span class="ok">100%</span>
+      </td>
+    <td><span class="pill no_observation">no observation</span></td>
+    <td>
+      <span class="muted">unrequested</span></td>
+  </tr>
+  
+  <tr>
+    <td><a  style="color:var(--accent)" data-dead="/visits/vis_1071d3b1997a" title="live deployment only — inert in this snapshot">vis_1071d3b199…</a></td>
+    <td>Maria Chen</td>
+    <td>Oct 4, 11:06 AM</td>
+    <td>1 min</td>
+    <td class="small">
+      <span class="bad">25%</span>
+      </td>
+    <td><span class="pill closed">closed</span></td>
+    <td>
+      <span class="muted">unrequested</span></td>
+  </tr>
+  
+  <tr>
+    <td><a  style="color:var(--accent)" data-dead="/visits/vis_6a79c8145c2e" title="live deployment only — inert in this snapshot">vis_6a79c8145c…</a></td>
+    <td>Maria Chen</td>
+    <td>Oct 3, 11:06 AM</td>
+    <td>1 min</td>
+    <td class="small">
+      <span class="warn">46%</span>
+      </td>
+    <td><span class="pill closed">closed</span></td>
+    <td>
+      <span class="muted">unrequested</span></td>
+  </tr>
+  
+  <tr>
+    <td><a href="demo-visit.html" style="color:var(--accent)">vis_70e42116a4…</a></td>
+    <td>Maria Chen</td>
+    <td>Oct 2, 11:31 AM</td>
+    <td>65 min</td>
+    <td class="small">
+      <span class="warn">32%</span>
+      </td>
+    <td><span class="pill closed">closed</span></td>
+    <td>
+      <span class="bad">Contested</span>
+      </td>
+  </tr>
+  
+  <tr>
+    <td><a  style="color:var(--accent)" data-dead="/visits/vis_8243499a3a78" title="live deployment only — inert in this snapshot">vis_8243499a3a…</a></td>
+    <td>Maria Chen</td>
+    <td>Oct 1, 11:06 AM</td>
+    <td>90 min</td>
+    <td class="small">
+      <span class="bad">26%</span>
+      </td>
+    <td><span class="pill closed">closed</span></td>
+    <td>
+      <span class="muted">unrequested</span></td>
+  </tr>
+  
+  </tbody>
+</table>
+</div>
+
+<h2>Schedules</h2>
+<div class="card table-wrap" style="padding:0">
+<table>
+  <thead><tr><th scope="col">Worker</th><th scope="col">Window</th><th scope="col">Expected</th><th scope="col">Service</th><th scope="col">Status</th></tr></thead>
+  <tbody>
+  
+  <tr>
+    <td>Maria Chen</td>
+    <td>Oct 1, 11:01 AM – 1:06 PM</td>
+    <td>90 min</td>
+    <td>Morning care visit</td>
+    <td class="muted">scheduled</td>
+  </tr>
+  
+  <tr>
+    <td>Maria Chen</td>
+    <td>Oct 2, 11:01 AM – 1:06 PM</td>
+    <td>90 min</td>
+    <td>Morning care visit</td>
+    <td class="muted">scheduled</td>
+  </tr>
+  
+  <tr>
+    <td>Maria Chen</td>
+    <td>Oct 3, 11:01 AM – 1:06 PM</td>
+    <td>90 min</td>
+    <td>Morning care visit</td>
+    <td class="muted">scheduled</td>
+  </tr>
+  
+  <tr>
+    <td>Maria Chen</td>
+    <td>Oct 4, 11:01 AM – 1:06 PM</td>
+    <td>90 min</td>
+    <td>Morning care visit</td>
+    <td class="muted">scheduled</td>
+  </tr>
+  
+  <tr>
+    <td>Maria Chen</td>
+    <td>Oct 5, 11:01 AM – 1:06 PM</td>
+    <td>90 min</td>
+    <td>Morning care visit</td>
+    <td class="muted">scheduled</td>
+  </tr>
+  
+  <tr>
+    <td>Maria Chen</td>
+    <td>Oct 6, 11:01 AM – 1:06 PM</td>
+    <td>90 min</td>
+    <td>Morning care visit</td>
+    <td class="muted">scheduled</td>
+  </tr>
+  
+  <tr>
+    <td>Maria Chen</td>
+    <td>Oct 7, 11:01 AM – 1:06 PM</td>
+    <td>90 min</td>
+    <td>Morning care visit</td>
+    <td class="muted">scheduled</td>
+  </tr>
+  
+  <tr>
+    <td>Maria Chen</td>
+    <td>Oct 8, 11:01 AM – 1:06 PM</td>
+    <td>90 min</td>
+    <td>Morning care visit</td>
+    <td class="muted">scheduled</td>
+  </tr>
+  
+  </tbody>
+</table>
+</div>
+<p class="small muted">A pattern of observations over time is context for review — it is not a
+certification of any individual visit. The case pack exports these records for independent verification.</p>
+</main>
+</body>
+</html>

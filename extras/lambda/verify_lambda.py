@@ -40,7 +40,12 @@ import zipfile
 # a real deployment. The bound here keeps a single request honest.
 MAX_PACK_BYTES = 24 * 1024 * 1024
 HERE = os.path.dirname(os.path.abspath(__file__))
-TIMEOUT_SECONDS = 25  # verifier is pure CPU — hashing + Ed25519
+# Verifier is pure CPU — hashing + stdlib Ed25519 runs ~0.3-0.5s per signed
+# receipt, so a 64-receipt pack wants ~30s on modest hardware. Budget covers
+# ~3x that (packs to ~200 receipts); the function's own --timeout must clear
+# it plus extract + cold start, so deploy with --timeout 120, not the 30s
+# the original 9-receipt pack needed.
+TIMEOUT_SECONDS = 90
 
 
 def _respond(status: int, payload: dict) -> dict:

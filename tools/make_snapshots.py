@@ -31,6 +31,10 @@ CONTESTED = "vis_70e42116a4cf"  # the trilateral dispute the tour walks through
 
 PAGES = {
     "/": "demo-dashboard.html",
+    # The site page carries the day-strip visual — per-day coverage lines
+    # with interruption marks and the live-view session band. It is the
+    # clearest single-picture answer to "what does this actually record?"
+    "/sites/site_a55d249ad6dd": "demo-site.html",
     f"/visits/{CONTESTED}": "demo-visit.html",
     f"/visits/{CONTESTED}/brief": "demo-visit-brief.html",
     f"/visits/{CONTESTED}/household": "demo-household.html",
@@ -91,6 +95,7 @@ SIBLING = [
     (f'href="/visits/{CONTESTED}/household"', 'href="demo-household.html"'),
     (f'href="/visits/{CONTESTED}/brief"', 'href="demo-visit-brief.html"'),
     (f'href="/visits/{CONTESTED}"', 'href="demo-visit.html"'),
+    ('href="/sites/site_a55d249ad6dd"', 'href="demo-site.html"'),
     ('href="/receipts.json"', 'href="demo-receipts.json"'),
     ('href="/verify-pack"', 'href="verify.html"'),
     ('href="/verify"', 'href="verify.html"'),
@@ -187,12 +192,12 @@ def snapshot(
         "demo-family": ("demo-family.html", "demo-family-es.html"),
         "demo-worker": ("demo-worker.html", "demo-worker-es.html"),
     }
-    en, es = next(
+    en_pair, es_pair = next(
         (pair for stem, pair in lang_pair.items() if page.startswith(stem)),
         ("demo-household.html", "demo-household-es.html"),
     )
-    html = html.replace('href="?lang=es"', f'href="{es}"')
-    html = html.replace('href="?lang=en"', f'href="{en}"')
+    html = html.replace('href="?lang=es"', f'href="{es_pair}"')
+    html = html.replace('href="?lang=en"', f'href="{en_pair}"')
     for old, new in SIBLING:
         html = html.replace(old, new)
     # Per-receipt downloads resolve to the shipped corpus, not a dead route.
@@ -345,6 +350,10 @@ def snapshot(
 def main() -> int:
     env = dict(os.environ, ATTEST_DATA_DIR=str(DATA), ATTEST_REPLAY_MODE="true")
     env.setdefault("ATTEST_ADMIN_TOKEN", "snapshot-run-admin-token-32chars!!")
+    # Arm webhook intake so /integrity reports the deployment's real posture —
+    # the demo store was populated through the signed-webhook path, and an
+    # "intake: OFF" banner on the flagship self-audit page is a lie by omission.
+    env.setdefault("ATTEST_RING_WEBHOOK_KEY", "snapshot-demo-webhook-key-32chars!!")
     exe = ROOT / ".venv" / "Scripts" / "attest.exe"
     proc = subprocess.Popen(
         [str(exe), "serve", "--port", str(PORT)],

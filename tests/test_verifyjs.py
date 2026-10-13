@@ -111,6 +111,44 @@ const receiptText=${JSON.stringify(rt)};
 
 
 @pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_js_verifier_bigint_fallback_agrees(tmp_path):
+    """crypto.subtle stubbed → the pure-BigInt engine takes over and must
+    reach the same verdicts (the fast path must never diverge)."""
+    _, r1, r2 = _chain()
+    (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
+    (tmp_path / "r.json").write_text(r1.model_dump_json(indent=2), encoding="utf-8")
+    driver = """
+const fs=require('fs');
+let src=fs.readFileSync(process.argv[2],'utf8').replace(/const dz=[\\s\\S]*$/,'');
+const rt=fs.readFileSync(process.argv[3],'utf8');
+eval(src + `
+const _s=globalThis.crypto.subtle;
+Object.defineProperty(globalThis.crypto,"subtle",
+  {value:{digest:_s.digest.bind(_s)}});
+const receiptText=${JSON.stringify(rt)};
+(async()=>{
+  const good=await checkReceipt(parseKeep(receiptText));
+  const bad=JSON.parse(receiptText);bad.payload.coverage.fraction=1.0;
+  const badRes=await checkReceipt(parseKeep(JSON.stringify(bad)));
+  console.log('bigint-ok:',good.ok,'bigint-tampered-ok:',badRes.ok,
+    'engine-js:',_engJs,'engine-wc:',_engWc);
+})();`);
+"""
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "verify.js", "r.json"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "bigint-ok: true" in proc.stdout
+    assert "bigint-tampered-ok: false" in proc.stdout
+    assert "engine-wc: 0" in proc.stdout  # nothing short-circuited the math
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
 def test_js_chain_verification(tmp_path):
     _, r1, r2 = _chain()
     (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
@@ -188,6 +226,52 @@ eval(src + `
     out = run(["bundle.json", "bundle.json"])
     assert "duplicate member name" in out
     assert check_member_names(["bundle.json", "bundle.json"]) is not None
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_js_diagnose_names_the_changed_signed_field(tmp_path):
+    """A FAILED verdict proves bytes moved; diagnoseTamper names where —
+    field-diffing the same signed bundle against the shipped clean pack.
+    The twin doctors the contested visit's observed_span_minutes, so the
+    diff must name that field and both values. Honest framing must close
+    the output (which copy is authentic is for the dispute to settle)."""
+    docs = Path(__file__).resolve().parents[1] / "docs"
+    (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
+    shutil.copy(docs / "sample-pack-tampered.zip", tmp_path / "t.zip")
+    shutil.copy(docs / "sample-pack.zip", tmp_path / "c.zip")
+    driver = """
+const fs=require('fs');
+let src=fs.readFileSync(process.argv[2],'utf8').replace(/const dz=[\\s\\S]*$/,'');
+const rows=[];
+global.document={getElementById:()=>({
+  insertAdjacentHTML:(p,h)=>rows.push(h)})};
+global.location={protocol:'http:'};
+global.fetch=async()=>{
+  const b=fs.readFileSync(process.argv[4]);
+  return {ok:true,arrayBuffer:async()=>b.buffer.slice(b.byteOffset,b.byteOffset+b.byteLength)};};
+eval(src + `
+(async()=>{
+  const zb=fs.readFileSync(process.argv[3]);
+  const f={arrayBuffer:async()=>zb.buffer.slice(zb.byteOffset,zb.byteOffset+zb.byteLength)};
+  const ents=await readZipEntries(f);
+  const byName=Object.create(null);for(const e of ents)byName[e.name]=e;
+  _packCtx={byName,failedVids:['vis_70e42116a4cf']};
+  await diagnoseTamper();
+  console.log(rows.join('\\\\n'));
+})();`);
+"""
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "verify.js", "t.zip", "c.zip"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "observed_span_minutes" in proc.stdout
+    assert "65.25" in proc.stdout and "135.25" in proc.stdout
+    assert "which copy is authentic" in proc.stdout  # honesty boundary holds
 
 
 @pytest.mark.skipif(NODE is None, reason="node runtime not available")
@@ -2120,8 +2204,16 @@ def test_every_advertised_pages_artifact_exists():
         text = script.sub("", page.read_text(encoding="utf-8"))
         for m in ref.finditer(text):
             rel = m.group(1).split("#")[0].split("?")[0]
+            # Root-absolute (/attest/x) links are deliberate on 404.html — a 404
+            # can land at any path depth, so only it can safely use them.
             if not rel or "://" in rel or rel.startswith(("data:", "mailto:")):
                 continue
+            if rel.startswith("/"):
+                if page.name == "404.html":
+                    rel = rel.lstrip("/").removeprefix("attest/")
+                else:
+                    missing.append(f"{page.name}: {rel} (root-absolute)")
+                    continue
             if rel.endswith("/"):
                 rel += "index.html"
             if not (page.parent / rel).resolve().exists():
@@ -2562,3 +2654,143 @@ console.log('anat:',ok,bad.length===0?[]:bad.slice(0,3));
     )
     assert proc.returncode == 0, proc.stderr
     assert f"anat: {len(files)} []" in proc.stdout, proc.stdout
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_gauntlet_oracle_agreement(tmp_path):
+    """#gauntlet: one click verifies all eight shipped artifacts in sequence
+    and prints ORACLE AGREEMENT 8/8 — each round's verdict captured under a
+    collapsible before #out resets for the next. The stub out element parses
+    its own rendered stamp so the driver exercises the real capture path."""
+    docs = Path(__file__).resolve().parents[1] / "docs"
+    need = [
+        "sample-pack.zip",
+        "sample-pack-tampered.zip",
+        "sample-pack-attack-missing-record.zip",
+        "sample-pack-attack-smuggled-file.zip",
+        "sample-pack-attack-forged-verifier.zip",
+        "live-sweep-receipt.json",
+        "divergence-checkpoint.json",
+        "anchor-demo.json",
+    ]
+    for n in need:
+        assert (docs / n).exists(), n
+    (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
+    driver = r"""
+const fs=require('fs'),path=require('path');
+const src=fs.readFileSync(process.argv[2],'utf8');
+const docsDir=process.argv[3];
+global.location={protocol:'http:',pathname:'/verify.html',
+  hash:'#gauntlet',origin:'http://x'};
+global.history={replaceState:()=>{}};
+global.fetch=async(u,o)=>{
+  if(o&&o.method==='HEAD')return{ok:true};
+  try{
+    const b=fs.readFileSync(path.join(docsDir,String(u)));
+    return{ok:true,arrayBuffer:async()=>b.buffer.slice(b.byteOffset,b.byteOffset+b.byteLength),
+      text:async()=>b.toString()};
+  }catch(e){return{ok:false};}};
+const mkel=()=>({hidden:true,innerHTML:'',innerText:'',value:'',open:false,
+  options:[],kids:[],setAttribute:()=>{},getAttribute:()=>null,
+  removeAttribute:()=>{},focus:()=>{},onclick:null,dataset:{},disabled:false,
+  textContent:'',className:'',classList:{contains:()=>false},
+  appendChild(c){this.kids.push(c);if(this.options)this.options.push(c)},
+  insertAdjacentHTML(pos,h){this.innerHTML=(pos==='afterbegin'?h+this.innerHTML:this.innerHTML+h)},
+  querySelector(sel){
+    if(sel!=='.stamp')return null;
+    const m=this.innerHTML.match(/class="row stamp (ok|bad)"[^>]*>([\s\S]*?)<\/div>/);
+    if(!m)return null;
+    return{classList:{contains:c=>c===m[1]},
+      textContent:m[2].replace(/<[^>]+>/g,'').trim()};},
+  remove(){},click(){if(this.onclick)this.onclick()}});
+const els={};const mk=id=>els[id]||(els[id]=mkel());
+global.document={getElementById:mk,querySelectorAll:()=>[],
+  createElement:mkel,createTextNode:t=>({text:t})};
+eval(src + `
+(async()=>{
+  const g=els['gauntlet-out'];
+  for(let i=0;i<3000;i++){
+    await new Promise(r=>setTimeout(r,100));
+    if(g.kids.some(k=>k.innerHTML&&k.innerHTML.includes('ORACLE AGREEMENT')))break;}
+  const rows=g.kids.filter(k=>k.className&&k.className.startsWith('row'));
+  const verdict=rows.find(k=>k.innerHTML&&k.innerHTML.includes('ORACLE AGREEMENT'));
+  console.log('gauntlet-rows:',rows.length);
+  console.log('gauntlet-verdict:',verdict?verdict.innerHTML.replace(/<[^>]+>/g,''):'NONE');
+  const names=rows.map(k=>(k.textContent||'').slice(0,44)).join('|');
+  console.log('gauntlet-seq:',names);
+  console.log('gauntlet-details:',g.kids.filter(k=>k.tagName===undefined&&k.innerHTML===undefined?false:!!k.appendChild).length);
+})();`);
+"""
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "verify.js", str(docs)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "gauntlet-rows: 9" in proc.stdout, proc.stdout
+    assert "ORACLE AGREEMENT 8/8" in proc.stdout, proc.stdout
+    assert "sample-pack-tampered.zip" in proc.stdout, proc.stdout
+    assert "anchor-demo.json" in proc.stdout, proc.stdout
+
+
+@pytest.mark.skipif(NODE is None, reason="node runtime not available")
+def test_two_pack_drop_compares_signed_membership(tmp_path):
+    """Dropping two packs arms the packdiff-in-the-browser path: each verifies
+    on its own merits, then membership, byte-level, signed-field, and signed
+    log-head comparisons run. Clean-vs-tampered must name the forged field and
+    still reconcile the heads via the embedded extends bridge; self-vs-self is
+    byte-identical evidence."""
+    docs = Path(__file__).resolve().parents[1] / "docs"
+    for n in ("sample-pack.zip", "sample-pack-tampered.zip"):
+        assert (docs / n).exists(), n
+    (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
+    driver = r"""
+const fs=require('fs'),path=require('path');
+const dir=process.argv[3];
+let src=fs.readFileSync(process.argv[2],'utf8').replace(/const dz=[\s\S]*$/,'');
+const mkel=()=>({hidden:true,innerHTML:'',innerText:'',value:'',open:false,
+  options:[],kids:[],className:'',textContent:'',dataset:{},disabled:false,
+  setAttribute:()=>{},getAttribute:()=>null,removeAttribute:()=>{},
+  appendChild(k){this.kids.push(k);return k;},
+  insertAdjacentHTML(p,h){this.innerHTML+=h;},
+  querySelector:()=>null,focus:()=>{},onclick:null});
+const out=mkel();
+globalThis.document={createElement:()=>mkel(),createTextNode:t=>({textContent:t}),
+  getElementById:()=>null,addEventListener:()=>{}};
+eval(src+';globalThis.__d=diffPacks;');
+const mk=(n)=>new File([fs.readFileSync(path.join(dir,n))],n);
+(async()=>{
+  // clean vs tampered twin
+  out.innerHTML='';out.kids=[];
+  await __d(mk('sample-pack.zip'),mk('sample-pack-tampered.zip'),out);
+  const t1=out.innerHTML;
+  console.log('T1:',t1.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').slice(0,4000));
+  // self vs self — identical bytes, same head
+  out.innerHTML='';out.kids=[];
+  await __d(mk('sample-pack.zip'),mk('sample-pack.zip'),out);
+  console.log('T2:',out.innerHTML.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').slice(0,1200));
+})().catch(e=>{console.log('ERR',e.message);process.exit(2);});
+"""
+    (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
+    proc = subprocess.run(
+        [NODE, "drive.js", "verify.js", str(docs)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert proc.returncode == 0, proc.stderr
+    t1 = proc.stdout.split("T1:")[1].split("T2:")[0]
+    t2 = proc.stdout.split("T2:")[1]
+    # the forged signed field is named — the diff's whole point
+    assert "observed_span_minutes" in t1, t1
+    # the doctored bundle is the shared member that moved
+    assert "vis_70e42116a4cf" in t1, t1
+    # heads reconcile through the newer export's own signed bridge
+    assert "provably extends" in t1 or "same signed log head" in t1, t1
+    assert "PACKS DIFFER" in t1, t1
+    assert "IDENTICAL EVIDENCE" in t2, t2
+    assert "same signed log head" in t2, t2

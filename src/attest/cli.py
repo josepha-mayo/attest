@@ -3722,7 +3722,9 @@ Attest — records, not verdicts. The ten-minute path:
        — ten self-playing beats, every frame the live artifact
     1. green VERIFIED … https://josepha-mayo.github.io/attest/verify.html#sample-pack
     2. red FAILED   … https://josepha-mayo.github.io/attest/verify.html#sample-pack-tampered
-       (one doctored field — the contested visit's observed span padded past its schedule — caught)
+       (one doctored field — the contested visit's observed span padded past
+        its schedule — caught; click "name what changed" and the verifier
+        points at the forged field itself)
     3. the attack gallery + caught fork + real-API sweep: same page, one click each
        + pipeline.svg — the seven verification gates, each attack pinned to
          the gate that kills it
@@ -3734,6 +3736,11 @@ Attest — records, not verdicts. The ten-minute path:
          __N__ artifact sha256s; hash every file → SITE VERIFIED or TAMPER
        + #tamper-lab — commit the attack yourself: rewrite a signed field
          in-page, download your doctored pack, watch the signature refuse it
+       + #gauntlet — one click verifies all eight shipped artifacts against
+         the shared oracle and scores agreement: ORACLE AGREEMENT 8/8
+       + #compare-packs — two packs at once: each verified, then their signed
+         membership diffed and the two log heads reconciled ("both verify" and
+         "both identical" are different claims)
     4. after a green stamp: open index.html — the pack hands you its own
        record browser, which re-verifies every record itself
     5. the product face, no install: demo-dashboard.html, demo-visit.html (the

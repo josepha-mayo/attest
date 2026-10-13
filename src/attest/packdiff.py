@@ -473,6 +473,9 @@ def _visit_summary(bundle: dict, manifest_entry: dict | None = None) -> dict:
         "media_digests": sorted(
             e["media_sha256"] for e in original["payload"].get("evidence", []) if e.get("media_sha256")
         ),
+        # The raw payload rides along so a changed-record anomaly can name
+        # the altered top-level fields, not just the receipt that moved.
+        "original_payload": original["payload"],
     }
     if manifest_entry:
         out["manifest_state"] = manifest_entry.get("state")
@@ -1234,13 +1237,33 @@ def _diff_events(old: dict, new: dict, key: str | None, old_path: str, new_path:
             anomalies += 1
             continue
         if a["payload_hash"] != b["payload_hash"]:
-            ev(
-                "anomaly",
-                vid,
+            detail = (
                 f"{vid}: signed original changed ({a['payload_hash'][:12]} -> "
-                f"{b['payload_hash'][:12]}) — a signed record cannot change; one export is inauthentic",
-                "!! ",
+                f"{b['payload_hash'][:12]}) — a signed record cannot change; one export is inauthentic"
             )
+            # Name the altered fields — detection becomes diagnosis. The
+            # fields' direction is honest: we can say what moved between the
+            # two copies, never which copy is true.
+            ap, bp = a.get("original_payload") or {}, b.get("original_payload") or {}
+            moved = [k for k in set(ap) | set(bp) if ap.get(k) != bp.get(k)]
+            if moved:
+                detail += f" — changed field(s): {', '.join(sorted(moved))}"
+            ev("anomaly", vid, detail, "!! ")
+            anomalies += 1
+            continue
+        if a.get("original_payload") != b.get("original_payload"):
+            # Same signed envelope, different signed-content bytes: the
+            # payload_hash field no longer binds (verification already
+            # flagged it). Name what moved — detection becomes diagnosis.
+            ap, bp = a.get("original_payload") or {}, b.get("original_payload") or {}
+            moved = [k for k in set(ap) | set(bp) if ap.get(k) != bp.get(k)]
+            detail = (
+                f"{vid}: signed payload content differs under an identical "
+                "envelope — one export's bytes were rewritten after signing"
+            )
+            if moved:
+                detail += f" — changed field(s): {', '.join(sorted(moved))}"
+            ev("anomaly", vid, detail, "!! ")
             anomalies += 1
             continue
         added = [h for h in b["review_hashes"] if h not in a["review_hashes"]]

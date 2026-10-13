@@ -26,6 +26,7 @@ padding:.6rem .9rem;font-size:.92rem;margin:.9rem 0}
 .badge.ok{background:#dcfce7;color:#166534}
 .badge.bad{background:#fee2e2;color:#991b1b}
 .badge.mut{background:#f1f5f9;color:#475569}
+.badge.warn{background:#fef9c3;color:#854d0e}
 h2{font-size:1.1rem;margin-top:1.8rem;border-top:1px solid #e4e4e7;padding-top:1rem}
 .proves{display:flex;gap:.8rem;flex-wrap:wrap}
 .proves>div{flex:1;min-width:240px;border-radius:10px;padding:.9rem 1rem}
@@ -64,10 +65,13 @@ a verdict; nobody's story does.</p>
 found <a href="https://ohioauditor.gov/Auditsearch/Reports/2024/117_Electronic_Visit_Verification_Report_FINAL.pdf"><strong>34%</strong> of electronic-visit-verification entries manually
 adjusted</a> — invisibly. Editable records are the problem; Attest makes them
 tamper-evident — and private home services (cleaners, caregivers, contractors)
-have no EVV mandate and no shared record at all. That's the gap.</p>
+have no EVV mandate and no shared record at all. That's the gap — and Ring's own
+end-to-end-encryption move makes independent attestation <em>more</em> valuable,
+not less: when the platform can't see the video either, the signed record is the
+shared truth everyone can hold.</p>
 
 <p style="border-left:3px solid #b45309;background:#fef9ee;padding:.55rem .9rem;border-radius:0 8px 8px 0">
-90 minutes scheduled. The camera observed 65. The worker disputes the record:
+90 minutes scheduled. The camera observed 65.25. The worker disputes the record:
 <em>"I dispute this record — I arrived before the first observation
 shown."</em> The household first wrote: <em>"My mother was home all morning
 and says the doorbell never rang — nobody came to the door before ten."</em>
@@ -90,7 +94,7 @@ Event History?</a> — receipts keep verifying even if Attest disappears.)</p>
 <a href="verify.html#sample-pack">green VERIFIED on the sample</a> →
 <a href="verify.html#sample-pack-tampered">red FAILED on the tampered twin</a> →
 <a href="verify.html#tamper-lab"><strong>forge it yourself</strong> in the
-tamper lab</a> → <a href="demo-receipts.html">the demo runtime's 115-receipt
+tamper lab</a> → <a href="demo-receipts.html">the demo runtime's 229-receipt
 hash chain</a>. No install, no account — every stamp runs in your browser and
 nothing leaves it.</div>
 <p style="margin:.5rem 0"><a href="verify.html#sample-pack"
@@ -108,8 +112,9 @@ moment this page opens. Drop any exported pack; nothing leaves your browser.</sm
 </a>
 <a class="card" href="verify.html#sample-pack-tampered">
 <b>Verify the tampered twin<span class="badge bad">FAIL</span></b>
-<small>Same pack, but someone inflated the contested visit's observed span — 65 to 135 minutes, past its 90-minute schedule.
-Deep link — lands on a red FAILED stamp.</small>
+<small>Same pack, but someone inflated the contested visit's observed span — 65.25 to 135.25 minutes, past its 90-minute schedule.
+Deep link — lands on a red FAILED stamp; then "name what changed" points at
+the forged field itself.</small>
 </a>
 <a class="card" href="verify.html#tamper-lab">
 <b>Forge it yourself<span class="badge bad">FAIL</span></b>
@@ -120,6 +125,19 @@ rebuilt zip — the signature refuses <em>your</em> forgery, not ours.</small>
 <b>Watch the two-minute tour</b>
 <small>Ten beats, self-playing — every frame is the live artifact, not a
 screenshot. The fastest possible entry if you'd rather look than click.</small>
+</a>
+<a class="card" href="verify.html#gauntlet">
+<b>Run the whole gauntlet<span class="badge ok">8/8</span></b>
+<small>One click, every artifact: clean pack, doctored twin, all three attacks,
+the real-API sweep, the signed fork, the Bitcoin anchor — each verdict scored
+against the shared oracle, live. The whole demo as a single stream.</small>
+</a>
+<a class="card" href="verify.html#compare-packs">
+<b>Compare two packs<span class="badge warn">DIFF</span></b>
+<small>"The copy the agency produced" vs "the copy I kept" — each verifies on
+its own merits, then their signed membership is diffed: the forged field named,
+and the two log heads proven to reconcile — or caught forking. Two verifying
+packs that aren't the same records is the whole point.</small>
 </a>
 <a class="card" href="verify.html#live-sweep-receipt">
 <b>Verify the real-API sweep<span class="badge ok">PASS</span></b>
@@ -162,7 +180,7 @@ var lines=[
  ["mut","  Day 3: the Ring plan lapses mid-visit \u2014 observation stops being delivered"],
  ["mut","  Demo is live \u2014 simulated data only, no real Ring account involved \u2192 http://127.0.0.1:8000"],
  ["cmd","$ attest verify sample-pack.zip"],
- ["ok","  OK: case pack verified \u2014 9 visit record(s) intact (export signed: 9 record(s); 4 verifier tool(s) pinned; 50 receipt(s) proven inside the deployment transparency log \u2026)"],
+ ["ok","  OK: case pack verified \u2014 9 visit record(s) intact (export signed: 9 record(s); 4 verifier tool(s) pinned; 80 receipt(s) proven inside the deployment transparency log \u2026)"],
  ["mut","  Note: a valid pack proves record integrity under the pack's self-declared issuer key \u2014 signatures are not physical truth."],
  ["cmd","$ attest attack-demo"],
  ["ok","  CAUGHT  forge a visit row (state -> attended_verified)"],
@@ -285,6 +303,8 @@ a disputed visit, a camera blackout mid-window, a lapsed subscription, a coordin
 live view — then serves the whole product on a printed localhost URL (<code>--port 8000</code> pins it).
 Or peek at a snapshot first, no install:
 <a href="demo-dashboard.html">the coordinator dashboard</a> ·
+<a href="demo-site.html">the site page</a> (day-by-day coverage strips,
+the live-view band) ·
 <a href="demo-visit.html">the contested visit</a> (source-divergence callout, signed
 dispute) · <a href="demo-household.html">the household
 view</a> (<a href="demo-household-es.html">en español</a>) ·
@@ -298,20 +318,32 @@ scoped <code>/review/</code> token sees ·
 <a href="demo-integrity.html">the self-audit page</a> (revoked-key suspect
 windows, annotated — 9 receipts in scope) ·
 <a href="demo-integrity.json">its machine-readable JSON</a> — and the raw layer
-underneath all of it: <a href="demo-receipts.html">115 signed receipts</a>,
+underneath all of it: <a href="demo-receipts.html">229 signed receipts</a>,
 drawn as the literal hash chain (every edge a <code>prev_hash</code> link —
-all 115 verify), each one-click verifiable in the same browser page —
-or <a href="verify.html#demo-receipts">all 115 at once</a>
+all 229 verify), each one-click verifiable in the same browser page —
+or <a href="verify.html#demo-receipts">all 229 at once</a>
 (<a href="demo-receipts.json">raw JSON</a>). New to the math?
 <a href="anatomy.html"><strong>Anatomy of a signed receipt</strong></a>
 decomposes one field-by-field — what the signature covers, what the
 <code>prev_hash</code> edge means, and what a valid signature can never
 prove.</p>
+<p>And because "trust our log" isn't a stopping point either: the demo
+deployment anchors its journal head to <strong>Bitcoin</strong> —
+<a href="verify.html#anchor-demo">the signed anchor, one-click verified</a>
+(journal head + transparency-log root pinned inside it) sits under a real
+<a href="anchor-demo.json.ots">OpenTimestamps submission</a> (<em>pending</em> —
+public calendars commit to a block on their own schedule;
+<code>attest stamp --upgrade</code> completes it). "This record existed before
+that block" — verifiable without trusting us.</p>
 <ul>
-  <li><code>/</code> — coordinator dashboard: KPI cards, per-day timeline strips,
-      coverage gaps labeled <em>"no observation — not absence"</em>, and a
-      per-worker check-in-timing table (median + worst camera-vs-self-report
-      lag — <em>"a pattern, not proof"</em>)</li>
+  <li><code>/</code> — coordinator dashboard: KPI cards, coverage gaps labeled
+      <em>"no observation — not absence"</em>, and a per-worker check-in-timing
+      table (median + worst camera-vs-self-report lag — <em>"a pattern, not
+      proof"</em>)</li>
+  <li><a href="demo-site.html"><code>/sites/…</code></a> — the site page: per-day
+      coverage strips for the whole window, interruptions marked <em>why</em>
+      (offline/online lifecycle), the live-view session band, coverage
+      certificates — the clearest picture of what gets recorded</li>
   <li><code>/integrity</code> — the deployment auditing itself: receipt chain, mutation
       journal, transparency head, key custody, webhook posture — each section signed
       (<code>/integrity.json</code> serves the same audit machine-readable)</li>
@@ -327,7 +359,7 @@ check in the same verifier — the links land directly on the red FAILED
 stamp:</p>
 <ul>
 <li><strong><a href="verify.html#sample-pack-tampered">Doctored field</a></strong> —
-  the contested visit's observed span inflated 65 → 135 minutes:
+  the contested visit's observed span inflated 65.25 → 135.25 minutes:
   the signed <code>payload_hash</code> no longer matches → <em>payload hash mismatch</em>.
   <a href="sample-pack-tampered.zip" download>zip</a></li>
 <li><strong><a href="verify.html#sample-pack-attack-missing-record">Deleted record</a></strong> —
@@ -435,9 +467,12 @@ emits the same evidence document.</p>
 called at runtime:</strong> signed webhooks · Event History · media &amp;
 snapshots (regional redirect handled) · devices/capabilities ·
 app-integrations · subscriptions · WHEP live view. <strong>Track fit:</strong>
-business systems + caretaking + accessibility — caretaking carried through
-the household view and the <a href="demo-family.html">scoped-link QR the
-family scans at the door</a>.</p>
+business systems + caretaking + accessibility + access control + IoT home
+automation — caretaking carried through the household view and the
+<a href="demo-family.html">scoped-link QR the family scans at the door</a>;
+access control through the hashed, expiring, revocable grant links those
+scoped pages run on; IoT telemetry through the device-lifecycle coverage
+journal (why observation stopped, signed).</p>
 
 <h2 id="aws">Five AWS touchpoints — three verified live</h2>
 <ul>
@@ -450,7 +485,7 @@ pack's embedded script — data and code come from different parties:</li>
   <pre style="min-height:0"><span class="p">$ aws lambda invoke --function-name attest-verify-pack \
     --payload fileb://pack.json out.json</span>
 <span class="ok">  {"ok": true} — 2 visit records, 43 receipts proven inside the log</span>
-<span class="mut">  (transcript of the 2026-09-18 run — the current pack carries 9 visit records, 50 receipts)</span>
+<span class="mut">  (transcript of the 2026-09-18 run — the current pack carries 9 visit records, 85 receipts)</span>
 <span class="p">$ # doctor one byte in a signed payload, invoke again</span>
 <span class="bad">  {"ok": false} — payload hash mismatch (payload was altered)</span>
 <span class="mut">  the function catches exactly what the local verifiers catch</span></pre>
@@ -472,7 +507,18 @@ model call authenticates then throttles — and the record labels the
 deterministic fallback as its true source instead of pretending.</li>
 <li><b>Strands agent</b> <span class="badge mut">labeled fallback</span> — the weekly
 triage brief reads the ledger through real read-only tools; same quota wall, same
-honest labeling (<code>strands-agent</code> vs <code>deterministic</code> + reason).</li>
+honest labeling (<code>strands-agent</code> vs <code>deterministic</code> + reason).
+<details style="margin-top:.4rem"><summary style="cursor:pointer">what the agent actually does — tools + a real brief</summary>
+<pre class="mut" style="font-size:.82rem;white-space:pre-wrap;margin:.4rem 0">tools granted (read-only, bound to the store):
+  list_sites · site_records · record_detail · integrity
+$ attest triage
+  agent triage unavailable (LoginRefreshRequired); deterministic brief
+  6 record(s) need attention:
+  - vis_70e42116a4cf (closed): worker disputes this record
+  - vis_5b7958271e00 (closed): observation matched no schedule
+  …
+  [source: deterministic triage — agent unavailable: LoginRefreshRequired]</pre>
+</details></li>
 </ul>
 <p><small>The fallback path is itself verified against real AWS failure modes —
 expired <code>aws login</code> creds surface as <code>LoginRefreshRequired</code>,
@@ -487,6 +533,9 @@ History, media, subscriptions, WHEP), a YAML scenario DSL, chaos injection, and 
 pytest plugin — MIT-licensed, on PyPI, CI-tested on Windows/Linux × Python
 3.11/3.14, shipping real Playground recordings as fixtures. Attest's whole demo
 runs on it — and every team after us gets Ring integration without a doorbell.</p>
+<p><code>pip install ring-sandbox</code> — then point the emulator at a scenario
+YAML and your client talks to a full Ring surface on localhost.
+<a href="https://pypi.org/project/ring-sandbox/"><img src="https://img.shields.io/pypi/v/ring-sandbox" alt="ring-sandbox on PyPI" style="vertical-align:middle"></a></p>
 <p><small>Developer-experience feedback for the bonus: 17 documented friction-log
 entries (task → expected vs actual → severity → workaround → suggestion) in
 <a href="https://github.com/josepha-mayo/attest/blob/main/FRICTIONLOG.md">FRICTIONLOG.md</a>.</small></p>
@@ -559,7 +608,7 @@ for the key either. Three ways to pin:</p>
   <a href="verify.html#verify-self">the page hashes its own bytes</a> →
   <strong>PINNED</strong>/<strong>PIN MISMATCH</strong>; and
   <a href="verify.html#verify-site"><code>site-manifest.json</code> pins all
-  191 artifacts this site ships</a> → <strong>SITE VERIFIED</strong>/<strong>SITE
+  308 artifacts this site ships</a> → <strong>SITE VERIFIED</strong>/<strong>SITE
   TAMPER</strong>, drifted files named.</li>
 </ul>
 
@@ -582,7 +631,11 @@ disputes, not an attendance-verification or EVV product. Source:
 <a href="https://github.com/josepha-mayo/attest">github.com/josepha-mayo/attest</a> ·
 emulator: <a href="https://github.com/josepha-mayo/ring-sandbox">ring-sandbox</a> ·
 judging: <a href="https://github.com/josepha-mayo/attest/blob/main/JUDGE.md">JUDGE.md</a>
-(the ten-minute path + scoring map).</p>
+(the ten-minute path + scoring map) ·
+<a href="https://github.com/josepha-mayo/attest/blob/main/THREATMODEL.md">threat model</a> ·
+<a href="https://github.com/josepha-mayo/attest/blob/main/extras/ci/verify-pack.yml">the CI evidence gate</a>
+(every pack must pass ∧ its doctored twin must fail) ·
+<a href="https://github.com/josepha-mayo/attest/blob/main/extras/appstore/LISTING.md">a drafted Ring Appstore listing</a>.</p>
 </main>
 </body>
 </html>

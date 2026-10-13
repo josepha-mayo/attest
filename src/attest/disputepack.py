@@ -1656,6 +1656,14 @@ WHAT IT DOES NOT PROVE
 The private signing key stays with the deployment. The issuer public key in
 manifest.json verifies this pack; compare it to a key obtained out-of-band to
 rule out a pack that swapped keys.
+
+HOLDING TWO EXPORTS?  `attest diff packA.zip packB.zip` compares them:
+appended records are normal drift, but a vanished record, an altered signed
+field (named field-by-field), or a same-size transparency-log fork is flagged.
+The same compare runs in the browser: drop both packs onto verify.html at
+once — each verifies on its own merits, then their signed membership is
+diffed and the two log heads are reconciled ("both verify" and "both
+identical" are different claims).
 """
 
 

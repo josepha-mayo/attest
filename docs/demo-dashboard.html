@@ -70,7 +70,7 @@
   @media(max-width:720px) { header { flex-wrap:wrap; padding:14px 16px } header .meta { margin-left:0; width:100% } main { padding:20px 16px } .row label { width:100% } }
 </style>
 <style>a[data-dead]{opacity:.55;cursor:not-allowed;text-decoration:line-through}[disabled]{cursor:not-allowed}.snap-note{font-size:12px;color:var(--muted,#5c6b7a);margin:4px 0 8px}@media print{.snap-banner{display:none}}</style></head>
-<body><div class="snap-banner" style="background:#f9edd4;border-bottom:1px solid #d9a83c;color:#6b4d0f;font:13px/1.5 system-ui,sans-serif;padding:8px 16px;text-align:center">Captura estática del producto <code>attest demo</code> en vivo — servida desde un emulador Ring local. Los enlaces tachados y los controles deshabilitados son rutas de la aplicación en vivo. Ejecuta <code>attest demo</code> para la versión real; <a href="index.html" style="color:#6b4d0f">volver a la página de demostración</a>.</div>
+<body><div class="snap-banner" style="background:#f9edd4;border-bottom:1px solid #d9a83c;color:#6b4d0f;font:13px/1.5 system-ui,sans-serif;padding:8px 16px;text-align:center">Snapshot of the live <code>attest demo</code> product — served from a local Ring emulator. Struck-through links and disabled controls are live-app routes. Run <code>attest demo</code> for the real thing; <a href="index.html" style="color:#6b4d0f">back to the demo page</a>.</div>
 <a class="skip-link" href="#main">Skip to content</a>
 
 <header>
@@ -88,8 +88,8 @@
     <div class="muted">Ring observations and worker self-reports around scheduled home-service visits — signed, reviewable, correctable. Records preserve what was received; they do not certify identity, attendance, or time worked.</div>
   </div>
   <div class="card small">
-    Ledger: <span class="ok">&#10003; 115 receipts, chain intact across 1 signed key rotation</span>
-    <br>Audit log: <span class="ok">&#10003; 484 entries, intact</span>
+    Ledger: <span class="ok">&#10003; 229 receipts, chain intact across 1 signed key rotation</span>
+    <br>Audit log: <span class="ok">&#10003; 637 entries, intact</span>
     
     <br><span class="muted">Queue: 0 pending · 0 in flight · 0 failed</span>
     
@@ -117,7 +117,7 @@
       onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();location.href='demo-visit.html'}">
     <td><span class="flag critical">urgent</span></td>
     <td><a href="demo-visit.html">Oct 2, 11:31 AM</a>
-      <a  class="muted small" data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot"> — Alvarez residence</a>
+      <a href="demo-site.html" class="muted small" onclick="event.stopPropagation()"> — Alvarez residence</a>
       <span class="muted small"> · Maria Chen</span></td>
     <td>worker disputes this record</td>
     <td class="muted small">Open record &rarr;</td>
@@ -126,7 +126,7 @@
   <tr aria-label="Open record vis_5b7958271e00"   data-dead="/visits/vis_5b7958271e00" title="live deployment only — inert in this snapshot">
     <td><span class="flag warn">needs review</span></td>
     <td><a  data-dead="/visits/vis_5b7958271e00" title="live deployment only — inert in this snapshot">Oct 7, 1:46 PM</a>
-      <a  class="muted small" data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot"> — Alvarez residence</a>
+      <a href="demo-site.html" class="muted small" onclick="event.stopPropagation()"> — Alvarez residence</a>
       </td>
     <td>observation matched no schedule</td>
     <td></td>
@@ -135,7 +135,7 @@
   <tr aria-label="Open record vis_3feab06a831b"   data-dead="/visits/vis_3feab06a831b" title="live deployment only — inert in this snapshot">
     <td><span class="flag warn">needs review</span></td>
     <td><a  data-dead="/visits/vis_3feab06a831b" title="live deployment only — inert in this snapshot">Oct 6, 11:06 AM</a>
-      <a  class="muted small" data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot"> — Alvarez residence</a>
+      <a href="demo-site.html" class="muted small" onclick="event.stopPropagation()"> — Alvarez residence</a>
       <span class="muted small"> · Maria Chen</span></td>
     <td>1 review note(s): observed_interval_short</td>
     <td></td>
@@ -144,7 +144,7 @@
   <tr aria-label="Open record vis_32a86d6fdbe4"   data-dead="/visits/vis_32a86d6fdbe4" title="live deployment only — inert in this snapshot">
     <td><span class="flag warn">needs review</span></td>
     <td><a  data-dead="/visits/vis_32a86d6fdbe4" title="live deployment only — inert in this snapshot">Oct 9, 11:06 AM</a>
-      <a  class="muted small" data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot"> — Alvarez residence</a>
+      <a href="demo-site.html" class="muted small" onclick="event.stopPropagation()"> — Alvarez residence</a>
       </td>
     <td>1 review note(s): no_observation</td>
     <td></td>
@@ -153,7 +153,7 @@
   <tr aria-label="Open record vis_1071d3b1997a"   data-dead="/visits/vis_1071d3b1997a" title="live deployment only — inert in this snapshot">
     <td><span class="flag warn">needs review</span></td>
     <td><a  data-dead="/visits/vis_1071d3b1997a" title="live deployment only — inert in this snapshot">Oct 4, 11:06 AM</a>
-      <a  class="muted small" data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot"> — Alvarez residence</a>
+      <a href="demo-site.html" class="muted small" onclick="event.stopPropagation()"> — Alvarez residence</a>
       <span class="muted small"> · Maria Chen</span></td>
     <td>1 review note(s): observed_interval_short</td>
     <td></td>
@@ -162,7 +162,7 @@
   <tr aria-label="Open record vis_6a79c8145c2e"   data-dead="/visits/vis_6a79c8145c2e" title="live deployment only — inert in this snapshot">
     <td><span class="flag warn">needs review</span></td>
     <td><a  data-dead="/visits/vis_6a79c8145c2e" title="live deployment only — inert in this snapshot">Oct 3, 11:06 AM</a>
-      <a  class="muted small" data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot"> — Alvarez residence</a>
+      <a href="demo-site.html" class="muted small" onclick="event.stopPropagation()"> — Alvarez residence</a>
       <span class="muted small"> · Maria Chen</span></td>
     <td>1 review note(s): observed_interval_short</td>
     <td></td>
@@ -230,7 +230,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
   <tbody>
   
   <tr>
-    <td><a  style="color:var(--accent)" data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot">Alvarez residence</a></td>
+    <td><a href="demo-site.html" style="color:var(--accent)">Alvarez residence</a></td>
     <td>Maria Chen</td>
     <td>Oct 8, 11:06 AM</td>
     <td>Oct 8, 12:36 PM</td>
@@ -242,7 +242,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
   </tr>
   
   <tr>
-    <td><a  style="color:var(--accent)" data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot">Alvarez residence</a></td>
+    <td><a href="demo-site.html" style="color:var(--accent)">Alvarez residence</a></td>
     <td>Unknown</td>
     <td>Oct 7, 1:46 PM</td>
     <td>Oct 7, 3:16 PM</td>
@@ -254,7 +254,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
   </tr>
   
   <tr>
-    <td><a  style="color:var(--accent)" data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot">Alvarez residence</a></td>
+    <td><a href="demo-site.html" style="color:var(--accent)">Alvarez residence</a></td>
     <td>Unknown</td>
     <td>None received</td>
     <td>None received</td>
@@ -267,7 +267,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
   </tr>
   
   <tr>
-    <td><a  style="color:var(--accent)" data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot">Alvarez residence</a></td>
+    <td><a href="demo-site.html" style="color:var(--accent)">Alvarez residence</a></td>
     <td>Maria Chen</td>
     <td>Oct 6, 11:06 AM</td>
     <td>Oct 6, 11:06 AM</td>
@@ -279,7 +279,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
   </tr>
   
   <tr>
-    <td><a  style="color:var(--accent)" data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot">Alvarez residence</a></td>
+    <td><a href="demo-site.html" style="color:var(--accent)">Alvarez residence</a></td>
     <td>Unknown</td>
     <td>None received</td>
     <td>None received</td>
@@ -291,7 +291,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
   </tr>
   
   <tr>
-    <td><a  style="color:var(--accent)" data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot">Alvarez residence</a></td>
+    <td><a href="demo-site.html" style="color:var(--accent)">Alvarez residence</a></td>
     <td>Maria Chen</td>
     <td>Oct 4, 11:06 AM</td>
     <td>Oct 4, 11:06 AM</td>
@@ -303,7 +303,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
   </tr>
   
   <tr>
-    <td><a  style="color:var(--accent)" data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot">Alvarez residence</a></td>
+    <td><a href="demo-site.html" style="color:var(--accent)">Alvarez residence</a></td>
     <td>Maria Chen</td>
     <td>Oct 3, 11:06 AM</td>
     <td>Oct 3, 11:06 AM</td>
@@ -315,7 +315,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
   </tr>
   
   <tr>
-    <td><a  style="color:var(--accent)" data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot">Alvarez residence</a></td>
+    <td><a href="demo-site.html" style="color:var(--accent)">Alvarez residence</a></td>
     <td>Maria Chen</td>
     <td>Oct 2, 11:31 AM</td>
     <td>Oct 2, 12:36 PM</td>
@@ -328,7 +328,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
   </tr>
   
   <tr>
-    <td><a  style="color:var(--accent)" data-dead="/sites/site_a55d249ad6dd" title="live deployment only — inert in this snapshot">Alvarez residence</a></td>
+    <td><a href="demo-site.html" style="color:var(--accent)">Alvarez residence</a></td>
     <td>Maria Chen</td>
     <td>Oct 1, 11:06 AM</td>
     <td>Oct 1, 12:36 PM</td>

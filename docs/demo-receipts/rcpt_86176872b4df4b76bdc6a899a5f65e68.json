@@ -1,0 +1,28 @@
+{
+  "id": "rcpt_86176872b4df4b76bdc6a899a5f65e68",
+  "visit_id": "export-tools:1622a932797ad9c3",
+  "sequence": 204,
+  "prev_hash": "6892cde19e191bd56945320a53b8b4d8a0241d3b42305182bd8ee203207cef1a",
+  "payload": {
+    "record_type": "verifier_manifest",
+    "scope": "site:site_a55d249ad6dd",
+    "tools": {
+      "verify_case.py": "ff7861a50764f6f15793927e7e171855f28ac35573a79132919668104abe2435",
+      "verify.html": "a19d15cd3a88dfc3324cbfc0b11bfd6d8d2242313f9a702e8d8c322a754e7287",
+      "index.html": "78b9bb71cc40f7703c296c62fe4eafe7b5eec30a9b6e0ba19e5153774bacbc80",
+      "README.txt": "c262c388616602fa18def58ee288635b327345bdbabace6ba03ff0c71bd0d450"
+    },
+    "boundary": "The named files must byte-match these sha256 digests — a verifier inside a pack that doesn't match was modified after export and must not be trusted to report honestly.",
+    "journal_head": "fd28dd9975704313bce3f23707aa14f4f91b5521ee94589b4ca7b82412bdb125",
+    "schema": "attest.receipt/2",
+    "sequence": 204,
+    "prev_hash": "6892cde19e191bd56945320a53b8b4d8a0241d3b42305182bd8ee203207cef1a",
+    "visit_id": "export-tools:1622a932797ad9c3",
+    "receipt_id": "rcpt_86176872b4df4b76bdc6a899a5f65e68",
+    "issued_at": "2026-10-13T12:50:33.150030+00:00"
+  },
+  "payload_hash": "fca9ad3d1ec02da420c4d67b0dab3e036090669540dde3884114192cbea35f54",
+  "signature": "pIpVKRAC/I8NOCDgnipPD1RUL54Vp7CfgWmYIkxjsu/VIAH0IatAQD4l/3cEXSJmOEOiqzLvZiZKduF5uCcZBA==",
+  "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+  "issued_at": "2026-10-13T12:50:33.150030Z"
+}

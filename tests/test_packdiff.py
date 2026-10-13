@@ -133,6 +133,30 @@ def test_diff_flags_an_altered_signed_record(exports, tmp_path):
     assert any("cannot change" in line for line in lines)
 
 
+def test_diff_names_the_field_changed_under_an_intact_envelope(exports, tmp_path):
+    """The classic forgery keeps the signed envelope — payload_hash field
+    stays — and rewrites the payload bytes. The diff must name the moved
+    field, not just report a changed hash."""
+    first, second, v1, _ = exports
+    zin = zipfile.ZipFile(second)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zout:
+        for name in zin.namelist():
+            data = zin.read(name)
+            if name == f"visits/{v1}/bundle.json":
+                b = json.loads(data)
+                b["original"]["payload"]["observed_span_minutes"] = 999.5
+                data = json.dumps(b)
+            zout.writestr(name, data)
+    forged = second.with_name("forged3.zip")
+    forged.write_bytes(buf.getvalue())
+    lines, anomalies = diff(first, forged)
+    assert anomalies >= 1
+    named = [line for line in lines if "observed_span_minutes" in line]
+    assert named, lines
+    assert any("identical" in line and "envelope" in line for line in named)
+
+
 def _repack(zin, out_path, mutate=None, drop=frozenset()):
     """Rewrite a case pack, optionally mutating manifest.json before re-zipping."""
     buf = io.BytesIO()

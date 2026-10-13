@@ -15,3 +15,7 @@ data-*/
 *.sqlite3-wal
 *.key
 *.pem
+*.log
+# Lambda build artifacts — emitted by attest.disputepack.write_verifiers()
+extras/lambda/verifier_case.py
+extras/lambda/verifier_bundle.py

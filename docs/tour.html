@@ -73,6 +73,9 @@ a{color:#2563eb}
 a link: <a href="verify.html#sample-pack">green VERIFIED</a> ·
 <a href="verify.html#sample-pack-tampered">red FAILED</a> ·
 <a href="verify.html#tamper-lab">the tamper lab</a> ·
+<a href="verify.html#compare-packs">two-pack compare</a> ·
+<a href="verify.html#gauntlet">the gauntlet</a> ·
+<a href="verify.html#anchor-demo">the OTS anchor</a> ·
 <a href="demo-visit.html">the contested visit</a> ·
 <a href="demo-family.html">the family link</a> ·
 <a href="demo-worker.html">the worker link</a> ·
@@ -93,10 +96,11 @@ const BEATS=[
   chain, the Merkle log, witness cosignatures, and a mid-history key rotation.`,
   w:"Notice the verdict hedges honestly — integrity under a key, never physical truth."},
  {t:"The same pack, one field doctored",u:"verify.html?b=3#sample-pack-tampered",s:12000,
-  p:`Someone inflated the contested visit's observed span — 65 to 135 minutes, past its 90-minute schedule — inside a signed
+  p:`Someone inflated the contested visit's observed span — 65.25 to 135.25 minutes, past its 90-minute schedule — inside a signed
   bundle. The red <strong>FAILED</strong> stamp names the visit and the check that
-  died: <code>payload hash mismatch</code>.`,
-  w:"One byte moves, the math refuses — this is the whole product in one frame."},
+  died: <code>payload hash mismatch</code>. Click "name what changed" and the
+  verifier points at the forged field itself.`,
+  w:"One byte moves, the math refuses — and one more click says which byte it was."},
  {t:"Commit the forgery yourself",u:"verify.html?b=4#tamper-lab",s:12000,
   p:`The tamper lab: pick a signed field, type your own value, and the page
   rebuilds a real zip around your edit — downloadable — then refuses it. The
@@ -116,7 +120,7 @@ const BEATS=[
   contest. Tokens are hashed at rest, expiring, revocable.`,
   w:"Three audiences, three surfaces — nobody needs a login to be heard on the record."},
  {t:"The raw layer",u:"demo-receipts.html",s:10000,
-  p:`All 115 signed receipts of the demo deployment, drawn as the literal hash
+  p:`All 229 signed receipts of the demo deployment, drawn as the literal hash
   chain — every edge a real <code>prev_hash</code>. Click any row or node for a
   one-click verdict on that single receipt.`,
   w:"A judge can drill to the byte level without trusting the site."},

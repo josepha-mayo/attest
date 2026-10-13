@@ -37,7 +37,7 @@ Compress-Archive verify_lambda.py, verifier_case.py, verifier_bundle.py verify-l
 aws lambda create-function --function-name attest-verify-pack `
   --runtime python3.13 --handler verify_lambda.handler `
   --zip-file fileb://verify-lambda.zip --role <lambda-exec-role-arn> `
-  --timeout 30 --memory-size 256
+  --timeout 120 --memory-size 256
 ```
 
 The deployed function is **authenticated-invoke only**. To expose a public
@@ -52,6 +52,10 @@ aws lambda add-permission --function-name attest-verify-pack --action lambda:Inv
 ## Use
 
 ```powershell
+# no AWS account? the same handler runs locally — stdlib only, no creds:
+python -c "import base64,json,verify_lambda as v; \
+  print(v.handler({'body': base64.b64encode(open('case.zip','rb').read()).decode(), \
+  'isBase64Encoded': True}, None))"
 # authenticated invoke
 aws lambda invoke --function-name attest-verify-pack --payload fileb://event.json out.json
 # or, with the optional public URL:
@@ -69,6 +73,11 @@ integrity under the issuer key — not identity, attendance, or absence.
 
 - Synchronous Lambda invokes cap at ~6 MiB request payloads; larger packs need
   a pre-signed-URL fetch path (not built).
+- The stdlib Ed25519 verifier is pure CPU — ~0.3-0.5s per signed receipt. The
+  2026-09-18 live verification ran on a ~9-receipt pack; a 80-receipt pack
+  needs ~25-35s, which is why the handler's subprocess budget is 90s and the
+  deploy doc says `--timeout 120`. If you redeployed with the old `--timeout 30`,
+  a big pack reports `verifier timed out` — a limit of the budget, not the math.
 - The verifier attests integrity under the issuer key. Whether you trust the
   issuer key is a separate question — the function URL response is itself
   only as trustworthy as the AWS account hosting it. For adjudication, prefer

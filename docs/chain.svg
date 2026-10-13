@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg viewBox="0 0 672 759" xmlns="http://www.w3.org/2000/svg" role="group" aria-label="Hash chain of the 115 signed receipts">
+<svg viewBox="0 0 672 1331" xmlns="http://www.w3.org/2000/svg" role="group" aria-label="Hash chain of the 229 signed receipts">
 <line x1="57" y1="52" x2="119" y2="52" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
 <line x1="119" y1="52" x2="181" y2="52" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
 <line x1="181" y1="52" x2="243" y2="52" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
@@ -114,27 +114,141 @@
 <line x1="553" y1="624" x2="491" y2="624" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
 <line x1="491" y1="624" x2="429" y2="624" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
 <line x1="429" y1="624" x2="367" y2="624" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="367" y1="624" x2="305" y2="624" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="305" y1="624" x2="243" y2="624" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="243" y1="624" x2="181" y2="624" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="181" y1="624" x2="119" y2="624" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="119" y1="624" x2="57" y2="624" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="57" y1="624" x2="57" y2="676" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="57" y1="676" x2="119" y2="676" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="119" y1="676" x2="181" y2="676" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="181" y1="676" x2="243" y2="676" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="243" y1="676" x2="305" y2="676" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="305" y1="676" x2="367" y2="676" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="367" y1="676" x2="429" y2="676" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="429" y1="676" x2="491" y2="676" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="491" y1="676" x2="553" y2="676" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="553" y1="676" x2="615" y2="676" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="615" y1="676" x2="615" y2="728" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="615" y1="728" x2="553" y2="728" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="553" y1="728" x2="491" y2="728" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="491" y1="728" x2="429" y2="728" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="429" y1="728" x2="367" y2="728" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="367" y1="728" x2="305" y2="728" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="305" y1="728" x2="243" y2="728" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="243" y1="728" x2="181" y2="728" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="181" y1="728" x2="119" y2="728" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="119" y1="728" x2="57" y2="728" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="57" y1="728" x2="57" y2="780" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="57" y1="780" x2="119" y2="780" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="119" y1="780" x2="181" y2="780" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="181" y1="780" x2="243" y2="780" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="243" y1="780" x2="305" y2="780" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="305" y1="780" x2="367" y2="780" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="367" y1="780" x2="429" y2="780" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="429" y1="780" x2="491" y2="780" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="491" y1="780" x2="553" y2="780" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="553" y1="780" x2="615" y2="780" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="615" y1="780" x2="615" y2="832" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="615" y1="832" x2="553" y2="832" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="553" y1="832" x2="491" y2="832" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="491" y1="832" x2="429" y2="832" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="429" y1="832" x2="367" y2="832" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="367" y1="832" x2="305" y2="832" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="305" y1="832" x2="243" y2="832" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="243" y1="832" x2="181" y2="832" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="181" y1="832" x2="119" y2="832" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="119" y1="832" x2="57" y2="832" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="57" y1="832" x2="57" y2="884" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="57" y1="884" x2="119" y2="884" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="119" y1="884" x2="181" y2="884" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="181" y1="884" x2="243" y2="884" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="243" y1="884" x2="305" y2="884" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="305" y1="884" x2="367" y2="884" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="367" y1="884" x2="429" y2="884" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="429" y1="884" x2="491" y2="884" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="491" y1="884" x2="553" y2="884" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="553" y1="884" x2="615" y2="884" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="615" y1="884" x2="615" y2="936" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="615" y1="936" x2="553" y2="936" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="553" y1="936" x2="491" y2="936" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="491" y1="936" x2="429" y2="936" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="429" y1="936" x2="367" y2="936" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="367" y1="936" x2="305" y2="936" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="305" y1="936" x2="243" y2="936" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="243" y1="936" x2="181" y2="936" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="181" y1="936" x2="119" y2="936" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="119" y1="936" x2="57" y2="936" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="57" y1="936" x2="57" y2="988" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="57" y1="988" x2="119" y2="988" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="119" y1="988" x2="181" y2="988" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="181" y1="988" x2="243" y2="988" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="243" y1="988" x2="305" y2="988" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="305" y1="988" x2="367" y2="988" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="367" y1="988" x2="429" y2="988" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="429" y1="988" x2="491" y2="988" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="491" y1="988" x2="553" y2="988" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="553" y1="988" x2="615" y2="988" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="615" y1="988" x2="615" y2="1040" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="615" y1="1040" x2="553" y2="1040" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="553" y1="1040" x2="491" y2="1040" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="491" y1="1040" x2="429" y2="1040" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="429" y1="1040" x2="367" y2="1040" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="367" y1="1040" x2="305" y2="1040" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="305" y1="1040" x2="243" y2="1040" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="243" y1="1040" x2="181" y2="1040" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="181" y1="1040" x2="119" y2="1040" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="119" y1="1040" x2="57" y2="1040" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="57" y1="1040" x2="57" y2="1092" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="57" y1="1092" x2="119" y2="1092" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="119" y1="1092" x2="181" y2="1092" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="181" y1="1092" x2="243" y2="1092" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="243" y1="1092" x2="305" y2="1092" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="305" y1="1092" x2="367" y2="1092" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="367" y1="1092" x2="429" y2="1092" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="429" y1="1092" x2="491" y2="1092" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="491" y1="1092" x2="553" y2="1092" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="553" y1="1092" x2="615" y2="1092" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="615" y1="1092" x2="615" y2="1144" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="615" y1="1144" x2="553" y2="1144" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="553" y1="1144" x2="491" y2="1144" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="491" y1="1144" x2="429" y2="1144" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="429" y1="1144" x2="367" y2="1144" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="367" y1="1144" x2="305" y2="1144" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="305" y1="1144" x2="243" y2="1144" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="243" y1="1144" x2="181" y2="1144" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="181" y1="1144" x2="119" y2="1144" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="119" y1="1144" x2="57" y2="1144" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="57" y1="1144" x2="57" y2="1196" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="57" y1="1196" x2="119" y2="1196" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="119" y1="1196" x2="181" y2="1196" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="181" y1="1196" x2="243" y2="1196" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="243" y1="1196" x2="305" y2="1196" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="305" y1="1196" x2="367" y2="1196" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="367" y1="1196" x2="429" y2="1196" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="429" y1="1196" x2="491" y2="1196" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="491" y1="1196" x2="553" y2="1196" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
 <g font-family="system-ui,sans-serif" font-size="11">
-<rect x="26" y="707" width="9" height="9" rx="2" fill="#7c3aed"/>
-<text x="38" y="715" fill="#475569">case_export</text>
-<rect x="154" y="707" width="9" height="9" rx="2" fill="#94a3b8"/>
-<text x="166" y="715" fill="#475569">verifier_manifest</text>
-<rect x="282" y="707" width="9" height="9" rx="2" fill="#0d9488"/>
-<text x="294" y="715" fill="#475569">log_checkpoint</text>
-<rect x="410" y="707" width="9" height="9" rx="2" fill="#2563eb"/>
-<text x="422" y="715" fill="#475569">visit_record</text>
-<rect x="538" y="707" width="9" height="9" rx="2" fill="#d97706"/>
-<text x="550" y="715" fill="#475569">coverage_attestation</text>
-<rect x="26" y="729" width="9" height="9" rx="2" fill="#16a34a"/>
-<text x="38" y="737" fill="#475569">verification_report</text>
-<rect x="154" y="729" width="9" height="9" rx="2" fill="#db2777"/>
-<text x="166" y="737" fill="#475569">period_digest</text>
-<rect x="282" y="729" width="9" height="9" rx="2" fill="#dc2626"/>
-<text x="294" y="737" fill="#475569">key_rotation</text>
-<rect x="410" y="729" width="9" height="9" rx="2" fill="#ea580c"/>
-<text x="422" y="737" fill="#475569">key_adoption</text>
-<rect x="538" y="729" width="9" height="9" rx="2" fill="#991b1b"/>
-<text x="550" y="737" fill="#475569">key_revocation</text>
+<rect x="26" y="1279" width="9" height="9" rx="2" fill="#7c3aed"/>
+<text x="38" y="1287" fill="#475569">case_export</text>
+<rect x="154" y="1279" width="9" height="9" rx="2" fill="#94a3b8"/>
+<text x="166" y="1287" fill="#475569">verifier_manifest</text>
+<rect x="282" y="1279" width="9" height="9" rx="2" fill="#0d9488"/>
+<text x="294" y="1287" fill="#475569">log_checkpoint</text>
+<rect x="410" y="1279" width="9" height="9" rx="2" fill="#2563eb"/>
+<text x="422" y="1287" fill="#475569">visit_record</text>
+<rect x="538" y="1279" width="9" height="9" rx="2" fill="#d97706"/>
+<text x="550" y="1287" fill="#475569">coverage_attestation</text>
+<rect x="26" y="1301" width="9" height="9" rx="2" fill="#16a34a"/>
+<text x="38" y="1309" fill="#475569">verification_report</text>
+<rect x="154" y="1301" width="9" height="9" rx="2" fill="#db2777"/>
+<text x="166" y="1309" fill="#475569">period_digest</text>
+<rect x="282" y="1301" width="9" height="9" rx="2" fill="#dc2626"/>
+<text x="294" y="1309" fill="#475569">key_rotation</text>
+<rect x="410" y="1301" width="9" height="9" rx="2" fill="#ea580c"/>
+<text x="422" y="1309" fill="#475569">key_adoption</text>
+<rect x="538" y="1301" width="9" height="9" rx="2" fill="#991b1b"/>
+<text x="550" y="1309" fill="#475569">key_revocation</text>
 </g>
 <a href="verify.html#demo-receipts/rcpt_12c9510dfc604236b880b034fce4af7e"><rect x="48" y="43" width="18" height="18" rx="4" fill="#2563eb" stroke="#fff" stroke-width="1.2"><title>rcpt_12c9510dfc604236b880b034fce4af7e · visit_record · seq 1 · 2026-10-09T18:06:04.725773Z</title></rect></a>
 <a href="verify.html#demo-receipts/rcpt_8af58f6242d04e13a94147ddc2c70a19"><rect x="110" y="43" width="18" height="18" rx="4" fill="#2563eb" stroke="#fff" stroke-width="1.2"><title>rcpt_8af58f6242d04e13a94147ddc2c70a19 · visit_record · seq 2 · 2026-10-09T18:06:05.909358Z</title></rect></a>
@@ -251,4 +365,118 @@
 <a href="verify.html#demo-receipts/rcpt_58431818d8a54e8e8b6e4e25739020ec"><rect x="482" y="615" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_58431818d8a54e8e8b6e4e25739020ec · case_export · seq 113 · 2026-10-13T07:15:51.993039Z</title></rect></a>
 <a href="verify.html#demo-receipts/rcpt_03fc9c1b849940df82ddd5b9ca6e73cd"><rect x="420" y="615" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_03fc9c1b849940df82ddd5b9ca6e73cd · verifier_manifest · seq 114 · 2026-10-13T07:15:52.014113Z</title></rect></a>
 <a href="verify.html#demo-receipts/rcpt_53b87b08b77a44c3830a61bbba74e9c8"><rect x="358" y="615" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_53b87b08b77a44c3830a61bbba74e9c8 · log_checkpoint · seq 115 · 2026-10-13T07:15:52.024520Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_0d9abce7e9f54baa99bc31c870ebc9d2"><rect x="296" y="615" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_0d9abce7e9f54baa99bc31c870ebc9d2 · case_export · seq 116 · 2026-10-13T10:10:53.480416Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_57a3291b1242454fb9363902724fe20b"><rect x="234" y="615" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_57a3291b1242454fb9363902724fe20b · verifier_manifest · seq 117 · 2026-10-13T10:10:53.494629Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_778fc5c7092a48c2a24883ac9f5a5a0c"><rect x="172" y="615" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_778fc5c7092a48c2a24883ac9f5a5a0c · log_checkpoint · seq 118 · 2026-10-13T10:10:53.503567Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_bf09f8d9ef154c6086f04c43db11abe8"><rect x="110" y="615" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_bf09f8d9ef154c6086f04c43db11abe8 · case_export · seq 119 · 2026-10-13T10:11:03.491808Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_17fc6470bacd48a99edea9cf417af03a"><rect x="48" y="615" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_17fc6470bacd48a99edea9cf417af03a · verifier_manifest · seq 120 · 2026-10-13T10:11:03.537036Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_17c9cd272536476293a059aaf525a9a3"><rect x="48" y="667" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_17c9cd272536476293a059aaf525a9a3 · log_checkpoint · seq 121 · 2026-10-13T10:11:03.546483Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_8fdb802444c5481ca32472ef28f32180"><rect x="110" y="667" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_8fdb802444c5481ca32472ef28f32180 · case_export · seq 122 · 2026-10-13T10:11:05.022634Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_ebd7704fbb824f57acc26b11912e8168"><rect x="172" y="667" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_ebd7704fbb824f57acc26b11912e8168 · verifier_manifest · seq 123 · 2026-10-13T10:11:05.038676Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_95e30f3cae2b47589004e21174acb8ea"><rect x="234" y="667" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_95e30f3cae2b47589004e21174acb8ea · log_checkpoint · seq 124 · 2026-10-13T10:11:05.055672Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_acee1d217c91451fb55a9ffe1d0becd9"><rect x="296" y="667" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_acee1d217c91451fb55a9ffe1d0becd9 · case_export · seq 125 · 2026-10-13T10:11:06.503120Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_83aa5e79ce864631a26e73590d047919"><rect x="358" y="667" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_83aa5e79ce864631a26e73590d047919 · verifier_manifest · seq 126 · 2026-10-13T10:11:06.549148Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_8bdef274fa7a42c09d029e443fee8f8a"><rect x="420" y="667" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_8bdef274fa7a42c09d029e443fee8f8a · log_checkpoint · seq 127 · 2026-10-13T10:11:06.560732Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_cc1b321b84c84b388b3868945f412c05"><rect x="482" y="667" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_cc1b321b84c84b388b3868945f412c05 · case_export · seq 128 · 2026-10-13T10:20:03.374783Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_73f0b344722748439fbb741ec7bf86be"><rect x="544" y="667" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_73f0b344722748439fbb741ec7bf86be · verifier_manifest · seq 129 · 2026-10-13T10:20:03.385368Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_9cc1481f74b5485bb107707526bdbd76"><rect x="606" y="667" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_9cc1481f74b5485bb107707526bdbd76 · log_checkpoint · seq 130 · 2026-10-13T10:20:03.398184Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_7044322030224789bd8bfd7234c1c289"><rect x="606" y="719" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_7044322030224789bd8bfd7234c1c289 · case_export · seq 131 · 2026-10-13T10:20:11.040943Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_ac5f6538ccc7456da76120acff0cec42"><rect x="544" y="719" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_ac5f6538ccc7456da76120acff0cec42 · verifier_manifest · seq 132 · 2026-10-13T10:20:11.053564Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_b0c8ea39ca76498599f23a7d2fefd258"><rect x="482" y="719" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_b0c8ea39ca76498599f23a7d2fefd258 · log_checkpoint · seq 133 · 2026-10-13T10:20:11.062947Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_b9eaa0f746f64aa28d3cfa9403336bd0"><rect x="420" y="719" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_b9eaa0f746f64aa28d3cfa9403336bd0 · case_export · seq 134 · 2026-10-13T10:20:13.346168Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_26c946a812da40fabe22c6bc6b42385f"><rect x="358" y="719" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_26c946a812da40fabe22c6bc6b42385f · verifier_manifest · seq 135 · 2026-10-13T10:20:13.366294Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_da79ff92561348a7a659fffb3dd503b0"><rect x="296" y="719" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_da79ff92561348a7a659fffb3dd503b0 · log_checkpoint · seq 136 · 2026-10-13T10:20:13.386609Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_154433771eca480b822d96a549e4c7ee"><rect x="234" y="719" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_154433771eca480b822d96a549e4c7ee · case_export · seq 137 · 2026-10-13T10:20:16.022546Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_7b77c661825248d5bd70f56d5b354256"><rect x="172" y="719" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_7b77c661825248d5bd70f56d5b354256 · verifier_manifest · seq 138 · 2026-10-13T10:20:16.042764Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_cd04b94f9854417787ca6c88ddc0de55"><rect x="110" y="719" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_cd04b94f9854417787ca6c88ddc0de55 · log_checkpoint · seq 139 · 2026-10-13T10:20:16.063050Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_5f2639cae0de47e296083bb180b660e1"><rect x="48" y="719" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_5f2639cae0de47e296083bb180b660e1 · case_export · seq 140 · 2026-10-13T10:34:47.411345Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_81af2201006b4f15b18e8289b9464bda"><rect x="48" y="771" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_81af2201006b4f15b18e8289b9464bda · verifier_manifest · seq 141 · 2026-10-13T10:34:47.423772Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_00f88c066a7a4d7e91155a4bf3358abf"><rect x="110" y="771" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_00f88c066a7a4d7e91155a4bf3358abf · log_checkpoint · seq 142 · 2026-10-13T10:34:47.434100Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_29cfabebffda43dab3fb12595cc2bbc4"><rect x="172" y="771" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_29cfabebffda43dab3fb12595cc2bbc4 · case_export · seq 143 · 2026-10-13T10:52:15.823306Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_0b4f5aee0b2f4215992823b0acfc49c4"><rect x="234" y="771" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_0b4f5aee0b2f4215992823b0acfc49c4 · verifier_manifest · seq 144 · 2026-10-13T10:52:15.840701Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_3d2fbdab03c44f3299a4490a7f0f0fb2"><rect x="296" y="771" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_3d2fbdab03c44f3299a4490a7f0f0fb2 · log_checkpoint · seq 145 · 2026-10-13T10:52:15.852673Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_b4e09ab320a345929280525231848f08"><rect x="358" y="771" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_b4e09ab320a345929280525231848f08 · case_export · seq 146 · 2026-10-13T10:53:57.617081Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_b6a0eb33fbf64bdfa89032c7d3e4478e"><rect x="420" y="771" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_b6a0eb33fbf64bdfa89032c7d3e4478e · verifier_manifest · seq 147 · 2026-10-13T10:53:57.633496Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_858c04b9cd474f25bd9aca203c9762b0"><rect x="482" y="771" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_858c04b9cd474f25bd9aca203c9762b0 · log_checkpoint · seq 148 · 2026-10-13T10:53:57.645546Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_02b978594d52400d88cec852a4f4d362"><rect x="544" y="771" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_02b978594d52400d88cec852a4f4d362 · case_export · seq 149 · 2026-10-13T11:07:24.177526Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_d0a4312f7235469083c148033c44c74b"><rect x="606" y="771" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_d0a4312f7235469083c148033c44c74b · verifier_manifest · seq 150 · 2026-10-13T11:07:24.192186Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_b8e1075958a341e4a387fa9dba0968eb"><rect x="606" y="823" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_b8e1075958a341e4a387fa9dba0968eb · log_checkpoint · seq 151 · 2026-10-13T11:07:24.211871Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_3a9f91585eb2497faf4d2ddee4b31927"><rect x="544" y="823" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_3a9f91585eb2497faf4d2ddee4b31927 · case_export · seq 152 · 2026-10-13T11:13:55.192655Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_511052d5419f4ef1b676c79cee25927c"><rect x="482" y="823" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_511052d5419f4ef1b676c79cee25927c · verifier_manifest · seq 153 · 2026-10-13T11:13:55.207444Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_4e2c2202656a45188c42baecede3186d"><rect x="420" y="823" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_4e2c2202656a45188c42baecede3186d · log_checkpoint · seq 154 · 2026-10-13T11:13:55.225744Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_a2b1d6d50fa74dbfbf60761e87044590"><rect x="358" y="823" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_a2b1d6d50fa74dbfbf60761e87044590 · case_export · seq 155 · 2026-10-13T11:21:21.258952Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_b167f1be148045e883adc67a0eeda2ce"><rect x="296" y="823" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_b167f1be148045e883adc67a0eeda2ce · verifier_manifest · seq 156 · 2026-10-13T11:21:21.275363Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_8639a07be15649749ad615d073fa7051"><rect x="234" y="823" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_8639a07be15649749ad615d073fa7051 · log_checkpoint · seq 157 · 2026-10-13T11:21:21.297861Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_716acfbaa4b34318b55e438ca0693045"><rect x="172" y="823" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_716acfbaa4b34318b55e438ca0693045 · case_export · seq 158 · 2026-10-13T12:00:55.725962Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_ade179f0da9a4766a3160cbeee180f63"><rect x="110" y="823" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_ade179f0da9a4766a3160cbeee180f63 · verifier_manifest · seq 159 · 2026-10-13T12:00:55.745208Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_ef27f8a7786b4d829d0d6c60b6a7f475"><rect x="48" y="823" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_ef27f8a7786b4d829d0d6c60b6a7f475 · log_checkpoint · seq 160 · 2026-10-13T12:00:55.768794Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_17402bfc71594b0faf04745d3274cba2"><rect x="48" y="875" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_17402bfc71594b0faf04745d3274cba2 · case_export · seq 161 · 2026-10-13T12:00:57.732271Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_614cd6dcecd043858ee87add0c21f202"><rect x="110" y="875" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_614cd6dcecd043858ee87add0c21f202 · verifier_manifest · seq 162 · 2026-10-13T12:00:57.752501Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_267032dae2aa4996b03e4d74d30eae72"><rect x="172" y="875" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_267032dae2aa4996b03e4d74d30eae72 · log_checkpoint · seq 163 · 2026-10-13T12:00:57.773874Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_428335698d4742e79f3b1cc659041270"><rect x="234" y="875" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_428335698d4742e79f3b1cc659041270 · case_export · seq 164 · 2026-10-13T12:01:03.447570Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_cc5c18be4f554fc0a0efb5b1ea80453c"><rect x="296" y="875" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_cc5c18be4f554fc0a0efb5b1ea80453c · verifier_manifest · seq 165 · 2026-10-13T12:01:03.463570Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_dedd400bfcdb40f58eccf3c0242d6d18"><rect x="358" y="875" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_dedd400bfcdb40f58eccf3c0242d6d18 · log_checkpoint · seq 166 · 2026-10-13T12:01:03.480881Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_0177e5ed6f414a798082877e4428593b"><rect x="420" y="875" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_0177e5ed6f414a798082877e4428593b · case_export · seq 167 · 2026-10-13T12:01:05.296478Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_061574f70ff845d397ea6fb6afa019a8"><rect x="482" y="875" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_061574f70ff845d397ea6fb6afa019a8 · verifier_manifest · seq 168 · 2026-10-13T12:01:05.309433Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_9cd0f16e229b497c899946dc31153898"><rect x="544" y="875" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_9cd0f16e229b497c899946dc31153898 · log_checkpoint · seq 169 · 2026-10-13T12:01:05.325769Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_06dfb9b41c114e4a801b6daa229f534c"><rect x="606" y="875" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_06dfb9b41c114e4a801b6daa229f534c · case_export · seq 170 · 2026-10-13T12:01:07.139079Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_0e730a97bf3d491baab8c71a81ba9395"><rect x="606" y="927" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_0e730a97bf3d491baab8c71a81ba9395 · verifier_manifest · seq 171 · 2026-10-13T12:01:07.152142Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_328e3e113e5046a2be9ea0c683a926d6"><rect x="544" y="927" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_328e3e113e5046a2be9ea0c683a926d6 · log_checkpoint · seq 172 · 2026-10-13T12:01:07.166924Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_1e375e3f83084c7e8e7bebba4735d6ad"><rect x="482" y="927" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_1e375e3f83084c7e8e7bebba4735d6ad · case_export · seq 173 · 2026-10-13T12:30:58.005173Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_76a31f14bcac4b96ac8ffd5a1a083996"><rect x="420" y="927" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_76a31f14bcac4b96ac8ffd5a1a083996 · verifier_manifest · seq 174 · 2026-10-13T12:30:58.021422Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_0007d4c23e774c849e0e12787f11f4f1"><rect x="358" y="927" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_0007d4c23e774c849e0e12787f11f4f1 · log_checkpoint · seq 175 · 2026-10-13T12:30:58.040422Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_f1fe25cb0d944c218e9abde57a45b9c7"><rect x="296" y="927" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_f1fe25cb0d944c218e9abde57a45b9c7 · case_export · seq 176 · 2026-10-13T12:30:59.791751Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_1b568426a03b4b8085056237e8b3726e"><rect x="234" y="927" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_1b568426a03b4b8085056237e8b3726e · verifier_manifest · seq 177 · 2026-10-13T12:30:59.809310Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_fe7417d91ac34becbbb81aa8804b07e8"><rect x="172" y="927" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_fe7417d91ac34becbbb81aa8804b07e8 · log_checkpoint · seq 178 · 2026-10-13T12:30:59.828140Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_ab031d06eaa64e4888ad1424eaad99b4"><rect x="110" y="927" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_ab031d06eaa64e4888ad1424eaad99b4 · case_export · seq 179 · 2026-10-13T12:31:05.174102Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_da53c033f1264661bbb3d51de18faeff"><rect x="48" y="927" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_da53c033f1264661bbb3d51de18faeff · verifier_manifest · seq 180 · 2026-10-13T12:31:05.188646Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_07b72b5aca6b4e7296068f2fc17ec0a9"><rect x="48" y="979" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_07b72b5aca6b4e7296068f2fc17ec0a9 · log_checkpoint · seq 181 · 2026-10-13T12:31:05.209205Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_cfb37077c01b44cbb6b15b6d2b6a77c6"><rect x="110" y="979" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_cfb37077c01b44cbb6b15b6d2b6a77c6 · case_export · seq 182 · 2026-10-13T12:31:07.268076Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_a217fb61a878428d92d45769d7d0124c"><rect x="172" y="979" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_a217fb61a878428d92d45769d7d0124c · verifier_manifest · seq 183 · 2026-10-13T12:31:07.283423Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_c260ff9084e041e4b98b49e0d1b70100"><rect x="234" y="979" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_c260ff9084e041e4b98b49e0d1b70100 · log_checkpoint · seq 184 · 2026-10-13T12:31:07.300276Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_7af466e897454e9583f99c9e978c3437"><rect x="296" y="979" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_7af466e897454e9583f99c9e978c3437 · case_export · seq 185 · 2026-10-13T12:31:09.082706Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_359e88a8d1c8407b8acbe03365dcd27b"><rect x="358" y="979" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_359e88a8d1c8407b8acbe03365dcd27b · verifier_manifest · seq 186 · 2026-10-13T12:31:09.096868Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_ce81fd7bd2ee4d54ad3b764b5df0237b"><rect x="420" y="979" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_ce81fd7bd2ee4d54ad3b764b5df0237b · log_checkpoint · seq 187 · 2026-10-13T12:31:09.112862Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_ab747cf295c644668883423c4813a5c1"><rect x="482" y="979" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_ab747cf295c644668883423c4813a5c1 · case_export · seq 188 · 2026-10-13T12:48:13.557048Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_f8247bc50ea64866aaf2a335c29bb35e"><rect x="544" y="979" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_f8247bc50ea64866aaf2a335c29bb35e · verifier_manifest · seq 189 · 2026-10-13T12:48:13.581105Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_19ea5e1c4ee244e9a2ede61063ac1b90"><rect x="606" y="979" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_19ea5e1c4ee244e9a2ede61063ac1b90 · log_checkpoint · seq 190 · 2026-10-13T12:48:13.609753Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_fb07a2e36ba44eceaedcec15b15c636e"><rect x="606" y="1031" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_fb07a2e36ba44eceaedcec15b15c636e · case_export · seq 191 · 2026-10-13T12:48:16.036690Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_25b6a147060842e4a9c4146a4e597a3f"><rect x="544" y="1031" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_25b6a147060842e4a9c4146a4e597a3f · verifier_manifest · seq 192 · 2026-10-13T12:48:16.055022Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_5754e13d9b3c4ffda780e964ec643133"><rect x="482" y="1031" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_5754e13d9b3c4ffda780e964ec643133 · log_checkpoint · seq 193 · 2026-10-13T12:48:16.088682Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_d3dee184733544088620001fb77fa3f2"><rect x="420" y="1031" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_d3dee184733544088620001fb77fa3f2 · case_export · seq 194 · 2026-10-13T12:48:18.205548Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_9e128dd2b0874e9eaad39343476fab10"><rect x="358" y="1031" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_9e128dd2b0874e9eaad39343476fab10 · verifier_manifest · seq 195 · 2026-10-13T12:48:18.230461Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_bd607ba585ed45d08fd3814aefa08e12"><rect x="296" y="1031" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_bd607ba585ed45d08fd3814aefa08e12 · log_checkpoint · seq 196 · 2026-10-13T12:48:18.256224Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_f933aa47e788486b8cce3adf03fffc3d"><rect x="234" y="1031" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_f933aa47e788486b8cce3adf03fffc3d · case_export · seq 197 · 2026-10-13T12:48:20.441867Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_d7891be7d07647f9945e6b8d25794726"><rect x="172" y="1031" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_d7891be7d07647f9945e6b8d25794726 · verifier_manifest · seq 198 · 2026-10-13T12:48:20.459079Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_b3f61799b1b64ffca7a8ae910ce3bb3d"><rect x="110" y="1031" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_b3f61799b1b64ffca7a8ae910ce3bb3d · log_checkpoint · seq 199 · 2026-10-13T12:48:20.483425Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_cceb330d0eaf46e0afec863fee2639be"><rect x="48" y="1031" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_cceb330d0eaf46e0afec863fee2639be · case_export · seq 200 · 2026-10-13T12:48:22.565341Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_a2a879f1b3dc49938747ee7bb1e92b9a"><rect x="48" y="1083" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_a2a879f1b3dc49938747ee7bb1e92b9a · verifier_manifest · seq 201 · 2026-10-13T12:48:22.590248Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_2c3bfb6167e4465381b7d55af014b9ad"><rect x="110" y="1083" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_2c3bfb6167e4465381b7d55af014b9ad · log_checkpoint · seq 202 · 2026-10-13T12:48:22.617176Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_3a79bdcd4b134339a34698d39e56b080"><rect x="172" y="1083" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_3a79bdcd4b134339a34698d39e56b080 · case_export · seq 203 · 2026-10-13T12:50:33.105823Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_86176872b4df4b76bdc6a899a5f65e68"><rect x="234" y="1083" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_86176872b4df4b76bdc6a899a5f65e68 · verifier_manifest · seq 204 · 2026-10-13T12:50:33.150030Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_e657b4e16ed44d498d7189f42657bb95"><rect x="296" y="1083" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_e657b4e16ed44d498d7189f42657bb95 · log_checkpoint · seq 205 · 2026-10-13T12:50:33.178666Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_efc1974213ce46d9886f87958a61200f"><rect x="358" y="1083" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_efc1974213ce46d9886f87958a61200f · case_export · seq 206 · 2026-10-13T12:50:35.513289Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_8e83f5ec1a634c7eb2e8d7591d1a82d9"><rect x="420" y="1083" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_8e83f5ec1a634c7eb2e8d7591d1a82d9 · verifier_manifest · seq 207 · 2026-10-13T12:50:35.532504Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_05e41c228cb24ab8ae24a576af8a6880"><rect x="482" y="1083" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_05e41c228cb24ab8ae24a576af8a6880 · log_checkpoint · seq 208 · 2026-10-13T12:50:35.564591Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_7c6e29ecdcb946c69ed704a1dd5623f4"><rect x="544" y="1083" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_7c6e29ecdcb946c69ed704a1dd5623f4 · case_export · seq 209 · 2026-10-13T12:50:37.615692Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_3f22bb7bef0b4627b8d4bc961bc57127"><rect x="606" y="1083" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_3f22bb7bef0b4627b8d4bc961bc57127 · verifier_manifest · seq 210 · 2026-10-13T12:50:37.631756Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_d743067d29084fe39619db149191dd77"><rect x="606" y="1135" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_d743067d29084fe39619db149191dd77 · log_checkpoint · seq 211 · 2026-10-13T12:50:37.648917Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_b6a553a856884865bd6b014534aa2cb2"><rect x="544" y="1135" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_b6a553a856884865bd6b014534aa2cb2 · case_export · seq 212 · 2026-10-13T12:50:39.575071Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_105127bd7f6e4a17bc65c63af7a6fbab"><rect x="482" y="1135" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_105127bd7f6e4a17bc65c63af7a6fbab · verifier_manifest · seq 213 · 2026-10-13T12:50:39.589878Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_3ce97ef1665742af9dd444160b5e485b"><rect x="420" y="1135" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_3ce97ef1665742af9dd444160b5e485b · log_checkpoint · seq 214 · 2026-10-13T12:50:39.606565Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_2e1f871230b24aa7a3cc1bb4496c9f63"><rect x="358" y="1135" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_2e1f871230b24aa7a3cc1bb4496c9f63 · case_export · seq 215 · 2026-10-13T12:50:41.509846Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_a7eed9ba22c04e339bb95647a5334679"><rect x="296" y="1135" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_a7eed9ba22c04e339bb95647a5334679 · verifier_manifest · seq 216 · 2026-10-13T12:50:41.525027Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_0a7f385018634dd180269a2c9bf01ecb"><rect x="234" y="1135" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_0a7f385018634dd180269a2c9bf01ecb · log_checkpoint · seq 217 · 2026-10-13T12:50:41.542230Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_950aa0fee8524c469256e59de55ab2cd"><rect x="172" y="1135" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_950aa0fee8524c469256e59de55ab2cd · case_export · seq 218 · 2026-10-13T13:06:10.451356Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_3c308851afca45a8b096b4a2e56b4b87"><rect x="110" y="1135" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_3c308851afca45a8b096b4a2e56b4b87 · verifier_manifest · seq 219 · 2026-10-13T13:06:10.501320Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_cba401ef08994efea406db5cbf5da1e9"><rect x="48" y="1135" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_cba401ef08994efea406db5cbf5da1e9 · log_checkpoint · seq 220 · 2026-10-13T13:06:10.524609Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_abf28934ff9f42d594ab4852882e1940"><rect x="48" y="1187" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_abf28934ff9f42d594ab4852882e1940 · case_export · seq 221 · 2026-10-13T13:06:14.454397Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_be6fd658825c4cbaa46babb95c6fe978"><rect x="110" y="1187" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_be6fd658825c4cbaa46babb95c6fe978 · verifier_manifest · seq 222 · 2026-10-13T13:06:14.508621Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_ba054d20314e40e1b0c5bf83bc123ee0"><rect x="172" y="1187" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_ba054d20314e40e1b0c5bf83bc123ee0 · log_checkpoint · seq 223 · 2026-10-13T13:06:14.523739Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_11b9a26dd2c34fa69d41736699e3cb37"><rect x="234" y="1187" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_11b9a26dd2c34fa69d41736699e3cb37 · case_export · seq 224 · 2026-10-13T13:06:16.032745Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_b8cd5b7922df401da96f822e305424a4"><rect x="296" y="1187" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_b8cd5b7922df401da96f822e305424a4 · verifier_manifest · seq 225 · 2026-10-13T13:06:16.047667Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_02fa41f9288d478cb18a0c1fcaea38bf"><rect x="358" y="1187" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_02fa41f9288d478cb18a0c1fcaea38bf · log_checkpoint · seq 226 · 2026-10-13T13:06:16.064533Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_2c8d5bf6582240158b5f7280a20d4ba8"><rect x="420" y="1187" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_2c8d5bf6582240158b5f7280a20d4ba8 · case_export · seq 227 · 2026-10-13T13:06:17.625042Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_b5291de68fb7421f9bf9439dbeede76b"><rect x="482" y="1187" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_b5291de68fb7421f9bf9439dbeede76b · verifier_manifest · seq 228 · 2026-10-13T13:06:17.647520Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_32ff45215df44c22865716d7b37c0a70"><rect x="544" y="1187" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_32ff45215df44c22865716d7b37c0a70 · log_checkpoint · seq 229 · 2026-10-13T13:06:17.663909Z</title></rect></a>
 </svg>

@@ -1,0 +1,37 @@
+{
+  "id": "rcpt_da79ff92561348a7a659fffb3dd503b0",
+  "visit_id": "log:96:08b43d10e0869532",
+  "sequence": 136,
+  "prev_hash": "750779586e7bc489a38b11db8a43a1f613ee6d1623c827e22d42c90ca6b51227",
+  "payload": {
+    "record_type": "log_checkpoint",
+    "tree_size": 96,
+    "root_sha256": "08b43d10e08695322c3d5aab3d1615ee16e590d4f2da1c99cf1f851e57b76034",
+    "leaf_input": "receipt.payload_hash (raw bytes, sequence order)",
+    "boundary": "A signed commitment that exactly these receipts, in this order, formed the log at this size — receipts in an export can prove inclusion, and a later checkpoint can prove it extends this one without rewriting history.",
+    "journal_head": "2cc1b0083e906e4e15bd36b62176abbec4ebdc0cdaebcfb0ff1af052b3cce64b",
+    "extends": {
+      "first": 94,
+      "first_root_sha256": "1420c085da656772c3fdaf1ea5375b461dfd0124954dd3619006ef1e040d7ccb",
+      "checkpoint_id": "rcpt_b0c8ea39ca76498599f23a7d2fefd258",
+      "proof": [
+        "dd5f0e1df14b817c55ebbc06e143cda21e2fa8c9e74d074937933b6d967efd19",
+        "cf7da58ce91b5493d7ae43e29bf65cc6d205164d75d0a2bdfd0db80399d7777f",
+        "a4788e96d154e965e376f6fd7ada4f911861b03a2213a519c0be352e80eb6185",
+        "6cd59c690087ee7f39683dbde15be939d87ae9596bc68991d904cb220bf41e6e",
+        "72c551d106841edad38146b5b790e70bc59af41e0709ddefaae56204d1a94f7c",
+        "8d2a0a4acf4e373680747e2e27b1becec57a1707356f2a3c1732fcd144565e59"
+      ]
+    },
+    "schema": "attest.receipt/2",
+    "sequence": 136,
+    "prev_hash": "750779586e7bc489a38b11db8a43a1f613ee6d1623c827e22d42c90ca6b51227",
+    "visit_id": "log:96:08b43d10e0869532",
+    "receipt_id": "rcpt_da79ff92561348a7a659fffb3dd503b0",
+    "issued_at": "2026-10-13T10:20:13.386609+00:00"
+  },
+  "payload_hash": "de620f1c0e4dd52e3ae9cda4a7df7de3b5886e0ae2c2df35716abe8f7a267488",
+  "signature": "/cURUvk5kGdBPeOL30iHkNlrv4fSfb9/fl0LkV1/IP3FVd0YEKeonIovjb8RVWgUZDTKwSXh8ANPyYpNM2StDw==",
+  "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+  "issued_at": "2026-10-13T10:20:13.386609Z"
+}
