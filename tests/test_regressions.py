@@ -365,6 +365,16 @@ def test_verify_attest_signs_the_verdict_into_the_journal(tmp_path, engine, stor
     )
     assert fail_att.payload["context"]["issuer_pin"] == foreign
 
+    # --json stays machine-pure with --attest — the attestation note rides
+    # stderr so a CI gate parses stdout alone.
+    import json as _json
+
+    rc = run("verify", "--json", "--attest", str(forged))
+    assert rc.returncode == 1
+    verdict = _json.loads(rc.stdout)
+    assert verdict["ok"] is False
+    assert "Attestation rcpt_" in rc.stderr
+
 
 def test_diff_attest_signs_the_comparison(tmp_path, engine, store, household, schedule, t0):
     """`attest diff --attest` — the mediator's reconciliation is evidence: a
@@ -438,6 +448,20 @@ def test_diff_attest_signs_the_comparison(tmp_path, engine, store, household, sc
 
     verdict = _json.loads(rc.stdout)  # stdout parses: the note can't corrupt it
     assert verdict["anomalies"] >= 1
+
+    # A comparison under a different issuer pin is a different claim — the
+    # trust context keys the pseudo-id, so the first receipt isn't reused.
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from attest.ledger import Signer
+
+    foreign = Signer(Ed25519PrivateKey.from_private_bytes(b"\xee" * 32)).public_key_b64
+    rc = run("diff", str(pack), str(forged), "--key", foreign, "--attest")
+    audit_store = Store(audit / "attest.sqlite3")
+    att = [r for r in audit_store.receipts() if r.payload.get("record_type") == "pack_comparison"]
+    assert len(att) == 2
+    pinned = next(r for r in att if r.payload["context"].get("issuer_pin") == foreign)
+    assert pinned.payload["verifier"]["checker"] == "attest.packdiff.diff_report"
 
 
 def test_verify_attest_needs_an_initialized_store(tmp_path):
