@@ -1264,6 +1264,80 @@ class VisitEngine:
             return self.store.receipt_for_visit(pseudo_id)
         return receipt
 
+    def issue_pack_comparison(
+        self,
+        pack_a_sha256: str,
+        pack_b_sha256: str,
+        pack_a_bytes: int,
+        pack_b_bytes: int,
+        log_heads: str | None,
+        clean: bool,
+        anomalies: int,
+        events_sha256: str,
+        detail: str,
+        verifier: dict,
+    ) -> Receipt:
+        """Sign a reconciliation act: THIS deployment's differ ran over the
+        byte-strings ``pack_a_sha256`` (old) and ``pack_b_sha256`` (new) and
+        produced the event stream hashed at ``events_sha256``. The signed
+        fields record the machine verdict — ``log_heads`` (``same``/
+        ``extends``/``extends_earlier``/``fork``/``unreconciled*``/
+        ``unpaired``/null), ``clean``, and the anomaly count — so a
+        coordinator's "I reconciled the two exports and the log provably
+        grew" is itself evidence. The receipt never claims the comparison
+        is correct — anyone can re-run ``attest diff`` on the named bytes —
+        and it says nothing about physical truth. Idempotent per
+        (a, b, verifier identity) via a ``pack-diff:`` pseudo-visit."""
+        import hashlib
+        import json as _json
+
+        canonical = _json.dumps(
+            {
+                "a": pack_a_sha256,
+                "b": pack_b_sha256,
+                "verifier": verifier,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        pseudo_id = f"pack-diff:{hashlib.sha256(canonical.encode()).hexdigest()[:16]}"
+        existing = self.store.receipt_for_visit(pseudo_id)
+        if existing:
+            return existing
+        prev = self.store.latest_receipt()
+        receipt = self.signer.issue(
+            visit_id=pseudo_id,
+            sequence=prev.sequence + 1 if prev else 1,
+            prev_hash=prev.payload_hash if prev else None,
+            facts={
+                "record_type": "pack_comparison",
+                "pack_a_sha256": pack_a_sha256,
+                "pack_b_sha256": pack_b_sha256,
+                "pack_a_bytes": int(pack_a_bytes),
+                "pack_b_bytes": int(pack_b_bytes),
+                "log_heads": log_heads,
+                "clean": bool(clean),
+                "anomalies": int(anomalies),
+                "events_sha256": events_sha256,
+                "detail": detail,
+                "verifier": dict(verifier),
+                "boundary": (
+                    "This receipt attests only that the named differ produced "
+                    "the named comparison on the two byte-string digests above. "
+                    "It does not prove the comparison is right — re-run "
+                    "attest diff on the named bytes to check — and says "
+                    "nothing about physical truth."
+                ),
+                "journal_head": self.store.journal_head(),
+            },
+        )
+        try:
+            self.store.put_receipt(receipt)
+        except sqlite3.IntegrityError:
+            return self.store.receipt_for_visit(pseudo_id)
+        return receipt
+
     def log_leaves(self) -> list[bytes]:
         """Ordered receipt payload hashes — the transparency-log leaves.
 

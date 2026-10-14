@@ -22,6 +22,7 @@ Everything else follows from that.
 | Worker review links | Hashed, expiring, single-use, visit-scoped grants | A statement arrived through a link issued for this visit and this scheduled worker | The worker's identity — a stolen link signs a stolen statement |
 | Media digests | Inside signed payloads | The bytes presented hash to what the record declared | That the bytes show what anyone claims they show |
 | `pack_verification` receipts (`verify --attest`) | Inside the store | The named verifier produced the named verdict on sha256-bound bytes, at a time | That the verdict is right — re-run the pinned verifier on those bytes; a verifier bug attests itself faithfully |
+| `pack_comparison` receipts (`diff --attest`) | Inside the store | The named differ produced the named comparison (`log_heads` + anomaly count) on two sha256-bound byte-strings | That the comparison is right — re-run `attest diff` on the named bytes; "extends" is only as good as the verifier's chain walk |
 
 ## What the records are
 

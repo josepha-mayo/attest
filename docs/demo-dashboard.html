@@ -89,14 +89,14 @@
     <div class="muted">Ring observations and worker self-reports around scheduled home-service visits — signed, reviewable, correctable. Records preserve what was received; they do not certify identity, attendance, or time worked.</div>
   </div>
   <div class="card small">
-    Ledger: <span class="ok">&#10003; 330 receipts, chain intact across 1 signed key rotation</span>
-    <br>Audit log: <span class="ok">&#10003; 771 entries, intact</span>
-    
+    Ledger: <span class="ok">&#10003; 332 receipts, chain intact across 1 signed key rotation</span>
+    <br>Audit log: <span class="ok">&#10003; 779 entries, intact</span>
+
     <br><span class="muted">Queue: 0 pending · 0 in flight · 0 failed</span>
-    
+
     <br><a href="sample-pack.zip" style="color:var(--accent)" title="Every signed record for this site, one manifest, offline verifier">Case pack: Alvarez residence</a>
     <span class="muted">— unzip and open index.html: it verifies every record in the browser, no install</span>
-    
+
     <br><a href="demo-integrity.html" style="color:var(--accent)" title="Chain, journal, custody, coverage — the runtime's self-audit">Integrity posture &rarr;</a>
     <br><a href="verify.html" style="color:var(--accent)" title="The same verifier every pack embeds — drop a .zip; nothing uploads">Verify a pack in-browser</a>
     <br><button id="refresh-toggle" class="muted" style="background:none;border:0;padding:6px 2px;cursor:pointer;text-decoration:underline;font-size:13px;min-height:24px" disabled title="live deployment only — inert in this snapshot — nothing reloads here">Pause auto-refresh</button>
@@ -111,7 +111,7 @@
     <tr><th scope="col">Priority</th><th scope="col">Record</th><th scope="col">Why flagged</th><th scope="col"><span class="sr-only">Action</span></th></tr>
   </thead>
   <tbody>
-  
+
   <tr class="link" tabindex="0" role="link"
       aria-label="Open record vis_70e42116a4cf"
       onclick="location.href='demo-visit.html'"
@@ -123,7 +123,7 @@
     <td>worker disputes this record</td>
     <td class="muted small">Open record &rarr;</td>
   </tr>
-  
+
   <tr aria-label="Open record vis_5b7958271e00"   data-dead="/visits/vis_5b7958271e00" title="live deployment only — inert in this snapshot">
     <td><span class="flag warn">needs review</span></td>
     <td><a  data-dead="/visits/vis_5b7958271e00" title="live deployment only — inert in this snapshot">Oct 7, 1:46 PM</a>
@@ -132,7 +132,7 @@
     <td>observation matched no schedule</td>
     <td></td>
   </tr>
-  
+
   <tr aria-label="Open record vis_3feab06a831b"   data-dead="/visits/vis_3feab06a831b" title="live deployment only — inert in this snapshot">
     <td><span class="flag warn">needs review</span></td>
     <td><a  data-dead="/visits/vis_3feab06a831b" title="live deployment only — inert in this snapshot">Oct 6, 11:06 AM</a>
@@ -141,7 +141,7 @@
     <td>1 review note(s): observed_interval_short</td>
     <td></td>
   </tr>
-  
+
   <tr aria-label="Open record vis_32a86d6fdbe4"   data-dead="/visits/vis_32a86d6fdbe4" title="live deployment only — inert in this snapshot">
     <td><span class="flag warn">needs review</span></td>
     <td><a  data-dead="/visits/vis_32a86d6fdbe4" title="live deployment only — inert in this snapshot">Oct 9, 11:06 AM</a>
@@ -150,7 +150,7 @@
     <td>1 review note(s): no_observation</td>
     <td></td>
   </tr>
-  
+
   <tr aria-label="Open record vis_1071d3b1997a"   data-dead="/visits/vis_1071d3b1997a" title="live deployment only — inert in this snapshot">
     <td><span class="flag warn">needs review</span></td>
     <td><a  data-dead="/visits/vis_1071d3b1997a" title="live deployment only — inert in this snapshot">Oct 4, 11:06 AM</a>
@@ -159,7 +159,7 @@
     <td>1 review note(s): observed_interval_short</td>
     <td></td>
   </tr>
-  
+
   <tr aria-label="Open record vis_6a79c8145c2e"   data-dead="/visits/vis_6a79c8145c2e" title="live deployment only — inert in this snapshot">
     <td><span class="flag warn">needs review</span></td>
     <td><a  data-dead="/visits/vis_6a79c8145c2e" title="live deployment only — inert in this snapshot">Oct 3, 11:06 AM</a>
@@ -168,16 +168,16 @@
     <td>1 review note(s): observed_interval_short</td>
     <td></td>
   </tr>
-  
+
   </tbody>
 </table>
 </div>
 
 
 <div class="grid" style="margin-top:20px">
-  
-  
-  
+
+
+
   <div class="card"><div class="kpi">0</div><div class="muted">visits in progress</div></div>
   <div class="card"><div class="kpi">9</div><div class="muted">receipts issued</div></div>
   <div class="card"><div class="kpi">9</div><div class="muted">visits with flags</div></div>
@@ -229,7 +229,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
 <table>
   <thead><tr><th scope="col">Site</th><th scope="col">Self-reported worker</th><th scope="col">First observed</th><th scope="col">Last observed</th><th scope="col">Observed interval</th><th scope="col">State</th><th scope="col">Worker stance</th><th scope="col">Review notes</th></tr></thead>
   <tbody>
-  
+
   <tr>
     <td><a href="demo-site.html" style="color:var(--accent)">Alvarez residence</a></td>
     <td>Maria Chen</td>
@@ -241,7 +241,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
       <span class="muted">Not requested</span></td>
     <td><span class="flag warn">departure_unconfirmed</span></td>
   </tr>
-  
+
   <tr>
     <td><a href="demo-site.html" style="color:var(--accent)">Alvarez residence</a></td>
     <td>Unknown</td>
@@ -253,7 +253,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
       <span class="muted">Not requested</span></td>
     <td><span class="flag warn">unscheduled</span><span class="flag warn">departure_unconfirmed</span></td>
   </tr>
-  
+
   <tr>
     <td><a href="demo-site.html" style="color:var(--accent)">Alvarez residence</a></td>
     <td>Unknown</td>
@@ -266,7 +266,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
       </td>
     <td><span class="flag warn">no_observation</span></td>
   </tr>
-  
+
   <tr>
     <td><a href="demo-site.html" style="color:var(--accent)">Alvarez residence</a></td>
     <td>Maria Chen</td>
@@ -278,7 +278,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
       <span class="muted">Not requested</span></td>
     <td><span class="flag warn">departure_unconfirmed</span><span class="flag warn">observed_interval_short</span></td>
   </tr>
-  
+
   <tr>
     <td><a href="demo-site.html" style="color:var(--accent)">Alvarez residence</a></td>
     <td>Unknown</td>
@@ -290,7 +290,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
       <span class="muted">Not requested</span></td>
     <td><span class="flag warn">no_observation</span></td>
   </tr>
-  
+
   <tr>
     <td><a href="demo-site.html" style="color:var(--accent)">Alvarez residence</a></td>
     <td>Maria Chen</td>
@@ -302,7 +302,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
       <span class="muted">Not requested</span></td>
     <td><span class="flag warn">departure_unconfirmed</span><span class="flag warn">observed_interval_short</span></td>
   </tr>
-  
+
   <tr>
     <td><a href="demo-site.html" style="color:var(--accent)">Alvarez residence</a></td>
     <td>Maria Chen</td>
@@ -314,7 +314,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
       <span class="muted">Not requested</span></td>
     <td><span class="flag warn">departure_unconfirmed</span><span class="flag warn">observed_interval_short</span></td>
   </tr>
-  
+
   <tr>
     <td><a href="demo-site.html" style="color:var(--accent)">Alvarez residence</a></td>
     <td>Maria Chen</td>
@@ -327,7 +327,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
       </td>
     <td><span class="flag warn">departure_unconfirmed</span><span class="flag warn">observed_interval_short</span></td>
   </tr>
-  
+
   <tr>
     <td><a href="demo-site.html" style="color:var(--accent)">Alvarez residence</a></td>
     <td>Maria Chen</td>
@@ -339,7 +339,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
       <span class="muted">Not requested</span></td>
     <td><span class="flag warn">departure_unconfirmed</span></td>
   </tr>
-  
+
   </tbody>
 </table>
 </div>
@@ -350,14 +350,14 @@ document.getElementById("triage-run").addEventListener("click", async () => {
 <table>
   <thead><tr><th scope="col">Worker</th><th scope="col">Visits with self-report</th><th scope="col">Median lag vs first observation</th><th scope="col">Worst lag</th></tr></thead>
   <tbody>
-  
+
   <tr>
     <td>Maria Chen</td>
     <td>6</td>
     <td>0 min</td>
     <td>65 min <span class="flag warn">divergence</span></td>
   </tr>
-  
+
   </tbody>
 </table>
 </div>
@@ -369,7 +369,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
 <table>
   <thead><tr><th scope="col">Site</th><th scope="col">Worker</th><th scope="col">Window</th><th scope="col">Expected</th><th scope="col">Service</th><th scope="col">Check-in link</th></tr></thead>
   <tbody>
-  
+
   <tr>
     <td>Alvarez residence</td>
     <td>Maria Chen</td>
@@ -378,7 +378,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
     <td>Morning care visit</td>
     <td class="small muted">Issued from the visit record.</td>
   </tr>
-  
+
   <tr>
     <td>Alvarez residence</td>
     <td>Maria Chen</td>
@@ -387,7 +387,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
     <td>Morning care visit</td>
     <td class="small muted">Issued from the visit record.</td>
   </tr>
-  
+
   <tr>
     <td>Alvarez residence</td>
     <td>Maria Chen</td>
@@ -396,7 +396,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
     <td>Morning care visit</td>
     <td class="small muted">Issued from the visit record.</td>
   </tr>
-  
+
   <tr>
     <td>Alvarez residence</td>
     <td>Maria Chen</td>
@@ -405,7 +405,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
     <td>Morning care visit</td>
     <td class="small muted">Issued from the visit record.</td>
   </tr>
-  
+
   <tr>
     <td>Alvarez residence</td>
     <td>Maria Chen</td>
@@ -414,7 +414,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
     <td>Morning care visit</td>
     <td class="small muted">Issued from the visit record.</td>
   </tr>
-  
+
   <tr>
     <td>Alvarez residence</td>
     <td>Maria Chen</td>
@@ -423,7 +423,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
     <td>Morning care visit</td>
     <td class="small muted">Issued from the visit record.</td>
   </tr>
-  
+
   <tr>
     <td>Alvarez residence</td>
     <td>Maria Chen</td>
@@ -432,7 +432,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
     <td>Morning care visit</td>
     <td class="small muted">Issued from the visit record.</td>
   </tr>
-  
+
   <tr>
     <td>Alvarez residence</td>
     <td>Maria Chen</td>
@@ -441,7 +441,7 @@ document.getElementById("triage-run").addEventListener("click", async () => {
     <td>Morning care visit</td>
     <td class="small muted">Issued from the visit record.</td>
   </tr>
-  
+
   </tbody>
 </table>
 </div>

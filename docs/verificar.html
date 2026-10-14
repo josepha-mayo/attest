@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1l6 2v5c0 3.5-2.6 6-6 7-3.4-1-6-3.5-6-7V3z' fill='%231c1c1e'/%3E%3Cpath d='M4.6 8.2l2.2 2.2 4.6-4.9' stroke='%23fff' stroke-width='1.5' fill='none'/%3E%3C/svg%3E">
+<title>Cómo verificar un paquete de evidencia · Attest</title>
+<meta name="description" content="Guía en español para verificar un paquete de evidencia Attest: qué significan los resultados, qué no prueban, y cómo comprobarlo sin confiar en nosotros.">
+<meta property="og:title" content="Cómo verificar un paquete de evidencia · Attest">
+<meta property="og:description" content="Guía en español: qué significa VERIFICADO, qué no prueba, y cómo comprobarlo sin confiar en nosotros.">
+<meta property="og:type" content="website">
+<style>
+body{font-family:system-ui,sans-serif;max-width:62em;margin:0 auto;padding:1.4rem 1.2rem;color:#1c1c1e;line-height:1.55}
+code{background:#f4f4f5;padding:.08rem .35rem;border-radius:4px;font-size:.85em;word-break:break-all}
+a{color:#2563eb}
+.snap{background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:.6rem .9rem;font-size:.85rem}
+.warnbox{background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:.6rem .9rem;font-size:.85rem}
+.okbox{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:.6rem .9rem;font-size:.85rem}
+.badbox{background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:.6rem .9rem;font-size:.85rem}
+pre{background:#0f172a;color:#e2e8f0;padding:.8rem 1rem;border-radius:8px;overflow-x:auto;font-size:.8rem;line-height:1.45}
+.small{color:#6b6b70;font-size:.85rem}
+h1{margin-bottom:.2rem}
+h2{margin-top:1.6rem}
+ol li{margin:.35rem 0}
+.okc{color:#166534}.badc{color:#991b1b}
+</style>
+</head>
+<body>
+<main>
+<p class="snap"><strong>Guía para familias y mediadores.</strong> Si recibió un
+paquete de evidencia Attest (un archivo <code>.zip</code>), esta página explica
+en español cómo comprobarlo usted mismo — sin instalar nada y sin tener que
+confiar en quien se lo entregó. <a href="index.html">English ↗</a></p>
+
+<h1>Cómo verificar un paquete de evidencia</h1>
+
+<p>Un paquete Attest es un archivo <code>.zip</code> que contiene registros
+firmados digitalmente sobre una visita a un domicilio: qué observó la cámara,
+qué declaró el trabajador, qué declaró el hogar. Cada afirmación lleva una
+firma criptográfica que nadie — ni siquiera quien la emitió — puede modificar
+después sin que se note.</p>
+
+<h2>Verificar en el navegador (lo más fácil)</h2>
+
+<ol>
+  <li>Abra <a href="verify.html"><strong>la página de verificación</strong></a>
+  — funciona sin conexión una vez cargada.</li>
+  <li>Arrastre el archivo <code>.zip</code> sobre la página, o use el botón para
+  elegirlo.</li>
+  <li>Lea el sello de resultado. Toda la comprobación ocurre dentro de su
+  navegador: el paquete <strong>no se sube a ningún servidor</strong>.</li>
+</ol>
+
+<h2>Qué significa el resultado</h2>
+
+<p class="okbox"><strong class="okc">VERIFICADO (verde).</strong> Los registros
+del paquete están intactos: cada firma es válida y ningún byte fue alterado
+desde que se firmaron. Lo que esto prueba es que <em>estos documentos son
+exactamente los que se emitieron</em>.</p>
+
+<p class="badbox"><strong class="badc">FALLO / MANIPULADO (rojo).</strong> Algo
+no cuadra: un dato fue modificado, un registro falta, o la firma no pertenece
+al emisor declarado. El resultado indica <em>qué</em> falló — por ejemplo
+«payload hash mismatch» significa que el contenido firmado fue alterado.</p>
+
+<p class="warnbox"><strong>Resultado con advertencias (ámbar).</strong> El
+paquete es válido, pero algo merece contexto: por ejemplo, que una clave del
+emisor fue rotada o revocada después de emitir los registros, o que el paquete
+oculta medios a propósito (redacción) — los resúmenes firmados siguen ahí,
+el contenido multimedia no viaja.</p>
+
+<h2>Qué NO prueba la verificación — importante</h2>
+
+<p>Un resultado verde <strong>no</strong> significa que las afirmaciones sean
+ciertas. Significa únicamente que existen, están firmadas y no fueron
+alteradas. En concreto, la verificación no prueba:</p>
+
+<ul>
+  <li>que una persona concreta estuvo físicamente presente — una cámara
+  observa eventos, no identidades;</li>
+  <li>que se haya trabajado un tiempo determinado — observar no es cronometrar;</li>
+  <li>que una versión de los hechos sea la verdadera — el sistema conserva
+  los relatos del trabajador y del hogar <em>por separado</em>, incluso
+  cuando se contradicen; no decide quién tiene razón;</li>
+  <li>que no existan eventos que la cámara no vio — el silencio en el registro
+  no es prueba de ausencia.</li>
+</ul>
+
+<h2>Comprobarlo sin confiar en esta página</h2>
+
+<p>La verificación no depende de nosotros. El mismo paquete incluye un
+verificador propio (<code>verify_case.py</code>) que funciona con cualquier
+instalación estándar de Python, sin librerías externas:</p>
+
+<pre>unzip paquete.zip -d paquete
+python paquete/verify_case.py paquete</pre>
+
+<p>También puede comprobarlo con la herramienta de línea de comandos
+(<code>attest verify paquete.zip</code>), o en la nube mediante la función
+AWS Lambda pública del proyecto. Si dos verificadores independientes
+discreparan sobre el mismo archivo, uno de ellos estaría mal — ese es el
+punto del <a href="vectors.html">corpus de pruebas público</a>: 44 paquetes
+de control que todo verificador debe juzgar igual.</p>
+
+<h2>Si es usted parte en una disputa</h2>
+
+<p>El paquete también incluye <code>index.html</code>, una vista navegable de
+los registros con una <strong>vista en lenguaje sencillo</strong> por visita.
+Ahí puede leer qué afirma cada parte — cámara, trabajador, hogar, coordinador
+— y comprobar usted mismo las discrepancias. Ninguna vista decide quién miente:
+presenta las pruebas firmadas tal como se emitieron.</p>
+
+<p class="small">Volver a la <a href="index.html">página principal</a> ·
+<a href="verify.html">Abrir el verificador</a> ·
+<a href="tour.html">Recorrido guiado (en inglés)</a></p>
+</main>
+</body>
+</html>

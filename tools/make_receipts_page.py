@@ -36,6 +36,7 @@ COLORS = {
     "key_revocation": "#991b1b",
     "verification_report": "#16a34a",
     "pack_verification": "#0891b2",
+    "pack_comparison": "#0e7490",
 }
 COLS = 10  # nodes per serpentine row
 PITCH_X = 62  # horizontal pitch between node centers

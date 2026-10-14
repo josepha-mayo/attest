@@ -1943,7 +1943,10 @@ def _verify_zip(
     # attestation binds sha256(pack bytes) + the verifier's content identity,
     # so a doctored twin attested later can never collide with the clean
     # verdict on the real pack.
-    attest_engine = _attestation_engine() if attest else None
+    try:
+        attest_engine = _attestation_engine() if attest else None
+    except (OSError, RuntimeError) as exc:
+        sys.exit(f"attest: --attest unavailable — {exc}")
 
     def _attest(ok: bool, detail: str) -> None:
         if attest_engine is None:
@@ -1952,17 +1955,20 @@ def _verify_zip(
 
         from . import __version__, disputepack
 
-        receipt = attest_engine.issue_pack_verification(
-            hashlib.sha256(raw).hexdigest(),
-            len(raw),
-            "ok" if ok else "fail",
-            detail,
-            {
-                "name": "attest-cli",
-                "version": __version__,
-                "verifier_sha256": hashlib.sha256(disputepack._VERIFIER.encode()).hexdigest(),
-            },
-        )
+        try:
+            receipt = attest_engine.issue_pack_verification(
+                hashlib.sha256(raw).hexdigest(),
+                len(raw),
+                "ok" if ok else "fail",
+                detail,
+                {
+                    "name": "attest-cli",
+                    "version": __version__,
+                    "verifier_sha256": hashlib.sha256(disputepack._VERIFIER.encode()).hexdigest(),
+                },
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            sys.exit(f"attest: could not sign the attestation — {exc}")
         print(
             f"Attestation {receipt.id}: verdict signed into this deployment's journal",
             file=sys.stderr if json_mode else sys.stdout,
@@ -3926,7 +3932,7 @@ Attest — records, not verdicts. The ten-minute path:
        and demo-worker.html (+ -es) — snapshots of the running app
     6. the raw layer: demo-receipts.html — all __R__ signed receipts, drawn as
        the hash chain itself, each a one-click verify.html deep link —
-       incl. the two `verify --attest` verdict receipts (the audit, audited)
+       incl. the four verify/diff --attest receipts (the audit, audited)
        (+ anatomy.html — one receipt decomposed field-by-field, chain links
        walkable)
     7. the adversarial corpus: vectors.html — __V__ conformance packs the oracle
@@ -3987,8 +3993,63 @@ def _diff(args: argparse.Namespace) -> None:
             file=sys.stderr,
         )
 
+    # --attest signs the reconciliation itself: a pack_comparison receipt
+    # binds both pack digests, the machine verdict (log_heads + anomaly
+    # count), and the verifier identity — the coordinator's "the log
+    # provably grew" is evidence too. The report path is forced so the
+    # attestation binds the same log_heads the JSON surface reports.
+    attest_engine = None
+    if getattr(args, "attest", False):
+        try:
+            attest_engine = _attestation_engine()
+        except (OSError, RuntimeError) as exc:
+            sys.exit(f"attest: --attest unavailable — {exc}")
+
+    def _attest_comparison(report: dict) -> None:
+        if attest_engine is None:
+            return
+        import hashlib
+        import json as _json
+        from pathlib import Path as _Path
+
+        from . import __version__, disputepack
+
+        a_raw = _Path(args.old).read_bytes()
+        b_raw = _Path(args.new).read_bytes()
+        events_sha = hashlib.sha256(
+            _json.dumps(report["events"], sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        detail = (
+            f"log heads: {report['log_heads'] or 'unpaired'} — "
+            f"{report['anomalies']} anomaly(ies), "
+            f"{'clean' if report['clean'] else 'anomalous'}"
+        )
+        try:
+            receipt = attest_engine.issue_pack_comparison(
+                hashlib.sha256(a_raw).hexdigest(),
+                hashlib.sha256(b_raw).hexdigest(),
+                len(a_raw),
+                len(b_raw),
+                report["log_heads"],
+                report["clean"],
+                report["anomalies"],
+                events_sha,
+                detail,
+                {
+                    "name": "attest-cli diff",
+                    "version": __version__,
+                    "verifier_sha256": hashlib.sha256(disputepack._VERIFIER.encode()).hexdigest(),
+                },
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            sys.exit(f"attest: could not sign the comparison — {exc}")
+        print(
+            f"Attestation {receipt.id}: comparison signed into this deployment's journal",
+            file=sys.stderr,
+        )
+
     try:
-        if getattr(args, "json", False) or getattr(args, "html", None):
+        if getattr(args, "json", False) or getattr(args, "html", None) or attest_engine is not None:
             from .packdiff import diff_report
 
             report = diff_report(args.old, args.new, key=key, extra_key_receipts=extra)
@@ -4001,19 +4062,23 @@ def _diff(args: argparse.Namespace) -> None:
                 import json as _json
 
                 print(_json.dumps(report, indent=2))
+                _attest_comparison(report)
                 sys.exit(0 if report["clean"] else 1)
-            # --html: the text lines and the page render the same event
-            # stream — `line` rides the report so the two can never disagree.
+            # --html / --attest: the text lines and the page render the same
+            # event stream — `line` rides the report so the two can never
+            # disagree.
             for e in report["events"]:
                 if e.get("line"):
                     print(e["line"])
             anomalies = report["anomalies"]
-            from pathlib import Path
+            if getattr(args, "html", None):
+                from pathlib import Path
 
-            from .packdiff import diff_html
+                from .packdiff import diff_html
 
-            Path(args.html).write_text(diff_html(report), encoding="utf-8")
-            print(f"html report written: {args.html}")
+                Path(args.html).write_text(diff_html(report), encoding="utf-8")
+                print(f"html report written: {args.html}")
+            _attest_comparison(report)
         else:
             lines, anomalies = diff(args.old, args.new, key=key, extra_key_receipts=extra)
             for line in lines:
@@ -4389,6 +4454,18 @@ def _explain_attestation(store, ident: str, *, as_json: bool = False) -> None:
         print(f"  and returned: {str(p.get('verdict')).upper()} — {p.get('detail')}")
         print("  the audit act itself, signed — it never claims the verdict is")
         print("  right. Re-run the pinned verifier on those exact bytes to check.")
+    elif rtype == "pack_comparison":
+        v = p.get("verifier") or {}
+        print(f"  differ {v.get('name')} {v.get('version')} compared")
+        print(f"  old sha256:{str(p.get('pack_a_sha256'))[:32]}… ({p.get('pack_a_bytes')} bytes)")
+        print(f"  new sha256:{str(p.get('pack_b_sha256'))[:32]}… ({p.get('pack_b_bytes')} bytes)")
+        print(
+            f"  and reported: {p.get('log_heads') or 'unpaired'} — "
+            f"{p.get('anomalies')} anomaly(ies), "
+            f"{'clean' if p.get('clean') else 'anomalous'}"
+        )
+        print("  the reconciliation itself, signed — it never claims the")
+        print("  comparison is right. Re-run attest diff on those bytes to check.")
     print()
     print("Boundary: a signature attests what the record claims and that it is")
     print("intact under the issuer key — never identity, attendance, or truth.")
@@ -4734,6 +4811,14 @@ def main(argv: list[str] | None = None) -> None:
         help="also write a self-contained HTML report of the diff — the "
         "attachable version a mediator or filing gets; renders the same "
         "events the text output prints",
+    )
+    s.add_argument(
+        "--attest",
+        action="store_true",
+        help="sign the comparison itself into this deployment's journal — a "
+        "pack_comparison receipt binding both pack digests, the log_heads "
+        "verdict, and the verifier identity; the mediator's reconciliation "
+        "becomes evidence too. Requires an initialized ATTEST_DATA_DIR store",
     )
     s.set_defaults(fn=_diff)
 

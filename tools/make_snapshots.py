@@ -395,6 +395,13 @@ def main() -> int:
                     dashboard=name == "demo-dashboard.html",
                     token=tokens.get(name),
                 )
+            # Trailing spaces ride in from the live templates' blank lines —
+            # strip them so the committed artifacts stay `git diff --check`
+            # clean (trailing whitespace inside <pre> is render-inert too).
+            if name.endswith((".html", ".svg")):
+                import re as _re
+
+                html = _re.sub(r"[ \t]+\n", "\n", html)
             (DOCS / name).write_bytes(html.encode("utf-8"))
             print(f"{name} <- {route} ({len(html)} chars)")
     finally:

@@ -1929,6 +1929,7 @@ def build_case_pack(
         or r.visit_id.startswith("key:")
         or r.visit_id.startswith("monitor:")
         or r.visit_id.startswith("pack-verify:")
+        or r.visit_id.startswith("pack-diff:")
     ]
     manifest = {
         "schema": "attest.case-pack/1",

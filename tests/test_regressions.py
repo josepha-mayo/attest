@@ -345,6 +345,80 @@ def test_verify_attest_signs_the_verdict_into_the_journal(tmp_path, engine, stor
     assert "--attest" in (rc.stdout + rc.stderr)
 
 
+def test_diff_attest_signs_the_comparison(tmp_path, engine, store, household, schedule, t0):
+    """`attest diff --attest` — the mediator's reconciliation is evidence: a
+    `pack_comparison` receipt binds BOTH pack digests, the machine verdict
+    (log_heads + anomaly count), and a hash of the event stream. An anomalous
+    comparison attests as anomalous — a caught forgery is the deliverable."""
+    import os
+    import subprocess
+    import sys
+
+    from attest.disputepack import build_case_pack, tamper_twin
+    from attest.reviews import ReviewService, countersign_status
+    from attest.store import Store
+
+    visit = engine.ingest(event(household[2], t0)).visit
+    engine.close_for_review(visit.id)
+    bundle = ReviewService(store, engine.signer, engine.clock).bundle(visit.id)
+    site = store.sites()[0]
+    data = build_case_pack(
+        store,
+        tmp_path / "media",
+        site,
+        [(visit, bundle, countersign_status(bundle))],
+        manifest_signer=lambda m: engine.issue_export_manifest(site, m),
+    )
+    pack = tmp_path / "case.zip"
+    pack.write_bytes(data)
+    forged_bytes, _ = tamper_twin(data)
+    forged = tmp_path / "forged.zip"
+    forged.write_bytes(forged_bytes)
+
+    audit = tmp_path / "auditor"
+    audit.mkdir()
+    Store(audit / "attest.sqlite3").close()
+    env = {**os.environ, "ATTEST_DATA_DIR": str(audit)}
+
+    def run(*argv):
+        return subprocess.run(
+            [sys.executable, "-m", "attest.cli", *argv],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+    # A clean comparison attests — the anomalous one is the deliverable.
+    rc = run("diff", str(pack), str(forged), "--attest")
+    assert rc.returncode == 1  # anomalies → exit 1
+    assert "Attestation rcpt_" in rc.stderr
+
+    audit_store = Store(audit / "attest.sqlite3")
+    att = [r for r in audit_store.receipts() if r.payload.get("record_type") == "pack_comparison"]
+    assert len(att) == 1
+    facts = att[0].payload
+    assert facts["pack_a_sha256"] == hashlib.sha256(data).hexdigest()
+    assert facts["pack_b_sha256"] == hashlib.sha256(forged_bytes).hexdigest()
+    assert facts["clean"] is False
+    assert facts["anomalies"] >= 1
+    assert len(facts["events_sha256"]) == 64
+    assert "does not prove the comparison is right" in facts["boundary"]
+    assert att[0].visit_id.startswith("pack-diff:")
+
+    # Idempotent — reconciling the same pair again reuses the receipt.
+    rc = run("diff", str(pack), str(forged), "--attest")
+    audit_store = Store(audit / "attest.sqlite3")
+    att = [r for r in audit_store.receipts() if r.payload.get("record_type") == "pack_comparison"]
+    assert len(att) == 1
+
+    # --json keeps stdout pure — the attestation note rides stderr.
+    rc = run("diff", "--json", str(pack), str(forged), "--attest")
+    import json as _json
+
+    verdict = _json.loads(rc.stdout)  # stdout parses: the note can't corrupt it
+    assert verdict["anomalies"] >= 1
+
+
 def test_verify_attest_needs_an_initialized_store(tmp_path):
     """--attest with no ATTEST_DATA_DIR store fails fast — before the pack is
     even opened — rather than silently verifying without attesting."""

@@ -1,0 +1,35 @@
+{
+  "id": "rcpt_0040a29e48a946d0bbb5d186ad554ae0",
+  "visit_id": "pack-diff:700efac553267079",
+  "sequence": 331,
+  "prev_hash": "3493625eb848ad4c710d6537b2c93c0601fdc71bd60ee853d5e4b29323990e96",
+  "payload": {
+    "record_type": "pack_comparison",
+    "pack_a_sha256": "a5ed930717fed2b1bf1469ab85831fd60775b00002aec2d6a968015c22b7433f",
+    "pack_b_sha256": "5638802682463ad6da55e0b776af23f4e62490ca04403aeedb037bcc08a56d32",
+    "pack_a_bytes": 362373,
+    "pack_b_bytes": 436333,
+    "log_heads": "extends",
+    "clean": true,
+    "anomalies": 0,
+    "events_sha256": "4b6cb7b894b99e20fd571548f940bf99af08dd8de20b415cf380084c272ce251",
+    "detail": "log heads: extends — 0 anomaly(ies), clean",
+    "verifier": {
+      "name": "attest-cli diff",
+      "version": "0.1.0",
+      "verifier_sha256": "9058287e2b4495da20d8cb0f2ec3a5ecbe75313d9b6f4c0ab3f1ead3082fac1b"
+    },
+    "boundary": "This receipt attests only that the named differ produced the named comparison on the two byte-string digests above. It does not prove the comparison is right — re-run attest diff on the named bytes to check — and says nothing about physical truth.",
+    "journal_head": "8e8682cc8ad9c5f95b52bbabc9d992528b81a4e2fc7d67ac8cfd2c0a911286f1",
+    "schema": "attest.receipt/2",
+    "sequence": 331,
+    "prev_hash": "3493625eb848ad4c710d6537b2c93c0601fdc71bd60ee853d5e4b29323990e96",
+    "visit_id": "pack-diff:700efac553267079",
+    "receipt_id": "rcpt_0040a29e48a946d0bbb5d186ad554ae0",
+    "issued_at": "2026-10-14T18:04:43.635843+00:00"
+  },
+  "payload_hash": "597062cb19db78cff7e7e9847ba6785b8158b485a2d03e65e6fc776304180393",
+  "signature": "hTeVfya9vT7alyGcG3XaSOVghGzWVvYW9kGDtauKCk9iPgzE3Drub5f6f7RabzIt2EKpNeezFevwBhJeco9RDQ==",
+  "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+  "issued_at": "2026-10-14T18:04:43.635843Z"
+}
