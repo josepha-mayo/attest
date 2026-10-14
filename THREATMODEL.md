@@ -238,8 +238,3 @@ These are architectural boundaries, not missing features:
 - Bedrock summarization is wired and provenance-labeled; live inference was
   quota-limited at verification time, so shipped demos run on the labeled
   template fallback.
-- Contact-sensor ingestion is implemented but not verified against official
-  hardware.
-- Bedrock summarization is wired and provenance-labeled; live inference was
-  quota-limited at verification time, so shipped demos run on the labeled
-  template fallback.

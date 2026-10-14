@@ -59,8 +59,9 @@ summary{cursor:pointer;color:#2563eb}
 <p class="tag">Attest replaces "he said / she said" home-service disputes with a
 signed, self-verifying evidence record, built on the Ring Partner API — what the
 devices observed, what the worker and the household each reported, what a
-coordinator concluded. <strong>Records, not verdicts</strong> — the evidence gets
-a verdict; nobody's story does. Not attendance tracking, not EVV, not
+coordinator concluded.</p>
+<p class="tag"><strong>Records, not verdicts</strong> — the evidence gets a
+verdict; nobody's story does. Not attendance tracking, not EVV, not
 surveillance: the record proves it wasn't quietly rewritten — it never claims
 to know who was at the door.</p>
 
@@ -84,7 +85,7 @@ doorbell a little after six and saw someone at the door. I can't say how
 long she stayed."</em> Every version, verbatim and signed — including a
 garbled re-send — in one record nobody can quietly rewrite.
 <a href="story.html"><strong>Read the story the signed bytes tell</strong></a>
-(every quote below deep-links to its verification) — or
+(every quote in it deep-links to its verification) — or
 <a href="demo-visit.html">open the live record page</a>.</p>
 
 <p>"He said / she said" disputes stop being memory contests:
@@ -100,7 +101,7 @@ Event History?</a> — receipts keep verifying even if Attest disappears.)</p>
 <a href="verify.html#sample-pack">green VERIFIED on the sample</a> →
 <a href="verify.html#sample-pack-tampered">red FAILED on the tampered twin</a> →
 <a href="verify.html#tamper-lab"><strong>forge it yourself</strong> in the
-tamper lab</a> → <a href="demo-receipts.html">the demo runtime's 325-receipt
+tamper lab</a> → <a href="demo-receipts.html">the demo runtime's 328-receipt
 hash chain</a>. No install, no account — every stamp runs in your browser and
 nothing leaves it.</div>
 <p style="margin:.5rem 0"><a href="verify.html#sample-pack"
@@ -144,7 +145,9 @@ against the shared oracle, live. The whole demo as a single stream.</small>
 <small>"The copy the agency produced" vs "the copy I kept" — each verifies on
 its own merits, then their signed membership is diffed: the forged field named,
 and the two log heads proven to reconcile — or caught forking. Two verifying
-packs that aren't the same records is the whole point.</small>
+packs that aren't the same records is the whole point. Downloads the comparison
+as a self-contained page — the same reading <code>attest diff --html</code>
+writes.</small>
 </a>
 <a class="card" href="verify.html#compare-earlier">
 <b>Compare across time<span class="badge ok">GROWTH</span></b>
@@ -334,10 +337,10 @@ scoped <code>/review/</code> token sees ·
 <a href="demo-integrity.html">the self-audit page</a> (revoked-key suspect
 windows, annotated — 9 receipts in scope) ·
 <a href="demo-integrity.json">its machine-readable JSON</a> — and the raw layer
-underneath all of it: <a href="demo-receipts.html">325 signed receipts</a>,
+underneath all of it: <a href="demo-receipts.html">328 signed receipts</a>,
 drawn as the literal hash chain (every edge a <code>prev_hash</code> link —
-all 325 verify), each one-click verifiable in the same browser page —
-or <a href="verify.html#demo-receipts">all 325 at once</a>
+all 328 verify), each one-click verifiable in the same browser page —
+or <a href="verify.html#demo-receipts">all 328 at once</a>
 (<a href="demo-receipts.json">raw JSON</a>). New to the math?
 <a href="anatomy.html"><strong>Anatomy of a signed receipt</strong></a>
 decomposes one field-by-field — what the signature covers, what the
@@ -623,8 +626,8 @@ for the key either. Three ways to pin:</p>
   <code>verifier_manifest.json</code> byte-pins <code>verify.html</code> —
   <a href="verify.html#verify-self">the page hashes its own bytes</a> →
   <strong>PINNED</strong>/<strong>PIN MISMATCH</strong>; and
-  <a href="verify.html#verify-site"><code>site-manifest.json</code> pins all
-  414 artifacts this site ships</a> → <strong>SITE VERIFIED</strong>/<strong>SITE
+  <a href="verify.html#verify-site"><code>site-manifest.json</code> pins every
+  artifact this site ships</a> → <strong>SITE VERIFIED</strong>/<strong>SITE
   TAMPER</strong>, drifted files named.</li>
 </ul>
 

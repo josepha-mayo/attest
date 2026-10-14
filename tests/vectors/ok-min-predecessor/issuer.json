@@ -3,7 +3,7 @@
   "issuer_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=",
   "key_receipts": [
     {
-      "id": "rcpt_da810e43795a4a13b7c94eddede8facb",
+      "id": "rcpt_510fe3d90b5343c8b20a23f3022840d6",
       "visit_id": "key:NLTZBDFWy23P:oJql9HpnWYAv",
       "sequence": 1,
       "prev_hash": null,
@@ -16,16 +16,16 @@
         "sequence": 1,
         "prev_hash": null,
         "visit_id": "key:NLTZBDFWy23P:oJql9HpnWYAv",
-        "receipt_id": "rcpt_da810e43795a4a13b7c94eddede8facb",
-        "issued_at": "2026-10-14T16:23:31.621585+00:00"
+        "receipt_id": "rcpt_510fe3d90b5343c8b20a23f3022840d6",
+        "issued_at": "2026-10-14T16:49:20.737336+00:00"
       },
-      "payload_hash": "458c1cd5816e8f627eee47341b61349286aa5414f465825d17d21348a8a7b551",
-      "signature": "9msqa/PbDAsiWk9sOJhaX6s9awdr5WDUU54CcOpSk3Oxs65ESkvQ6ewMghz9tGNTcjB+m5pjiBvcWPBVxdMgDw==",
+      "payload_hash": "6bce4d05f77c3ca1bc5bc31e8113bdb45307166741676a53e909cb997cf9cf56",
+      "signature": "NuK+vgH4FTXli7A1oKUfNerVfwnjUc89/JdLQYGBnv/Ip2zFQNfi56c3rT1MKMawMVfV3+haMz8NrSvlHuX2DA==",
       "public_key": "NLTZBDFWy23PC+sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y=",
-      "issued_at": "2026-10-14T16:23:31.621585Z"
+      "issued_at": "2026-10-14T16:49:20.737336Z"
     },
     {
-      "id": "rcpt_6d3fbe8c6c574ee8a912807a09667c2f",
+      "id": "rcpt_387c7cce88fc48869bb9b07c085b07bc",
       "visit_id": "key:NLTZBDFWy23P:oJql9HpnWYAv:adopted",
       "sequence": 2,
       "prev_hash": null,
@@ -33,70 +33,70 @@
         "record_type": "key_adoption",
         "previous_key": "NLTZBDFWy23PC+sKKUm3VZyUDSvLbb6MU6mzAnjjp0Y=",
         "rotation_receipt": {
-          "id": "rcpt_da810e43795a4a13b7c94eddede8facb",
-          "hash": "458c1cd5816e8f627eee47341b61349286aa5414f465825d17d21348a8a7b551"
+          "id": "rcpt_510fe3d90b5343c8b20a23f3022840d6",
+          "hash": "6bce4d05f77c3ca1bc5bc31e8113bdb45307166741676a53e909cb997cf9cf56"
         },
         "schema": "attest.receipt/2",
         "sequence": 2,
         "prev_hash": null,
         "visit_id": "key:NLTZBDFWy23P:oJql9HpnWYAv:adopted",
-        "receipt_id": "rcpt_6d3fbe8c6c574ee8a912807a09667c2f",
-        "issued_at": "2026-10-14T16:23:31.621699+00:00"
+        "receipt_id": "rcpt_387c7cce88fc48869bb9b07c085b07bc",
+        "issued_at": "2026-10-14T16:49:20.737444+00:00"
       },
-      "payload_hash": "861cf12852f3e92fda116ecd80811a5f4e4d007ec5971b376d7f37f04e1ab2c3",
-      "signature": "rQHmz0VFFVqzzTuWCMAhCiEH70wVr4bF9bPxo77EO2oKw726U2pVocX0cidg+DTssxRuBVzs0E/Y13wl7mZvBw==",
+      "payload_hash": "6cd23c67a5c00654db61b26f6eaece681ed157e979264d9d9175844f911b9d9b",
+      "signature": "QOvuIEXA8X4iih/zrF35iD58Jc/yxsEsK2YvizCxt7QTZ9Qrm/go1p6LTXD3DEtSLAZ/hfoeJ/xghoOHcYFFBA==",
       "public_key": "oJql9HpnWYAv+VX43C0qFKXJnSO+l/hkEn/5ODRVpPA=",
-      "issued_at": "2026-10-14T16:23:31.621699Z"
+      "issued_at": "2026-10-14T16:49:20.737444Z"
     },
     {
-      "id": "rcpt_0bea48d6d8aa474ea25b80f9b4f542e1",
+      "id": "rcpt_b82593b930ae4ef4978964e44201aab2",
       "visit_id": "key:0EqyMnQrtKs6:oJql9HpnWYAv",
       "sequence": 2,
-      "prev_hash": "538a91838edc27b9c7100cbe458be9fcd8e7302c10d5a20c6673f22de99a0b8f",
+      "prev_hash": "8282324043c8f3ade8aaaaebfb4700a294d6abad3411b954f488fbf4548c5cac",
       "payload": {
         "record_type": "key_rotation",
         "previous_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=",
         "new_key": "oJql9HpnWYAv+VX43C0qFKXJnSO+l/hkEn/5ODRVpPA=",
         "reason": "planned rotation",
         "boundary": "A signed statement that the issuer retired the signing key named here and adopted the successor \u2014 extends pinned-key trust across the transition; never proves either key was or stayed uncompromised.",
-        "journal_head": "897c6dd027f79770782c728c9d320adc8da4ae671dd70a3a7ca50f052294d955",
+        "journal_head": "0c528e1714212836cf96c9d7fe3f49adca1263b0929f3fd68d279ff2bf1de7ba",
         "schema": "attest.receipt/2",
         "sequence": 2,
-        "prev_hash": "538a91838edc27b9c7100cbe458be9fcd8e7302c10d5a20c6673f22de99a0b8f",
+        "prev_hash": "8282324043c8f3ade8aaaaebfb4700a294d6abad3411b954f488fbf4548c5cac",
         "visit_id": "key:0EqyMnQrtKs6:oJql9HpnWYAv",
-        "receipt_id": "rcpt_0bea48d6d8aa474ea25b80f9b4f542e1",
-        "issued_at": "2026-10-14T16:23:31.619971+00:00"
+        "receipt_id": "rcpt_b82593b930ae4ef4978964e44201aab2",
+        "issued_at": "2026-10-14T16:49:20.735758+00:00"
       },
-      "payload_hash": "1b68aa434708007ae558044059a945f81cba64b5db2f61256b7a078ca3ae4bcb",
-      "signature": "HsN5AYnfjnKNW41+HLHvM/D7o0Jtbnxzyu8YuqRer1ROQnT2BYe5hv2x/aKzktok+4IpOXcYSCln4EazYg2TCw==",
+      "payload_hash": "9c3e1b27199322bde4c5bf7da5aca52fabebf6e2a34173b838e10ae85650a588",
+      "signature": "PjXAd5xHfyFc/AWwHEhL2Trcwdmyy41LoLQIul3XGN9HzVi+HbXfU9F/GHfFmPthsQ6LXHTa/6RDgIUnJq4gCw==",
       "public_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=",
-      "issued_at": "2026-10-14T16:23:31.619971Z"
+      "issued_at": "2026-10-14T16:49:20.735758Z"
     },
     {
-      "id": "rcpt_9d5ea590776e4d52aec7968aa1875665",
+      "id": "rcpt_d83f2871bcf3471ea374e66666719d6e",
       "visit_id": "key:0EqyMnQrtKs6:oJql9HpnWYAv:adopted",
       "sequence": 3,
-      "prev_hash": "1b68aa434708007ae558044059a945f81cba64b5db2f61256b7a078ca3ae4bcb",
+      "prev_hash": "9c3e1b27199322bde4c5bf7da5aca52fabebf6e2a34173b838e10ae85650a588",
       "payload": {
         "record_type": "key_adoption",
         "previous_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc=",
         "rotation_receipt": {
-          "id": "rcpt_0bea48d6d8aa474ea25b80f9b4f542e1",
-          "hash": "1b68aa434708007ae558044059a945f81cba64b5db2f61256b7a078ca3ae4bcb"
+          "id": "rcpt_b82593b930ae4ef4978964e44201aab2",
+          "hash": "9c3e1b27199322bde4c5bf7da5aca52fabebf6e2a34173b838e10ae85650a588"
         },
         "boundary": "A signed statement that the holder of the new signing key executed the named rotation \u2014 together with the retiring key's endorsement it binds both sides of the transition.",
-        "journal_head": "38f073cf22a159a91b6411c1da861ee1ee8dc7380b3925279e991a8098223083",
+        "journal_head": "423d0e2126827b9795ef6457c5c60767b4d59492d5ded7f319217a02e84be04a",
         "schema": "attest.receipt/2",
         "sequence": 3,
-        "prev_hash": "1b68aa434708007ae558044059a945f81cba64b5db2f61256b7a078ca3ae4bcb",
+        "prev_hash": "9c3e1b27199322bde4c5bf7da5aca52fabebf6e2a34173b838e10ae85650a588",
         "visit_id": "key:0EqyMnQrtKs6:oJql9HpnWYAv:adopted",
-        "receipt_id": "rcpt_9d5ea590776e4d52aec7968aa1875665",
-        "issued_at": "2026-10-14T16:23:31.620883+00:00"
+        "receipt_id": "rcpt_d83f2871bcf3471ea374e66666719d6e",
+        "issued_at": "2026-10-14T16:49:20.736684+00:00"
       },
-      "payload_hash": "ca5a7f15d176dc5c436772e459a4914683f2af18b09abe5323181d739f427646",
-      "signature": "Is+9ZyGVU8NBsYs2shDB0ZAGQUGIGMp/LWd461/zCxp499fEy7qSIQ2RVY120rJ0DwXSnHB49OY1f74tSgCzDA==",
+      "payload_hash": "a8173f7ed2513b3e0d1bb28c26fe21bc276b1d5eea9c3fe12146efba845a041c",
+      "signature": "aaDc/kidydWq1R4lmVTDYCqq/H6kAKyz+T3aM0xu31eMz2/VykVbaSh+LAQw12ABEBz74xza4trgD0x5byjjDg==",
       "public_key": "oJql9HpnWYAv+VX43C0qFKXJnSO+l/hkEn/5ODRVpPA=",
-      "issued_at": "2026-10-14T16:23:31.620883Z"
+      "issued_at": "2026-10-14T16:49:20.736684Z"
     }
   ]
 }

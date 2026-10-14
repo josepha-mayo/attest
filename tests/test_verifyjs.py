@@ -2788,6 +2788,11 @@ const mkel=()=>({hidden:true,innerHTML:'',innerText:'',value:'',open:false,
   querySelector:function(s){
     // diffPacks reads .stamp off the rendered inner verdict — parse it back
     // the way a browser would (first div whose class list carries .stamp)
+    if(s==='[data-dlbtn]'){
+      if(!this.innerHTML.includes('data-dlbtn'))return null;
+      if(!this._dlbtn)this._dlbtn={_h:null,
+        addEventListener:(ev,fn)=>{this._dlbtn._h=fn;}};
+      return this._dlbtn;}
     if(s!=='.stamp')return null;
     const m=this.innerHTML.match(/<div class="row (stamp[^"]*)">([\s\S]*?)<\/div>/);
     return m?{classList:{contains:c=>m[1].split(/\s+/).includes(c)},
@@ -2830,6 +2835,24 @@ const mk=(n)=>new File([fs.readFileSync(path.join(dir,n))],n);
   out.innerHTML='';out.kids=[];
   await __d(mk('sample-pack-earlier.zip'),mk('sample-pack.zip'),out);
   console.log('T6:',out.innerHTML.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').slice(0,2400));
+  // the download affordance emits a self-contained report page — the same
+  // reading `attest diff --html` writes, produced in-browser, no dead button
+  global.__dl=null;
+  URL.createObjectURL=b=>{global.__dl=b;return 'blob:x';};
+  URL.revokeObjectURL=()=>{};
+  document.createElement=(t)=>{const e=mkel();e._tag=t;return e;};
+  const btn=out.querySelector('[data-dlbtn]');
+  if(!btn||!btn._h){console.log('T7: no download button');}
+  else{
+    btn._h();
+    const page=await global.__dl.text();
+    console.log('T7:',page.length,
+      page.includes('Append-only export diff'),
+      page.includes('provably extends'),
+      page.includes('readable rendering, not a signed artifact'),
+      !page.includes('data-dlbtn'),
+      page.includes('sample-pack-earlier.zip vs sample-pack.zip'));
+  }
 })().catch(e=>{console.log('ERR',e.message);process.exit(2);});
 """
     (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
@@ -2868,3 +2891,9 @@ const mk=(n)=>new File([fs.readFileSync(path.join(dir,n))],n);
     assert "DIFFERENT roots" not in t5 and "commit to the same" not in t5, t5
     # the chain walk proves append-only growth offline — never "unverifiable"
     assert "provably extends" in t6 and "hop" in t6, t6
+    t7 = proc.stdout.split("T7:")[1].strip()
+    # the in-browser download is a self-contained, honestly-framed report —
+    # same reading `attest diff --html` writes, no dead button, no silent claim
+    assert "no download button" not in t7, t7
+    flags = t7.split()[1:]
+    assert all(f == "true" for f in flags), t7
