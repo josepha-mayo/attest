@@ -213,7 +213,7 @@ _LOG_MEMBER = "log_checkpoint.json"
 
 def check_log_pin(
     read_member, receipt_ids: list[tuple[str, str, str]], trusted: set
-) -> tuple[tuple[int, int, int, dict] | None, str | None]:
+) -> tuple[tuple | None, str | None]:
     """Validate ``log_checkpoint.json``: a signed Merkle Tree Head plus an
     RFC 6962 inclusion path proving every receipt in the pack sat inside the
     deployment's published log — 'valid signature' alone no longer implies
@@ -225,8 +225,10 @@ def check_log_pin(
     not failed; present-and-incomplete fails closed. The checkpoint receipt
     itself anchors the tree and carries no proof (its own leaf postdates its
     head). Returns ((proven, tree_size, cosigs, anchored_cosigs,
-    checkpoint_payload), None), (None, None) when absent, or
-    (None, error)."""
+    checkpoint_payload, chain_members), None), (None, None) when absent, or
+    (None, error). ``chain_members`` is the validated ``chain`` list —
+    ``{id, size, root, payload}`` per prior signed head — so the reconcile
+    can multi-hop between non-adjacent exports."""
     raw = read_member(_LOG_MEMBER)
     if raw is None:
         return None, None
@@ -404,12 +406,11 @@ def check_log_pin(
             if not ok3:
                 return None, f"log_checkpoint.json: chain member {mr.id[:24]}… invalid: {why3}"
             msize, mroot = mp.get("tree_size"), mp.get("root_sha256")
-            if (
-                not json_is_int(msize)
-                or not 1 <= int(msize) < size
-                or not isinstance(mroot, str)
-                or len(mroot) != 64
-            ):
+            try:
+                mroot_b = transparency.hex_bytes(mroot, length=32)
+            except (TypeError, ValueError):
+                mroot_b = None
+            if not json_is_int(msize) or not 1 <= int(msize) < size or mroot_b is None:
                 return None, (
                     f"log_checkpoint.json: chain member {mr.id[:24]}… carries a malformed or non-prior head"
                 )
@@ -417,10 +418,14 @@ def check_log_pin(
                 return None, (
                     f"log_checkpoint.json: chain member {mr.id[:24]}… signs a bridge it cannot prove"
                 )
-            if msize in seen_sizes and seen_sizes[msize] != mroot.lower():
+            # Dedupe on the DECODED root — hex case variants of the same bytes
+            # are one head, and a non-hex spelling can never reach this line
+            # (the browser's regex gate would convict where a len()==64 check
+            # alone would not — the strictest spelling wins everywhere).
+            if msize in seen_sizes and seen_sizes[msize] != mroot_b:
                 return None, (f"log_checkpoint.json: chain carries two signed heads at size {msize}")
-            seen_sizes[msize] = mroot.lower()
-            chain_members.append({"id": mr.id, "size": int(msize), "root": mroot, "payload": mp})
+            seen_sizes[msize] = mroot_b
+            chain_members.append({"id": mr.id, "size": int(msize), "root": mroot_b.hex(), "payload": mp})
         chain_members.sort(key=lambda m: m["size"])
     # Witness counter-signatures ride the checkpoint document: verified
     # under each cosig's own key + subject binding, reported as auxiliary
@@ -1146,6 +1151,12 @@ def diff_report(
             {k: e[k] for k in ("severity", "target", "detail", "line") if e.get(k) is not None}
             for e in events
         ],
+        # The log-head relationship in one machine word — "same", "extends",
+        # "extends_earlier", "fork", "unreconciled", "unreconciled_earlier",
+        # "unpaired", or null when no comparison ran. `clean` collapses
+        # unreconciled into success; this field keeps the third state legible
+        # to a CI gate (proven append-only is "same" or "extends").
+        "log_heads": next((e["heads"] for e in events if e.get("heads")), None),
         "anomalies": anomalies,
         "clean": anomalies == 0,
     }
@@ -1333,7 +1344,7 @@ def _walk_chain(hi: dict, lo_size: int, lo_root: bytes) -> tuple[str, int] | Non
     size under a different root, or a head's own signed bridge fails against
     the member it names — and None when the chain simply cannot reach the
     older head (a gap, a missing bridge, or no chain at all)."""
-    from .transparency import hex_bytes, verify_extends
+    from .transparency import coerce_int, hex_bytes, verify_extends
 
     by_size = {m["size"]: m for m in hi.get("chain") or []}
     # A chain member occupying the OLDER head's exact size under a different
@@ -1350,8 +1361,15 @@ def _walk_chain(hi: dict, lo_size: int, lo_root: bytes) -> tuple[str, int] | Non
     hops = 0
     while hops <= len(by_size):
         ext = cur.get("extends") if isinstance(cur, dict) else None
-        first = ext.get("first") if isinstance(ext, dict) else None
-        if not isinstance(first, int) or isinstance(first, bool):
+        # coerce_int, not a strict isinstance gate — verify_extends evaluates
+        # the same signed field with JS-mirrored coercion (digit strings,
+        # truncating floats, bools), so the hop target must read it the same
+        # way or one surface walks a bridge the other calls a dead end.
+        try:
+            first = coerce_int(ext["first"]) if isinstance(ext, dict) else None
+        except (KeyError, TypeError, ValueError):
+            first = None
+        if first is None:
             return None  # no usable bridge — cannot descend further
         if first == lo_size:
             r = verify_extends(cur, first=lo_size, first_root=lo_root)
@@ -1381,12 +1399,16 @@ def _walk_chain(hi: dict, lo_size: int, lo_root: bytes) -> tuple[str, int] | Non
     return None
 
 
-def _log_head_verdict(a: dict, b: dict) -> tuple[str, str] | None:
+def _log_head_verdict(a: dict, b: dict) -> tuple[str, str, str] | None:
     """Compare two VALIDATED log heads — ``{head, chain}`` per pack, the
     signed tree heads two exports committed to plus the signed prior-head
-    chain each embeds. Returns (severity, line) or None when a head is too
-    malformed to judge (the pack verify loop already flags malformed
-    checkpoints; this only sees ones that parsed)."""
+    chain each embeds. Returns (severity, line, kind) or None when a head is
+    too malformed to judge (the pack verify loop already flags malformed
+    checkpoints; this only sees ones that parsed). ``kind`` is the machine-
+    readable relationship a CI gate can't read out of severity alone —
+    severity collapses to clean/not-clean, while the heads either provably
+    agree ("same"), provably extend ("extends"/"extends_earlier"), provably
+    fork ("fork"), or stay undecidable offline ("unreconciled")."""
     ah, bh = a.get("head") or {}, b.get("head") or {}
     try:
         from .transparency import hex_bytes
@@ -1397,11 +1419,12 @@ def _log_head_verdict(a: dict, b: dict) -> tuple[str, str] | None:
         return None
     if sa == sb:
         if ra == rb:
-            return "ok", f"both exports commit to the same signed log head (tree size {sa})"
+            return "ok", f"both exports commit to the same signed log head (tree size {sa})", "same"
         return (
             "anomaly",
             f"both exports carry size-{sa} log heads with DIFFERENT roots — "
             "the issuer signed two histories at one tree size: a provable fork",
+            "fork",
         )
     # Direction matters: the LARGER head walked back to the smaller proves
     # append-only growth — a single embedded bridge for adjacent heads, or
@@ -1429,6 +1452,7 @@ def _log_head_verdict(a: dict, b: dict) -> tuple[str, str] | None:
                     f"the {hi_tag} export's embedded chain carries a signed head at "
                     f"size {lo_size} whose root differs from the {lo_tag} export's — "
                     "two issuer-signed heads at one tree size: a provable fork",
+                    "fork",
                 )
         except (KeyError, TypeError, ValueError):
             pass
@@ -1440,6 +1464,7 @@ def _log_head_verdict(a: dict, b: dict) -> tuple[str, str] | None:
                 f"the size-{sb} head provably extends the size-{sa} head "
                 "via the larger checkpoint's own signed bridge — the log only "
                 "appended between these exports",
+                "extends",
             )
         return (
             "drift",
@@ -1447,6 +1472,7 @@ def _log_head_verdict(a: dict, b: dict) -> tuple[str, str] | None:
             "the old head provably extends it: either this pack was exported "
             "before the old one, or the deployment served a regressed head "
             "(a rollback is indistinguishable from an older export offline)",
+            "extends_earlier",
         )
     if bridged is False:
         return (
@@ -1454,6 +1480,7 @@ def _log_head_verdict(a: dict, b: dict) -> tuple[str, str] | None:
             f"the {hi_tag} export's size-{max(sa, sb)} checkpoint signs a bridge "
             f"naming the {lo_tag} head's size but not its root — the issuer's "
             "own proof material contradicts the pack: fork evidence",
+            "fork",
         )
     # No direct bridge — walk the embedded signed chain hop-by-hop.
     walked = _walk_chain(hi, lo_size, lo_root)
@@ -1466,6 +1493,7 @@ def _log_head_verdict(a: dict, b: dict) -> tuple[str, str] | None:
                     f"the size-{sb} head provably extends the size-{sa} head — "
                     f"{hops} signed checkpoint hop(s) verified inside the "
                     "newer pack's embedded chain, no network needed",
+                    "extends",
                 )
             return (
                 "drift",
@@ -1475,12 +1503,14 @@ def _log_head_verdict(a: dict, b: dict) -> tuple[str, str] | None:
                 "snapshot of the same log: exported before, or a regressed "
                 "head honestly identified (a rollback stays indistinguishable "
                 "from an older export offline)",
+                "extends_earlier",
             )
         return (
             "anomaly",
             f"the embedded signed chain COLLIDES with the {lo_tag} export's "
             f"size-{lo_size} head after {hops} verified hop(s) — two signed "
             "heads claim different roots at one tree size: a provable fork",
+            "fork",
         )
     if sb > sa:
         return (
@@ -1488,12 +1518,14 @@ def _log_head_verdict(a: dict, b: dict) -> tuple[str, str] | None:
             f"export log heads differ (size {sa} vs {sb}) with no embedded "
             "bridge or chain reaching between them — `attest consistency` "
             "against the live deployment decides",
+            "unreconciled",
         )
     return (
         "drift",
         f"the newer export pins an earlier signed head (size {sb} < {sa}) with "
         "no bridge or chain reaching back — an older export or a regression, "
         "undecidable offline",
+        "unreconciled_earlier",
     )
 
 
@@ -1563,13 +1595,17 @@ def _diff_events(old: dict, new: dict, key: str | None, old_path: str, new_path:
     if oh is not None and nh is not None:
         verdict = _log_head_verdict(oh, nh)
         if verdict:
-            severity, detail = verdict
+            severity, detail, kind = verdict
             ev(
                 severity,
                 "log_checkpoint.json",
                 detail,
                 {"ok": "ok ", "info": "+  ", "anomaly": "!! ", "drift": "~  "}[severity],
             )
+            # The machine-readable relationship rides on the event — `clean`
+            # alone cannot tell proven-append-only from unproven-but-clean,
+            # so CI gates on this field too.
+            events[-1]["heads"] = kind
             if severity == "anomaly":
                 anomalies += 1
     elif oh is not None or nh is not None:
@@ -1580,6 +1616,7 @@ def _diff_events(old: dict, new: dict, key: str | None, old_path: str, new_path:
             "checkpoint — the append-only postures can't be compared",
             "~  ",
         )
+        events[-1]["heads"] = "unpaired"
 
     for vid in sorted(set(old["visits"]) | set(new["visits"])):
         a, b = old["visits"].get(vid), new["visits"].get(vid)

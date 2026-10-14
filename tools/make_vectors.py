@@ -878,6 +878,105 @@ def main() -> None:
         },
     )
 
+    def _case_variant_member(doc: dict) -> dict:
+        # The boundary twin of dup-size: two members at one size whose roots
+        # differ only in hex CASE are the same decoded head — dedupe on
+        # bytes, not spelling, or the browser convicts where Python passes.
+        doc = dict(doc)
+        mp = dict(doc["chain"][0]["payload"])
+        twin = engine.signer.issue(
+            visit_id=f"log-case:{mp['tree_size']}",
+            sequence=1,
+            prev_hash=None,
+            facts={k: (v.upper() if k == "root_sha256" else v) for k, v in mp.items() if k not in _RESERVED},
+        ).model_dump(mode="json")
+        doc["chain"] = doc["chain"] + [twin]
+        return doc
+
+    _write_vector(
+        "ok-chain-case-roots",
+        _log_edit(chain_pack, _case_variant_member),
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "ok",
+            "detail_contains": ["prior signed head(s)"],
+            "js": {"bundle_ok": True, "verdict": "ok"},
+            "note": "two members carry the SAME head at one size, spelled "
+            "upper- and lower-case — one head, not a collision; every surface "
+            "dedupes on the decoded root",
+        },
+    )
+
+    def _quoted_bridge_member(doc: dict) -> dict:
+        # A signed member whose `extends.first` is spelled as a digit STRING —
+        # verify_extends coerces it on every surface, so intake and the
+        # reconcile walk must read it identically (a strict isinstance gate
+        # dead-ends Python where the browser still walks).
+        doc = dict(doc)
+        donor = next(m for m in doc["chain"] if isinstance(m["payload"].get("extends"), dict))
+        mp = {k: v for k, v in donor["payload"].items() if k not in _RESERVED}
+        mp = json.loads(json.dumps(mp))
+        mp["extends"]["first"] = str(mp["extends"]["first"])
+        respelled = engine.signer.issue(
+            visit_id=f"log-quoted:{mp['tree_size']}",
+            sequence=1,
+            prev_hash=None,
+            facts=mp,
+        ).model_dump(mode="json")
+        doc["chain"] = [m for m in doc["chain"] if m["payload"]["tree_size"] != mp["tree_size"]] + [respelled]
+        return doc
+
+    _write_vector(
+        "ok-chain-quoted-bridge",
+        _log_edit(chain_pack, _quoted_bridge_member),
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "ok",
+            "detail_contains": ["prior signed head(s)"],
+            "js": {"bundle_ok": True, "verdict": "ok"},
+            "note": "a member's signed extends.first spelled as a digit "
+            "string — signed material is evaluated with JS-mirrored "
+            "coercion, so the quoted hop is legal on every surface",
+        },
+    )
+
+    def _nonhex_root_member(doc: dict) -> dict:
+        # 64 chars but not hex — a len()==64 gate alone would pass it, then
+        # Python's decode-and-skip vs the browser's string compare would
+        # deliver different verdicts on one artifact. Strict hex at intake.
+        doc = dict(doc)
+        mp = dict(doc["chain"][0]["payload"])
+        forged = engine.signer.issue(
+            visit_id=f"log-nonhex:{mp['tree_size']}",
+            sequence=1,
+            prev_hash=None,
+            facts={
+                "record_type": "log_checkpoint",
+                "tree_size": mp["tree_size"],
+                "root_sha256": "zz" * 32,
+                "journal_head": "ab" * 32,
+            },
+        ).model_dump(mode="json")
+        doc["chain"] = [m for m in doc["chain"] if m["payload"]["tree_size"] != mp["tree_size"]] + [forged]
+        return doc
+
+    _write_vector(
+        "fail-chain-nonhex-root",
+        _log_edit(chain_pack, _nonhex_root_member),
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "fail",
+            "detail_contains": ["malformed or non-prior head"],
+            "js": {"bundle_ok": True, "verdict": "fail"},
+            "note": "a 64-char non-hex member root — the strictest spelling "
+            "wins on every surface, so the pack fails closed at intake "
+            "instead of diverging mid-walk",
+        },
+    )
+
     # --- a cosigned checkpoint: the witness attestation riding the pack ---
     def _attach_cosig(doc: dict) -> dict:
         from attest.ledger import Signer

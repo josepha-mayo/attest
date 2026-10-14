@@ -1239,8 +1239,12 @@ async function checkLog(byName,trustedSet,refs,bad,ok){
         bad(`log_checkpoint.json: chain member ${esc(rid)}… signed outside the issuer lineage`);return;}
       const rc=await checkReceipt(cNodes[i]);
       if(!rc.ok){bad(`log_checkpoint.json: chain member ${esc(rid)}… ${esc(rc.why)}`);return;}
-      const ms=mp.tree_size,mr=mp.root_sha256;
-      if(!Number.isInteger(ms)||ms<1||ms>=size||typeof mr!=="string"||mr.length!==64){
+      /* _pyHex normalizes to lowercase AND rejects non-hex — the Python side
+         decodes to bytes for the same checks, so dedupe/compare ride the
+         canonical spelling on every surface (a case variant is the same
+         head; a 64-char non-hex spelling fails closed). */
+      const ms=mp.tree_size,mr=_pyHex(mp.root_sha256);
+      if(!Number.isInteger(ms)||ms<1||ms>=size||mr===null){
         bad(`log_checkpoint.json: chain member ${esc(rid)}… carries a malformed or non-prior head`);return;}
       if((await _extOk(mp))===false){
         bad(`log_checkpoint.json: chain member ${esc(rid)}… signs a bridge it cannot prove`);return;}
@@ -1481,7 +1485,7 @@ async function verifyFiles(files){
            embeds so two packs reconcile offline. Same closed discipline as
            the pack path — signed log_checkpoint receipts inside the issuer
            lineage, strictly below the doc's head, one root per size. */
-        const chainArr=[];
+        const chainArr=[],sizeIds=new Map();
         const chain=r.chain;
         if(chain!==undefined&&chain!==null){
           if(!Array.isArray(chain)||chain.length>64)
@@ -1503,14 +1507,18 @@ async function verifyFiles(files){
                 say("bad",`chain member ${esc(cid)}… signed by a key outside the issuer lineage`);continue;}
               const mrc=await checkReceipt(cNodes[i]);
               if(!mrc.ok){say("bad",`chain member ${esc(cid)}… invalid: ${esc(mrc.why)}`);continue;}
-              const ms=cp2.tree_size,mr=cp2.root_sha256;
-              if(!Number.isInteger(ms)||ms<1||ms>=size||typeof mr!=="string"||mr.length!==64){
+              /* _pyHex normalizes + rejects non-hex — the Python side decodes
+                 to bytes for the same gate, so both surfaces dedupe on the
+                 canonical spelling (case variant = same head; non-hex fails). */
+              const ms=cp2.tree_size,mr=_pyHex(cp2.root_sha256);
+              if(!Number.isInteger(ms)||ms<1||ms>=size||mr===null){
                 say("bad",`chain member ${esc(cid)}… carries a malformed or non-prior head`);continue;}
               if((await _extOk(cp2))===false){
                 say("bad",`chain member ${esc(cid)}… signs a bridge it cannot prove`);continue;}
               if(seenSize.has(ms)&&seenSize.get(ms)!==mr){
                 say("bad",`chain carries two signed heads at size ${ms}`);continue;}
               seenSize.set(ms,mr);
+              sizeIds.set(ms,cr.id);
               chainArr.push({size:ms,root:mr,payload:cp2});
             }
             if(chainArr.length)
@@ -1523,9 +1531,19 @@ async function verifyFiles(files){
           say("bad","checkpoint's embedded `extends` bridge does not verify — "
             +"the signed head attests a history it cannot prove");
         else if(selfExt===true){
-          const e=cpay.extends||{};
-          say("ok",`embedded bridge extends checkpoint `
-            +`${esc(String(e.checkpoint_id||"").slice(0,16))}… from size ${esc(String(e.first))}`);
+          /* The bridge's cryptographic claim is (size, root, proof) — its
+             checkpoint_id label is signed text but only verifiable against a
+             chain member at that size. Report bound/named/mismatched. */
+          const e=cpay.extends||{},cid=e.checkpoint_id?String(e.checkpoint_id):"",
+            ef=e.first===undefined?null:_pyInt(e.first),
+            mid=ef===null?undefined:sizeIds.get(ef);
+          let line=`embedded bridge provably reaches size ${esc(String(e.first))}`;
+          if(cid&&mid!==undefined&&mid===cid)line+=` (checkpoint ${esc(cid.slice(0,16))}…)`;
+          else if(cid&&mid!==undefined)line+=` — NOTE: names checkpoint ${esc(cid.slice(0,16))}… `
+            +`but the signed chain member at that size is ${esc(String(mid).slice(0,16))}… `
+            +`(inconsistent label; the size+root binding still verifies)`;
+          else if(cid)line+=` (names checkpoint ${esc(cid.slice(0,16))}…)`;
+          say("ok",line);
         }
         const {cosigs,anchored}=await _cosigReport(node,r,cp.id,size,rootHex,allowed,
           m=>say("bad",m));

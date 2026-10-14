@@ -1,0 +1,13 @@
+{
+  "kind": "case",
+  "pin": "declared",
+  "verdict": "ok",
+  "detail_contains": [
+    "prior signed head(s)"
+  ],
+  "js": {
+    "bundle_ok": true,
+    "verdict": "ok"
+  },
+  "note": "two members carry the SAME head at one size, spelled upper- and lower-case \u2014 one head, not a collision; every surface dedupes on the decoded root"
+}

@@ -20,6 +20,11 @@
   "note": "a chain member signed by a foreign key — the walk could never trust a bridge it names, so the pack fails closed"
  },
  {
+  "name": "fail-chain-nonhex-root",
+  "verdict": "fail",
+  "note": "a 64-char non-hex member root — the strictest spelling wins on every surface, so the pack fails closed at intake instead of diverging mid-walk"
+ },
+ {
   "name": "fail-doctored-verifier",
   "verdict": "fail",
   "note": "a post-export edit to verify_case.py — membership checks names, only the signed pin checks the bytes"
@@ -123,6 +128,16 @@
   "name": "fail-wrong-pin",
   "verdict": "fail",
   "note": "pinning an unrelated key must not bless the pack"
+ },
+ {
+  "name": "ok-chain-case-roots",
+  "verdict": "ok",
+  "note": "two members carry the SAME head at one size, spelled upper- and lower-case — one head, not a collision; every surface dedupes on the decoded root"
+ },
+ {
+  "name": "ok-chain-quoted-bridge",
+  "verdict": "ok",
+  "note": "a member's signed extends.first spelled as a digit string — signed material is evaluated with JS-mirrored coercion, so the quoted hop is legal on every surface"
  },
  {
   "name": "ok-checkpoint-chain",

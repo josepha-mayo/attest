@@ -1,0 +1,13 @@
+{
+  "kind": "case",
+  "pin": "declared",
+  "verdict": "ok",
+  "detail_contains": [
+    "prior signed head(s)"
+  ],
+  "js": {
+    "bundle_ok": true,
+    "verdict": "ok"
+  },
+  "note": "a member's signed extends.first spelled as a digit string \u2014 signed material is evaluated with JS-mirrored coercion, so the quoted hop is legal on every surface"
+}

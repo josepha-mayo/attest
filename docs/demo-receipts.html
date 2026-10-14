@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1l6 2v5c0 3.5-2.6 6-6 7-3.4-1-6-3.5-6-7V3z' fill='%231c1c1e'/%3E%3Cpath d='M4.6 8.2l2.2 2.2 4.6-4.9' stroke='%23fff' stroke-width='1.5' fill='none'/%3E%3C/svg%3E">
 <title>Signed receipts — the raw layer · Attest</title>
-<meta name="description" content="All 313 signed receipts of the demo story, drawn as the hash chain itself — each a one-click browser verification.">
+<meta name="description" content="All 325 signed receipts of the demo story, drawn as the hash chain itself — each a one-click browser verification.">
 <meta property="og:title" content="Signed receipts — the raw layer · Attest">
-<meta property="og:description" content="All 313 signed receipts of the demo story, drawn as the hash chain itself — each a one-click browser verification.">
+<meta property="og:description" content="All 325 signed receipts of the demo story, drawn as the hash chain itself — each a one-click browser verification.">
 <meta property="og:type" content="website">
 
 <style>
@@ -31,20 +31,20 @@ clip:rect(0 0 0 0);white-space:nowrap}
 </head>
 <body>
 <main>
-<p class="snap"><strong>Static snapshot.</strong> These are the 313 signed receipts of
+<p class="snap"><strong>Static snapshot.</strong> These are the 325 signed receipts of
 the simulated <em>Alvarez residence</em> deployment — the raw signed layer every
 other surface derives from. Fetched from a live <code>attest demo</code> runtime's
 <code>/receipts.json</code> surface; served here as static files. Nothing was
 rewritten — bytes are the exact signed payloads.</p>
 <h1>Signed receipts — the raw layer</h1>
-<p class="sum"><strong>313 receipts</strong> across 9 visits and
-2 issuer keys (a mid-history rotation — both lineages verify): 99 case_export · 99 verifier_manifest · 99 log_checkpoint · 9 visit_record · 2 coverage_attestation · 1 verification_report · 1 period_digest · 1 key_rotation · 1 key_adoption · 1 key_revocation.</p>
+<p class="sum"><strong>325 receipts</strong> across 9 visits and
+2 issuer keys (a mid-history rotation — both lineages verify): 103 case_export · 103 verifier_manifest · 103 log_checkpoint · 9 visit_record · 2 coverage_attestation · 1 verification_report · 1 period_digest · 1 key_rotation · 1 key_adoption · 1 key_revocation.</p>
 <figure style="margin:.8rem 0;overflow-x:auto"><figcaption class="small">
 <strong>The chain, literally.</strong> Each node is a receipt; every edge is a
-<code>prev_hash</code> link — all 312 verify. Hover a node for its id, type,
+<code>prev_hash</code> link — all 324 verify. Hover a node for its id, type,
 sequence, and issue time; click it to verify that receipt in your browser ·
 <a href="chain.svg">open the SVG alone</a> to zoom.</figcaption>
-<svg viewBox="0 0 672 1799" xmlns="http://www.w3.org/2000/svg" role="group" aria-label="Hash chain of the 313 signed receipts">
+<svg viewBox="0 0 672 1851" xmlns="http://www.w3.org/2000/svg" role="group" aria-label="Hash chain of the 325 signed receipts">
 <line x1="57" y1="52" x2="119" y2="52" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
 <line x1="119" y1="52" x2="181" y2="52" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
 <line x1="181" y1="52" x2="243" y2="52" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
@@ -357,27 +357,39 @@ sequence, and issue time; click it to verify that receipt in your browser ·
 <line x1="615" y1="1612" x2="615" y2="1664" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
 <line x1="615" y1="1664" x2="553" y2="1664" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
 <line x1="553" y1="1664" x2="491" y2="1664" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="491" y1="1664" x2="429" y2="1664" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="429" y1="1664" x2="367" y2="1664" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="367" y1="1664" x2="305" y2="1664" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="305" y1="1664" x2="243" y2="1664" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="243" y1="1664" x2="181" y2="1664" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="181" y1="1664" x2="119" y2="1664" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="119" y1="1664" x2="57" y2="1664" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="57" y1="1664" x2="57" y2="1716" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="57" y1="1716" x2="119" y2="1716" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="119" y1="1716" x2="181" y2="1716" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="181" y1="1716" x2="243" y2="1716" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="243" y1="1716" x2="305" y2="1716" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
 <g font-family="system-ui,sans-serif" font-size="11">
-<rect x="26" y="1747" width="9" height="9" rx="2" fill="#7c3aed"/>
-<text x="38" y="1755" fill="#475569">case_export</text>
-<rect x="154" y="1747" width="9" height="9" rx="2" fill="#94a3b8"/>
-<text x="166" y="1755" fill="#475569">verifier_manifest</text>
-<rect x="282" y="1747" width="9" height="9" rx="2" fill="#0d9488"/>
-<text x="294" y="1755" fill="#475569">log_checkpoint</text>
-<rect x="410" y="1747" width="9" height="9" rx="2" fill="#2563eb"/>
-<text x="422" y="1755" fill="#475569">visit_record</text>
-<rect x="538" y="1747" width="9" height="9" rx="2" fill="#d97706"/>
-<text x="550" y="1755" fill="#475569">coverage_attestation</text>
-<rect x="26" y="1769" width="9" height="9" rx="2" fill="#16a34a"/>
-<text x="38" y="1777" fill="#475569">verification_report</text>
-<rect x="154" y="1769" width="9" height="9" rx="2" fill="#db2777"/>
-<text x="166" y="1777" fill="#475569">period_digest</text>
-<rect x="282" y="1769" width="9" height="9" rx="2" fill="#dc2626"/>
-<text x="294" y="1777" fill="#475569">key_rotation</text>
-<rect x="410" y="1769" width="9" height="9" rx="2" fill="#ea580c"/>
-<text x="422" y="1777" fill="#475569">key_adoption</text>
-<rect x="538" y="1769" width="9" height="9" rx="2" fill="#991b1b"/>
-<text x="550" y="1777" fill="#475569">key_revocation</text>
+<rect x="26" y="1799" width="9" height="9" rx="2" fill="#7c3aed"/>
+<text x="38" y="1807" fill="#475569">case_export</text>
+<rect x="154" y="1799" width="9" height="9" rx="2" fill="#94a3b8"/>
+<text x="166" y="1807" fill="#475569">verifier_manifest</text>
+<rect x="282" y="1799" width="9" height="9" rx="2" fill="#0d9488"/>
+<text x="294" y="1807" fill="#475569">log_checkpoint</text>
+<rect x="410" y="1799" width="9" height="9" rx="2" fill="#2563eb"/>
+<text x="422" y="1807" fill="#475569">visit_record</text>
+<rect x="538" y="1799" width="9" height="9" rx="2" fill="#d97706"/>
+<text x="550" y="1807" fill="#475569">coverage_attestation</text>
+<rect x="26" y="1821" width="9" height="9" rx="2" fill="#16a34a"/>
+<text x="38" y="1829" fill="#475569">verification_report</text>
+<rect x="154" y="1821" width="9" height="9" rx="2" fill="#db2777"/>
+<text x="166" y="1829" fill="#475569">period_digest</text>
+<rect x="282" y="1821" width="9" height="9" rx="2" fill="#dc2626"/>
+<text x="294" y="1829" fill="#475569">key_rotation</text>
+<rect x="410" y="1821" width="9" height="9" rx="2" fill="#ea580c"/>
+<text x="422" y="1829" fill="#475569">key_adoption</text>
+<rect x="538" y="1821" width="9" height="9" rx="2" fill="#991b1b"/>
+<text x="550" y="1829" fill="#475569">key_revocation</text>
 </g>
 <a href="verify.html#demo-receipts/rcpt_12c9510dfc604236b880b034fce4af7e"><rect x="48" y="43" width="18" height="18" rx="4" fill="#2563eb" stroke="#fff" stroke-width="1.2"><title>rcpt_12c9510dfc604236b880b034fce4af7e · visit_record · seq 1 · 2026-10-09T18:06:04.725773Z</title></rect></a>
 <a href="verify.html#demo-receipts/rcpt_8af58f6242d04e13a94147ddc2c70a19"><rect x="110" y="43" width="18" height="18" rx="4" fill="#2563eb" stroke="#fff" stroke-width="1.2"><title>rcpt_8af58f6242d04e13a94147ddc2c70a19 · visit_record · seq 2 · 2026-10-09T18:06:05.909358Z</title></rect></a>
@@ -692,6 +704,18 @@ sequence, and issue time; click it to verify that receipt in your browser ·
 <a href="verify.html#demo-receipts/rcpt_489d4468d91443698c72fc34da0ac806"><rect x="606" y="1655" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_489d4468d91443698c72fc34da0ac806 · case_export · seq 311 · 2026-10-14T15:45:42.722037Z</title></rect></a>
 <a href="verify.html#demo-receipts/rcpt_82b7ad6e4409497c96e217d1c040283b"><rect x="544" y="1655" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_82b7ad6e4409497c96e217d1c040283b · verifier_manifest · seq 312 · 2026-10-14T15:45:42.739820Z</title></rect></a>
 <a href="verify.html#demo-receipts/rcpt_5736d4f6c7044fd298b5c6a8bba45157"><rect x="482" y="1655" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_5736d4f6c7044fd298b5c6a8bba45157 · log_checkpoint · seq 313 · 2026-10-14T15:45:42.768263Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_d4ae2043955a4234b2a4767057972b86"><rect x="420" y="1655" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_d4ae2043955a4234b2a4767057972b86 · case_export · seq 314 · 2026-10-14T16:35:54.386909Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_fe5c577eabd54a3ebe3fcab26f0be90e"><rect x="358" y="1655" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_fe5c577eabd54a3ebe3fcab26f0be90e · verifier_manifest · seq 315 · 2026-10-14T16:35:54.401547Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_016d2db95da146359bb9df4cc65578e2"><rect x="296" y="1655" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_016d2db95da146359bb9df4cc65578e2 · log_checkpoint · seq 316 · 2026-10-14T16:35:54.418666Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_b540dedf9c584e4080f6345e0b49ef5d"><rect x="234" y="1655" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_b540dedf9c584e4080f6345e0b49ef5d · case_export · seq 317 · 2026-10-14T16:35:58.448123Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_7f5ea58379de49379c8c82e16de80e9c"><rect x="172" y="1655" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_7f5ea58379de49379c8c82e16de80e9c · verifier_manifest · seq 318 · 2026-10-14T16:35:58.463228Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_411127e3523943968c59e1200b733290"><rect x="110" y="1655" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_411127e3523943968c59e1200b733290 · log_checkpoint · seq 319 · 2026-10-14T16:35:58.481935Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_951dfc87a0cb40b982deb9066c124832"><rect x="48" y="1655" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_951dfc87a0cb40b982deb9066c124832 · case_export · seq 320 · 2026-10-14T16:35:59.914562Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_5901fe699c544516be33b9d3b5ede390"><rect x="48" y="1707" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_5901fe699c544516be33b9d3b5ede390 · verifier_manifest · seq 321 · 2026-10-14T16:35:59.931001Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_3daee1d2e9594c7ea3031c6b3f9417ca"><rect x="110" y="1707" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_3daee1d2e9594c7ea3031c6b3f9417ca · log_checkpoint · seq 322 · 2026-10-14T16:35:59.953781Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_f9c9cc014af04fe4b97ea5baeb87630b"><rect x="172" y="1707" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_f9c9cc014af04fe4b97ea5baeb87630b · case_export · seq 323 · 2026-10-14T16:36:01.214834Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_7c00a2a8478d47ef93104762edbcb956"><rect x="234" y="1707" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_7c00a2a8478d47ef93104762edbcb956 · verifier_manifest · seq 324 · 2026-10-14T16:36:01.229329Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_22adac770ee5442eb3e249b6ce011cbb"><rect x="296" y="1707" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_22adac770ee5442eb3e249b6ce011cbb · log_checkpoint · seq 325 · 2026-10-14T16:36:01.248323Z</title></rect></a>
 </svg>
 </figure>
 <p>Every row is a self-contained Ed25519-signed receipt. <strong>verify →</strong>
@@ -1016,10 +1040,22 @@ fetchable — the bytes are what was signed, not a rendering of them.</p>
 <tr><th scope="row"><a href="demo-receipts/rcpt_489d4468d91443698c72fc34da0ac806.json"><code>rcpt_489d4468d91443698c72fc34da0ac806</code></a></th><td>case_export</td><td><code>export:site_a55d249ad6dd:f197691061f1af24</code></td><td>2026-10-14 15:45:42.722037Z</td><td><a class="plink" href="verify.html#demo-receipts/rcpt_489d4468d91443698c72fc34da0ac806" aria-label="verify receipt rcpt_489d4468d91443698c72fc34da0ac806 in the browser verifier">verify →</a></td></tr>
 <tr><th scope="row"><a href="demo-receipts/rcpt_82b7ad6e4409497c96e217d1c040283b.json"><code>rcpt_82b7ad6e4409497c96e217d1c040283b</code></a></th><td>verifier_manifest</td><td><code>export-tools:a6bb64587ddafa02</code></td><td>2026-10-14 15:45:42.739820Z</td><td><a class="plink" href="verify.html#demo-receipts/rcpt_82b7ad6e4409497c96e217d1c040283b" aria-label="verify receipt rcpt_82b7ad6e4409497c96e217d1c040283b in the browser verifier">verify →</a></td></tr>
 <tr><th scope="row"><a href="demo-receipts/rcpt_5736d4f6c7044fd298b5c6a8bba45157.json"><code>rcpt_5736d4f6c7044fd298b5c6a8bba45157</code></a></th><td>log_checkpoint</td><td><code>log:214:1fcae500b98fcccb</code></td><td>2026-10-14 15:45:42.768263Z</td><td><a class="plink" href="verify.html#demo-receipts/rcpt_5736d4f6c7044fd298b5c6a8bba45157" aria-label="verify receipt rcpt_5736d4f6c7044fd298b5c6a8bba45157 in the browser verifier">verify →</a></td></tr>
+<tr><th scope="row"><a href="demo-receipts/rcpt_d4ae2043955a4234b2a4767057972b86.json"><code>rcpt_d4ae2043955a4234b2a4767057972b86</code></a></th><td>case_export</td><td><code>export:site_a55d249ad6dd:76e405ee6aadab4b</code></td><td>2026-10-14 16:35:54.386909Z</td><td><a class="plink" href="verify.html#demo-receipts/rcpt_d4ae2043955a4234b2a4767057972b86" aria-label="verify receipt rcpt_d4ae2043955a4234b2a4767057972b86 in the browser verifier">verify →</a></td></tr>
+<tr><th scope="row"><a href="demo-receipts/rcpt_fe5c577eabd54a3ebe3fcab26f0be90e.json"><code>rcpt_fe5c577eabd54a3ebe3fcab26f0be90e</code></a></th><td>verifier_manifest</td><td><code>export-tools:b642cafa73e29483</code></td><td>2026-10-14 16:35:54.401547Z</td><td><a class="plink" href="verify.html#demo-receipts/rcpt_fe5c577eabd54a3ebe3fcab26f0be90e" aria-label="verify receipt rcpt_fe5c577eabd54a3ebe3fcab26f0be90e in the browser verifier">verify →</a></td></tr>
+<tr><th scope="row"><a href="demo-receipts/rcpt_016d2db95da146359bb9df4cc65578e2.json"><code>rcpt_016d2db95da146359bb9df4cc65578e2</code></a></th><td>log_checkpoint</td><td><code>log:216:a2537bba980c2224</code></td><td>2026-10-14 16:35:54.418666Z</td><td><a class="plink" href="verify.html#demo-receipts/rcpt_016d2db95da146359bb9df4cc65578e2" aria-label="verify receipt rcpt_016d2db95da146359bb9df4cc65578e2 in the browser verifier">verify →</a></td></tr>
+<tr><th scope="row"><a href="demo-receipts/rcpt_b540dedf9c584e4080f6345e0b49ef5d.json"><code>rcpt_b540dedf9c584e4080f6345e0b49ef5d</code></a></th><td>case_export</td><td><code>export:site_a55d249ad6dd:350fcf1ba91ea8c8</code></td><td>2026-10-14 16:35:58.448123Z</td><td><a class="plink" href="verify.html#demo-receipts/rcpt_b540dedf9c584e4080f6345e0b49ef5d" aria-label="verify receipt rcpt_b540dedf9c584e4080f6345e0b49ef5d in the browser verifier">verify →</a></td></tr>
+<tr><th scope="row"><a href="demo-receipts/rcpt_7f5ea58379de49379c8c82e16de80e9c.json"><code>rcpt_7f5ea58379de49379c8c82e16de80e9c</code></a></th><td>verifier_manifest</td><td><code>export-tools:8d4d833d946f6609</code></td><td>2026-10-14 16:35:58.463228Z</td><td><a class="plink" href="verify.html#demo-receipts/rcpt_7f5ea58379de49379c8c82e16de80e9c" aria-label="verify receipt rcpt_7f5ea58379de49379c8c82e16de80e9c in the browser verifier">verify →</a></td></tr>
+<tr><th scope="row"><a href="demo-receipts/rcpt_411127e3523943968c59e1200b733290.json"><code>rcpt_411127e3523943968c59e1200b733290</code></a></th><td>log_checkpoint</td><td><code>log:218:0b873ca36bf223e7</code></td><td>2026-10-14 16:35:58.481935Z</td><td><a class="plink" href="verify.html#demo-receipts/rcpt_411127e3523943968c59e1200b733290" aria-label="verify receipt rcpt_411127e3523943968c59e1200b733290 in the browser verifier">verify →</a></td></tr>
+<tr><th scope="row"><a href="demo-receipts/rcpt_951dfc87a0cb40b982deb9066c124832.json"><code>rcpt_951dfc87a0cb40b982deb9066c124832</code></a></th><td>case_export</td><td><code>export:site_a55d249ad6dd:ad08a16d0e62c082</code></td><td>2026-10-14 16:35:59.914562Z</td><td><a class="plink" href="verify.html#demo-receipts/rcpt_951dfc87a0cb40b982deb9066c124832" aria-label="verify receipt rcpt_951dfc87a0cb40b982deb9066c124832 in the browser verifier">verify →</a></td></tr>
+<tr><th scope="row"><a href="demo-receipts/rcpt_5901fe699c544516be33b9d3b5ede390.json"><code>rcpt_5901fe699c544516be33b9d3b5ede390</code></a></th><td>verifier_manifest</td><td><code>export-tools:af4e7a462cd75487</code></td><td>2026-10-14 16:35:59.931001Z</td><td><a class="plink" href="verify.html#demo-receipts/rcpt_5901fe699c544516be33b9d3b5ede390" aria-label="verify receipt rcpt_5901fe699c544516be33b9d3b5ede390 in the browser verifier">verify →</a></td></tr>
+<tr><th scope="row"><a href="demo-receipts/rcpt_3daee1d2e9594c7ea3031c6b3f9417ca.json"><code>rcpt_3daee1d2e9594c7ea3031c6b3f9417ca</code></a></th><td>log_checkpoint</td><td><code>log:220:0edd709cab212b67</code></td><td>2026-10-14 16:35:59.953781Z</td><td><a class="plink" href="verify.html#demo-receipts/rcpt_3daee1d2e9594c7ea3031c6b3f9417ca" aria-label="verify receipt rcpt_3daee1d2e9594c7ea3031c6b3f9417ca in the browser verifier">verify →</a></td></tr>
+<tr><th scope="row"><a href="demo-receipts/rcpt_f9c9cc014af04fe4b97ea5baeb87630b.json"><code>rcpt_f9c9cc014af04fe4b97ea5baeb87630b</code></a></th><td>case_export</td><td><code>export:site_a55d249ad6dd:9a75307fc42f2c0e</code></td><td>2026-10-14 16:36:01.214834Z</td><td><a class="plink" href="verify.html#demo-receipts/rcpt_f9c9cc014af04fe4b97ea5baeb87630b" aria-label="verify receipt rcpt_f9c9cc014af04fe4b97ea5baeb87630b in the browser verifier">verify →</a></td></tr>
+<tr><th scope="row"><a href="demo-receipts/rcpt_7c00a2a8478d47ef93104762edbcb956.json"><code>rcpt_7c00a2a8478d47ef93104762edbcb956</code></a></th><td>verifier_manifest</td><td><code>export-tools:a288a38321d83b82</code></td><td>2026-10-14 16:36:01.229329Z</td><td><a class="plink" href="verify.html#demo-receipts/rcpt_7c00a2a8478d47ef93104762edbcb956" aria-label="verify receipt rcpt_7c00a2a8478d47ef93104762edbcb956 in the browser verifier">verify →</a></td></tr>
+<tr><th scope="row"><a href="demo-receipts/rcpt_22adac770ee5442eb3e249b6ce011cbb.json"><code>rcpt_22adac770ee5442eb3e249b6ce011cbb</code></a></th><td>log_checkpoint</td><td><code>log:222:3df0dfd1858db010</code></td><td>2026-10-14 16:36:01.248323Z</td><td><a class="plink" href="verify.html#demo-receipts/rcpt_22adac770ee5442eb3e249b6ce011cbb" aria-label="verify receipt rcpt_22adac770ee5442eb3e249b6ce011cbb in the browser verifier">verify →</a></td></tr>
 </tbody>
 </table></div>
 <p class="small">Back to the <a href="index.html">landing page</a> ·
-<a href="demo-receipts.json">all 313 as one JSON array</a> ·
+<a href="demo-receipts.json">all 325 as one JSON array</a> ·
 <a href="verify.html">the verifier</a> ·
 <a href="story.html">the story these receipts tell</a></p>
 </main>

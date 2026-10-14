@@ -1,0 +1,13 @@
+{
+  "kind": "case",
+  "pin": "declared",
+  "verdict": "fail",
+  "detail_contains": [
+    "malformed or non-prior head"
+  ],
+  "js": {
+    "bundle_ok": true,
+    "verdict": "fail"
+  },
+  "note": "a 64-char non-hex member root \u2014 the strictest spelling wins on every surface, so the pack fails closed at intake instead of diverging mid-walk"
+}

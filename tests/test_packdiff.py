@@ -758,3 +758,127 @@ def test_diff_notes_when_only_one_export_carries_a_checkpoint(
     lines, anomalies = diff(without, with_log)
     text = "\n".join(lines)
     assert "only the new export carries a transparency checkpoint" in text
+
+
+def test_diff_chain_quoted_bridge_first_still_walks(engine, store, household, schedule, t0, tmp_path):
+    """Parity fix: a member whose signed `extends.first` is spelled as a
+    digit STRING coerces on every surface (verify_extends/_extOk accept it),
+    so the multi-hop walk must follow it too — a strict isinstance gate
+    would dead-end Python where the browser still walks. The signed member
+    is real: the issuer's key signs the quoted spelling itself."""
+    import zipfile as _zf
+
+    service = ReviewService(store, engine.signer, engine.clock)
+    site = store.sites()[0]
+    v1 = _visit(engine, household, t0)
+    first = _case_with_log(engine, store, tmp_path, site, service, [v1])
+    v2 = _visit(engine, household, t0, offset=90)
+    engine.issue_log_checkpoint()
+    v3 = _visit(engine, household, t0, offset=180)
+    third = _case_with_log(engine, store, tmp_path, site, service, [v1, v2, v3])
+
+    with _zf.ZipFile(third) as z:
+        doc = json.loads(z.read("log_checkpoint.json"))
+    # The walk only visits the member the HEAD's bridge names — respell the
+    # `extends.first` of exactly that member (the mid-walk hop) as a string
+    # and have the issuer sign the respelled payload.
+    head_ext = doc["checkpoint"]["payload"].get("extends") or {}
+    hop_size = head_ext.get("first")
+    target = next((m for m in doc["chain"] if m["payload"].get("tree_size") == hop_size), None)
+    assert target is not None, "expected the head's bridge target to ride in the chain"
+    payload = {
+        k: v
+        for k, v in json.loads(json.dumps(target["payload"])).items()
+        if k not in ("schema", "sequence", "prev_hash", "receipt_id", "issued_at", "visit_id")
+    }
+    payload["extends"]["first"] = str(payload["extends"]["first"])
+    prev = store.latest_receipt()
+    respelled = engine.signer.issue(
+        visit_id=f"log-quoted:{payload['tree_size']}",
+        sequence=prev.sequence + 1,
+        prev_hash=prev.payload_hash,
+        facts=payload,
+    ).model_dump(mode="json")
+    doc["chain"] = [m for m in doc["chain"] if m["payload"].get("tree_size") != payload["tree_size"]] + [
+        respelled
+    ]
+    quoted = _rewrite_member(third, "log_checkpoint.json", json.dumps(doc).encode(), tmp_path)
+
+    lines, anomalies = diff(first, quoted)
+    text = "\n".join(lines)
+    assert anomalies == 0, text
+    assert "signed checkpoint hop(s) verified" in text, text
+
+
+def test_check_log_rejects_nonhex_and_accepts_case_variant_roots(
+    engine, store, household, schedule, t0, tmp_path
+):
+    """Parity fixes: a member root must decode to 32 bytes — a 64-char
+    NON-HEX spelling passed the old len()==64 gate and diverged (Python
+    walked past it as undecidable, the browser convicted a fork). And two
+    members at one size whose roots differ only in hex CASE are the same
+    bytes — same head, not a collision."""
+    import zipfile as _zf
+
+    service = ReviewService(store, engine.signer, engine.clock)
+    site = store.sites()[0]
+    v1 = _visit(engine, household, t0)
+    engine.issue_log_checkpoint()  # a PRIOR checkpoint must exist for `chain`
+    v2 = _visit(engine, household, t0, offset=90)
+    pack = _case_with_log(engine, store, tmp_path, site, service, [v1, v2])
+
+    from attest.packdiff import check_log_pin
+
+    with _zf.ZipFile(pack) as z:
+        doc = json.loads(z.read("log_checkpoint.json"))
+        member_ids = []
+        for n in z.namelist():
+            if n.startswith("attestations/"):
+                att = json.loads(z.read(n))
+                member_ids.append((att["id"], att["payload_hash"], att["public_key"]))
+    assert doc.get("chain"), "export should embed prior signed heads"
+    trusted = {doc["checkpoint"]["public_key"]}
+
+    def run(d):
+        raw = json.dumps(d).encode()
+        return check_log_pin(lambda n: raw if n == "log_checkpoint.json" else None, member_ids, trusted)
+
+    def signed_member(facts):
+        prev = store.latest_receipt()
+        return engine.signer.issue(
+            visit_id=f"log-variant:{facts['tree_size']}:{len(facts['root_sha256'])}",
+            sequence=prev.sequence + 1,
+            prev_hash=prev.payload_hash,
+            facts=facts,
+        ).model_dump(mode="json")
+
+    # 64 chars but not hex — the strictest spelling (the browser's regex)
+    # wins everywhere now: fail closed at intake.
+    base = doc["chain"][0]["payload"]
+    badhex = dict(doc)
+    badhex["chain"] = [
+        signed_member(
+            {
+                "record_type": "log_checkpoint",
+                "tree_size": base["tree_size"],
+                "root_sha256": "zz" * 32,
+                "journal_head": store.journal_head(),
+            }
+        )
+    ]
+    res, err = run(badhex)
+    assert res is None and "malformed or non-prior head" in err, err
+
+    # Same bytes, upper-case spelling — one head, not two.
+    upper = dict(doc)
+    member = signed_member(
+        {
+            "record_type": "log_checkpoint",
+            "tree_size": base["tree_size"],
+            "root_sha256": base["root_sha256"].upper(),
+            "journal_head": store.journal_head(),
+        }
+    )
+    upper["chain"] = [m for m in doc["chain"]] + [member]
+    res2, err2 = run(upper)
+    assert err2 is None and res2 is not None, err2

@@ -732,10 +732,14 @@ def check_log(pack_dir, trusted, receipts):
         for raw in chain:
             if not isinstance(raw, dict):
                 sys.exit("FAIL log_checkpoint.json: chain member malformed")
-            rid = str(raw.get("id") or "?")[:24]
-            if rid in seen_cids:
+            # Dedupe on the FULL id — truncating it to 24 chars would convict
+            # two distinct members whose ids share a prefix (fail-closed,
+            # but wrong; every other surface compares the whole id).
+            rid_raw = raw.get("id")
+            rid = str(rid_raw or "?")[:24]
+            if rid_raw in seen_cids:
                 sys.exit(f"FAIL log_checkpoint.json: chain member {rid}… listed twice")
-            seen_cids.add(rid)
+            seen_cids.add(rid_raw)
             mp = raw.get("payload")
             if not isinstance(mp, dict) or mp.get("record_type") != "log_checkpoint":
                 sys.exit(
@@ -754,12 +758,8 @@ def check_log(pack_dir, trusted, receipts):
             if not ok:
                 sys.exit(f"FAIL log_checkpoint.json: chain member {rid}… invalid: {why}")
             msize, mroot = mp.get("tree_size"), mp.get("root_sha256")
-            if (
-                not _is_int(msize)
-                or not 1 <= msize < size
-                or not isinstance(mroot, str)
-                or len(mroot) != 64
-            ):
+            mroot_b = _hex32(mroot)
+            if not _is_int(msize) or not 1 <= msize < size or mroot_b is None:
                 sys.exit(
                     f"FAIL log_checkpoint.json: chain member {rid}… "
                     "carries a malformed or non-prior head"
@@ -769,12 +769,12 @@ def check_log(pack_dir, trusted, receipts):
                     f"FAIL log_checkpoint.json: chain member {rid}… "
                     "signs a bridge it cannot prove"
                 )
-            if msize in seen_sizes and seen_sizes[msize] != mroot.lower():
+            if msize in seen_sizes and seen_sizes[msize] != mroot_b:
                 sys.exit(
                     f"FAIL log_checkpoint.json: chain carries two signed heads "
                     f"at size {msize}"
                 )
-            seen_sizes[msize] = mroot.lower()
+            seen_sizes[msize] = mroot_b
             chain_n += 1
     # CLI _verify_log_doc parity: every proofs entry must verify — a junk
     # entry referencing nothing is a lie, not decoration.

@@ -1590,6 +1590,7 @@ def _verify_log_doc(
         # inside the issuer lineage, strictly below the doc's head, one root
         # per tree size.
         chain = data.get("chain")
+        size_ids: dict[int, str] = {}
         if chain is not None:
             if not isinstance(chain, list) or len(chain) > 64:
                 fail(
@@ -1597,7 +1598,7 @@ def _verify_log_doc(
                     kind="log_checkpoint",
                 )
             seen_cids: set[str] = set()
-            seen_sizes: dict[int, str] = {}
+            seen_sizes: dict[int, bytes] = {}
             for raw in chain:
                 try:
                     mr = Receipt.model_validate(raw)
@@ -1621,12 +1622,11 @@ def _verify_log_doc(
                 if not ok:
                     fail(f"chain member {mr.id[:24]}… invalid: {why}", kind="log_checkpoint")
                 msize, mroot = mp.get("tree_size"), mp.get("root_sha256")
-                if (
-                    not transparency.json_is_int(msize)
-                    or not 1 <= int(msize) < size
-                    or not isinstance(mroot, str)
-                    or len(mroot) != 64
-                ):
+                try:
+                    mroot_b = transparency.hex_bytes(mroot, length=32)
+                except (TypeError, ValueError):
+                    mroot_b = None
+                if not transparency.json_is_int(msize) or not 1 <= int(msize) < size or mroot_b is None:
                     fail(
                         f"chain member {mr.id[:24]}… carries a malformed or non-prior head",
                         kind="log_checkpoint",
@@ -1636,12 +1636,16 @@ def _verify_log_doc(
                         f"chain member {mr.id[:24]}… signs a bridge it cannot prove",
                         kind="log_checkpoint",
                     )
-                if msize in seen_sizes and seen_sizes[msize] != mroot.lower():
+                # Dedupe on decoded bytes so hex-case variants of one head
+                # don't convict, and a non-hex spelling fails closed like the
+                # browser's regex gate.
+                if msize in seen_sizes and seen_sizes[msize] != mroot_b:
                     fail(
                         f"chain carries two signed heads at size {msize}",
                         kind="log_checkpoint",
                     )
-                seen_sizes[msize] = mroot.lower()
+                seen_sizes[msize] = mroot_b
+                size_ids[int(msize)] = mr.id
             detail_extra += f" — {len(chain)} prior signed head(s) verified in the embedded chain"
         detail = f"signed transparency head: tree size {size}, root {cp.payload['root_sha256'][:16]}…"
         detail += detail_extra
@@ -1660,10 +1664,28 @@ def _verify_log_doc(
             )
         if self_ext is True:
             e = cp.payload["extends"]
-            detail += (
-                f" — embedded bridge extends checkpoint "
-                f"{str(e.get('checkpoint_id'))[:16]}… from size {e['first']}"
-            )
+            # The bridge's cryptographic claim is (size, root, proof) — its
+            # `checkpoint_id` label is signed text but only verifiable when
+            # the named member rides in this document's own chain. Report it
+            # as what it is: verified when it matches the embedded member,
+            # "names" when unchecked, flagged when the two disagree.
+            cid = str(e.get("checkpoint_id") or "")
+            try:
+                efirst = transparency.coerce_int(e.get("first"))
+            except (TypeError, ValueError):
+                efirst = None
+            named = size_ids.get(efirst) if efirst is not None else None
+            detail += f" — embedded bridge provably reaches size {e.get('first')}"
+            if cid and named is not None and named == cid:
+                detail += f" (checkpoint {cid[:16]}…)"
+            elif cid and named is not None:
+                detail += (
+                    f" — NOTE: bridge names checkpoint {cid[:16]}… but the signed "
+                    f"chain member at that size is {named[:16]}… (inconsistent label; "
+                    "the size+root binding still verifies)"
+                )
+            elif cid:
+                detail += f" (names checkpoint {cid[:16]}…)"
         # Witness counter-signatures: auxiliary attestations — verified and
         # reported, never the gate. A third party holding this doc sees WHO
         # countersigned this head, not just that the issuer signed it.
@@ -4608,7 +4630,8 @@ def main(argv: list[str] | None = None) -> None:
 
     s = sub.add_parser(
         "diff",
-        help="compare two exports — appended records are normal; vanished or altered ones are anomalies",
+        help="compare two exports — appended records are normal; vanished or altered ones are anomalies; "
+        "signed log heads reconcile offline through the newer export's embedded checkpoint chain",
     )
     s.add_argument("old", help="earlier export: case pack, pack.zip, or bundle.json")
     s.add_argument("new", help="later export")
