@@ -1,5 +1,5 @@
 {
- "id": "rcpt_c5515538c22740f6ba6432f404b03c05",
+ "id": "rcpt_2e1af07d7f4d424ea1cc848483d21863",
  "visit_id": "site:josepha-mayo.github.io/attest",
  "sequence": 1,
  "prev_hash": null,
@@ -372,8 +372,8 @@
    "qr-verify.png": "3e616368ec8298e1380e70dd4c6e5f1dfeb725a6ee6564919c4027ba3d5f82ad",
    "qr-verify.svg": "166fd4781a1c6c6599163acbca198a3213bcaae5b0aff999ef075e32140d5786",
    "robots.txt": "ab77b5f7423845ddeb6c5068f571320248a81959ed64b4a322fd1bb14d1065f6",
-   "sample-diff-report.html": "366daf80ddcdf6d253ecced1ad8b851cf8ce2d0c7161e114a99754b47f225153",
-   "sample-growth-report.html": "b7476f3a2eac436a6261e136c209e51d3a7e1915b74f9f91e4543a181541d7ce",
+   "sample-diff-report.html": "246054b97a0508dff61b1a8a2521ee03d7a7aab0b3ee78172d5fd4338e451b05",
+   "sample-growth-report.html": "350714a8e54837a7fed14367b02135c988ed2a5809b0a6a4c48cd41ffeb7a6e2",
    "sample-pack-attack-forged-verifier.zip": "5f2efeac57c84f67a3d23821d0a43b54013187fbfcfd4d1c7247522765d63c63",
    "sample-pack-attack-missing-record.zip": "3f0293e88c3c53ed82c62bd3d6cd1702cf59d486c94271a996578c2a760ba651",
    "sample-pack-attack-smuggled-file.zip": "5b1f952d074ab575b2e51261e28789163d9651fba00faa92d222e82ff13b06a0",
@@ -437,11 +437,11 @@
   "sequence": 1,
   "prev_hash": null,
   "visit_id": "site:josepha-mayo.github.io/attest",
-  "receipt_id": "rcpt_c5515538c22740f6ba6432f404b03c05",
-  "issued_at": "2026-10-14T18:22:27.225175+00:00"
+  "receipt_id": "rcpt_2e1af07d7f4d424ea1cc848483d21863",
+  "issued_at": "2026-10-14T18:58:00.298036+00:00"
  },
- "payload_hash": "8dd7b9f0b04575dc39fbc325969042156ce8f73d01ed640a6d417dcf2e6a88ad",
- "signature": "u0O6kmJjgZNLmDj9q9porV31Gq7ZsjMJDysPSxlBPBUTiPMmpBodc028cCC6bIgQfdn2gHxinR5QfmNEQyAvCg==",
+ "payload_hash": "d2a34d7bde229c6ad379493194e5b1b2b0e929bff70c0eef1792eb124a96aeb9",
+ "signature": "hg37nSpnM80nFGf1KeNnjCtuadRpLBVnXft5J4+n3fwiBU5f7GLl+bHgf117+BcIVNNAhm3FJSsVdLeca5gWDg==",
  "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
- "issued_at": "2026-10-14T18:22:27.225175Z"
+ "issued_at": "2026-10-14T18:58:00.298036Z"
 }

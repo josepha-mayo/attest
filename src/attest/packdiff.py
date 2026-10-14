@@ -1203,9 +1203,18 @@ def _side_card(side: dict, label: str) -> str:
     else:
         n = len(fails)
         verdict = f'<span class="chip bad">FAILED</span> {n} verification failure(s)'
+    sha = side.get("sha256")
+    nbytes = side.get("bytes")
+    digest_txt = (
+        f'<div class="meta">sha256 <code title="{h.escape(sha)}">{h.escape(sha[:18])}…</code>'
+        f" · {nbytes} bytes</div>"
+        if isinstance(sha, str) and isinstance(nbytes, int)
+        else ""
+    )
     return (
         f'<div class="side"><div class="path">{name}</div>'
         f'<div class="meta">{kind} · {issuer_txt}</div>'
+        f"{digest_txt}"
         f'<div class="meta">{verdict}</div></div>'
     )
 
