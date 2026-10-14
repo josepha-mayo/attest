@@ -1,5 +1,5 @@
 {
- "id": "rcpt_14f0452bd271447fbd1852db8a29a0a6",
+ "id": "rcpt_c15bc3959d6245a6b0fbaa81e1098dca",
  "visit_id": "site:josepha-mayo.github.io/attest",
  "sequence": 1,
  "prev_hash": null,
@@ -361,7 +361,7 @@
    "demo-worker-es.html": "9a59292bcd556164bb5c88737211b9d7a2329d50d69f756181165fc280f84d98",
    "demo-worker.html": "019b5c5226515b2dfcb62af3ff7e01a7905a4db0457041ffb50a3ed91a321f3a",
    "divergence-checkpoint.json": "2f0055cc75ee26571727e67aba8188d7b4c1adb521333fc2b5f8af7470e39be7",
-   "index.html": "6359a078c2c09977d1653a257fc46d601766ea0b57976df82d3c91a736e91b9d",
+   "index.html": "468b2e0ec7cc66e9d4071dc19dd64244b3bd4d097494ba2343547845334a08cb",
    "live-sweep-receipt.json": "6341ac6468a7752d5638af756fa77677ba690bb740f43f5901db12c0c3d476a5",
    "og-image.png": "38df079300d4cba7f4518dbc183dd5406753d8281ec36e19dbe57d5694a8d5e5",
    "pipeline.svg": "9e7856ea6e36b351e57dcec2886d76b6220b96217c15bba5053f5ab559e73b3a",
@@ -430,11 +430,11 @@
   "sequence": 1,
   "prev_hash": null,
   "visit_id": "site:josepha-mayo.github.io/attest",
-  "receipt_id": "rcpt_14f0452bd271447fbd1852db8a29a0a6",
-  "issued_at": "2026-10-14T17:05:42.290024+00:00"
+  "receipt_id": "rcpt_c15bc3959d6245a6b0fbaa81e1098dca",
+  "issued_at": "2026-10-14T17:14:23.002383+00:00"
  },
- "payload_hash": "4e8a8909877173340c71b2b42bebef4cb304df77c60e1dff14ca1e8ecb217e44",
- "signature": "HNDlLjyUurB+I2IlkmUcAN2qCYArowyhvgPoCd+KLfXkj+kmlYbqkybTJwKip/9eR6pwB2MiUXB9w+tICGmxBw==",
+ "payload_hash": "1ea6255feb3ff17ded5d84bcebd684da9dea7b0ed50d032ecdb4373d7b028c47",
+ "signature": "13i8TEArdicyIA+oPhXc+aR5Wm13wFOUqofGcLEwxov7+eNnl4e4DTI+1guRUJcvaR8UxiOmjB5amTHw25XGDA==",
  "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
- "issued_at": "2026-10-14T17:05:42.290024Z"
+ "issued_at": "2026-10-14T17:14:23.002383Z"
 }
