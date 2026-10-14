@@ -1217,6 +1217,23 @@ def diff_html(report: dict) -> str:
         if e.get("severity") == "info" and e.get("target") not in (None, "old", "new", "log_checkpoint.json")
     ]
     heads_open = any(e.get("severity") == "info" and e.get("target") == "log_checkpoint.json" for e in events)
+    # The machine-readable head relationship — the stamp can't read it off
+    # severity alone (extends_earlier and unreconciled_earlier both arrive as
+    # "drift" but mean opposite levels of proven vs undecidable).
+    heads_kind = report.get("log_heads")
+    heads_note = {
+        "extends_earlier": (
+            " The 'newer' pack is a proven EARLIER snapshot — append-only "
+            "direction verified hop-by-hop over signed checkpoints."
+        ),
+        "unreconciled_earlier": (
+            " The newer export pins an earlier signed head no bridge reaches — "
+            "a rollback or simply an older export; offline can't tell which."
+        ),
+        "unreconciled": (
+            " The signed log heads could not be reconciled offline — `attest consistency` decides."
+        ),
+    }.get(heads_kind, "")
 
     if anomalies:
         stamp = f'<div class="stamp bad">ANOMALIES DETECTED — {anomalies}</div>'
@@ -1228,11 +1245,7 @@ def diff_html(report: dict) -> str:
         stamp = '<div class="stamp drift">APPEND-ONLY DRIFT — 0 anomalies</div>'
         stamp_sub = (
             "New signed records appeared (normal export growth); nothing vanished and nothing was altered."
-            + (
-                " The signed log heads could not be reconciled offline — `attest consistency` decides."
-                if heads_open
-                else ""
-            )
+            + heads_note
         )
     elif heads_open:
         stamp = '<div class="stamp drift">LOG HEADS UNRECONCILED — no record differences found</div>'

@@ -1,5 +1,5 @@
 {
- "id": "rcpt_c15bc3959d6245a6b0fbaa81e1098dca",
+ "id": "rcpt_fefc589c14634de396ac40e25d5a702a",
  "visit_id": "site:josepha-mayo.github.io/attest",
  "sequence": 1,
  "prev_hash": null,
@@ -430,11 +430,11 @@
   "sequence": 1,
   "prev_hash": null,
   "visit_id": "site:josepha-mayo.github.io/attest",
-  "receipt_id": "rcpt_c15bc3959d6245a6b0fbaa81e1098dca",
-  "issued_at": "2026-10-14T17:14:23.002383+00:00"
+  "receipt_id": "rcpt_fefc589c14634de396ac40e25d5a702a",
+  "issued_at": "2026-10-14T17:16:52.592895+00:00"
  },
- "payload_hash": "1ea6255feb3ff17ded5d84bcebd684da9dea7b0ed50d032ecdb4373d7b028c47",
- "signature": "13i8TEArdicyIA+oPhXc+aR5Wm13wFOUqofGcLEwxov7+eNnl4e4DTI+1guRUJcvaR8UxiOmjB5amTHw25XGDA==",
+ "payload_hash": "47a714c3a7cbc60a851318b8d3e5c4504fad0b0591d6b8e85142bab60ba37dd6",
+ "signature": "DmzEtgEhelx+Gjoyd8koYHfAbY7agGvY7wKA/TS2wmHGm3qbd0ILxWaBKmDUWTNj6gtAFVH+o4zvdmujBICjBA==",
  "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
- "issued_at": "2026-10-14T17:14:23.002383Z"
+ "issued_at": "2026-10-14T17:16:52.592895Z"
 }
