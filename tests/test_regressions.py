@@ -344,6 +344,27 @@ def test_verify_attest_signs_the_verdict_into_the_journal(tmp_path, engine, stor
     assert rc.returncode != 0
     assert "--attest" in (rc.stdout + rc.stderr)
 
+    # The verdict's trust context keys the attestation — the same bytes
+    # re-verified under a different pin and reaching the OPPOSITE verdict
+    # must mint a new receipt, never reuse the "ok" one.
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from attest.ledger import Signer
+
+    foreign = Signer(Ed25519PrivateKey.from_private_bytes(b"\xee" * 32)).public_key_b64
+    rc = run("verify", "--attest", "--key", foreign, str(pack))
+    assert rc.returncode == 1, rc.stderr + rc.stdout
+    audit_store = Store(audit / "attest.sqlite3")
+    att = [r for r in audit_store.receipts() if r.payload.get("record_type") == "pack_verification"]
+    verdicts = {(r.payload["pack_sha256"], r.payload["verdict"]) for r in att}
+    assert (hashlib.sha256(data).hexdigest(), "fail") in verdicts
+    fail_att = next(
+        r
+        for r in att
+        if r.payload["verdict"] == "fail" and r.payload["pack_sha256"] == hashlib.sha256(data).hexdigest()
+    )
+    assert fail_att.payload["context"]["issuer_pin"] == foreign
+
 
 def test_diff_attest_signs_the_comparison(tmp_path, engine, store, household, schedule, t0):
     """`attest diff --attest` — the mediator's reconciliation is evidence: a
@@ -477,6 +498,40 @@ def test_issue_pack_verification_fields(engine):
         {"name": "verify_case.py", "version": "", "verifier_sha256": "ef" * 32},
     )
     assert other.id != receipt.id
+
+
+def test_attestation_pseudo_ids_key_every_asserted_claim(engine):
+    """Two runs over the same bytes reaching different claims must never share
+    a receipt — the pseudo-id keys verdict, detail, and trust context, or an
+    "ok" could be cited for a run that actually failed."""
+    v = {"name": "attest-cli", "version": "0.1.0", "verifier_sha256": "cd" * 32}
+    ok = engine.issue_pack_verification("ab" * 32, 1, "ok", "verified", v)
+    fail = engine.issue_pack_verification("ab" * 32, 1, "fail", "mismatch", v)
+    assert fail.id != ok.id
+    # Same verdict but a different trust context — also a distinct claim.
+    pinned = engine.issue_pack_verification("ab" * 32, 1, "ok", "verified", v, context={"issuer_pin": "AA=="})
+    assert pinned.id != ok.id
+    again = engine.issue_pack_verification("ab" * 32, 1, "ok", "verified", v, context={"issuer_pin": "AA=="})
+    assert again.id == pinned.id
+    # Comparisons key the same way — a changed verdict never reuses a
+    # "clean" receipt.
+    c1 = engine.issue_pack_comparison("aa" * 32, "bb" * 32, 1, 1, "extends", True, 0, "e" * 64, "grew", v)
+    c2 = engine.issue_pack_comparison("aa" * 32, "bb" * 32, 1, 1, "same", False, 2, "f" * 64, "moved", v)
+    assert c2.id != c1.id
+    c3 = engine.issue_pack_comparison(
+        "aa" * 32,
+        "bb" * 32,
+        1,
+        1,
+        "extends",
+        True,
+        0,
+        "e" * 64,
+        "grew",
+        v,
+        context={"issuer_pin": "AA=="},
+    )
+    assert c3.id != c1.id
 
 
 def test_cli_verify_json_emits_a_gatable_verdict(tmp_path, engine, store, household, schedule, t0):

@@ -1906,6 +1906,34 @@ def _attestation_engine():
     return _cli_engine(Store(db))
 
 
+def _lifecycle_fp(pool: list | None) -> str | None:
+    """Content fingerprint of an issuer-lifecycle receipt pool — part of the
+    trust context an attestation binds (a changed pool is a changed claim)."""
+    import hashlib
+
+    if not pool:
+        return None
+    return hashlib.sha256(json.dumps(sorted(r.id for r in pool), separators=(",", ":")).encode()).hexdigest()
+
+
+def _checker_verifier(checker: str, func) -> dict:
+    """Verifier identity for attestation receipts — name, version, the entry
+    point that produced the verdict, and a content hash of that module's
+    source, so a verdict from different checking rules never collapses."""
+    import hashlib
+    import inspect
+    from pathlib import Path
+
+    from . import __version__
+
+    return {
+        "name": "attest-cli",
+        "version": __version__,
+        "checker": checker,
+        "verifier_sha256": hashlib.sha256(Path(inspect.getfile(func)).read_bytes()).hexdigest(),
+    }
+
+
 def _verify_zip(
     raw: bytes,
     pinned_key: str | None,
@@ -1940,20 +1968,21 @@ def _verify_zip(
     # --attest signs the verdict itself into the deployment's journal: the
     # audit becomes auditable. Built BEFORE the pack is opened so a missing
     # store fails fast instead of after the (potentially slow) check. The
-    # attestation binds sha256(pack bytes) + the verifier's content identity,
-    # so a doctored twin attested later can never collide with the clean
-    # verdict on the real pack.
+    # attestation binds sha256(pack bytes) + the verifier's content identity
+    # + the trust context (pin, lifecycle pool, witness policy, live check),
+    # so a re-run reaching a different verdict can never reuse this receipt.
     try:
         attest_engine = _attestation_engine() if attest else None
     except (OSError, RuntimeError) as exc:
         sys.exit(f"attest: --attest unavailable — {exc}")
 
+    live_report: dict | None = None
+    live_line: str | None = None
+
     def _attest(ok: bool, detail: str) -> None:
         if attest_engine is None:
             return
         import hashlib
-
-        from . import __version__, disputepack
 
         try:
             receipt = attest_engine.issue_pack_verification(
@@ -1961,25 +1990,41 @@ def _verify_zip(
                 len(raw),
                 "ok" if ok else "fail",
                 detail,
-                {
-                    "name": "attest-cli",
-                    "version": __version__,
-                    "verifier_sha256": hashlib.sha256(disputepack._VERIFIER.encode()).hexdigest(),
+                _checker_verifier("attest.app._verify_pack", _verify_pack),
+                context={
+                    "issuer_pin": pinned_key,
+                    "lifecycle_sha256": _lifecycle_fp(known_rotations),
+                    "witness_policy": (
+                        {
+                            "required": sorted(required_witnesses),
+                            "threshold": witness_threshold,
+                        }
+                        if required_witnesses
+                        else None
+                    ),
+                    "live_log": live_report,
                 },
             )
-        except (OSError, RuntimeError, ValueError) as exc:
-            sys.exit(f"attest: could not sign the attestation — {exc}")
+        except Exception as exc:  # noqa: BLE001 — never mask the verdict
+            sys.exit(
+                f"attest: could not sign the attestation — {exc} "
+                f"(the verdict was: {'ok' if ok else 'FAIL'} — {detail})"
+            )
         print(
             f"Attestation {receipt.id}: verdict signed into this deployment's journal",
             file=sys.stderr if json_mode else sys.stdout,
         )
 
     def fail(detail: str, **kw) -> None:
+        if json_mode:
+            # The verdict lands on stdout before the attestation write — a
+            # signing failure must not eat the machine-readable result.
+            print(json.dumps({"ok": False, "detail": detail, **kw}, indent=2))
+            _attest(False, detail)
+            _write_verdict_badge(badge, False, detail, link=badge_link)
+            sys.exit(1)
         _attest(False, detail)
         _write_verdict_badge(badge, False, detail, link=badge_link)
-        if json_mode:
-            print(json.dumps({"ok": False, "detail": detail, **kw}, indent=2))
-            sys.exit(1)
         sys.exit(detail)
 
     try:
@@ -2003,8 +2048,6 @@ def _verify_zip(
     ok, detail = _verify_pack(raw, key, known_rotations=known_rotations)
     if not ok:
         fail(f"verification failed: {detail}", kind=kind)
-    live_report: dict | None = None
-    live_line: str | None = None
     if live_base and issuer_doc is not None and "log_checkpoint.json" in names:
         # The pack's checkpoint proves membership in A log; the live head
         # answers WHICH log — a deployment that mints a consistent-but-forked
@@ -2101,17 +2144,17 @@ def _verify_zip(
                 pass
         if live_report is not None:
             extra["live_log"] = live_report
-        _attest(True, detail)
-        _write_verdict_badge(badge, True, detail, link=badge_link)
         print(
             json.dumps(
                 {"ok": True, "kind": kind, "detail": detail, "pinned": bool(pinned_key), **extra},
                 indent=2,
             )
         )
+        _attest(True, detail)
+        _write_verdict_badge(badge, True, detail, link=badge_link)
         return
-    _attest(True, detail)
     print(f"OK: {detail}")
+    _attest(True, detail)
     _write_verdict_badge(badge, True, detail, link=badge_link)
     if live_line:
         print(f"Live log: {live_line}")
@@ -4010,12 +4053,11 @@ def _diff(args: argparse.Namespace) -> None:
             return
         import hashlib
         import json as _json
-        from pathlib import Path as _Path
 
-        from . import __version__, disputepack
+        from .packdiff import diff_report as _dr
 
-        a_raw = _Path(args.old).read_bytes()
-        b_raw = _Path(args.new).read_bytes()
+        # The digests ride the report — the exact bytes load_artifact
+        # verified, not a re-read of paths that could have been swapped.
         events_sha = hashlib.sha256(
             _json.dumps(report["events"], sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
@@ -4026,22 +4068,22 @@ def _diff(args: argparse.Namespace) -> None:
         )
         try:
             receipt = attest_engine.issue_pack_comparison(
-                hashlib.sha256(a_raw).hexdigest(),
-                hashlib.sha256(b_raw).hexdigest(),
-                len(a_raw),
-                len(b_raw),
+                report["old"]["sha256"],
+                report["new"]["sha256"],
+                report["old"]["bytes"],
+                report["new"]["bytes"],
                 report["log_heads"],
                 report["clean"],
                 report["anomalies"],
                 events_sha,
                 detail,
-                {
-                    "name": "attest-cli diff",
-                    "version": __version__,
-                    "verifier_sha256": hashlib.sha256(disputepack._VERIFIER.encode()).hexdigest(),
+                _checker_verifier("attest.packdiff.diff_report", _dr),
+                context={
+                    "issuer_pin": key,
+                    "lifecycle_sha256": _lifecycle_fp(extra),
                 },
             )
-        except (OSError, RuntimeError, ValueError) as exc:
+        except Exception as exc:  # noqa: BLE001 — a signing failure is loud
             sys.exit(f"attest: could not sign the comparison — {exc}")
         print(
             f"Attestation {receipt.id}: comparison signed into this deployment's journal",
@@ -4058,11 +4100,11 @@ def _diff(args: argparse.Namespace) -> None:
                 if getattr(args, "issuer_url", None):
                     report["pin"]["issuer_url"] = args.issuer_url
                     report["pin"]["lifecycle_receipts"] = len(extra)
+            _attest_comparison(report)
             if getattr(args, "json", False):
                 import json as _json
 
                 print(_json.dumps(report, indent=2))
-                _attest_comparison(report)
                 sys.exit(0 if report["clean"] else 1)
             # --html / --attest: the text lines and the page render the same
             # event stream — `line` rides the report so the two can never
@@ -4078,7 +4120,6 @@ def _diff(args: argparse.Namespace) -> None:
 
                 Path(args.html).write_text(diff_html(report), encoding="utf-8")
                 print(f"html report written: {args.html}")
-            _attest_comparison(report)
         else:
             lines, anomalies = diff(args.old, args.new, key=key, extra_key_receipts=extra)
             for line in lines:
@@ -4449,14 +4490,32 @@ def _explain_attestation(store, ident: str, *, as_json: bool = False) -> None:
         print("  verifiers weight them as suspect-window signatures.")
     elif rtype == "pack_verification":
         v = p.get("verifier") or {}
-        print(f"  verifier {v.get('name')} {v.get('version')} ran over")
+        ctx = p.get("context") or {}
+        print(
+            f"  verifier {v.get('name')} {v.get('version')} ({v.get('checker', 'unknown checker')}) ran over"
+        )
         print(f"  sha256:{str(p.get('pack_sha256'))[:32]}… ({p.get('pack_bytes')} bytes)")
         print(f"  and returned: {str(p.get('verdict')).upper()} — {p.get('detail')}")
+        if "context" not in p:
+            print("  trust context: not recorded (pre-context attestation)")
+        else:
+            pin = ctx.get("issuer_pin")
+            print(
+                "  pinned issuer: " + (str(pin)[:24] + "…" if pin else "self-declared (the pack's own key)")
+            )
+        if ctx.get("witness_policy"):
+            w = ctx["witness_policy"]
+            print(
+                f"  witness policy: {w.get('threshold')}-of-{len(w.get('required') or [])} required witnesses"
+            )
+        if ctx.get("live_log"):
+            print(f"  live-log cross-check: {ctx['live_log'].get('detail')}")
         print("  the audit act itself, signed — it never claims the verdict is")
         print("  right. Re-run the pinned verifier on those exact bytes to check.")
     elif rtype == "pack_comparison":
         v = p.get("verifier") or {}
-        print(f"  differ {v.get('name')} {v.get('version')} compared")
+        ctx = p.get("context") or {}
+        print(f"  differ {v.get('name')} {v.get('version')} ({v.get('checker', 'unknown checker')}) compared")
         print(f"  old sha256:{str(p.get('pack_a_sha256'))[:32]}… ({p.get('pack_a_bytes')} bytes)")
         print(f"  new sha256:{str(p.get('pack_b_sha256'))[:32]}… ({p.get('pack_b_bytes')} bytes)")
         print(
@@ -4464,6 +4523,13 @@ def _explain_attestation(store, ident: str, *, as_json: bool = False) -> None:
             f"{p.get('anomalies')} anomaly(ies), "
             f"{'clean' if p.get('clean') else 'anomalous'}"
         )
+        if "context" not in p:
+            print("  trust context: not recorded (pre-context attestation)")
+        else:
+            pin = ctx.get("issuer_pin")
+            print(
+                "  pinned issuer: " + (str(pin)[:24] + "…" if pin else "self-declared (the packs' own keys)")
+            )
         print("  the reconciliation itself, signed — it never claims the")
         print("  comparison is right. Re-run attest diff on those bytes to check.")
     print()

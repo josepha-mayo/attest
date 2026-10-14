@@ -736,12 +736,20 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
     deployment's fetched issuer document) extends the lineage the pack itself
     carries — a pre-rotation export still verifies under the current issuer."""
     path = Path(path)
+    import hashlib
+    import io
+
+    # One read, one identity — the digest and byte count recorded on the
+    # normalized map name the exact bytes this verdict ran over, so an
+    # attestation bound to them can't drift to a swapped file.
+    blob = path.read_bytes()
+    digest = hashlib.sha256(blob).hexdigest()
     visits: dict[str, dict] = {}
     issuer = None
     failures: list[str] = []
     notes: list[str] = []
-    if zipfile.is_zipfile(path):
-        with zipfile.ZipFile(path) as raw:
+    if zipfile.is_zipfile(io.BytesIO(blob)):
+        with zipfile.ZipFile(io.BytesIO(blob)) as raw:
             bad_name = check_member_names(raw.namelist())
             if bad_name:
                 raise ValueError(f"{path}: {bad_name}")
@@ -922,6 +930,8 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                     "log_head": log_head,
                     "verify_failures": failures,
                     "notes": notes,
+                    "sha256": digest,
+                    "bytes": len(blob),
                 }
             if "bundle.json" in names:
                 bundle = transparency.json_loads(z.read("bundle.json"))
@@ -1036,9 +1046,11 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                     "log_head": log_head,
                     "verify_failures": failures,
                     "notes": notes,
+                    "sha256": digest,
+                    "bytes": len(blob),
                 }
             raise ValueError(f"{path}: zip contains neither manifest.json nor bundle.json")
-    data = transparency.json_loads(path.read_text(encoding="utf-8"))
+    data = transparency.json_loads(blob.decode("utf-8"))
     if not isinstance(data, dict):
         raise ValueError(f"{path}: not a pack artifact (expected a JSON object)")
     if "original" in data:
@@ -1056,6 +1068,8 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
             "kind": "bundle",
             "verify_failures": failures,
             "notes": notes,
+            "sha256": digest,
+            "bytes": len(blob),
         }
     if "visits" in data:  # a bare manifest without its bundles
         declared = data.get("issuer_key")
@@ -1101,6 +1115,8 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
             "kind": "manifest",
             "verify_failures": failures,
             "notes": notes,
+            "sha256": digest,
+            "bytes": len(blob),
         }
     raise ValueError(f"{path}: unrecognized artifact (no 'original' or 'visits' key)")
 
@@ -1142,6 +1158,8 @@ def diff_report(
             "verify_failures": fails,
             "notes": art.get("notes") or [],
             "verified": fails == [],
+            "sha256": art.get("sha256"),
+            "bytes": art.get("bytes"),
         }
 
     return {

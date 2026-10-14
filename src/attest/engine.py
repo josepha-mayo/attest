@@ -1202,6 +1202,7 @@ class VisitEngine:
             return self.store.receipt_for_visit(pseudo_id)
         return receipt
 
+    @atomic
     def issue_pack_verification(
         self,
         pack_sha256: str,
@@ -1209,6 +1210,8 @@ class VisitEngine:
         verdict: str,
         detail: str,
         verifier: dict,
+        *,
+        context: dict | None = None,
     ) -> Receipt:
         """Sign a third-party verification act: THIS deployment's verifier ran
         over the byte-string ``pack_sha256`` and returned ``verdict``
@@ -1218,17 +1221,30 @@ class VisitEngine:
         ``verifier`` identity says which code produced it. It does NOT say
         the verdict is correct — anyone can re-run the pinned verifier on
         the same bytes — and it says nothing about physical truth.
-        ``verifier`` carries ``{name, version, verifier_sha256}`` — the
-        content hash of the stdlib verifier copy is included so a verdict
-        produced by different checking rules never collapses into the same
-        attestation. Idempotent per (pack digest, verifier identity) via a
-        ``pack-verify:`` pseudo visit_id — a distinct prefix, never
-        ``export:``-namespaced, so no real visit absorbs audit receipts."""
+        ``verifier`` carries ``{name, version, checker, verifier_sha256}`` —
+        the content hash of the module that produced the verdict, so a
+        verdict produced by different checking rules never collapses into
+        the same attestation. ``context`` records the trust context the
+        verdict depended on (issuer pin, lifecycle pool fingerprint,
+        witness policy, live-log cross-check) — two runs over the same bytes
+        that reach different verdicts, or the same verdict under different
+        trust inputs, are different claims and must not share a receipt, so
+        every asserted field keys the idempotent ``pack-verify:`` pseudo
+        visit_id — a distinct prefix, never ``export:``-namespaced, so no
+        real visit absorbs audit receipts."""
         import hashlib
         import json as _json
 
+        context = dict(context or {})
         canonical = _json.dumps(
-            {"pack_sha256": pack_sha256, "verifier": verifier},
+            {
+                "pack_sha256": pack_sha256,
+                "pack_bytes": int(pack_bytes),
+                "verdict": verdict,
+                "detail": detail,
+                "verifier": verifier,
+                "context": context,
+            },
             sort_keys=True,
             separators=(",", ":"),
             ensure_ascii=False,
@@ -1249,11 +1265,13 @@ class VisitEngine:
                 "verdict": verdict,
                 "detail": detail,
                 "verifier": dict(verifier),
+                "context": context,
                 "boundary": (
                     "This receipt attests only that the named verifier produced "
-                    "the named verdict on the byte-string digest above. It does "
-                    "not prove the verdict is right — re-run the pinned verifier "
-                    "to check — and says nothing about physical truth."
+                    "the named verdict on the byte-string digest above, under "
+                    "the recorded trust context. It does not prove the verdict "
+                    "is right — re-run the pinned verifier to check — and says "
+                    "nothing about physical truth."
                 ),
                 "journal_head": self.store.journal_head(),
             },
@@ -1261,9 +1279,13 @@ class VisitEngine:
         try:
             self.store.put_receipt(receipt)
         except sqlite3.IntegrityError:
-            return self.store.receipt_for_visit(pseudo_id)
+            existing = self.store.receipt_for_visit(pseudo_id)
+            if existing is not None:
+                return existing
+            raise RuntimeError("attestation row collided and vanished") from None
         return receipt
 
+    @atomic
     def issue_pack_comparison(
         self,
         pack_a_sha256: str,
@@ -1276,6 +1298,8 @@ class VisitEngine:
         events_sha256: str,
         detail: str,
         verifier: dict,
+        *,
+        context: dict | None = None,
     ) -> Receipt:
         """Sign a reconciliation act: THIS deployment's differ ran over the
         byte-strings ``pack_a_sha256`` (old) and ``pack_b_sha256`` (new) and
@@ -1286,16 +1310,28 @@ class VisitEngine:
         coordinator's "I reconciled the two exports and the log provably
         grew" is itself evidence. The receipt never claims the comparison
         is correct — anyone can re-run ``attest diff`` on the named bytes —
-        and it says nothing about physical truth. Idempotent per
-        (a, b, verifier identity) via a ``pack-diff:`` pseudo-visit."""
+        and it says nothing about physical truth. ``context`` records the
+        issuer pin and lifecycle pool the side-verifications ran under, so
+        a re-run that reaches a different verdict never reuses this
+        receipt — every asserted field keys the idempotent ``pack-diff:``
+        pseudo-visit."""
         import hashlib
         import json as _json
 
+        context = dict(context or {})
         canonical = _json.dumps(
             {
                 "a": pack_a_sha256,
                 "b": pack_b_sha256,
+                "a_bytes": int(pack_a_bytes),
+                "b_bytes": int(pack_b_bytes),
+                "log_heads": log_heads,
+                "clean": bool(clean),
+                "anomalies": int(anomalies),
+                "events_sha256": events_sha256,
+                "detail": detail,
                 "verifier": verifier,
+                "context": context,
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -1322,10 +1358,12 @@ class VisitEngine:
                 "events_sha256": events_sha256,
                 "detail": detail,
                 "verifier": dict(verifier),
+                "context": context,
                 "boundary": (
                     "This receipt attests only that the named differ produced "
-                    "the named comparison on the two byte-string digests above. "
-                    "It does not prove the comparison is right — re-run "
+                    "the named comparison on the two byte-string digests above, "
+                    "under the recorded trust context. It does not prove the "
+                    "comparison is right — re-run "
                     "attest diff on the named bytes to check — and says "
                     "nothing about physical truth."
                 ),
@@ -1335,7 +1373,10 @@ class VisitEngine:
         try:
             self.store.put_receipt(receipt)
         except sqlite3.IntegrityError:
-            return self.store.receipt_for_visit(pseudo_id)
+            existing = self.store.receipt_for_visit(pseudo_id)
+            if existing is not None:
+                return existing
+            raise RuntimeError("attestation row collided and vanished") from None
         return receipt
 
     def log_leaves(self) -> list[bytes]:
