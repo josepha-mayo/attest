@@ -1,0 +1,36 @@
+{
+  "id": "rcpt_c186dbdb879d4257bdd39ccb3d78588f",
+  "visit_id": "log:204:54d1ec614a5e77a3",
+  "sequence": 298,
+  "prev_hash": "91e9b47eae84cc31165f7db89ca6611ebe471ebcc029f8c1754b2125d0b23f20",
+  "payload": {
+    "record_type": "log_checkpoint",
+    "tree_size": 204,
+    "root_sha256": "54d1ec614a5e77a3769302a2e70b7f63fd1e484b736ec3fb5d9e9464c9abde5a",
+    "leaf_input": "receipt.payload_hash (raw bytes, sequence order)",
+    "boundary": "A signed commitment that exactly these receipts, in this order, formed the log at this size — receipts in an export can prove inclusion, and a later checkpoint can prove it extends this one without rewriting history.",
+    "journal_head": "3db94a61af0f0d96d31fa71af611e3773621c5ebad5531e91a6a91734d521b20",
+    "extends": {
+      "first": 202,
+      "first_root_sha256": "1b32de81896d88b6b090923b3bca5ab1143d5a4ba051b205b611ca7d8856422c",
+      "checkpoint_id": "rcpt_10525da3c32c4b589518d7fed5d018d7",
+      "proof": [
+        "6e796091f1b23abf93f1e444293d0bac7343c740e8c621fc4521b3d00ff9c94f",
+        "afb12e2f9adc3f40124d97f98a881a44fe69824700622aed531b853cd394ac23",
+        "a2a6348f16f5e7718268cb4e1985503f9261757486836992c024c9f4abddd196",
+        "d8c0fb66a810a1a2af5faf4bf733ef111fb2d6a7e3001c908e7122a699a13592",
+        "c0cd7f5d7ed43d9d0dc8fa2b492d2656463d5debf13578ec5decf0d4dafc7855"
+      ]
+    },
+    "schema": "attest.receipt/2",
+    "sequence": 298,
+    "prev_hash": "91e9b47eae84cc31165f7db89ca6611ebe471ebcc029f8c1754b2125d0b23f20",
+    "visit_id": "log:204:54d1ec614a5e77a3",
+    "receipt_id": "rcpt_c186dbdb879d4257bdd39ccb3d78588f",
+    "issued_at": "2026-10-14T15:24:13.251479+00:00"
+  },
+  "payload_hash": "10ae983a8ec89882a2b9c28ea6ff62f1a0c0ee8ba7bbcaa0e96557fdf2bd555d",
+  "signature": "jpW51/mjB5MgI1yud+68jh9lci3h40ktEHud7NLLFSC5l4davnsj/OruVkDwwdc5yPQejzCiaQNTI8WSMuTZAw==",
+  "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+  "issued_at": "2026-10-14T15:24:13.251479Z"
+}

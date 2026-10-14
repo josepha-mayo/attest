@@ -34,6 +34,9 @@
    body{max-width:none}}
  @keyframes stampin{from{transform:scale(1.5);opacity:0}to{transform:scale(1);opacity:1}}
  @media (prefers-reduced-motion:reduce){.row.stamp{animation:none}}
+ /* receipt ids and member names are 64-char unbroken hex — without the
+    break they overflow a 360px row. */
+ code{word-break:break-all}
  small{color:#666}
  .muted,.mut{color:#666}
  .pill{display:inline-block;border-radius:99px;padding:.05rem .6rem;font-size:.8rem;
@@ -81,11 +84,12 @@ twin — the same pack, but someone inflated the contested visit's observed span
 Watch the signature catch it</button></p>
 <p id="trygauntlet-wrap" hidden><button id="trygauntlet" type="button"><strong>Run
 the whole gauntlet</strong> — every artifact on this page verified in sequence:
-the clean pack, the doctored twin, all three attacks, the real-API sweep, the
-signed fork, the Bitcoin anchor — scored against the shared oracle</button><br>
+the clean pack, its older sibling from weeks ago, the doctored twin, all three
+attacks, the real-API sweep, the signed fork, the Bitcoin anchor — scored
+against the shared oracle</button><br>
 <small class="mut">the oracle is the verdict each artifact was built to
 produce — agreement means the verifier and the published spec say the same
-thing about all eight.</small></p>
+thing about all nine.</small></p>
 <p id="trycompare-wrap" hidden><button id="trycompare" type="button"><strong>Compare
 two packs</strong> — the clean pack vs its doctored twin: each verifies on its
 own merits, then their signed membership diffs member-by-member — the moved
@@ -1086,7 +1090,11 @@ async function liveCheck(base,say){
     +") — cannot cross-check");return;}
   const ps=packStash.size,pr=packStash.root,ls=lpay.tree_size,lr=lpay.root_sha256;
   if(ps===ls){
-    if(pr===lr)say("ok",`pack's signed head IS the live head — tree size ${ps}: `
+    /* Root equality is byte equality — hex case is presentation, not
+       semantics: every other compare lowercases, so a validly-signed head
+       spelled in uppercase must not read as a different history. */
+    if(String(pr).toLowerCase()===String(lr).toLowerCase())
+      say("ok",`pack's signed head IS the live head — tree size ${ps}: `
       +"the log this pack proves membership in is the one the deployment still serves");
     else say("bad",`FORK: pack and live heads both sign tree size ${ps} with different `
       +"roots — the deployment served this auditor a different log");
@@ -1988,10 +1996,14 @@ async function diagnoseTamper(){
    — decisive — the two signed log heads: same head, proven append-only
    growth, or a provable fork. Mirrored on packdiff._log_head_verdict. */
 async function diffPacks(fileA,fileB,out){
-  const say=(c,m)=>{out.innerHTML+="<div class='row "+c+"'>"+m+"</div>";};
+  const say=(c,m)=>{out.insertAdjacentHTML("beforeend",
+    "<div class='row "+c+"'>"+m+"</div>");};
   const nm=f=>esc(f.name);
-  say("mut","two packs dropped — each is verified on its own merits, then "
-    +"their signed contents are compared");
+  /* Bind the labels to the dropped files up front — a mediator reconciling
+     "agency copy" vs "our copy" must be able to map A/B back to the files. */
+  say("mut","comparing <strong>pack A = "+nm(fileA)+"</strong> vs "
+    +"<strong>pack B = "+nm(fileB)+"</strong> — each is verified on its own "
+    +"merits, then their signed contents are compared");
   let entA,entB;
   try{
     entA=await readZipEntries(fileA);
@@ -2010,6 +2022,9 @@ async function diffPacks(fileA,fileB,out){
   const heads={},verdicts={};
   for(const [label,ents] of [["A",entA],["B",entB]]){
     let html=null,perr=null;
+    /* packName rides each pack's own verdict stamps — set it per side or a
+       previous single-drop's filename leaks into both copies' details. */
+    packName=(label==="A"?fileA:fileB).name;
     try{html=await verifyFiles(ents);}catch(e){perr=e;}
     heads[label]=packStash; /* checkLog's VALIDATED head — null when the
       pack carried none or its checkpoint failed (verifyFiles resets it). */
@@ -2030,11 +2045,12 @@ async function diffPacks(fileA,fileB,out){
     const st=inner.querySelector(".stamp");
     const failed=st?st.classList.contains("bad"):(html===null?true:null);
     verdicts[label]=failed;
-    say(failed===true?"bad":"mut",
+    say(failed!==false?"bad":"mut",
       "pack "+label+" self-verdict: "
       +(st?esc(st.textContent.trim().slice(0,120))
         :(html===null?"FAILED — aborted on malformed member"
-          :"no verdict rendered")));
+          :"FAILED — no verdict rendered (a pack that cannot produce a "
+           +"verdict cannot be trusted)")));
   }
   /* Membership diff. */
   const namesA=new Set(Object.keys(byA)),namesB=new Set(Object.keys(byB));
@@ -2099,7 +2115,7 @@ async function diffPacks(fileA,fileB,out){
       const pa=toJS(get(ca.node,"payload"))||{},
         pb=toJS(get(cb.node,"payload"))||{},
         sa=ca.size,sb=cb.size,ra=ca.root,rb=cb.root;
-      if(sa===sb&&ra===rb)
+      if(sa===sb&&String(ra).toLowerCase()===String(rb).toLowerCase())
         headLine=["ok","both exports commit to the same signed log head "
           +"(tree size "+sa+")"];
       else if(sa===sb)
@@ -2211,10 +2227,16 @@ async function diffPacks(fileA,fileB,out){
         +"both packs is byte-for-byte the same");
   }
   else{
-    const sev=(changed.length||(headLine&&headLine[0]==="bad"))?"bad":"warn";
+    /* packdiff parity: a side that FAILED its own self-verdict is an anomaly
+       event in `attest diff` — the stamp must not sit at warn beside a red
+       self-verdict row. */
+    const failed=verdicts.A===true||verdicts.B===true;
+    const sev=(failed||changed.length||(headLine&&headLine[0]==="bad"))
+      ?"bad":"warn";
     say("stamp "+sev,"<strong>PACKS DIFFER</strong> — "+onlyA.length+
       " member(s) only in A · "+onlyB.length+" only in B · "+changed.length+
-      " shared member(s) with different bytes");
+      " shared member(s) with different bytes"
+      +(failed?" · at least one pack FAILED its own verification":""));
     say("mut","honest reading: divergence is not automatically an attack — "
       +"a re-export a week later legitimately differs. The log-head line above "
       +"is what separates proven append-only growth from a provable fork, and "
@@ -2228,8 +2250,17 @@ async function diffPacks(fileA,fileB,out){
     if(out.children)for(const ch of out.children)
       if(ch.classList&&ch.classList.contains&&ch.classList.contains("stamp"))
         st=ch;
-    if(st&&st.scrollIntoView)
-      st.scrollIntoView({behavior:"smooth",block:"nearest"});
+    if(st){
+      const rm=window.matchMedia
+        &&window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if(st.scrollIntoView)
+        st.scrollIntoView({behavior:rm?"auto":"smooth",block:"nearest"});
+      /* Keyboard users were left on the button — move focus to the result
+         like the single-pack verdict path does. */
+      if(!st.hasAttribute||!st.hasAttribute("tabindex"))
+        st.setAttribute("tabindex","-1");
+      if(st.focus)st.focus({preventScroll:true});
+    }
   }catch(e){}
 }
 /* ---------- minimal zip reader: stored + deflate via DecompressionStream ---------- */
@@ -2597,8 +2628,8 @@ if(location.protocol.indexOf("http")===0){
      twin, the three-layer attack gallery, the real-API sweep, the signed
      fork, the Bitcoin anchor — as a single stream. Each round's full
      verdict detail is preserved under a collapsible, so nothing is lost.
-     While it runs, #out is an off-screen scratch — eight full verdicts
-     would flood the polite live region and steal focus eight times; the
+     While it runs, #out is an off-screen scratch — nine full verdicts
+     would flood the polite live region and steal focus nine times; the
      accessible record lands once in #gauntlet-out. */
   async function gauntlet(){
     const gout=document.getElementById("gauntlet-out"),out=
@@ -2622,6 +2653,7 @@ if(location.protocol.indexOf("http")===0){
     const _savedIssuer=issuerDoc;issuerDoc=null;
     const seq=[
       ["sample-pack.zip","VERIFIED"],
+      ["sample-pack-earlier.zip","VERIFIED — the pre-chain export, still valid"],
       ["sample-pack-tampered.zip","FAILED"],
       ["sample-pack-attack-missing-record.zip","FAILED"],
       ["sample-pack-attack-smuggled-file.zip","FAILED"],
@@ -2747,6 +2779,12 @@ if(location.protocol.indexOf("http")===0){
     /* diffPacks writes #out for ~seconds — hold the flag or a mid-compare
        drop interleaves a whole second verdict into the report. */
     if(_busy){_busyNote(out);return;}_busy=true;
+    /* A compare is not a single-pack context: a previous drop's validated
+       head must not keep the live cross-check armed against stale bytes, and
+       a stale packName must not bleed into the per-pack verdicts. */
+    packStash=null;packName="";
+    const lw=document.getElementById("live-wrap");
+    if(lw)lw.hidden=true;
     const pair=earlier
       ?["sample-pack-earlier.zip","sample-pack.zip"]
       :["sample-pack.zip","sample-pack-tampered.zip"];
@@ -2789,7 +2827,12 @@ if(location.protocol.indexOf("http")===0){
           catch(e){}
           comparePacks(pair);};
         if(location.hash===hash)comparePacks(pair);
-      }).catch(()=>{});
+      }).catch(()=>{
+        /* A rejected HEAD (offline, CORS) is a silent dead link otherwise —
+           give the deep link the same named miss a 404 gets. */
+        if(location.hash===hash)
+          _miss(files[0]+" (the fetch never answered)");
+      });
     };
     arm("trycompare-wrap","trycompare","#compare-packs",false,
         ["sample-pack.zip","sample-pack-tampered.zip"]);

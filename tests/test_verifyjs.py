@@ -2443,6 +2443,7 @@ global.fetch=async(u,o)=>{if(o&&o.method==='HEAD')return{ok:u==='sample-pack.zip
   return{ok:true,arrayBuffer:async()=>packB.buffer.slice(packB.byteOffset,packB.byteOffset+packB.byteLength),text:async()=>packB.toString()};};
 const mkel=()=>({hidden:true,innerHTML:'',value:'',open:false,options:[],
   setAttribute:()=>{},focus:()=>{},onclick:null,dataset:{},textContent:'',
+  insertAdjacentHTML(pos,h){this.innerHTML=(pos==='afterbegin'?h+this.innerHTML:this.innerHTML+h)},
   appendChild(c){if(this.options)this.options.push(c)},
   click(){if(this.onclick)this.onclick()}});
 const els={};const mk=id=>els[id]||(els[id]=mkel());
@@ -2513,6 +2514,7 @@ global.fetch=async(u,o)=>{
   }catch(e){return{ok:false};}};
 const mkel=()=>({hidden:true,innerHTML:'',value:'',open:false,options:[],
   setAttribute:()=>{},focus:()=>{},onclick:null,dataset:{},textContent:'',
+  insertAdjacentHTML(pos,h){this.innerHTML=(pos==='afterbegin'?h+this.innerHTML:this.innerHTML+h)},
   appendChild(c){if(this.options)this.options.push(c)},remove(){},
   click(){if(this.onclick)this.onclick()}});
 const els={};const mk=id=>els[id]||(els[id]=mkel());
@@ -2658,13 +2660,14 @@ console.log('anat:',ok,bad.length===0?[]:bad.slice(0,3));
 
 @pytest.mark.skipif(NODE is None, reason="node runtime not available")
 def test_gauntlet_oracle_agreement(tmp_path):
-    """#gauntlet: one click verifies all eight shipped artifacts in sequence
-    and prints ORACLE AGREEMENT 8/8 — each round's verdict captured under a
+    """#gauntlet: one click verifies all nine shipped artifacts in sequence
+    and prints ORACLE AGREEMENT 9/9 — each round's verdict captured under a
     collapsible before #out resets for the next. The stub out element parses
     its own rendered stamp so the driver exercises the real capture path."""
     docs = Path(__file__).resolve().parents[1] / "docs"
     need = [
         "sample-pack.zip",
+        "sample-pack-earlier.zip",
         "sample-pack-tampered.zip",
         "sample-pack-attack-missing-record.zip",
         "sample-pack-attack-smuggled-file.zip",
@@ -2730,8 +2733,8 @@ eval(src + `
         timeout=300,
     )
     assert proc.returncode == 0, proc.stderr
-    assert "gauntlet-rows: 9" in proc.stdout, proc.stdout
-    assert "ORACLE AGREEMENT 8/8" in proc.stdout, proc.stdout
+    assert "gauntlet-rows: 10" in proc.stdout, proc.stdout
+    assert "ORACLE AGREEMENT 9/9" in proc.stdout, proc.stdout
     assert "sample-pack-tampered.zip" in proc.stdout, proc.stdout
     assert "anchor-demo.json" in proc.stdout, proc.stdout
 

@@ -48,5 +48,5 @@
 <text class="d" x="64" y="455">verifier_manifest pins the checker's own bytes · media digests match or withheld</text>
 <a href="verify.html#sample-pack-attack-forged-verifier"><text class="a" x="640" y="430" text-anchor="end" text-decoration="underline">forged verifier ✗</text></a>
 <a href="verify.html#vectors/fail-missing-pinned-tool"><text class="a" x="640" y="443" text-anchor="end" text-decoration="underline">missing tool ✗</text></a>
-<text class="d" x="20" y="498">…then the verdict — <tspan fill="#146c2e" font-weight="700">VERIFIED</tspan> only when every gate passed. Two attacks skip honestly where this store has nothing to forge.</text>
+<text class="d" x="20" y="498">…then the verdict — <tspan fill="#146c2e" font-weight="700">VERIFIED</tspan> only when every gate passed. All 21 demo-store attacks die at one of these gates.</text>
 </svg>

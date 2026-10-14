@@ -417,9 +417,9 @@ def check_log_pin(
                 return None, (
                     f"log_checkpoint.json: chain member {mr.id[:24]}… signs a bridge it cannot prove"
                 )
-            if msize in seen_sizes and seen_sizes[msize] != mroot:
+            if msize in seen_sizes and seen_sizes[msize] != mroot.lower():
                 return None, (f"log_checkpoint.json: chain carries two signed heads at size {msize}")
-            seen_sizes[msize] = mroot
+            seen_sizes[msize] = mroot.lower()
             chain_members.append({"id": mr.id, "size": int(msize), "root": mroot, "payload": mp})
         chain_members.sort(key=lambda m: m["size"])
     # Witness counter-signatures ride the checkpoint document: verified

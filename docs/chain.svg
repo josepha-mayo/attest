@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg viewBox="0 0 672 1643" xmlns="http://www.w3.org/2000/svg" role="group" aria-label="Hash chain of the 283 signed receipts">
+<svg viewBox="0 0 672 1799" xmlns="http://www.w3.org/2000/svg" role="group" aria-label="Hash chain of the 313 signed receipts">
 <line x1="57" y1="52" x2="119" y2="52" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
 <line x1="119" y1="52" x2="181" y2="52" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
 <line x1="181" y1="52" x2="243" y2="52" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
@@ -282,27 +282,57 @@
 <line x1="57" y1="1456" x2="57" y2="1508" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
 <line x1="57" y1="1508" x2="119" y2="1508" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
 <line x1="119" y1="1508" x2="181" y2="1508" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="181" y1="1508" x2="243" y2="1508" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="243" y1="1508" x2="305" y2="1508" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="305" y1="1508" x2="367" y2="1508" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="367" y1="1508" x2="429" y2="1508" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="429" y1="1508" x2="491" y2="1508" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="491" y1="1508" x2="553" y2="1508" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="553" y1="1508" x2="615" y2="1508" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="615" y1="1508" x2="615" y2="1560" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="615" y1="1560" x2="553" y2="1560" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="553" y1="1560" x2="491" y2="1560" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="491" y1="1560" x2="429" y2="1560" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="429" y1="1560" x2="367" y2="1560" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="367" y1="1560" x2="305" y2="1560" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="305" y1="1560" x2="243" y2="1560" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="243" y1="1560" x2="181" y2="1560" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="181" y1="1560" x2="119" y2="1560" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="119" y1="1560" x2="57" y2="1560" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="57" y1="1560" x2="57" y2="1612" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="57" y1="1612" x2="119" y2="1612" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="119" y1="1612" x2="181" y2="1612" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="181" y1="1612" x2="243" y2="1612" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="243" y1="1612" x2="305" y2="1612" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="305" y1="1612" x2="367" y2="1612" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="367" y1="1612" x2="429" y2="1612" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="429" y1="1612" x2="491" y2="1612" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="491" y1="1612" x2="553" y2="1612" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="553" y1="1612" x2="615" y2="1612" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="615" y1="1612" x2="615" y2="1664" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="615" y1="1664" x2="553" y2="1664" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="553" y1="1664" x2="491" y2="1664" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
 <g font-family="system-ui,sans-serif" font-size="11">
-<rect x="26" y="1591" width="9" height="9" rx="2" fill="#7c3aed"/>
-<text x="38" y="1599" fill="#475569">case_export</text>
-<rect x="154" y="1591" width="9" height="9" rx="2" fill="#94a3b8"/>
-<text x="166" y="1599" fill="#475569">verifier_manifest</text>
-<rect x="282" y="1591" width="9" height="9" rx="2" fill="#0d9488"/>
-<text x="294" y="1599" fill="#475569">log_checkpoint</text>
-<rect x="410" y="1591" width="9" height="9" rx="2" fill="#2563eb"/>
-<text x="422" y="1599" fill="#475569">visit_record</text>
-<rect x="538" y="1591" width="9" height="9" rx="2" fill="#d97706"/>
-<text x="550" y="1599" fill="#475569">coverage_attestation</text>
-<rect x="26" y="1613" width="9" height="9" rx="2" fill="#16a34a"/>
-<text x="38" y="1621" fill="#475569">verification_report</text>
-<rect x="154" y="1613" width="9" height="9" rx="2" fill="#db2777"/>
-<text x="166" y="1621" fill="#475569">period_digest</text>
-<rect x="282" y="1613" width="9" height="9" rx="2" fill="#dc2626"/>
-<text x="294" y="1621" fill="#475569">key_rotation</text>
-<rect x="410" y="1613" width="9" height="9" rx="2" fill="#ea580c"/>
-<text x="422" y="1621" fill="#475569">key_adoption</text>
-<rect x="538" y="1613" width="9" height="9" rx="2" fill="#991b1b"/>
-<text x="550" y="1621" fill="#475569">key_revocation</text>
+<rect x="26" y="1747" width="9" height="9" rx="2" fill="#7c3aed"/>
+<text x="38" y="1755" fill="#475569">case_export</text>
+<rect x="154" y="1747" width="9" height="9" rx="2" fill="#94a3b8"/>
+<text x="166" y="1755" fill="#475569">verifier_manifest</text>
+<rect x="282" y="1747" width="9" height="9" rx="2" fill="#0d9488"/>
+<text x="294" y="1755" fill="#475569">log_checkpoint</text>
+<rect x="410" y="1747" width="9" height="9" rx="2" fill="#2563eb"/>
+<text x="422" y="1755" fill="#475569">visit_record</text>
+<rect x="538" y="1747" width="9" height="9" rx="2" fill="#d97706"/>
+<text x="550" y="1755" fill="#475569">coverage_attestation</text>
+<rect x="26" y="1769" width="9" height="9" rx="2" fill="#16a34a"/>
+<text x="38" y="1777" fill="#475569">verification_report</text>
+<rect x="154" y="1769" width="9" height="9" rx="2" fill="#db2777"/>
+<text x="166" y="1777" fill="#475569">period_digest</text>
+<rect x="282" y="1769" width="9" height="9" rx="2" fill="#dc2626"/>
+<text x="294" y="1777" fill="#475569">key_rotation</text>
+<rect x="410" y="1769" width="9" height="9" rx="2" fill="#ea580c"/>
+<text x="422" y="1777" fill="#475569">key_adoption</text>
+<rect x="538" y="1769" width="9" height="9" rx="2" fill="#991b1b"/>
+<text x="550" y="1777" fill="#475569">key_revocation</text>
 </g>
 <a href="verify.html#demo-receipts/rcpt_12c9510dfc604236b880b034fce4af7e"><rect x="48" y="43" width="18" height="18" rx="4" fill="#2563eb" stroke="#fff" stroke-width="1.2"><title>rcpt_12c9510dfc604236b880b034fce4af7e · visit_record · seq 1 · 2026-10-09T18:06:04.725773Z</title></rect></a>
 <a href="verify.html#demo-receipts/rcpt_8af58f6242d04e13a94147ddc2c70a19"><rect x="110" y="43" width="18" height="18" rx="4" fill="#2563eb" stroke="#fff" stroke-width="1.2"><title>rcpt_8af58f6242d04e13a94147ddc2c70a19 · visit_record · seq 2 · 2026-10-09T18:06:05.909358Z</title></rect></a>
@@ -587,4 +617,34 @@
 <a href="verify.html#demo-receipts/rcpt_505fb19c808246bbb952c48b5144b803"><rect x="48" y="1499" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_505fb19c808246bbb952c48b5144b803 · case_export · seq 281 · 2026-10-14T14:34:09.223671Z</title></rect></a>
 <a href="verify.html#demo-receipts/rcpt_820db57e292e46e58e1cbd5668040106"><rect x="110" y="1499" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_820db57e292e46e58e1cbd5668040106 · verifier_manifest · seq 282 · 2026-10-14T14:34:09.241586Z</title></rect></a>
 <a href="verify.html#demo-receipts/rcpt_97dae3841bf448ad996da30da1788f61"><rect x="172" y="1499" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_97dae3841bf448ad996da30da1788f61 · log_checkpoint · seq 283 · 2026-10-14T14:34:09.282649Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_38ea1c1ab23b4bc091aa94cdc043a157"><rect x="234" y="1499" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_38ea1c1ab23b4bc091aa94cdc043a157 · case_export · seq 284 · 2026-10-14T15:23:42.026722Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_76a579d9208a41509cff32a52b2475ad"><rect x="296" y="1499" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_76a579d9208a41509cff32a52b2475ad · verifier_manifest · seq 285 · 2026-10-14T15:23:42.041885Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_a3d4e869ed3a4e1bb2df475a56a1154a"><rect x="358" y="1499" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_a3d4e869ed3a4e1bb2df475a56a1154a · log_checkpoint · seq 286 · 2026-10-14T15:23:42.068271Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_5556fd65ee1a4d07a03f1a3f569a3fac"><rect x="420" y="1499" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_5556fd65ee1a4d07a03f1a3f569a3fac · case_export · seq 287 · 2026-10-14T15:23:43.555996Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_895c234dfe6a48d1b62b59d120e23973"><rect x="482" y="1499" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_895c234dfe6a48d1b62b59d120e23973 · verifier_manifest · seq 288 · 2026-10-14T15:23:43.573214Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_b7233041612b446f97a4def264959f9d"><rect x="544" y="1499" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_b7233041612b446f97a4def264959f9d · log_checkpoint · seq 289 · 2026-10-14T15:23:43.602055Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_d5d4285f0ffb4c4bb126173fe827fccd"><rect x="606" y="1499" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_d5d4285f0ffb4c4bb126173fe827fccd · case_export · seq 290 · 2026-10-14T15:24:09.502821Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_269e0958223c4c5bb9111c193a38f1d4"><rect x="606" y="1551" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_269e0958223c4c5bb9111c193a38f1d4 · verifier_manifest · seq 291 · 2026-10-14T15:24:09.520049Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_bd887931d2804e619ac9b24404184c52"><rect x="544" y="1551" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_bd887931d2804e619ac9b24404184c52 · log_checkpoint · seq 292 · 2026-10-14T15:24:09.588825Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_a4e2c8432e2b4832a5ca7edca6fbbb01"><rect x="482" y="1551" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_a4e2c8432e2b4832a5ca7edca6fbbb01 · case_export · seq 293 · 2026-10-14T15:24:11.596056Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_8978c45f834c47ba9a3f84f3e2eb6266"><rect x="420" y="1551" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_8978c45f834c47ba9a3f84f3e2eb6266 · verifier_manifest · seq 294 · 2026-10-14T15:24:11.618232Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_10525da3c32c4b589518d7fed5d018d7"><rect x="358" y="1551" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_10525da3c32c4b589518d7fed5d018d7 · log_checkpoint · seq 295 · 2026-10-14T15:24:11.654584Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_85fd48794f2a4ff6a5af8a669a2f07f9"><rect x="296" y="1551" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_85fd48794f2a4ff6a5af8a669a2f07f9 · case_export · seq 296 · 2026-10-14T15:24:13.213665Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_56981a906b66406eac329baf35264176"><rect x="234" y="1551" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_56981a906b66406eac329baf35264176 · verifier_manifest · seq 297 · 2026-10-14T15:24:13.229459Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_c186dbdb879d4257bdd39ccb3d78588f"><rect x="172" y="1551" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_c186dbdb879d4257bdd39ccb3d78588f · log_checkpoint · seq 298 · 2026-10-14T15:24:13.251479Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_018977a437af44bbb58cbc08cde652a0"><rect x="110" y="1551" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_018977a437af44bbb58cbc08cde652a0 · case_export · seq 299 · 2026-10-14T15:45:35.024886Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_4c2cccc244e647188c8093f26fec30c2"><rect x="48" y="1551" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_4c2cccc244e647188c8093f26fec30c2 · verifier_manifest · seq 300 · 2026-10-14T15:45:35.044327Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_21c1988a88624240aa881fd5223d16b4"><rect x="48" y="1603" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_21c1988a88624240aa881fd5223d16b4 · log_checkpoint · seq 301 · 2026-10-14T15:45:35.068408Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_30d2abcb8692412aa60680dc6e9f531f"><rect x="110" y="1603" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_30d2abcb8692412aa60680dc6e9f531f · case_export · seq 302 · 2026-10-14T15:45:36.978721Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_90a4a862c26943239324c6b772db061f"><rect x="172" y="1603" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_90a4a862c26943239324c6b772db061f · verifier_manifest · seq 303 · 2026-10-14T15:45:36.997794Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_f922bb9cb6224217bf809f536b0ab53a"><rect x="234" y="1603" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_f922bb9cb6224217bf809f536b0ab53a · log_checkpoint · seq 304 · 2026-10-14T15:45:37.025554Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_f23a652d2cf04d0589cad81772cf2bd6"><rect x="296" y="1603" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_f23a652d2cf04d0589cad81772cf2bd6 · case_export · seq 305 · 2026-10-14T15:45:38.696035Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_b7c092e5b8fe4dd1afdacf1620a2bcf6"><rect x="358" y="1603" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_b7c092e5b8fe4dd1afdacf1620a2bcf6 · verifier_manifest · seq 306 · 2026-10-14T15:45:38.712986Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_1cb2600694ea4d58bcf7974d8f7a1f54"><rect x="420" y="1603" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_1cb2600694ea4d58bcf7974d8f7a1f54 · log_checkpoint · seq 307 · 2026-10-14T15:45:38.747620Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_0719d9e958164bc7a5042a0e7efbd75a"><rect x="482" y="1603" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_0719d9e958164bc7a5042a0e7efbd75a · case_export · seq 308 · 2026-10-14T15:45:40.866932Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_708b6b62ac454adf9ab719722fc8637f"><rect x="544" y="1603" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_708b6b62ac454adf9ab719722fc8637f · verifier_manifest · seq 309 · 2026-10-14T15:45:40.883879Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_fa1bff4415ee4200819ab5c8e76e46c4"><rect x="606" y="1603" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_fa1bff4415ee4200819ab5c8e76e46c4 · log_checkpoint · seq 310 · 2026-10-14T15:45:40.911598Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_489d4468d91443698c72fc34da0ac806"><rect x="606" y="1655" width="18" height="18" rx="4" fill="#7c3aed" stroke="#fff" stroke-width="1.2"><title>rcpt_489d4468d91443698c72fc34da0ac806 · case_export · seq 311 · 2026-10-14T15:45:42.722037Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_82b7ad6e4409497c96e217d1c040283b"><rect x="544" y="1655" width="18" height="18" rx="4" fill="#94a3b8" stroke="#fff" stroke-width="1.2"><title>rcpt_82b7ad6e4409497c96e217d1c040283b · verifier_manifest · seq 312 · 2026-10-14T15:45:42.739820Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_5736d4f6c7044fd298b5c6a8bba45157"><rect x="482" y="1655" width="18" height="18" rx="4" fill="#0d9488" stroke="#fff" stroke-width="1.2"><title>rcpt_5736d4f6c7044fd298b5c6a8bba45157 · log_checkpoint · seq 313 · 2026-10-14T15:45:42.768263Z</title></rect></a>
 </svg>

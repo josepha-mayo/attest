@@ -769,12 +769,12 @@ def check_log(pack_dir, trusted, receipts):
                     f"FAIL log_checkpoint.json: chain member {rid}… "
                     "signs a bridge it cannot prove"
                 )
-            if msize in seen_sizes and seen_sizes[msize] != mroot:
+            if msize in seen_sizes and seen_sizes[msize] != mroot.lower():
                 sys.exit(
                     f"FAIL log_checkpoint.json: chain carries two signed heads "
                     f"at size {msize}"
                 )
-            seen_sizes[msize] = mroot
+            seen_sizes[msize] = mroot.lower()
             chain_n += 1
     # CLI _verify_log_doc parity: every proofs entry must verify — a junk
     # entry referencing nothing is a lie, not decoration.

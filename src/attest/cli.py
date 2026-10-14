@@ -1636,12 +1636,12 @@ def _verify_log_doc(
                         f"chain member {mr.id[:24]}… signs a bridge it cannot prove",
                         kind="log_checkpoint",
                     )
-                if msize in seen_sizes and seen_sizes[msize] != mroot:
+                if msize in seen_sizes and seen_sizes[msize] != mroot.lower():
                     fail(
                         f"chain carries two signed heads at size {msize}",
                         kind="log_checkpoint",
                     )
-                seen_sizes[msize] = mroot
+                seen_sizes[msize] = mroot.lower()
             detail_extra += f" — {len(chain)} prior signed head(s) verified in the embedded chain"
         detail = f"signed transparency head: tree size {size}, root {cp.payload['root_sha256'][:16]}…"
         detail += detail_extra
@@ -3836,8 +3836,8 @@ Attest — records, not verdicts. The ten-minute path:
          __N__ artifact sha256s; hash every file → SITE VERIFIED or TAMPER
        + #tamper-lab — commit the attack yourself: rewrite a signed field
          in-page, download your doctored pack, watch the signature refuse it
-       + #gauntlet — one click verifies all eight shipped artifacts against
-         the shared oracle and scores agreement: ORACLE AGREEMENT 8/8
+       + #gauntlet — one click verifies all nine shipped artifacts against
+         the shared oracle and scores agreement: ORACLE AGREEMENT 9/9
        + #compare-packs — two packs at once: each verified, then their signed
          membership diffed and the two log heads reconciled ("both verify" and
          "both identical" are different claims)
