@@ -1211,8 +1211,11 @@ def _verify(args: argparse.Namespace) -> None:
             witness_threshold=witness_threshold,
             badge=getattr(args, "badge", None),
             badge_link=getattr(args, "badge_link", None),
+            attest=getattr(args, "attest", False),
         )
         return
+    if getattr(args, "attest", False):
+        fail("--attest signs a verdict on a pack .zip — pass the zip itself")
     try:
         data = transparency.json_loads(raw.decode("utf-8"))
     except UnicodeDecodeError:
@@ -1889,6 +1892,20 @@ def _pack_key_pool(z, names) -> list:
     return pool
 
 
+def _attestation_engine():
+    """``verify --attest`` — the journal a signed verdict lands in. Mutating,
+    so it takes the instance writer lock like every other issuance command;
+    a missing store is a loud error, never a silent skip."""
+    from .instance import acquire_instance_lock
+    from .store import Store
+
+    db = settings.data_dir / "attest.sqlite3"
+    if not db.exists():
+        sys.exit(f"--attest needs a store to sign into — none at {db}")
+    acquire_instance_lock(settings.data_dir)
+    return _cli_engine(Store(db))
+
+
 def _verify_zip(
     raw: bytes,
     pinned_key: str | None,
@@ -1902,6 +1919,7 @@ def _verify_zip(
     witness_threshold: int = 1,
     badge: str | None = None,
     badge_link: str | None = None,
+    attest: bool = False,
 ) -> None:
     """Verify a dispute pack or case pack zip in place — same checks as the
     embedded verify_case.py and the /verify page. Without --key the pack's own
@@ -1919,7 +1937,39 @@ def _verify_zip(
     from .models import ReviewBundle
     from .packdiff import BoundedZip
 
+    # --attest signs the verdict itself into the deployment's journal: the
+    # audit becomes auditable. Built BEFORE the pack is opened so a missing
+    # store fails fast instead of after the (potentially slow) check. The
+    # attestation binds sha256(pack bytes) + the verifier's content identity,
+    # so a doctored twin attested later can never collide with the clean
+    # verdict on the real pack.
+    attest_engine = _attestation_engine() if attest else None
+
+    def _attest(ok: bool, detail: str) -> None:
+        if attest_engine is None:
+            return
+        import hashlib
+
+        from . import __version__, disputepack
+
+        receipt = attest_engine.issue_pack_verification(
+            hashlib.sha256(raw).hexdigest(),
+            len(raw),
+            "ok" if ok else "fail",
+            detail,
+            {
+                "name": "attest-cli",
+                "version": __version__,
+                "verifier_sha256": hashlib.sha256(disputepack._VERIFIER.encode()).hexdigest(),
+            },
+        )
+        print(
+            f"Attestation {receipt.id}: verdict signed into this deployment's journal",
+            file=sys.stderr if json_mode else sys.stdout,
+        )
+
     def fail(detail: str, **kw) -> None:
+        _attest(False, detail)
         _write_verdict_badge(badge, False, detail, link=badge_link)
         if json_mode:
             print(json.dumps({"ok": False, "detail": detail, **kw}, indent=2))
@@ -2045,6 +2095,7 @@ def _verify_zip(
                 pass
         if live_report is not None:
             extra["live_log"] = live_report
+        _attest(True, detail)
         _write_verdict_badge(badge, True, detail, link=badge_link)
         print(
             json.dumps(
@@ -2053,6 +2104,7 @@ def _verify_zip(
             )
         )
         return
+    _attest(True, detail)
     print(f"OK: {detail}")
     _write_verdict_badge(badge, True, detail, link=badge_link)
     if live_line:
@@ -3873,7 +3925,8 @@ Attest — records, not verdicts. The ten-minute path:
        plus the scoped links each side gets texted: demo-family.html (+ -es)
        and demo-worker.html (+ -es) — snapshots of the running app
     6. the raw layer: demo-receipts.html — all __R__ signed receipts, drawn as
-       the hash chain itself, each a one-click verify.html deep link
+       the hash chain itself, each a one-click verify.html deep link —
+       incl. the two `verify --attest` verdict receipts (the audit, audited)
        (+ anatomy.html — one receipt decomposed field-by-field, chain links
        walkable)
     7. the adversarial corpus: vectors.html — __V__ conformance packs the oracle
@@ -3896,6 +3949,9 @@ Attest — records, not verdicts. The ten-minute path:
                           # append-only audit — names the moved field, proves
                           # the log only grew (or calls the fork), writes the
                           # page a mediator attaches to the dispute
+    attest verify pack.zip --attest
+                          # sign the verdict itself into the journal — the
+                          # mediator's "I checked" becomes evidence too
     attest status && attest doctor
 
   To read: JUDGE.md (scoring map) · THREATMODEL.md (limits are the point) ·
@@ -4326,6 +4382,13 @@ def _explain_attestation(store, ident: str, *, as_json: bool = False) -> None:
             print(f"  stated reason: {p['reason']} (unverified, like all stated facts)")
         print("  a trust annotation, not an erasure: the records still verify;")
         print("  verifiers weight them as suspect-window signatures.")
+    elif rtype == "pack_verification":
+        v = p.get("verifier") or {}
+        print(f"  verifier {v.get('name')} {v.get('version')} ran over")
+        print(f"  sha256:{str(p.get('pack_sha256'))[:32]}… ({p.get('pack_bytes')} bytes)")
+        print(f"  and returned: {str(p.get('verdict')).upper()} — {p.get('detail')}")
+        print("  the audit act itself, signed — it never claims the verdict is")
+        print("  right. Re-run the pinned verifier on those exact bytes to check.")
     print()
     print("Boundary: a signature attests what the record claims and that it is")
     print("intact under the issuer key — never identity, attendance, or truth.")
@@ -4507,6 +4570,16 @@ def main(argv: list[str] | None = None) -> None:
         metavar="SVG_PATH",
         help="also write the verdict as a self-contained SVG shield — a CI "
         "badge for evidence packs; written red on failure, not withheld",
+    )
+    s.add_argument(
+        "--attest",
+        action="store_true",
+        help="sign the verdict itself into this deployment's journal — a "
+        "pack_verification receipt binding sha256(pack bytes), the verdict, "
+        "and the verifier's content identity, so a mediator's audit is itself "
+        "auditable. Requires an initialized ATTEST_DATA_DIR store; pack "
+        ".zip inputs only; FAIL verdicts are signed too — a forged pack "
+        "attested as forged is evidence",
     )
     s.add_argument(
         "--badge-link",

@@ -13909,5 +13909,65 @@
     "signature": "tOwNcT6se79luzeXwoEfJw4wfi5I7AHBFL/lV2S0Qt/uc8C+YEi+iJuqHWQAI5dMN7Ar3Z5N7v9tnQh4FDSmCA==",
     "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
     "issued_at": "2026-10-14T16:48:58.667898Z"
+  },
+  {
+    "id": "rcpt_387e4205e034494a9d1ddb3acb151561",
+    "visit_id": "pack-verify:72247ba88a8c5980",
+    "sequence": 329,
+    "prev_hash": "d8be0317151e4124c62d653c3a213ecf73264c4b0b2c3beccd9f61954abdd198",
+    "payload": {
+      "record_type": "pack_verification",
+      "pack_sha256": "5638802682463ad6da55e0b776af23f4e62490ca04403aeedb037bcc08a56d32",
+      "pack_bytes": 436333,
+      "verdict": "ok",
+      "detail": "case pack verified — 9 visit record(s) intact (export signed: 9 record(s); 4 verifier tool(s) pinned by issuer-signed manifest; 121 receipt(s) proven inside the deployment transparency log at checkpoint size 224 — cosigned by 1 witness(es) (1 anchored in the witness's own published log) — 32 prior signed head(s) embedded for cross-export reconciliation; 2 issuer keys linked via the signed rotation chain; 6 record(s) signed by a revoked issuer inside its suspect window; 1 key-lifecycle receipt(s) signed inside a suspect window — the trust pivot itself is qualified): vis_ac04986742ad: closed (no_statement) — 0/2 signed media digests found in pack, 2 withheld by redaction; vis_5b7958271e00: closed (no_statement) — 0/2 signed media digests found in pack, 2 withheld by redaction; vis_f34460136366: no_observation (resolved) — 0/0 signed media digests found in pack; vis_3feab06a831b: closed (no_statement) — 0/1 signed media digests found in pack, 1 withheld by redaction; vis_32a86d6fdbe4: no_observation (no_statement) — 0/0 signed media digests found in pack; vis_1071d3b1997a: closed (no_statement) — 0/1 signed media digests found in pack, 1 withheld by redaction; vis_6a79c8145c2e: closed (no_statement) — 0/1 signed media digests found in pack, 1 withheld by redaction; vis_70e42116a4cf: closed (contested) — 0/2 signed media digests found in pack, 2 withheld by redaction; vis_8243499a3a78: closed (no_statement) — 0/2 signed media digests found in pack, 2 withheld by redaction",
+      "verifier": {
+        "name": "attest-cli",
+        "version": "0.1.0",
+        "verifier_sha256": "9058287e2b4495da20d8cb0f2ec3a5ecbe75313d9b6f4c0ab3f1ead3082fac1b"
+      },
+      "boundary": "This receipt attests only that the named verifier produced the named verdict on the byte-string digest above. It does not prove the verdict is right — re-run the pinned verifier to check — and says nothing about physical truth.",
+      "journal_head": "cc730f537090deb8e3f318b200cd8798aa87feeb5483fd480e5c6811767e59b2",
+      "schema": "attest.receipt/2",
+      "sequence": 329,
+      "prev_hash": "d8be0317151e4124c62d653c3a213ecf73264c4b0b2c3beccd9f61954abdd198",
+      "visit_id": "pack-verify:72247ba88a8c5980",
+      "receipt_id": "rcpt_387e4205e034494a9d1ddb3acb151561",
+      "issued_at": "2026-10-14T17:41:50.559818+00:00"
+    },
+    "payload_hash": "94c75c3932fb5ef3d2668f1f7490f8d2a0e2850f4c441878130c5515b6581e52",
+    "signature": "wspnxdKqpr01e48pfA7iuULmXVFLs8Ih0PJ9Gk/1Pkw9kH316DCRpqr1WhJUwb8yA1juoZ5lXjZ+RM4HLTjRAw==",
+    "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+    "issued_at": "2026-10-14T17:41:50.559818Z"
+  },
+  {
+    "id": "rcpt_e5b54b9b11b84879829b122aa5f0ac76",
+    "visit_id": "pack-verify:9bcb17e0ef11163c",
+    "sequence": 330,
+    "prev_hash": "94c75c3932fb5ef3d2668f1f7490f8d2a0e2850f4c441878130c5515b6581e52",
+    "payload": {
+      "record_type": "pack_verification",
+      "pack_sha256": "76a5daeebbc77ced5b9cdf4035160c117f068271ac46b010ec5f34fadc3fbfef",
+      "pack_bytes": 436334,
+      "verdict": "fail",
+      "detail": "verification failed: vis_70e42116a4cf: bundle: original: payload hash mismatch (payload was altered)",
+      "verifier": {
+        "name": "attest-cli",
+        "version": "0.1.0",
+        "verifier_sha256": "9058287e2b4495da20d8cb0f2ec3a5ecbe75313d9b6f4c0ab3f1ead3082fac1b"
+      },
+      "boundary": "This receipt attests only that the named verifier produced the named verdict on the byte-string digest above. It does not prove the verdict is right — re-run the pinned verifier to check — and says nothing about physical truth.",
+      "journal_head": "2295d36144665f84d42baafe4ae52a927a553f22708d20981a6c28a9981403a5",
+      "schema": "attest.receipt/2",
+      "sequence": 330,
+      "prev_hash": "94c75c3932fb5ef3d2668f1f7490f8d2a0e2850f4c441878130c5515b6581e52",
+      "visit_id": "pack-verify:9bcb17e0ef11163c",
+      "receipt_id": "rcpt_e5b54b9b11b84879829b122aa5f0ac76",
+      "issued_at": "2026-10-14T17:41:51.622079+00:00"
+    },
+    "payload_hash": "3493625eb848ad4c710d6537b2c93c0601fdc71bd60ee853d5e4b29323990e96",
+    "signature": "R7kUvarVdbPz8cI0JfQq/w/GJOAv5BZ7thdxpOKBNigJo86K6rc9hdQXyshchfj3aV1hg9bAp9bugCyQwF/gDQ==",
+    "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+    "issued_at": "2026-10-14T17:41:51.622079Z"
   }
 ]

@@ -258,6 +258,153 @@ def test_cli_verify_real_pack(tmp_path, engine, store, household, schedule, t0):
     assert "case pack verified" in rc.stdout
 
 
+def test_verify_attest_signs_the_verdict_into_the_journal(tmp_path, engine, store, household, schedule, t0):
+    """`attest verify pack.zip --attest` — the mediator's audit act is itself
+    evidence: a `pack_verification` receipt binds sha256(pack bytes), the
+    verdict, and the verifier's content identity under the AUDITING
+    deployment's issuer key. FAIL verdicts sign too — a forged pack attested
+    as forged is evidence. Idempotent per (pack, verifier identity)."""
+    import subprocess
+    import sys
+
+    from attest.disputepack import build_case_pack, tamper_twin
+    from attest.reviews import ReviewService, countersign_status
+    from attest.store import Store
+
+    visit = engine.ingest(event(household[2], t0)).visit
+    engine.close_for_review(visit.id)
+    bundle = ReviewService(store, engine.signer, engine.clock).bundle(visit.id)
+    site = store.sites()[0]
+    data = build_case_pack(
+        store,
+        tmp_path / "media",
+        site,
+        [(visit, bundle, countersign_status(bundle))],
+        manifest_signer=lambda m: engine.issue_export_manifest(site, m),
+    )
+    pack = tmp_path / "case.zip"
+    pack.write_bytes(data)
+
+    audit = tmp_path / "auditor"
+    audit.mkdir()
+    Store(audit / "attest.sqlite3").close()  # initialized store the CLI can open
+    import os
+
+    env = {**os.environ, "ATTEST_DATA_DIR": str(audit)}
+
+    def run(*argv):
+        return subprocess.run(
+            [sys.executable, "-m", "attest.cli", *argv],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+    rc = run("verify", "--attest", str(pack))
+    assert rc.returncode == 0, rc.stderr + rc.stdout
+    assert "Attestation rcpt_" in rc.stdout
+
+    audit_store = Store(audit / "attest.sqlite3")
+    att = [r for r in audit_store.receipts() if r.payload.get("record_type") == "pack_verification"]
+    assert len(att) == 1
+    facts = att[0].payload
+    assert facts["verdict"] == "ok"
+    assert facts["pack_sha256"] == hashlib.sha256(data).hexdigest()
+    assert facts["pack_bytes"] == len(data)
+    assert facts["verifier"]["name"] == "attest-cli"
+    assert len(facts["verifier"]["verifier_sha256"]) == 64
+    assert att[0].visit_id.startswith("pack-verify:")
+
+    # A doctored twin attests as forged — exit 1, but the FAIL receipt lands.
+    forged = tmp_path / "forged.zip"
+    forged_bytes, _attack = tamper_twin(data)
+    forged.write_bytes(forged_bytes)
+    rc = run("verify", "--attest", str(forged))
+    assert rc.returncode == 1, rc.stderr + rc.stdout
+    audit_store = Store(audit / "attest.sqlite3")
+    att = [r for r in audit_store.receipts() if r.payload.get("record_type") == "pack_verification"]
+    assert len(att) == 2
+    fail_att = next(r for r in att if r.payload["verdict"] == "fail")
+    assert fail_att.payload["pack_sha256"] == hashlib.sha256(forged_bytes).hexdigest()
+    assert fail_att.payload["pack_bytes"] == len(forged_bytes)
+    assert fail_att.payload["detail"]
+
+    # Re-attesting the same bytes under the same verifier is idempotent —
+    # the audit trail records the act once, not once per run.
+    rc = run("verify", "--attest", str(pack))
+    assert rc.returncode == 0
+    audit_store = Store(audit / "attest.sqlite3")
+    att = [r for r in audit_store.receipts() if r.payload.get("record_type") == "pack_verification"]
+    assert len(att) == 2
+
+    # --attest on a non-pack input rejects loudly instead of silently skipping.
+    bare = tmp_path / "receipts.json"
+    bare.write_text("[]")
+    rc = run("verify", "--attest", str(bare))
+    assert rc.returncode != 0
+    assert "--attest" in (rc.stdout + rc.stderr)
+
+
+def test_verify_attest_needs_an_initialized_store(tmp_path):
+    """--attest with no ATTEST_DATA_DIR store fails fast — before the pack is
+    even opened — rather than silently verifying without attesting."""
+    import os
+    import subprocess
+    import sys
+
+    pack = tmp_path / "case.zip"
+    pack.write_bytes(b"PK\x03\x04" + b"0" * 20)
+    empty = tmp_path / "no-store"
+    empty.mkdir()
+    env = {**os.environ, "ATTEST_DATA_DIR": str(empty)}
+    rc = subprocess.run(
+        [sys.executable, "-m", "attest.cli", "verify", "--attest", str(pack)],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert rc.returncode != 0
+    assert "--attest needs a store" in (rc.stdout + rc.stderr)
+
+
+def test_issue_pack_verification_fields(engine):
+    """The attestation receipt carries the boundary discipline every signed
+    claim does: it attests the verifier RAN and returned this verdict, not
+    that the verdict is right or that anything physical is true."""
+    receipt = engine.issue_pack_verification(
+        "ab" * 32,
+        1234,
+        "ok",
+        "case pack verified — 4 receipts intact",
+        {"name": "attest-cli", "version": "0.1.0", "verifier_sha256": "cd" * 32},
+    )
+    p = receipt.payload
+    assert p["record_type"] == "pack_verification"
+    assert p["pack_sha256"] == "ab" * 32
+    assert p["verdict"] == "ok"
+    assert "does not prove the verdict is right" in p["boundary"]
+    assert receipt.visit_id.startswith("pack-verify:")
+    # Same pack + same verifier → the same attestation, not a duplicate leaf.
+    again = engine.issue_pack_verification(
+        "ab" * 32,
+        1234,
+        "ok",
+        "case pack verified — 4 receipts intact",
+        {"name": "attest-cli", "version": "0.1.0", "verifier_sha256": "cd" * 32},
+    )
+    assert again.id == receipt.id
+    # A different verifier identity must NOT collapse into the first
+    # attestation — verdicts from different rules are different claims.
+    other = engine.issue_pack_verification(
+        "ab" * 32,
+        1234,
+        "fail",
+        "payload hash mismatch",
+        {"name": "verify_case.py", "version": "", "verifier_sha256": "ef" * 32},
+    )
+    assert other.id != receipt.id
+
+
 def test_cli_verify_json_emits_a_gatable_verdict(tmp_path, engine, store, household, schedule, t0):
     """`attest verify pack.zip --json` is the CI gate: stdout carries exactly
     one object — {ok, kind, detail, pinned} — and a tampered pack is exit 1

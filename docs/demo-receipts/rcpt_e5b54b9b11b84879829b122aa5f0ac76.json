@@ -1,0 +1,30 @@
+{
+  "id": "rcpt_e5b54b9b11b84879829b122aa5f0ac76",
+  "visit_id": "pack-verify:9bcb17e0ef11163c",
+  "sequence": 330,
+  "prev_hash": "94c75c3932fb5ef3d2668f1f7490f8d2a0e2850f4c441878130c5515b6581e52",
+  "payload": {
+    "record_type": "pack_verification",
+    "pack_sha256": "76a5daeebbc77ced5b9cdf4035160c117f068271ac46b010ec5f34fadc3fbfef",
+    "pack_bytes": 436334,
+    "verdict": "fail",
+    "detail": "verification failed: vis_70e42116a4cf: bundle: original: payload hash mismatch (payload was altered)",
+    "verifier": {
+      "name": "attest-cli",
+      "version": "0.1.0",
+      "verifier_sha256": "9058287e2b4495da20d8cb0f2ec3a5ecbe75313d9b6f4c0ab3f1ead3082fac1b"
+    },
+    "boundary": "This receipt attests only that the named verifier produced the named verdict on the byte-string digest above. It does not prove the verdict is right — re-run the pinned verifier to check — and says nothing about physical truth.",
+    "journal_head": "2295d36144665f84d42baafe4ae52a927a553f22708d20981a6c28a9981403a5",
+    "schema": "attest.receipt/2",
+    "sequence": 330,
+    "prev_hash": "94c75c3932fb5ef3d2668f1f7490f8d2a0e2850f4c441878130c5515b6581e52",
+    "visit_id": "pack-verify:9bcb17e0ef11163c",
+    "receipt_id": "rcpt_e5b54b9b11b84879829b122aa5f0ac76",
+    "issued_at": "2026-10-14T17:41:51.622079+00:00"
+  },
+  "payload_hash": "3493625eb848ad4c710d6537b2c93c0601fdc71bd60ee853d5e4b29323990e96",
+  "signature": "R7kUvarVdbPz8cI0JfQq/w/GJOAv5BZ7thdxpOKBNigJo86K6rc9hdQXyshchfj3aV1hg9bAp9bugCyQwF/gDQ==",
+  "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+  "issued_at": "2026-10-14T17:41:51.622079Z"
+}

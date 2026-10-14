@@ -1202,6 +1202,68 @@ class VisitEngine:
             return self.store.receipt_for_visit(pseudo_id)
         return receipt
 
+    def issue_pack_verification(
+        self,
+        pack_sha256: str,
+        pack_bytes: int,
+        verdict: str,
+        detail: str,
+        verifier: dict,
+    ) -> Receipt:
+        """Sign a third-party verification act: THIS deployment's verifier ran
+        over the byte-string ``pack_sha256`` and returned ``verdict``
+        (``"ok"``/``"fail"``) with ``detail``. The receipt makes the audit
+        itself auditable — a mediator or coordinator can prove *which*
+        verdict they produced on *which* exact bytes, and the pinned
+        ``verifier`` identity says which code produced it. It does NOT say
+        the verdict is correct — anyone can re-run the pinned verifier on
+        the same bytes — and it says nothing about physical truth.
+        ``verifier`` carries ``{name, version, verifier_sha256}`` — the
+        content hash of the stdlib verifier copy is included so a verdict
+        produced by different checking rules never collapses into the same
+        attestation. Idempotent per (pack digest, verifier identity) via a
+        ``pack-verify:`` pseudo visit_id — a distinct prefix, never
+        ``export:``-namespaced, so no real visit absorbs audit receipts."""
+        import hashlib
+        import json as _json
+
+        canonical = _json.dumps(
+            {"pack_sha256": pack_sha256, "verifier": verifier},
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        pseudo_id = f"pack-verify:{hashlib.sha256(canonical.encode()).hexdigest()[:16]}"
+        existing = self.store.receipt_for_visit(pseudo_id)
+        if existing:
+            return existing
+        prev = self.store.latest_receipt()
+        receipt = self.signer.issue(
+            visit_id=pseudo_id,
+            sequence=prev.sequence + 1 if prev else 1,
+            prev_hash=prev.payload_hash if prev else None,
+            facts={
+                "record_type": "pack_verification",
+                "pack_sha256": pack_sha256,
+                "pack_bytes": int(pack_bytes),
+                "verdict": verdict,
+                "detail": detail,
+                "verifier": dict(verifier),
+                "boundary": (
+                    "This receipt attests only that the named verifier produced "
+                    "the named verdict on the byte-string digest above. It does "
+                    "not prove the verdict is right — re-run the pinned verifier "
+                    "to check — and says nothing about physical truth."
+                ),
+                "journal_head": self.store.journal_head(),
+            },
+        )
+        try:
+            self.store.put_receipt(receipt)
+        except sqlite3.IntegrityError:
+            return self.store.receipt_for_visit(pseudo_id)
+        return receipt
+
     def log_leaves(self) -> list[bytes]:
         """Ordered receipt payload hashes — the transparency-log leaves.
 

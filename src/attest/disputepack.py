@@ -1683,8 +1683,10 @@ index.html          START HERE — a self-contained offline record browser. It
 manifest.json       Every visit's receipt hash, state, and worker stance.
 visits/<id>/        Per-visit bundle.json + the media bytes it references.
 attestations/       Site-level signed receipts: coverage certificates, period
-                    digests, prior exports — and any key_rotation pivots, each
-                    signed by the retiring key endorsing its successor.
+                    digests, prior exports, this deployment's own verification
+                    acts (pack_verification — the audit, audited) — and any
+                    key_rotation pivots, each signed by the retiring key
+                    endorsing its successor.
 verify_case.py      Offline verifier. Run:  python verify_case.py .
                     Pass --key <base64> to pin the expected issuer key —
                     without it the issuer is self-declared by the pack. A
@@ -1913,6 +1915,9 @@ def build_case_pack(
     # ``key:*`` receipts are deployment-scoped trust anchors (a signed
     # key_rotation extends pinned-key trust across an issuer change) and
     # travel with every pack like the verify:* provenance receipts.
+    # ``pack-verify:*`` receipts are this deployment's signed verification
+    # acts (`verify --attest`) — the audit history travels with the evidence,
+    # so a pack carries a verifiable record of who checked what.
     attestations = [
         r
         for r in store.receipts()
@@ -1923,6 +1928,7 @@ def build_case_pack(
         or r.visit_id.startswith("verify:")
         or r.visit_id.startswith("key:")
         or r.visit_id.startswith("monitor:")
+        or r.visit_id.startswith("pack-verify:")
     ]
     manifest = {
         "schema": "attest.case-pack/1",

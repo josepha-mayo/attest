@@ -89,39 +89,39 @@ offline, rendered live (<a href="demo-integrity.json">raw JSON</a> for scripted 
 This page describes the evidence system's health, not whether any worker was honest.</div>
 
 <div class="card" style="margin-top:14px">
-  
+
   <span class="ok">&#10003; Self-audit passes</span> — receipt chain and mutation journal both verify.
-  
+
 </div>
 
 <div class="grid" style="margin-top:16px">
   <div class="card">
     <h2 style="margin-top:0;font-size:1.05rem">Receipt chain</h2>
-    <span class="ok">&#10003; 328 receipts, chain intact across 1 signed key rotation</span>
-    
+    <span class="ok">&#10003; 330 receipts, chain intact across 1 signed key rotation</span>
+
     <div class="muted small" style="margin-top:.5rem">
-      328 signed receipts · latest sequence #328
+      330 signed receipts · latest sequence #330
     </div>
   </div>
   <div class="card">
     <h2 style="margin-top:0;font-size:1.05rem">Mutation journal</h2>
-    <span class="ok">&#10003; 766 entries, intact</span>
-    
+    <span class="ok">&#10003; 771 entries, intact</span>
+
     <div class="muted small" style="margin-top:.5rem">
-      333 signature-pinned heads · head <code>cc730f537090…</code>
+      335 signature-pinned heads · head <code>8e8682cc8ad9…</code>
       <br>4 newest entries not yet covered by a signed head — `attest anchor` pins them
-      
+
     </div>
   </div>
   <div class="card">
     <h2 style="margin-top:0;font-size:1.05rem">Transparency log</h2>
-    
+
       <span class="ok">&#10003; 104 signed checkpoint(s)</span>
-    
+
     <div class="muted small" style="margin-top:.5rem">
-      224 receipts in the Merkle tree · head <code>48c9ba579566…</code>
+      226 receipts in the Merkle tree · head <code>e2719d322957…</code>
       <br>latest checkpoint <code>rcpt_936d4a1eb7c…</code> · Oct 14, 9:48 AM
-        — covers 224 leaves
+        — covers 224 leaves<br><span class="warn">2 receipt(s) not yet covered by a checkpoint</span> — <code>attest checkpoint</code> signs them in
       <br>Inclusion + consistency proofs at <code>/api/log/*</code> — <code>attest monitor</code> pins this head and catches a rewrite.
       <br><span class="muted">No witness pins yet — another deployment can ask this one to cosign via <code>/api/witness/cosign</code>.</span>
     </div>
@@ -143,10 +143,10 @@ This page describes the evidence system's health, not whether any worker was hon
   </div>
   <div class="card">
     <h2 style="margin-top:0;font-size:1.05rem">Webhook intake</h2>
-    
+
       <span class="ok">&#10003; HMAC-verified</span> — 3600s freshness window
       <div class="muted small" style="margin-top:.5rem">Stale signed bodies and replays beyond the window are refused (401) even when the dedupe tombstone is gone.</div>
-    
+
   </div>
 </div>
 
@@ -157,25 +157,27 @@ This page describes the evidence system's health, not whether any worker was hon
 <table>
   <thead><tr><th scope="col">Kind</th><th scope="col">Count</th><th scope="col">Latest issued</th></tr></thead>
   <tbody>
-  
+
   <tr><td>case export</td><td>104</td><td class="muted">Oct 14, 9:48 AM · <a href="demo-receipts/rcpt_0b7aa0eb56de49ac96101f3f938c08ff.json">receipt</a></td></tr>
-  
+
   <tr><td>coverage attestation</td><td>2</td><td class="muted">Oct 9, 11:45 AM · <a href="demo-receipts/rcpt_170eba68fbe845939f715be5a27d83ad.json">receipt</a></td></tr>
-  
+
   <tr><td>key adoption</td><td>1</td><td class="muted">Oct 9, 11:44 AM · <a href="demo-receipts/rcpt_c54d9cd510f14a468f99f1ceeb980cf4.json">receipt</a></td></tr>
-  
+
   <tr><td>key revocation</td><td>1</td><td class="muted">Oct 9, 11:45 AM · <a href="demo-receipts/rcpt_f701b52cc775472baa1355f52842ba4c.json">receipt</a></td></tr>
-  
+
   <tr><td>key rotation</td><td>1</td><td class="muted">Oct 9, 11:44 AM · <a href="demo-receipts/rcpt_10b8bda583df441cb500ad2091d45639.json">receipt</a></td></tr>
-  
+
   <tr><td>log checkpoint</td><td>104</td><td class="muted">Oct 14, 9:48 AM · <a href="demo-receipts/rcpt_936d4a1eb7c444fcb695c6e1d73e6d50.json">receipt</a></td></tr>
-  
+
+  <tr><td>pack verification</td><td>2</td><td class="muted">Oct 14, 10:41 AM · <a href="demo-receipts/rcpt_e5b54b9b11b84879829b122aa5f0ac76.json">receipt</a></td></tr>
+
   <tr><td>period digest</td><td>1</td><td class="muted">Oct 9, 11:06 AM · <a href="demo-receipts/rcpt_c44581e230574aa5919a280f808f489c.json">receipt</a></td></tr>
-  
+
   <tr><td>verification report</td><td>1</td><td class="muted">Oct 9, 11:06 AM · <a href="demo-receipts/rcpt_8836cc13a0b34f908d765d445bdaa82d.json">receipt</a></td></tr>
-  
+
   <tr><td>verifier manifest</td><td>104</td><td class="muted">Oct 14, 9:48 AM · <a href="demo-receipts/rcpt_860bf98196704c0eb99b143c41d0d629.json">receipt</a></td></tr>
-  
+
   </tbody>
 </table>
 </div>
@@ -186,15 +188,15 @@ This page describes the evidence system's health, not whether any worker was hon
 <table>
   <thead><tr><th scope="col">Site</th><th scope="col">Poll observations</th><th scope="col">Most recent poll</th><th scope="col">Latest lifecycle event</th></tr></thead>
   <tbody>
-  
+
   <tr>
     <td><a href="demo-site.html" style="color:var(--accent)">Alvarez residence</a></td>
     <td>56</td>
     <td class="muted">Oct 8, 12:36 PM</td>
     <td class="muted">subscription deactivated · Oct 4, 11:41 AM</td>
   </tr>
-  
-  
+
+
   </tbody>
 </table>
 </div>

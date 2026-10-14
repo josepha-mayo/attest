@@ -21,6 +21,7 @@ Everything else follows from that.
 | Signed anchors (`attest anchor`) | **Outside** the store — a file, an S3 object | The journal/receipt state existed at issuance, plus the log's Merkle head as an external STH | Anything after the anchor unless another anchor exists |
 | Worker review links | Hashed, expiring, single-use, visit-scoped grants | A statement arrived through a link issued for this visit and this scheduled worker | The worker's identity — a stolen link signs a stolen statement |
 | Media digests | Inside signed payloads | The bytes presented hash to what the record declared | That the bytes show what anyone claims they show |
+| `pack_verification` receipts (`verify --attest`) | Inside the store | The named verifier produced the named verdict on sha256-bound bytes, at a time | That the verdict is right — re-run the pinned verifier on those bytes; a verifier bug attests itself faithfully |
 
 ## What the records are
 
