@@ -1914,23 +1914,38 @@ async function diffPacks(fileA,fileB,out){
   for(const f of entA)byA[f.name]=f;
   for(const f of entB)byB[f.name]=f;
   /* Each pack's own verdict, preserved under a collapsible — the compare is
-     meaningless if a copy already failed on its own. */
+     meaningless if a copy already failed on its own. A member parse throw
+     aborts verifyFiles mid-render (the CLI names the malformed member and
+     continues); the compare still owes the mediator a visible self-verdict,
+     so a crashed verify degrades to FAILED — never a missing verdict. */
+  const heads={},verdicts={};
   for(const [label,ents] of [["A",entA],["B",entB]]){
-    const html=await verifyFiles(ents);
+    let html=null,perr=null;
+    try{html=await verifyFiles(ents);}catch(e){perr=e;}
+    heads[label]=packStash; /* checkLog's VALIDATED head — null when the
+      pack carried none or its checkpoint failed (verifyFiles resets it). */
     const det=document.createElement("details");
     const sum=document.createElement("summary");
     sum.innerHTML="pack "+label+" — its own verdict";
     det.appendChild(sum);
     const inner=document.createElement("div");
-    inner.innerHTML=html
+    inner.innerHTML=(html===null
+      ?'<div class="row bad">verification aborted — a member could not be '
+        +'parsed ('+esc(String(perr&&perr.message||perr))+'); '
+        +'<code>attest diff</code> names the malformed member</div>'
+      :html)
       .replace(/<button[^>]*>[\s\S]*?<\/button>/g,"")
       .replace(/<a [^>]*href="blob:[^"]*"[^>]*>([\s\S]*?)<\/a>/g,
         '<span class="mut">$1 (link expires with the live run)</span>');
     det.appendChild(inner);out.appendChild(det);
     const st=inner.querySelector(".stamp");
-    say(st&&st.classList.contains("bad")?"bad":"mut",
-      "pack "+label+" self-verdict: "+(st?esc(st.textContent.trim().slice(0,120))
-        :"no verdict rendered"));
+    const failed=st?st.classList.contains("bad"):(html===null?true:null);
+    verdicts[label]=failed;
+    say(failed===true?"bad":"mut",
+      "pack "+label+" self-verdict: "
+      +(st?esc(st.textContent.trim().slice(0,120))
+        :(html===null?"FAILED — aborted on malformed member"
+          :"no verdict rendered")));
   }
   /* Membership diff. */
   const namesA=new Set(Object.keys(byA)),namesB=new Set(Object.keys(byB));
@@ -1952,7 +1967,7 @@ async function diffPacks(fileA,fileB,out){
     if(list.length>6)say("warn","only in "+tag+": +"+(list.length-6)+
       " more member(s)");};
   cap6(onlyA,"A");cap6(onlyB,"B");
-  for(const n of changed){
+  for(const n of changed.slice(0,6)){
     /* Name the signed fields when a bundle diverges — a byte-diff without
        the field reads as noise. */
     let fields="";
@@ -1969,27 +1984,33 @@ async function diffPacks(fileA,fileB,out){
     }
     say("bad","different bytes: <code>"+esc(n)+"</code>"+fields);
   }
+  if(changed.length>6)say("warn","different bytes: +"+(changed.length-6)
+    +" more member(s)");
   /* The two signed log heads — the decisive compare. Same head: identical
      evidence state. Bridge: proven append-only growth. Same-size different
      root: a provable fork — the issuer signed two histories. */
   let headLine=null;
   try{
-    const ca=byA["log_checkpoint.json"],cb=byB["log_checkpoint.json"];
-    if(!ca&&!cb)headLine=["mut","neither pack carries a signed log head — "
-      +"membership is all that can be compared"];
-    else if(!ca||!cb)headLine=["warn","only one pack carries a signed log head"
-      +" — append-only growth cannot be proven"];
+    /* Only heads that PASSED checkLog reconcile — a checkpoint whose own
+       signature/lineage failed proves nothing about forks (packdiff parity:
+       Python compares validated heads only). */
+    const ca=heads.A,cb=heads.B,
+      hasA=!!byA["log_checkpoint.json"],hasB=!!byB["log_checkpoint.json"];
+    if(!ca&&!cb)headLine=hasA||hasB
+      ?["warn","the log head(s) present failed their own verification — "
+        +"each pack's verdict above names it, so the heads can't be reconciled"]
+      :["mut","neither pack carries a signed log head — membership is all "
+        +"that can be compared"];
+    else if(!ca||!cb)headLine=["warn","only one pack's signed log head "
+      +"verified — append-only growth between exports cannot be proven"
+      +(hasA&&hasB?" (the other's checkpoint failed its own check)":"")];
     else{
-      /* The shipped document wraps the signed head: {checkpoint, proofs,…} —
-         the receipt's payload carries tree_size/root_sha256/extends. */
-      const pa=((toJS(get(parseKeep(await ca.text()),"checkpoint"))||{}).payload)||{};
-      const pb=((toJS(get(parseKeep(await cb.text()),"checkpoint"))||{}).payload)||{};
-      const sa=_pyInt(pa.tree_size),sb=_pyInt(pb.tree_size),
-        ra=_pyHex(pa.root_sha256),rb=_pyHex(pb.root_sha256);
-      if(sa===null||sb===null||ra===null||rb===null)
-        headLine=["warn","a log head is malformed here — the pack's own "
-          +"verdict above already flags it"];
-      else if(sa===sb&&ra===rb)
+      /* packStash.node is the validated checkpoint receipt — toJS its
+         payload for the extends bridge the CLI's verify_extends reads. */
+      const pa=toJS(get(ca.node,"payload"))||{},
+        pb=toJS(get(cb.node,"payload"))||{},
+        sa=ca.size,sb=cb.size,ra=ca.root,rb=cb.root;
+      if(sa===sb&&ra===rb)
         headLine=["ok","both exports commit to the same signed log head "
           +"(tree size "+sa+")"];
       else if(sa===sb)
@@ -2024,9 +2045,23 @@ async function diffPacks(fileA,fileB,out){
   }catch(e){headLine=["warn","log-head compare failed: "+esc(e.message||e)];}
   const ident=!onlyA.length&&!onlyB.length&&!changed.length;
   if(headLine)say(headLine[0],headLine[1]);
-  if(ident)
-    say("stamp ok","<strong>IDENTICAL EVIDENCE</strong> — every member of both "
-      +"packs is byte-for-byte the same");
+  if(ident){
+    /* Byte-identical, but the verdict stamp must not go green under a red
+       self-verdict — two copies of a FORGED pack are identical and bad. */
+    const failed=["A","B"].filter(l=>verdicts[l]===true);
+    if(failed.length)
+      say("stamp bad","<strong>IDENTICAL BYTES — "
+        +(failed.length===2?"both copies FAILED":"pack "+failed[0]+" FAILED")
+        +" verification</strong> — the same broken evidence twice; there is "
+        +"nothing to choose between them");
+    else if(verdicts.A===null||verdicts.B===null)
+      say("stamp warn","<strong>IDENTICAL BYTES</strong> — every member is "
+        +"byte-for-byte the same, but a pack's own verdict could not be read "
+        +"— read each verdict above");
+    else
+      say("stamp ok","<strong>IDENTICAL EVIDENCE</strong> — every member of "
+        +"both packs is byte-for-byte the same");
+  }
   else{
     const sev=(changed.length||(headLine&&headLine[0]==="bad"))?"bad":"warn";
     say("stamp "+sev,"<strong>PACKS DIFFER</strong> — "+onlyA.length+
@@ -2178,17 +2213,20 @@ function buildZip(entries){
    rounds must still reach verifyFiles. Every #out writer funnels here or
    checks the flag first; interleaved runs would erase each other's rows. */
 let _busy=false;
+function _busyNote(out){
+  const o=out||document.getElementById("out");
+  if(o&&!(o.querySelector&&o.querySelector(".busy-note")))
+    o.insertAdjacentHTML("beforeend",
+      "<div class='row mut busy-note'>a verification is already running "
+      +"— this click was ignored</div>");
+}
 async function go(fileList,_force){
   const out=document.getElementById("out");
   if(_busy&&!_force){
     /* A refused call is a dead click unless it says so — append (never wipe)
        a muted note so button-spam during a run reads as feedback, not
        silence. Deduped so it can't stack up under repeated clicks. */
-    const o=out||document.getElementById("out");
-    if(o&&!(o.querySelector&&o.querySelector(".busy-note")))
-      o.insertAdjacentHTML("beforeend",
-        "<div class='row mut busy-note'>a verification is already running "
-        +"— this click was ignored</div>");
+    _busyNote(out);
     return;}
   const _owned=!_busy;if(_owned)_busy=true;
   try{
@@ -2558,7 +2596,7 @@ if(location.protocol.indexOf("http")===0){
     const out=document.getElementById("out");
     /* diffPacks writes #out for ~seconds — hold the flag or a mid-compare
        drop interleaves a whole second verdict into the report. */
-    if(_busy)return;_busy=true;
+    if(_busy){_busyNote(out);return;}_busy=true;
     try{
     out.innerHTML="<p>fetching both packs for comparison…</p>";
     const fa=fetch("sample-pack.zip").then(r=>{
@@ -2586,7 +2624,7 @@ if(location.protocol.indexOf("http")===0){
     const cw=document.getElementById("trycompare-wrap");
     if(cw){cw.hidden=false;
       document.getElementById("trycompare").onclick=()=>{
-        if(_busy)return;
+        if(_busy){_busyNote(document.getElementById("out"));return;}
         try{history.replaceState(null,"",location.pathname+"#compare-packs");}
         catch(e){}
         comparePacks();};}

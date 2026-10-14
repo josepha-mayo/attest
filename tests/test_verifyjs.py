@@ -2746,10 +2746,36 @@ def test_two_pack_drop_compares_signed_membership(tmp_path):
     docs = Path(__file__).resolve().parents[1] / "docs"
     for n in ("sample-pack.zip", "sample-pack-tampered.zip"):
         assert (docs / n).exists(), n
+    # Adversarial variants built from the shipped pack — a JSON member so
+    # malformed the browser's verify aborts mid-render (B3: the compare must
+    # still surface a FAILED self-verdict row, not die), and a checkpoint
+    # whose signed payload is rewritten so checkLog fails it (B1: only
+    # VALIDATED heads may reconcile — an unproven head can't claim a fork).
+    import zipfile as _zf
+
+    members = {
+        i.filename: _zf.ZipFile(docs / "sample-pack.zip").read(i.filename)
+        for i in _zf.ZipFile(docs / "sample-pack.zip").infolist()
+    }
+    bad_member = dict(members)
+    red = next(n for n in bad_member if n.endswith("redaction.json"))
+    bad_member[red] = b'{"x":,,,'
+    bad_head = dict(members)
+    head_doc = json.loads(bad_head["log_checkpoint.json"])
+    rs = head_doc["checkpoint"]["payload"]["root_sha256"]
+    head_doc["checkpoint"]["payload"]["root_sha256"] = ("f" if rs[0] != "f" else "e") + rs[1:]
+    bad_head["log_checkpoint.json"] = json.dumps(head_doc, separators=(",", ":")).encode()
+    for name, table in (
+        ("bad-member.zip", bad_member),
+        ("bad-head.zip", bad_head),
+    ):
+        with _zf.ZipFile(tmp_path / name, "w", _zf.ZIP_DEFLATED) as z:
+            for n, b in table.items():
+                z.writestr(n, b)
     (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
     driver = r"""
 const fs=require('fs'),path=require('path');
-const dir=process.argv[3];
+const dir=process.argv[3],vdir=process.argv[4];
 let src=fs.readFileSync(process.argv[2],'utf8').replace(/const dz=[\s\S]*$/,'');
 const mkel=()=>({hidden:true,innerHTML:'',innerText:'',value:'',open:false,
   options:[],kids:[],className:'',textContent:'',dataset:{},disabled:false,
@@ -2779,11 +2805,27 @@ const mk=(n)=>new File([fs.readFileSync(path.join(dir,n))],n);
   out.innerHTML='';out.kids=[];
   await __d(mk('sample-pack.zip'),mk('sample-pack.zip'),out);
   console.log('T2:',out.innerHTML.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').slice(0,1200));
+  // tampered vs the SAME tampered bytes — identical and both FAILED: the
+  // verdict stamp must not go green under a red self-verdict
+  out.innerHTML='';out.kids=[];
+  await __d(mk('sample-pack-tampered.zip'),mk('sample-pack-tampered.zip'),out);
+  console.log('T3:',out.innerHTML.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').slice(0,1600));
+  // malformed JSON member — verify aborts; compare must still render a
+  // FAILED self-verdict row instead of dying mid-compare
+  const vload=n=>new File([fs.readFileSync(path.join(vdir,n))],n);
+  out.innerHTML='';out.kids=[];
+  await __d(mk('sample-pack.zip'),vload('bad-member.zip'),out);
+  console.log('T4:',out.innerHTML.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').slice(0,1600));
+  // checkpoint payload rewritten — checkLog fails it; the reconcile must not
+  // treat an unproven head as fork evidence (validated heads only)
+  out.innerHTML='';out.kids=[];
+  await __d(mk('sample-pack.zip'),vload('bad-head.zip'),out);
+  console.log('T5:',out.innerHTML.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').slice(0,2000));
 })().catch(e=>{console.log('ERR',e.message);process.exit(2);});
 """
     (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
     proc = subprocess.run(
-        [NODE, "drive.js", "verify.js", str(docs)],
+        [NODE, "drive.js", "verify.js", str(docs), str(tmp_path)],
         cwd=tmp_path,
         capture_output=True,
         text=True,
@@ -2804,3 +2846,13 @@ const mk=(n)=>new File([fs.readFileSync(path.join(dir,n))],n);
     # each pack's own verdict surfaces — the twin's FAILED stamp must name it
     assert "pack A self-verdict: VERIFIED" in t1 or "self-verdict: " in t1, t1
     assert "pack B self-verdict: FAILED" in t1, t1
+    t3 = proc.stdout.split("T3:")[1].split("T4:")[0]
+    t4 = proc.stdout.split("T4:")[1].split("T5:")[0]
+    t5 = proc.stdout.split("T5:")[1]
+    # identical-but-failed: the stamp folds the red self-verdicts in
+    assert "IDENTICAL BYTES" in t3 and "both copies FAILED" in t3, t3
+    # a crashed verify still surfaces a FAILED self-verdict, not a dead compare
+    assert "FAILED" in t4 and ("aborted" in t4 or "could not be parsed" in t4), t4
+    # an unverified head is never reconciled as evidence of fork/agreement
+    assert "failed their own verification" in t5 or "only one pack" in t5, t5
+    assert "DIFFERENT roots" not in t5 and "commit to the same" not in t5, t5

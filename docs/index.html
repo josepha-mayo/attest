@@ -100,7 +100,7 @@ Event History?</a> — receipts keep verifying even if Attest disappears.)</p>
 <a href="verify.html#sample-pack">green VERIFIED on the sample</a> →
 <a href="verify.html#sample-pack-tampered">red FAILED on the tampered twin</a> →
 <a href="verify.html#tamper-lab"><strong>forge it yourself</strong> in the
-tamper lab</a> → <a href="demo-receipts.html">the demo runtime's 265-receipt
+tamper lab</a> → <a href="demo-receipts.html">the demo runtime's 277-receipt
 hash chain</a>. No install, no account — every stamp runs in your browser and
 nothing leaves it.</div>
 <p style="margin:.5rem 0"><a href="verify.html#sample-pack"
@@ -186,7 +186,7 @@ var lines=[
  ["mut","  Day 3: the Ring plan lapses mid-visit \u2014 observation stops being delivered"],
  ["mut","  Demo is live \u2014 simulated data only, no real Ring account involved \u2192 http://127.0.0.1:8000"],
  ["cmd","$ attest verify sample-pack.zip"],
- ["ok","  OK: case pack verified \u2014 9 visit record(s) intact (export signed: 9 record(s); 4 verifier tool(s) pinned; 97 receipt(s) proven inside the deployment transparency log \u2026)"],
+ ["ok","  OK: case pack verified \u2014 9 visit record(s) intact (export signed: 9 record(s); 4 verifier tool(s) pinned; 101 receipt(s) proven inside the deployment transparency log \u2026)"],
  ["mut","  Note: a valid pack proves record integrity under the pack's self-declared issuer key \u2014 signatures are not physical truth."],
  ["cmd","$ attest attack-demo"],
  ["ok","  CAUGHT  forge a visit row (state -> attended_verified)"],
@@ -326,10 +326,10 @@ scoped <code>/review/</code> token sees ·
 <a href="demo-integrity.html">the self-audit page</a> (revoked-key suspect
 windows, annotated — 9 receipts in scope) ·
 <a href="demo-integrity.json">its machine-readable JSON</a> — and the raw layer
-underneath all of it: <a href="demo-receipts.html">265 signed receipts</a>,
+underneath all of it: <a href="demo-receipts.html">277 signed receipts</a>,
 drawn as the literal hash chain (every edge a <code>prev_hash</code> link —
-all 265 verify), each one-click verifiable in the same browser page —
-or <a href="verify.html#demo-receipts">all 265 at once</a>
+all 277 verify), each one-click verifiable in the same browser page —
+or <a href="verify.html#demo-receipts">all 277 at once</a>
 (<a href="demo-receipts.json">raw JSON</a>). New to the math?
 <a href="anatomy.html"><strong>Anatomy of a signed receipt</strong></a>
 decomposes one field-by-field — what the signature covers, what the
@@ -493,7 +493,7 @@ pack's embedded script — data and code come from different parties:</li>
   <pre style="min-height:0"><span class="p">$ aws lambda invoke --function-name attest-verify-pack \
     --payload fileb://pack.json out.json</span>
 <span class="ok">  {"ok": true} — 2 visit records, 43 receipts proven inside the log</span>
-<span class="mut">  (transcript of the 2026-09-18 run — the current pack carries 9 visit records, 97 receipts)</span>
+<span class="mut">  (transcript of the 2026-09-18 run — the current pack carries 9 visit records, 101 receipts)</span>
 <span class="p">$ # doctor one byte in a signed payload, invoke again</span>
 <span class="bad">  {"ok": false} — payload hash mismatch (payload was altered)</span>
 <span class="mut">  the function catches exactly what the local verifiers catch</span></pre>
@@ -616,7 +616,7 @@ for the key either. Three ways to pin:</p>
   <a href="verify.html#verify-self">the page hashes its own bytes</a> →
   <strong>PINNED</strong>/<strong>PIN MISMATCH</strong>; and
   <a href="verify.html#verify-site"><code>site-manifest.json</code> pins all
-  346 artifacts this site ships</a> → <strong>SITE VERIFIED</strong>/<strong>SITE
+  358 artifacts this site ships</a> → <strong>SITE VERIFIED</strong>/<strong>SITE
   TAMPER</strong>, drifted files named.</li>
 </ul>
 

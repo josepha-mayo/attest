@@ -1070,13 +1070,17 @@ def diff_report(
     old = load_artifact(old_path, key, extra_key_receipts)
     new = load_artifact(new_path, key, extra_key_receipts)
     events, anomalies = _diff_events(old, new, key, str(old_path), str(new_path))
-    side = lambda art: {  # noqa: E731
-        "kind": art["kind"],
-        "issuer": art.get("issuer"),
-        "verify_failures": art.get("verify_failures") or [],
-        "notes": art.get("notes") or [],
-        "verified": art.get("verify_failures") == [],
-    }
+
+    def side(art):
+        fails = art.get("verify_failures")
+        return {
+            "kind": art["kind"],
+            "issuer": art.get("issuer"),
+            "verify_failures": fails,
+            "notes": art.get("notes") or [],
+            "verified": fails == [],
+        }
+
     return {
         "old": {"path": str(old_path), **side(old)},
         "new": {"path": str(new_path), **side(new)},
@@ -1139,8 +1143,11 @@ def diff_html(report: dict) -> str:
         if e.get("severity") in ("drift", "anomaly") and e.get("target") not in ("old", "new")
     ]
     appended = [
-        e for e in events if e.get("severity") == "info" and e.get("target") not in (None, "old", "new")
+        e
+        for e in events
+        if e.get("severity") == "info" and e.get("target") not in (None, "old", "new", "log_checkpoint.json")
     ]
+    heads_open = any(e.get("severity") == "info" and e.get("target") == "log_checkpoint.json" for e in events)
 
     if anomalies:
         stamp = f'<div class="stamp bad">ANOMALIES DETECTED — {anomalies}</div>'
@@ -1152,6 +1159,18 @@ def diff_html(report: dict) -> str:
         stamp = '<div class="stamp drift">APPEND-ONLY DRIFT — 0 anomalies</div>'
         stamp_sub = (
             "New signed records appeared (normal export growth); nothing vanished and nothing was altered."
+            + (
+                " The signed log heads could not be reconciled offline — `attest consistency` decides."
+                if heads_open
+                else ""
+            )
+        )
+    elif heads_open:
+        stamp = '<div class="stamp drift">LOG HEADS UNRECONCILED — no record differences found</div>'
+        stamp_sub = (
+            "Both exports carry the same signed membership, but their transparency-log "
+            "heads can't be bridged offline — `attest consistency` against the live "
+            "deployment decides whether one history diverged."
         )
     else:
         stamp = '<div class="stamp ok">NO SIGNED DIFFERENCES</div>'
@@ -1163,11 +1182,10 @@ def diff_html(report: dict) -> str:
         cls = _SEV_CLASS.get(sev, "info")
         target = e.get("target")
         lab = "compare" if target is None and sev == "info" else _SEV_LABEL.get(sev, sev)
-        target_html = f"<code>{esc(target)}</code>" if target else "—"
+        target_html = f"<code>{esc(str(target))}</code>" if target else "—"
         detail = esc(e.get("detail") or "")
-        rows.append(
-            f'<tr><td><span class="chip {cls}">{lab}</span></td><td>{target_html}</td><td>{detail}</td></tr>'
-        )
+        chip = f'<span class="chip {cls}">{esc(str(lab))}</span>'
+        rows.append(f"<tr><td>{chip}</td><td>{target_html}</td><td>{detail}</td></tr>")
 
     pin = report.get("pin") or {}
     pin_line = ""
@@ -1314,10 +1332,19 @@ def _log_head_verdict(a: dict, b: dict) -> tuple[str, str] | None:
 def _diff_events(old: dict, new: dict, key: str | None, old_path: str, new_path: str):
     """The single comparison core — text output and the JSON report are built
     from the same event stream so the two can never disagree."""
+    import re
+
     events: list[dict] = []
     anomalies = 0
 
     def ev(severity: str, target: str | None, detail: str, marker: str | None = None) -> None:
+        # Pack-controlled strings (visit ids, member names, failure text) land in
+        # detail — strip control bytes so a hostile name can't forge terminal
+        # lines or inject ANSI into text output. JSON/HTML renderings escape
+        # independently; this keeps all three views consistent.
+        detail = re.sub(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]", "�", str(detail))
+        if isinstance(target, str):
+            target = re.sub(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]", "�", target)
         events.append(
             {
                 "severity": severity,
@@ -1328,6 +1355,11 @@ def _diff_events(old: dict, new: dict, key: str | None, old_path: str, new_path:
         )
 
     ev("info", None, f"{old_path} [{old['kind']}] -> {new_path} [{new['kind']}]")
+    try:
+        if Path(old_path).read_bytes() == Path(new_path).read_bytes():
+            ev("ok", None, "identical bytes — the two inputs are the same archive")
+    except OSError:
+        pass
 
     for label, art in (("old", old), ("new", new)):
         for fail in art.get("verify_failures") or []:
