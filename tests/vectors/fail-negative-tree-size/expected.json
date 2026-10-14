@@ -1,0 +1,13 @@
+{
+  "kind": "case",
+  "pin": "declared",
+  "verdict": "fail",
+  "detail_contains": [
+    "malformed tree head"
+  ],
+  "js": {
+    "bundle_ok": true,
+    "verdict": "fail"
+  },
+  "note": "a properly SIGNED head claiming tree_size -1 \u2014 Number.isInteger(-1) is TRUE, so this isolates the size<1 range guard: a log with negative size is a malformed head everywhere"
+}

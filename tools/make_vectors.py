@@ -1296,6 +1296,21 @@ def main() -> None:
         },
     )
 
+    _write_vector(
+        "fail-negative-leaf-index",
+        _log_edit(embedded_pack, _edit_first_proof(lambda p: p.__setitem__("leaf_index", -1))),
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "fail",
+            "detail_contains": ["does not reach the signed tree head"],
+            "js": {"bundle_ok": True, "verdict": "fail"},
+            "note": "leaf_index -1 — Number.isInteger(-1) is TRUE, so this "
+            "isolates the explicit index<0 range guard every surface must "
+            "carry beyond the type check",
+        },
+    )
+
     def _space_hex(doc: dict) -> dict:
         key = sorted(doc["proofs"])[0]
         node = doc["proofs"][key]["path"][0]
@@ -1370,6 +1385,21 @@ def main() -> None:
             "note": "a properly SIGNED head claiming tree_size 2^40 — valid "
             "signature, impossible size: JS bitwise ops die past 2^31, so "
             "every surface rejects it rather than diverging",
+        },
+    )
+
+    _write_vector(
+        "fail-negative-tree-size",
+        _case_pack(store, engine, site, [v1], tmp / "d1", log_fn=_crafted_head(lambda n: -1)),
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "fail",
+            "detail_contains": ["malformed tree head"],
+            "js": {"bundle_ok": True, "verdict": "fail"},
+            "note": "a properly SIGNED head claiming tree_size -1 — "
+            "Number.isInteger(-1) is TRUE, so this isolates the size<1 range "
+            "guard: a log with negative size is a malformed head everywhere",
         },
     )
 

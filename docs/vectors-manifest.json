@@ -85,6 +85,16 @@
   "note": "a tool the signed pin names but the pack lacks fails — the pin binds both directions"
  },
  {
+  "name": "fail-negative-leaf-index",
+  "verdict": "fail",
+  "note": "leaf_index -1 — Number.isInteger(-1) is TRUE, so this isolates the explicit index<0 range guard every surface must carry beyond the type check"
+ },
+ {
+  "name": "fail-negative-tree-size",
+  "verdict": "fail",
+  "note": "a properly SIGNED head claiming tree_size -1 — Number.isInteger(-1) is TRUE, so this isolates the size<1 range guard: a log with negative size is a malformed head everywhere"
+ },
+ {
   "name": "fail-orphan-rotation",
   "verdict": "fail",
   "note": "a rotation the successor never countersigned cannot pivot trust"

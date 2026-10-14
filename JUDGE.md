@@ -138,8 +138,8 @@ self-verifying evidence record. This is the fastest honest path through it.
    decomposes any of the 328 field-by-field — what the signature covers, what
    `prev_hash` chains, and what a valid signature can never prove.
 12. **The adversarial corpus**: [vectors.html](https://josepha-mayo.github.io/attest/vectors.html)
-   — 42 Wycheproof-style conformance packs the shared oracle says must pass or
-   fail (grammar traps: bool/string/fractional `leaf_index`, padded hex,
+   — 44 Wycheproof-style conformance packs the shared oracle says must pass or
+   fail (grammar traps: bool/string/fractional/negative `leaf_index`, padded hex,
    2^40 tree_size; +5 more pinning vectors in the repo's tests). Each a
    `verify.html` deep link landing on the predicted verdict.
 13. **The tamper lab**: [verify.html#tamper-lab](https://josepha-mayo.github.io/attest/verify.html#tamper-lab)
@@ -219,7 +219,7 @@ attest demo        # boots emulator + server + an eight-day story, prints a URL
 
 | Criterion | The evidence to look at |
 |---|---|
-| **Tech Implementation** | The repo *calls* Ring at runtime — signed webhooks, Event History, media+snapshots through the regional redirect, devices/capabilities, app-integrations, subscriptions, WHEP. Five AWS touchpoints (Bedrock — multimodal, snapshots re-hashed before they reach the model — Strands, KMS, S3, Lambda) — KMS/S3/Lambda verified live. The nine-artifact `#gauntlet` (ORACLE AGREEMENT 9/9) plus pinned-verify, self-verify, site-verify, per-receipt, and 42 vector deep links on the hosted verifier, 21 real attacks (all 21 caught on the demo store), conformance vectors pinning four verifier paths (server `_verify_pack`, both embedded stdlib verifiers, and the browser JS under node) to one oracle — the AWS Lambda and the pack's own `index.html` browser run the same pinned verifier bytes. `extras/ci/` is the adoption story: a zero-install workflow that verifies a pack, plus an opt-in twin gate (`vars.TAMPERED_PACK`) that requires its doctored twin to fail. |
+| **Tech Implementation** | The repo *calls* Ring at runtime — signed webhooks, Event History, media+snapshots through the regional redirect, devices/capabilities, app-integrations, subscriptions, WHEP. Five AWS touchpoints (Bedrock — multimodal, snapshots re-hashed before they reach the model — Strands, KMS, S3, Lambda) — KMS/S3/Lambda verified live. The nine-artifact `#gauntlet` (ORACLE AGREEMENT 9/9) plus pinned-verify, self-verify, site-verify, per-receipt, and 44 vector deep links on the hosted verifier, 21 real attacks (all 21 caught on the demo store), conformance vectors pinning four verifier paths (server `_verify_pack`, both embedded stdlib verifiers, and the browser JS under node) to one oracle — the AWS Lambda and the pack's own `index.html` browser run the same pinned verifier bytes. `extras/ci/` is the adoption story: a zero-install workflow that verifies a pack, plus an opt-in twin gate (`vars.TAMPERED_PACK`) that requires its doctored twin to fail. |
 | **Design** | Three audiences, three honest readings of one signed record: coordinator console (corroboration + coverage), worker scoped link (QR, no account), household view (plain language + family voice). Verified packs hand you their own record browser — and `story.html` + `attest diff --html` turn the same signed data into the narrative a family reads and the report a mediator attaches. |
 | **Potential Impact** | Home-service disputes are a real recurring cost; Ring-track priorities named business systems + caretaking. The Appstore path is argued from the privacy posture itself: disconnect tombstones, retention, scoped links, redaction. |
 | **Quality of the Idea** | The non-obvious move: don't certify presence — attest the *record*. Missing events are never absence; outages are signed explanations; even the issuer can't fork its log undetected. The honesty boundary is the product. |

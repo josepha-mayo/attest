@@ -1,0 +1,13 @@
+{
+  "kind": "case",
+  "pin": "declared",
+  "verdict": "fail",
+  "detail_contains": [
+    "does not reach the signed tree head"
+  ],
+  "js": {
+    "bundle_ok": true,
+    "verdict": "fail"
+  },
+  "note": "leaf_index -1 \u2014 Number.isInteger(-1) is TRUE, so this isolates the explicit index<0 range guard every surface must carry beyond the type check"
+}
