@@ -24,7 +24,7 @@ deliberate dependency upgrade, don't hand-edit.
 git diff --check
 ```
 
-Fresh checkouts pass 756 of 758 collected tests (2 platform-gated skips).
+Fresh checkouts pass 790 of 792 collected tests (2 platform-gated skips).
 A PR that adds a verification rule without a conformance vector
 (`tests/vectors/<name>/pack.zip` + `expected.json` — build one by
 exporting a pack and doctoring it, then pinning the expected verdict and
