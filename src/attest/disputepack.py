@@ -49,7 +49,12 @@ log_checkpoint.json   Present when the deployment publishes a transparency
                receipts were committed to the deployment's published append-
                only log, in this order. A receipt with a valid signature but
                no log membership still fails: signing a record is not the
-               same as committing it.
+               same as committing it. The doc's `chain` list carries up to
+               32 PRIOR signed checkpoint receipts — each embedding its own
+               `extends` bridge — so two packs exported days apart reconcile
+               offline: `attest diff` (and verify.html's compare) walks the
+               chain hop-by-hop, proving append-only growth or catching a
+               same-size root collision as provable fork evidence.
 
 WHAT A VALID VERIFICATION PROVES
 - Every receipt in bundle.json is byte-identical to what was signed: the payload
@@ -709,6 +714,68 @@ def check_log(pack_dir, trusted, receipts):
                 )
             verified_ph.add(raw.get("payload_hash"))
             proven += 1
+    # The signed checkpoint chain (`chain`): prior heads the export embeds so
+    # two packs exported far apart can reconcile offline — each member is a
+    # full signed checkpoint receipt whose own `extends` bridge does the
+    # hopping. Members verify like embedded evidence receipts minus the
+    # inclusion proof (checkpoints are heads, not leaves); each must sit
+    # strictly below the doc's head, and one tree size may carry only one
+    # root — two signed roots at one size inside a single document is a fork
+    # claim the walk cannot read honestly, so it fails closed.
+    chain_n = 0
+    chain = doc.get("chain")
+    if chain is not None:
+        if not isinstance(chain, list) or len(chain) > 64:
+            sys.exit("FAIL log_checkpoint.json: 'chain' must be a list of at most 64")
+        seen_cids = set()
+        seen_sizes = {}
+        for raw in chain:
+            if not isinstance(raw, dict):
+                sys.exit("FAIL log_checkpoint.json: chain member malformed")
+            rid = str(raw.get("id") or "?")[:24]
+            if rid in seen_cids:
+                sys.exit(f"FAIL log_checkpoint.json: chain member {rid}… listed twice")
+            seen_cids.add(rid)
+            mp = raw.get("payload")
+            if not isinstance(mp, dict) or mp.get("record_type") != "log_checkpoint":
+                sys.exit(
+                    f"FAIL log_checkpoint.json: chain member {rid}… "
+                    "is not a log_checkpoint receipt"
+                )
+            if raw.get("public_key") not in trusted:
+                sys.exit(
+                    f"FAIL log_checkpoint.json: chain member {rid}… "
+                    "signed outside the issuer lineage"
+                )
+            try:
+                ok, why = check_receipt(raw, raw["public_key"])
+            except (KeyError, TypeError, ValueError, AttributeError) as exc:
+                sys.exit(f"FAIL log_checkpoint.json: chain member {rid}… malformed: {exc}")
+            if not ok:
+                sys.exit(f"FAIL log_checkpoint.json: chain member {rid}… invalid: {why}")
+            msize, mroot = mp.get("tree_size"), mp.get("root_sha256")
+            if (
+                not _is_int(msize)
+                or not 1 <= msize < size
+                or not isinstance(mroot, str)
+                or len(mroot) != 64
+            ):
+                sys.exit(
+                    f"FAIL log_checkpoint.json: chain member {rid}… "
+                    "carries a malformed or non-prior head"
+                )
+            if _extends_ok(mp) is False:
+                sys.exit(
+                    f"FAIL log_checkpoint.json: chain member {rid}… "
+                    "signs a bridge it cannot prove"
+                )
+            if msize in seen_sizes and seen_sizes[msize] != mroot:
+                sys.exit(
+                    f"FAIL log_checkpoint.json: chain carries two signed heads "
+                    f"at size {msize}"
+                )
+            seen_sizes[msize] = mroot
+            chain_n += 1
     # CLI _verify_log_doc parity: every proofs entry must verify — a junk
     # entry referencing nothing is a lie, not decoration.
     for ph, p in proofs.items():
@@ -726,7 +793,7 @@ def check_log(pack_dir, trusted, receipts):
     # inclusion path. Auxiliary like the cosig count — but a present one
     # that fails is a lie, not a downgrade (logmonitor parity).
     anchored = _cosig_anchors(doc)
-    return proven, size, cosigs, anchored
+    return proven, size, cosigs, anchored, chain_n
 
 
 def _cosig_anchors(doc):
@@ -1300,6 +1367,8 @@ def main():
         w = f" · cosigned by {logged[2]} witness(es)" if logged[2] else ""
         if logged[3]:
             w += f" ({logged[3]} anchored in the witness's own published log)"
+        if logged[4]:
+            w += f" · {logged[4]} prior signed head(s) embedded"
         print(f"    ({logged[0]} receipt(s) proven inside the deployment's transparency"
               f" log at checkpoint size {logged[1]}{w})")
     print("Signature proves record integrity under the issuer key - not identity,")
@@ -1565,6 +1634,8 @@ def main():
         w = f" · cosigned by {logged[2]} witness(es)" if logged[2] else ""
         if logged[3]:
             w += f" ({logged[3]} anchored in the witness's own published log)"
+        if logged[4]:
+            w += f" · {logged[4]} prior signed head(s) embedded"
         print(f"    ({logged[0]} receipt(s) proven inside the deployment's transparency"
               f" log at checkpoint size {logged[1]}{w})")
     if len(trusted) > 1:
@@ -1630,7 +1701,10 @@ log_checkpoint.json   Present when the deployment publishes a transparency
                     log: a signed Merkle tree head plus an inclusion proof
                     for every issuer-signed receipt in this pack — evidence
                     that these records were committed to the deployment's
-                    published append-only log.
+                    published append-only log. Its `chain` list embeds prior
+                    signed heads (up to 32) so two exports reconcile offline:
+                    `attest diff` walks the signed `extends` bridges
+                    hop-by-hop instead of trusting enumeration.
 
 WHAT A VALID VERIFICATION PROVES
 - Each bundle.json is byte-identical to what was signed, and every appended
@@ -2117,6 +2191,20 @@ def log_member(engine, receipts, cosign_fn=None) -> dict:
         "checkpoint": cp.model_dump(mode="json"),
         "proofs": proofs,
     }
+    # The signed checkpoint chain: the prior heads, oldest first. Each member
+    # is a full signed receipt — its own payload carries the `extends` bridge
+    # to ITS predecessor — so two packs exported days or months apart can
+    # reconcile their heads offline by walking hop-by-hop instead of trusting
+    # a serving endpoint. Capped so an ancient gap degrades to 'undecidable
+    # offline' rather than unbounded pack growth.
+    prior = [
+        r
+        for r in engine.store.receipts()
+        if r.payload.get("record_type") == "log_checkpoint" and r.id != cp.id
+    ]
+    prior.sort(key=lambda r: r.payload.get("tree_size") or 0)
+    if prior:
+        doc["chain"] = [r.model_dump(mode="json") for r in prior[-32:]]
     if cosign_fn:
         cosigs, anchors = cosign_fn(cp)
         if cosigs:

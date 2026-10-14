@@ -92,7 +92,16 @@ own merits, then their signed membership diffs member-by-member — the moved
 field named — and the two signed log heads reconcile</button><br>
 <small class="mut">"the copy the agency produced" vs "the copy I kept" — two
 packs that both verify can still carry different records. Or drop any two
-exported zips at once for the same compare.</small></p>
+exported zips at once for the same compare.
+<a href="sample-diff-report.html">What it looks like written down</a>.</small></p>
+<p id="trycompare2-wrap" hidden><button id="trycompare2" type="button"><strong>Compare
+across time</strong> — the pack exported last week vs the pack exported today:
+their signed log heads are <em>not</em> adjacent, so the reconcile walks the
+newer pack's embedded checkpoint chain hop-by-hop — append-only growth proven
+offline, no server trust</button><br>
+<small class="mut">the shape a real dispute takes: "the pack my family kept"
+vs "the pack the agency just produced" — provably the same log, only longer.
+<a href="sample-growth-report.html">What it looks like written down</a>.</small></p>
 <p id="tryatk-hint" hidden><small>Or pick an attack — each is caught by a
 different layer:</small></p>
 <p id="tryatk1-wrap" hidden><button id="tryatk1" type="button">Attack: deleted record
@@ -1144,9 +1153,6 @@ async function checkLog(byName,trustedSet,refs,bad,ok){
      standalone checkpoint path convicts the same way (verify_extends). */
   if((await _extOk(p))===false){
     bad("log_checkpoint.json: extends bridge attests a history it cannot prove");return;}
-  /* Validated signed head — the live cross-check compares it against the
-     head the deployment serves now. */
-  packStash={node:cpNode,size,root:rootHex};
   let proven=0;const verifiedPh=new Set();
   for(const ref of refs||[]){
     if(!ref||!ref.payload_hash)continue;
@@ -1198,11 +1204,53 @@ async function checkLog(byName,trustedSet,refs,bad,ok){
       bad(`log_checkpoint.json: unreferenced inclusion proof for ${esc(ph.slice(0,16))}… `
         +"does not reach the signed tree head");return;}
   }
+  /* The signed checkpoint chain (`chain`): prior heads the export embeds so
+     packs exported far apart reconcile offline — each member is a full signed
+     checkpoint receipt whose own `extends` bridge does the hopping. Members
+     verify like embedded evidence receipts minus the inclusion proof
+     (checkpoints are heads, not leaves); each sits strictly below the doc's
+     head, and one tree size may carry only one root — check_log /
+     check_log_pin / _verify_log_doc parity. */
+  const chain=[];
+  if(doc.chain!==undefined&&doc.chain!==null){
+    if(!Array.isArray(doc.chain)||doc.chain.length>64){
+      bad("log_checkpoint.json: 'chain' must be a list of at most 64");return;}
+    const csec=get(dn,"chain"),cNodes=csec&&csec.t==="arr"?csec.v:[];
+    const seenCid=new Set(),seenSize=new Map();
+    for(let i=0;i<doc.chain.length;i++){
+      const r=doc.chain[i];
+      if(!r||typeof r!=="object"||Array.isArray(r)){
+        bad("log_checkpoint.json: chain member malformed");return;}
+      const rid=String(r.id||"?").slice(0,24);
+      if(seenCid.has(r.id)){bad(`log_checkpoint.json: chain member ${esc(rid)}… listed twice`);return;}
+      seenCid.add(r.id);
+      const mp=r.payload;
+      if(!mp||typeof mp!=="object"||mp.record_type!=="log_checkpoint"){
+        bad(`log_checkpoint.json: chain member ${esc(rid)}… is not a log_checkpoint receipt`);return;}
+      if(!trustedSet||!trustedSet.has(r.public_key)){
+        bad(`log_checkpoint.json: chain member ${esc(rid)}… signed outside the issuer lineage`);return;}
+      const rc=await checkReceipt(cNodes[i]);
+      if(!rc.ok){bad(`log_checkpoint.json: chain member ${esc(rid)}… ${esc(rc.why)}`);return;}
+      const ms=mp.tree_size,mr=mp.root_sha256;
+      if(!Number.isInteger(ms)||ms<1||ms>=size||typeof mr!=="string"||mr.length!==64){
+        bad(`log_checkpoint.json: chain member ${esc(rid)}… carries a malformed or non-prior head`);return;}
+      if((await _extOk(mp))===false){
+        bad(`log_checkpoint.json: chain member ${esc(rid)}… signs a bridge it cannot prove`);return;}
+      if(seenSize.has(ms)&&seenSize.get(ms)!==mr){
+        bad(`log_checkpoint.json: chain carries two signed heads at size ${ms}`);return;}
+      seenSize.set(ms,mr);
+      chain.push({size:ms,root:mr,payload:mp});
+    }
+  }
+  /* Validated signed head + chain — the live cross-check and the two-pack
+     compare reconcile against it. */
+  packStash={node:cpNode,size,root:rootHex,chain};
   const {cosigs,anchored}=await _cosigReport(dn,doc,cp.id,size,rootHex,trustedSet,
     m=>bad(`log_checkpoint.json: ${m}`));
   if(proven)ok(`${proven} receipt(s) proven inside the deployment transparency `
     +`log at checkpoint size ${size}${cosigs?` — cosigned by ${cosigs} witness(es)`:""}`
-    +`${anchored?` (${anchored} anchored in the witness's own published log)`:""}`);
+    +`${anchored?` (${anchored} anchored in the witness's own published log)`:""}`
+    +`${chain.length?` — ${chain.length} prior signed head(s) embedded for cross-export reconciliation`:""}`);
 }
 /* Cosignature + self-anchor accounting for a checkpoint document — shared by
    the pack path (checkLog) and the standalone attest.log-checkpoint/1 path.
@@ -1421,6 +1469,47 @@ async function verifyFiles(files){
             }
           }
         }
+        /* The signed checkpoint chain (`chain`): prior heads an export
+           embeds so two packs reconcile offline. Same closed discipline as
+           the pack path — signed log_checkpoint receipts inside the issuer
+           lineage, strictly below the doc's head, one root per size. */
+        const chainArr=[];
+        const chain=r.chain;
+        if(chain!==undefined&&chain!==null){
+          if(!Array.isArray(chain)||chain.length>64)
+            say("bad","checkpoint document: 'chain' must be a list of at most 64");
+          else{
+            const csec=get(node,"chain"),cNodes=csec&&csec.t==="arr"?csec.v:[];
+            const seenCid=new Set(),seenSize=new Map();
+            for(let i=0;i<chain.length;i++){
+              const cr=chain[i];
+              if(!cr||typeof cr!=="object"||Array.isArray(cr)){
+                say("bad","chain member malformed");continue;}
+              const cid=String(cr.id||"?").slice(0,24);
+              if(seenCid.has(cr.id)){say("bad",`chain member ${esc(cid)}… listed twice`);continue;}
+              seenCid.add(cr.id);
+              const cp2=cr.payload;
+              if(!cp2||typeof cp2!=="object"||cp2.record_type!=="log_checkpoint"){
+                say("bad",`chain member ${esc(cid)}… is not a log_checkpoint receipt`);continue;}
+              if(!allowed.has(cr.public_key)){
+                say("bad",`chain member ${esc(cid)}… signed by a key outside the issuer lineage`);continue;}
+              const mrc=await checkReceipt(cNodes[i]);
+              if(!mrc.ok){say("bad",`chain member ${esc(cid)}… invalid: ${esc(mrc.why)}`);continue;}
+              const ms=cp2.tree_size,mr=cp2.root_sha256;
+              if(!Number.isInteger(ms)||ms<1||ms>=size||typeof mr!=="string"||mr.length!==64){
+                say("bad",`chain member ${esc(cid)}… carries a malformed or non-prior head`);continue;}
+              if((await _extOk(cp2))===false){
+                say("bad",`chain member ${esc(cid)}… signs a bridge it cannot prove`);continue;}
+              if(seenSize.has(ms)&&seenSize.get(ms)!==mr){
+                say("bad",`chain carries two signed heads at size ${ms}`);continue;}
+              seenSize.set(ms,mr);
+              chainArr.push({size:ms,root:mr,payload:cp2});
+            }
+            if(chainArr.length)
+              say("ok",`${chainArr.length} prior signed head(s) verified in the embedded chain`);
+          }
+        }
+        if(packStash&&packStash.size===size)packStash.chain=chainArr;
         const selfExt=await _extOk(cpay);
         if(selfExt===false)
           say("bad","checkpoint's embedded `extends` bridge does not verify — "
@@ -2018,28 +2107,87 @@ async function diffPacks(fileA,fileB,out){
           +"DIFFERENT roots — the issuer signed two histories at one tree "
           +"size: a provable fork"];
       else{
-        /* The larger head's own signed extends bridge proves append-only —
-           a smaller B is reported as drift: provably older, but that is the
-           shape a rollback replay produces (packdiff parity). */
-        const[bigP,bigS,bigR,smallS,smallR]=sb>sa?[pb,sb,rb,sa,ra]:[pa,sa,ra,sb,rb];
-        const ext=await _extOk(bigP,smallS,smallR);
-        if(sb>sa)
-          headLine=ext===true?["ok","B's size-"+sb+" head provably extends "
-            +"A's size-"+sa+" head via its own signed bridge — the log only "
-            +"appended between these exports"]
-            :ext===false?["bad","B's size-"+sb+" checkpoint's signed extends "
-              +"bridge names A's size-"+sa+" head but does not reach it — "
-              +"fork evidence inside the issuer's own proof material"]
-              :["warn","B's head is larger ("+sb+" > "+sa+") but carries no "
-                +"usable bridge — a later export or a regression, undecidable "
-                +"offline"];
-        else
-          headLine=ext===true?["warn","B pins an EARLIER signed head (size "
-            +sb+" < "+sa+") it provably extends — an older export, or a "
-            +"replayed regression: offline these are indistinguishable"]
-            :["warn","B pins an earlier signed head (size "+sb+" < "+sa
-              +") with no bridge — older export or regression, undecidable "
-              +"offline"];
+        /* packdiff parity (_log_head_verdict/_walk_chain): the larger head's
+           own signed bridge first; failing that, walk ITS pack's embedded
+           signed chain hop-by-hop — landing on the smaller head proves
+           append-only growth across arbitrarily many checkpoints, colliding
+           on it (a signed member at the target size under a different root)
+           proves a fork. A smaller B is drift: provably older, but that is
+           the shape a rollback replay produces. */
+        const hi=sb>sa?cb:ca,hiP=sb>sa?pb:pa,loS=sb>sa?sa:sb,loR=sb>sa?ra:rb,
+          hiTag=sb>sa?"B":"A",loTag=sb>sa?"A":"B";
+        /* Fork probe before any bridge: a signed chain member at the
+           smaller head's exact size under a DIFFERENT root is two issuer-
+           signed heads at one tree size — evidence even when the bridge
+           itself verifies (_log_head_verdict parity). */
+        const probe=(hi.chain||[]).find(m=>m.size===loS);
+        if(probe&&String(probe.root).toLowerCase()!==String(loR).toLowerCase()){
+          headLine=["bad","the "+hiTag+" export's embedded chain carries a "
+            +"signed head at size "+loS+" whose root differs from "+loTag
+            +"'s — two issuer-signed heads at one tree size: a provable fork"];
+        }else{
+        const ext=await _extOk(hiP,loS,loR);
+        if(ext===true)
+          headLine=sb>sa
+            ?["ok","B's size-"+sb+" head provably extends A's size-"+sa
+              +" head via its own signed bridge — the log only appended "
+              +"between these exports"]
+            :["warn","B pins an EARLIER signed head (size "+sb+" < "+sa
+              +") it provably extends — an older export, or a replayed "
+              +"regression: offline these are indistinguishable"];
+        else if(ext===false)
+          headLine=["bad","the "+hiTag+" export's size-"+Math.max(sa,sb)
+            +" checkpoint signs a bridge naming "+loTag+"'s head's size but "
+            +"not its root — fork evidence inside the issuer's own proof "
+            +"material"];
+        else{
+          /* Multi-hop walk: each hop re-verifies the current head's signed
+             `extends` bridge against the signed chain member it names —
+             _walk_chain parity. */
+          const bySize=new Map();
+          for(const m of hi.chain||[])bySize.set(m.size,m);
+          let cur=hiP,hops=0,outcome=null;
+          while(hops<=bySize.size){
+            const e2=cur&&cur.extends,
+              f=e2&&typeof e2==="object"?_pyInt(e2.first):null;
+            if(f===null)break;
+            if(f===loS){
+              const r=await _extOk(cur,loS,loR);
+              if(r===true){outcome="extends";hops++;}
+              else if(r===false){outcome="fork";hops++;}
+              break;}
+            const m=bySize.get(f);
+            if(!m)break;
+            const r=await _extOk(cur,m.size,m.root);
+            if(r===true){cur=m.payload;hops++;continue;}
+            if(r===false){outcome="fork";hops++;}
+            break;
+          }
+          if(outcome==="extends")
+            headLine=sb>sa
+              ?["ok","B's size-"+sb+" head provably extends A's size-"+sa
+                +" head — "+hops+" signed checkpoint hop(s) verified inside "
+                +"B's embedded chain, no network needed"]
+              :["warn","A's size-"+sa+" head provably extends B's size-"+sb
+                +" head over "+hops+" signed checkpoint hop(s) — the "
+                +"'newer' pack is a verified EARLIER snapshot of the same "
+                +"log: exported before, or a replayed regression honestly "
+                +"identified"];
+          else if(outcome==="fork")
+            headLine=["bad","the embedded signed chain COLLIDES with "+loTag
+              +"'s size-"+loS+" head after "+hops+" verified hop(s) — two "
+              +"signed heads claim different roots at one tree size: a "
+              +"provable fork"];
+          else
+            headLine=sb>sa
+              ?["warn","B's head is larger ("+sb+" > "+sa+") but no bridge or "
+                +"embedded chain reaches A's — `attest consistency` against "
+                +"the live deployment decides"]
+              :["warn","B pins an earlier signed head (size "+sb+" < "+sa
+                +") with no bridge or chain reaching back — older export or "
+                +"regression, undecidable offline"];
+        }
+        }
       }
     }
   }catch(e){headLine=["warn","log-head compare failed: "+esc(e.message||e)];}
@@ -2374,7 +2522,7 @@ if(_lgo)_lgo.onclick=async()=>{if(_busy)return;_busy=true;try{
    An unconsumed deep link must say why instead of dying silently. */
 if(location.protocol.indexOf("http")!==0&&location.hash.length>1){
   const _h=location.hash.slice(1);
-  if(/^(tamper-lab|verify-self|verify-site|sample-pack|demo-receipts|vectors|anchor-demo|live-sweep-receipt|divergence-checkpoint|gauntlet|compare-packs)/.test(_h))
+  if(/^(tamper-lab|verify-self|verify-site|sample-pack|demo-receipts|vectors|anchor-demo|live-sweep-receipt|divergence-checkpoint|gauntlet|compare-packs|compare-earlier)/.test(_h))
     document.getElementById("out").innerHTML="<div class='row warn'>"+
       "This copy is running as a local file — the one-click demos named by "+
       "#"+esc(_h)+" need a hosted copy, which can fetch its sibling files. "+
@@ -2591,45 +2739,63 @@ if(location.protocol.indexOf("http")===0){
      fetched and diffed — the whole dispute in one click: the twin verifies
      FAILED on its own, the diff names observed_span_minutes as the moved
      field, and the signed heads prove the log only appended between the two
-     exports. */
-  const comparePacks=async()=>{
+     exports. #compare-earlier swaps the twin for the pack exported a week
+     earlier — heads NON-adjacent, reconciled offline by walking the newer
+     pack's embedded signed checkpoint chain hop-by-hop. */
+  const comparePacks=async(earlier)=>{
     const out=document.getElementById("out");
     /* diffPacks writes #out for ~seconds — hold the flag or a mid-compare
        drop interleaves a whole second verdict into the report. */
     if(_busy){_busyNote(out);return;}_busy=true;
+    const pair=earlier
+      ?["sample-pack-earlier.zip","sample-pack.zip"]
+      :["sample-pack.zip","sample-pack-tampered.zip"];
     try{
     out.innerHTML="<p>fetching both packs for comparison…</p>";
-    const fa=fetch("sample-pack.zip").then(r=>{
-      if(!r.ok)throw new Error("sample-pack.zip HTTP "+r.status);
-      return r.arrayBuffer().then(b=>new File([b],"sample-pack.zip"));});
-    const fb=fetch("sample-pack-tampered.zip").then(r=>{
-      if(!r.ok)throw new Error("sample-pack-tampered.zip HTTP "+r.status);
-      return r.arrayBuffer().then(b=>new File([b],"sample-pack-tampered.zip"));});
+    const fa=fetch(pair[0]).then(r=>{
+      if(!r.ok)throw new Error(pair[0]+" HTTP "+r.status);
+      return r.arrayBuffer().then(b=>new File([b],pair[0]));});
+    const fb=fetch(pair[1]).then(r=>{
+      if(!r.ok)throw new Error(pair[1]+" HTTP "+r.status);
+      return r.arrayBuffer().then(b=>new File([b],pair[1]));});
     const[a,b]=await Promise.all([fa,fb]);
     out.innerHTML="";
     await diffPacks(a,b,out);
     /* The same pair pre-rendered as a printable report — the page a
        coordinator actually attaches to the dispute. */
-    out.insertAdjacentHTML("beforeend","<div class='row'><a "+
-      "href='sample-diff-report.html'>the printable report of this exact "+
-      "diff</a> — what attest diff --html writes.</div>");
+    if(!earlier)
+      out.insertAdjacentHTML("beforeend","<div class='row'><a "+
+        "href='sample-diff-report.html'>the printable report of this exact "+
+        "diff</a> — what attest diff --html writes.</div>");
     }catch(e){
       out.innerHTML="<div class='row bad'>compare link failed: "+
         esc(e.message||e)+"</div>";
     }finally{_busy=false;}
   };
-  /* The button shows only where fetches can succeed — http gate, same as the
-     gauntlet. */
+  /* The buttons show only where BOTH members of their pair fetch — same
+     sibling-HEAD gate as the pin/self buttons, so an extracted pack served
+     over http never offers demos whose artifacts aren't there. */
   if(location.protocol.startsWith("http")){
-    const cw=document.getElementById("trycompare-wrap");
-    if(cw){cw.hidden=false;
-      document.getElementById("trycompare").onclick=()=>{
-        if(_busy){_busyNote(document.getElementById("out"));return;}
-        try{history.replaceState(null,"",location.pathname+"#compare-packs");}
-        catch(e){}
-        comparePacks();};}
+    const arm=(wrapId,btnId,hash,pair,files)=>{
+      Promise.all(files.map(f=>fetch(f,{method:"HEAD"}))).then(rs=>{
+        if(!rs.every(r=>r.ok)){
+          if(location.hash===hash)_miss(files.find((f,i)=>!rs[i].ok));
+          return;}
+        const w=document.getElementById(wrapId);if(!w)return;
+        w.hidden=false;
+        document.getElementById(btnId).onclick=()=>{
+          if(_busy){_busyNote(document.getElementById("out"));return;}
+          try{history.replaceState(null,"",location.pathname+hash);}
+          catch(e){}
+          comparePacks(pair);};
+        if(location.hash===hash)comparePacks(pair);
+      }).catch(()=>{});
+    };
+    arm("trycompare-wrap","trycompare","#compare-packs",false,
+        ["sample-pack.zip","sample-pack-tampered.zip"]);
+    arm("trycompare2-wrap","trycompare2","#compare-earlier",true,
+        ["sample-pack-earlier.zip","sample-pack.zip"]);
   }
-  if(location.hash==="#compare-packs")comparePacks();
   if(location.hash==="#anchor-demo"){
     fetch("anchor-demo.json").then(async r=>{
       if(!r.ok){_failOut(
@@ -2955,7 +3121,7 @@ if(location.protocol.indexOf("http")===0){
   if(location.hash.length>1){
     const h=location.hash;
     const claimed=_rm||_vm||h==="#anchor-demo"||h==="#gauntlet"
-      ||h==="#compare-packs"||h==="#tamper-lab"||h==="#verify-self"
+      ||h==="#compare-packs"||h==="#compare-earlier"||h==="#tamper-lab"||h==="#verify-self"
       ||h==="#verify-site"
       ||h==="#sample-pack-pinned"
       ||_samples.some(([f])=>h==="#"+f.replace(/\.(zip|json)$/,""));

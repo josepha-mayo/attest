@@ -75,11 +75,12 @@
 
 <header>
   <div class="brand">Attest<span>.</span></div>
-  <nav><a href="demo-dashboard.html">Records</a><a  data-dead="/setup" title="live deployment only — inert in this snapshot">Setup &amp; schedules</a><a href="demo-integrity.html">Integrity</a><a href="verify.html#demo-receipts">Verify (journal)</a><a href="verify.html">Verify (pack)</a><a href="index.html">Claim boundary</a><a href="demo-receipts.json" download>Receipts (JSON)</a></nav>
+  <nav><a href="demo-dashboard.html">Records</a><a  data-dead="/setup" title="live deployment only — inert in this snapshot">Setup &amp; schedules</a><a href="demo-integrity.html">Integrity</a><a href="verify.html#demo-receipts">Verify (server)</a><a href="verify.html">Verify (browser)</a><a href="index.html">Claim boundary</a><a href="demo-receipts.json" download>Receipts (JSON)</a></nav>
   <div class="meta">Local / test data &middot; configured summary provider: template</div>
 </header>
-<div class="replay-banner">LOCAL REPLAY — not a live visit. Event clock: 2026-10-08T20:37:03.318922+00:00. Security expiry and signature issuance use real time.</div>
 
+
+<div class="replay-banner">LOCAL REPLAY — not a live visit. Event clock: 2026-10-08T20:37:03.318922+00:00. Security expiry and signature issuance use real time.</div>
 <main id="main" tabindex="-1">
 
 <a href="demo-dashboard.html" class="muted small">&larr; all records</a>
@@ -123,9 +124,9 @@
 
 
 <div class="muted small" style="margin-top:4px">
-  87 case export(s) signed — each export is itself a chain event
+  89 case export(s) signed — each export is itself a chain event
   naming exactly which receipt hashes it carried
-  (latest: <a href="demo-receipts/rcpt_afc4630e8a61445aa15b3d60cc9b6129.json"><code>rcpt_afc4630e8a61445aa15b3d60cc9b6129</code></a>).
+  (latest: <a href="demo-receipts/rcpt_505fb19c808246bbb952c48b5144b803.json"><code>rcpt_505fb19c808246bbb952c48b5144b803</code></a>).
 </div>
 
 
@@ -1046,7 +1047,7 @@ async function disconnectSource() {
 
 <h2>Ring lifecycle events</h2>
 <div class="card">
-  <p class="small muted" style="margin-top:0">Signed-channel facts that explain observation coverage — a camera offline or a subscription ending says *why* events stopped; it never says nobody came.</p>
+  <p class="small muted" style="margin-top:0">Signed-channel facts that explain observation coverage — a camera offline or a subscription ending says <em>why</em> events stopped; it never says nobody came.</p>
   <table>
     <thead>
       <tr><th scope="col">When</th><th scope="col">Event</th><th scope="col">Scope</th></tr>

@@ -39,7 +39,7 @@ This page describes the evidence system's health, not whether any worker was hon
     {% if transparency.checkpoints %}
       <span class="ok">&#10003; {{ transparency.checkpoints }} signed checkpoint(s)</span>
     {% else %}
-      <span class="muted">no checkpoint yet — `attest checkpoint` signs the current head</span>
+      <span class="muted">no checkpoint yet — <code>attest checkpoint</code> signs the current head</span>
     {% endif %}
     <div class="muted small" style="margin-top:.5rem">
       {{ transparency.tree_size }} receipts in the Merkle tree · head <code>{{ transparency.root_sha256[:12] }}…</code>
@@ -110,7 +110,7 @@ This page describes the evidence system's health, not whether any worker was hon
   <tr>
     <td><a href="/sites/{{ sid }}" style="color:var(--accent)">{{ sites[sid].name if sid in sites else sid }}</a></td>
     <td>{{ p.count }}</td>
-    <td class="muted">{{ p.last }}</td>
+    <td class="muted">{{ t(p.last) }}</td>
     <td class="muted">{% if sid in lifecycle %}{{ lifecycle[sid].last_kind.replace("_"," ") }} · {{ t(lifecycle[sid].last) }}{% else %}—{% endif %}</td>
   </tr>
   {% else %}

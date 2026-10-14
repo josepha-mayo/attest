@@ -595,9 +595,10 @@ def test_diff_reports_same_head_and_unbridged_gap(engine, store, household, sche
     assert anomalies == 0, text
     assert "both exports commit to the same signed log head" in text
 
-    # A checkpoint issued between the exports breaks adjacency — the
-    # newer head's bridge names THAT head, not the first pack's, so the
-    # comparison stays honestly undecidable offline. The intermediate
+    # A checkpoint issued between the exports breaks ADJACENCY — the newer
+    # head's own bridge names THAT head, not the first pack's — but the
+    # second export's embedded signed chain covers the gap hop-by-hop, so
+    # the reconcile still proves append-only, offline. The intermediate
     # checkpoint must cover a GROWN tree (unchanged heads are idempotent),
     # and the tree must grow again after it so the export's checkpoint is
     # a distinct, non-adjacent head.
@@ -608,7 +609,141 @@ def test_diff_reports_same_head_and_unbridged_gap(engine, store, household, sche
     lines, anomalies = diff(first, third)
     text = "\n".join(lines)
     assert anomalies == 0, text
-    assert "no embedded bridge" in text
+    assert "signed checkpoint hop(s) verified" in text, text
+
+
+def test_diff_reports_unbridged_gap_when_chain_cannot_reach(engine, store, household, schedule, t0, tmp_path):
+    """A pack whose embedded chain does not reach the older head stays
+    honestly undecidable — strip the newer pack's `chain` member and the
+    reconcile falls back to 'no bridge', never a guess."""
+    import zipfile as _zf
+
+    service = ReviewService(store, engine.signer, engine.clock)
+    site = store.sites()[0]
+    v1 = _visit(engine, household, t0)
+    first = _case_with_log(engine, store, tmp_path, site, service, [v1])
+    v2 = _visit(engine, household, t0, offset=90)
+    engine.issue_log_checkpoint()
+    v3 = _visit(engine, household, t0, offset=180)
+    third = _case_with_log(engine, store, tmp_path, site, service, [v1, v2, v3])
+
+    with _zf.ZipFile(third) as z:
+        doc = json.loads(z.read("log_checkpoint.json"))
+    assert doc.get("chain"), "export should embed prior signed heads"
+    del doc["chain"]
+    stripped = _rewrite_member(third, "log_checkpoint.json", json.dumps(doc).encode(), tmp_path)
+
+    lines, anomalies = diff(first, stripped)
+    text = "\n".join(lines)
+    assert anomalies == 0, text
+    assert "no bridge or chain" in text or "no embedded bridge" in text, text
+
+
+def test_diff_chain_collision_is_a_provable_fork(engine, store, household, schedule, t0, tmp_path):
+    """A chain member occupying the OLDER pack's head size under a different
+    signed root is two issuer-signed heads at one tree size — the walk must
+    report a provable fork, not quietly pass over it."""
+    import zipfile as _zf
+
+    service = ReviewService(store, engine.signer, engine.clock)
+    site = store.sites()[0]
+    v1 = _visit(engine, household, t0)
+    first = _case_with_log(engine, store, tmp_path, site, service, [v1])
+    s1, _ = _head(first)
+
+    v2 = _visit(engine, household, t0, offset=90)
+    second = _case_with_log(engine, store, tmp_path, site, service, [v1, v2])
+
+    # Forge a signed checkpoint receipt AT the older head's size under a
+    # different root — the issuer's real key signs it, so it passes the
+    # pack's own chain validation and reaches the reconcile.
+    from attest.transparency import root as _troot
+
+    prev = store.latest_receipt()
+    forged = engine.signer.issue(
+        visit_id=f"log-fork:{s1}",
+        sequence=prev.sequence + 1,
+        prev_hash=prev.payload_hash,
+        facts={
+            "record_type": "log_checkpoint",
+            "tree_size": s1,
+            "root_sha256": _troot([b"\xab" * 32]).hex(),
+            "journal_head": store.journal_head(),
+        },
+    ).model_dump(mode="json")
+
+    with _zf.ZipFile(second) as z:
+        doc = json.loads(z.read("log_checkpoint.json"))
+    chain = doc.get("chain") or []
+    # Replace the honest member at s1 (the walk's target) so the pack still
+    # verifies — the fork lives inside the signed evidence itself.
+    doc["chain"] = [forged] + [m for m in chain if m["payload"].get("tree_size") != s1]
+    forked = _rewrite_member(second, "log_checkpoint.json", json.dumps(doc).encode(), tmp_path)
+
+    lines, anomalies = diff(first, forked)
+    text = "\n".join(lines)
+    assert anomalies >= 1, text
+    assert "provable fork" in text and "two issuer-signed heads at one tree size" in text, text
+
+
+def test_check_log_rejects_foreign_and_dup_size_chain_members(
+    engine, store, household, schedule, t0, tmp_path
+):
+    """Chain members are validated like embedded evidence receipts minus the
+    leaf proof — a foreign signer's member, or two signed roots at one tree
+    size inside one document, fail the pack closed."""
+    import zipfile as _zf
+
+    service = ReviewService(store, engine.signer, engine.clock)
+    site = store.sites()[0]
+    v1 = _visit(engine, household, t0)
+    _case_with_log(engine, store, tmp_path, site, service, [v1])
+    v2 = _visit(engine, household, t0, offset=90)
+    pack = _case_with_log(engine, store, tmp_path, site, service, [v1, v2])
+
+    from attest.packdiff import check_log_pin
+
+    with _zf.ZipFile(pack) as z:
+        doc = json.loads(z.read("log_checkpoint.json"))
+        member_ids = []
+        for n in z.namelist():
+            if n.startswith("attestations/"):
+                att = json.loads(z.read(n))
+                member_ids.append((att["id"], att["payload_hash"], att["public_key"]))
+    assert doc.get("chain"), "export should embed prior signed heads"
+    trusted = {doc["checkpoint"]["public_key"]}
+
+    def run(d):
+        raw = json.dumps(d).encode()
+        return check_log_pin(lambda n: raw if n == "log_checkpoint.json" else None, member_ids, trusted)
+
+    res, err = run(doc)
+    assert err is None and res is not None, err
+
+    bad = json.loads(json.dumps(doc))
+    bad["chain"][0]["public_key"] = "AA" * 32
+    res2, err2 = run(bad)
+    assert res2 is None and "outside the issuer lineage" in err2
+
+    # The second root at one size must be VALIDLY signed — a mutated copy
+    # dies at the signature check long before the dedup rule reads it.
+    dup = json.loads(json.dumps(doc))
+    s0 = dup["chain"][0]["payload"]["tree_size"]
+    prev = store.latest_receipt()
+    forged = engine.signer.issue(
+        visit_id=f"log-fork:{s0}",
+        sequence=prev.sequence + 1,
+        prev_hash=prev.payload_hash,
+        facts={
+            "record_type": "log_checkpoint",
+            "tree_size": s0,
+            "root_sha256": "ab" * 32,
+            "journal_head": store.journal_head(),
+        },
+    ).model_dump(mode="json")
+    dup["chain"].append(forged)
+    res3, err3 = run(dup)
+    assert res3 is None and "two signed heads" in err3, err3
 
 
 def test_diff_notes_when_only_one_export_carries_a_checkpoint(

@@ -3,9 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>The Attest tour — eleven beats, all real</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1l6 2v5c0 3.5-2.6 6-6 7-3.4-1-6-3.5-6-7V3z' fill='%231c1c1e'/%3E%3Cpath d='M4.6 8.2l2.2 2.2 4.6-4.9' stroke='%23fff' stroke-width='1.5' fill='none'/%3E%3C/svg%3E">
+<title>The Attest tour — twelve beats, all real</title>
 <meta name="description" content="A self-playing walkthrough of Attest's verification story — every frame is the real product page, not a screenshot.">
-<meta property="og:title" content="The Attest tour — eleven beats, all real">
+<meta property="og:title" content="The Attest tour — twelve beats, all real">
 <meta property="og:description" content="Self-playing walkthrough: signed packs verify, doctored packs fail, and judges can commit the forgery themselves — every frame a real product page.">
 <meta property="og:type" content="website">
 <meta property="og:image" content="https://josepha-mayo.github.io/attest/og-image.png">
@@ -49,7 +50,7 @@ a{color:#2563eb}
 <aside class="side" aria-live="polite">
   <div>
     <h1>The Attest tour</h1>
-    <p class="tag">Eleven beats, ~two minutes — every frame is the real product page, not a
+    <p class="tag">Twelve beats, ~two minutes — every frame is the real product page, not a
     screenshot. The verifier runs for real inside each panel.</p>
   </div>
   <div id="card">
@@ -64,22 +65,23 @@ a{color:#2563eb}
     <button id="play" class="primary" type="button">pause</button>
     <button id="next" type="button">next →</button>
   </div>
-  <div class="prog" role="progressbar" aria-hidden="true"><i id="bar"></i></div>
+  <div class="prog" aria-hidden="true"><i id="bar"></i></div>
   <div class="dots" id="dots"></div>
 </aside>
 <div class="stage"><iframe id="frame" title="product page"></iframe></div>
 </div>
-<noscript><p style="padding:1rem">The tour needs JavaScript — but every beat is
-a link: <a href="verify.html#sample-pack">green VERIFIED</a> ·
+<noscript><p style="padding:1rem">The tour needs JavaScript — but every page it
+visits is a link: <a href="verify.html#sample-pack">green VERIFIED</a> ·
 <a href="verify.html#sample-pack-tampered">red FAILED</a> ·
 <a href="verify.html#tamper-lab">the tamper lab</a> ·
 <a href="verify.html#compare-packs">two-pack compare</a> ·
+<a href="verify.html#compare-earlier">compare across time</a> ·
 <a href="verify.html#gauntlet">the gauntlet</a> ·
 <a href="verify.html#anchor-demo">the OTS anchor</a> ·
 <a href="story.html">the story the signed bytes tell</a> ·
 <a href="demo-visit.html">the contested visit</a> ·
 <a href="demo-family.html">the family link</a> ·
-<a href="demo-worker.html">the worker link</a> ·
+<a href="demo-worker.html" target="_blank" rel="noopener">the worker link</a> ·
 <a href="demo-receipts.html">the hash chain</a> ·
 <a href="vectors.html">the corpus</a> ·
 <a href="verify.html#verify-site">site attestation</a>.</p></noscript>
@@ -91,29 +93,34 @@ const BEATS=[
   statements, household statements, and the coordinator's conclusion kept
   <em>separate</em>, signed, and append-only.`,
   w:"Why judges care: the demo is the product — every artifact on this site verifies independently."},
- {t:"A pack verifies itself",u:"verify.html?b=2#sample-pack",s:12000,
+ {t:"A pack verifies itself",u:"verify.html?b=1#sample-pack",s:12000,
   p:`The exported dispute pack verifies in your browser — no install, nothing
   uploaded. The green <strong>VERIFIED</strong> stamp covers signatures, the hash
   chain, the Merkle log, witness cosignatures, and a mid-history key rotation.`,
   w:"Notice the verdict hedges honestly — integrity under a key, never physical truth."},
- {t:"The same pack, one field doctored",u:"verify.html?b=3#sample-pack-tampered",s:12000,
+ {t:"The same pack, one field doctored",u:"verify.html?b=2#sample-pack-tampered",s:12000,
   p:`Someone inflated the contested visit's observed span — 65.25 to 135.25 minutes, past its 90-minute schedule — inside a signed
   bundle. The red <strong>FAILED</strong> stamp names the visit and the check that
   died: <code>payload hash mismatch</code>. Click "name what changed" and the
   verifier points at the forged field itself.`,
   w:"One byte moves, the math refuses — and one more click says which byte it was."},
- {t:"Commit the forgery yourself",u:"verify.html?b=4#tamper-lab",s:12000,
+ {t:"Commit the forgery yourself",u:"verify.html?b=3#tamper-lab",s:12000,
   p:`The tamper lab: pick a signed field, type your own value, and the page
   rebuilds a real zip around your edit — downloadable — then refuses it. The
   adversary is you.`,
   w:"Nothing staged: the same verifier that passed the clean pack kills yours."},
- {t:"Two packs, both verify — not the same",u:"verify.html?b=5#compare-packs",s:14000,
+ {t:"Two packs, both verify — not the same",u:"verify.html?b=4#compare-packs",s:12000,
   p:`"The copy the agency produced" versus "the copy I kept": each verifies on
   its own merits, then the verifier diffs their signed membership — the forged
   field named — and reconciles the two signed log heads through the embedded
   bridge. "Both verify" and "both identical" are different claims.`,
   w:"This is the dispute story's endpoint: integrity is checkable per-copy; sameness is a separate, provable fact."},
- {t:"The product face",u:"demo-visit.html",s:12000,
+ {t:"The pack you kept vs the export of today",u:"verify.html?b=5#compare-earlier",s:12000,
+  p:`Weeks apart, the signed heads aren't even adjacent — so the reconcile
+  walks the newer pack's embedded checkpoint chain, hop by signed hop, and
+  still proves the log only grew. No server contacted.`,
+  w:"The real dispute shape: an old keepsake pack and a fresh export provably share one history — offline."},
+ {t:"The product face",u:"demo-visit.html",s:10000,
   p:`The contested visit as a coordinator sees it: source divergence flagged,
   the worker's signed dispute, and the household's own account changing
   mid-record — first "the doorbell never rang", then a re-sent statement
@@ -121,27 +128,27 @@ const BEATS=[
   w:"He said / she said is preserved, not adjudicated — that's the product thesis."},
  {t:"What each side sees",u:"demo-family.html",s:12000,
   p:`Scoped links carry the dispute to each side: the household gets a texted
-  <code>/family/</code> link (<a href="demo-family-es.html">en español</a>) —
+  <code>/family/</code> link (<a href="demo-family-es.html" target="_blank" rel="noopener">en español</a>) —
   view plus their own statement form; the worker gets a
-  <a href="demo-worker.html"><code>/review/</code> link</a> to countersign or
+  <a href="demo-worker.html" target="_blank" rel="noopener"><code>/review/</code> link</a> to countersign or
   contest. Tokens are hashed at rest, expiring, revocable.`,
   w:"Three audiences, three surfaces — nobody needs a login to be heard on the record."},
  {t:"The raw layer",u:"demo-receipts.html",s:10000,
-  p:`All 277 signed receipts of the demo deployment, drawn as the literal hash
+  p:`All 283 signed receipts of the demo deployment, drawn as the literal hash
   chain — every edge a real <code>prev_hash</code>. Click any row or node for a
   one-click verdict on that single receipt.`,
   w:"A judge can drill to the byte level without trusting the site."},
  {t:"The adversarial corpus",u:"vectors.html",s:10000,
-  p:`36 Wycheproof-style conformance vectors ship publicly — each row a deep
+  p:`39 Wycheproof-style conformance vectors ship publicly — each row a deep
   link landing on the verdict the oracle predicts. Bool/string/fractional
   <code>leaf_index</code>, padded hex, a 2⁴⁰ tree_size.`,
   w:"Two verifiers silently diverging is how a pack gets ruled valid in one room and invalid in another."},
- {t:"The site attests itself",u:"verify.html?b=8#verify-site",s:12000,
+ {t:"The site attests itself",u:"verify.html?b=6#verify-site",s:12000,
   p:`<code>site-manifest.json</code> is a signed receipt pinning the sha256 of
   every artifact we ship. One click verifies the manifest, then hashes every
   served file against it.`,
   w:"We hold the hosting surface to the same standard as the evidence: <strong>SITE VERIFIED</strong> or <strong>SITE TAMPER</strong>, drifted files named."},
- {t:"Where to go from here",u:"verify.html?b=9#verify-self",s:9000,
+ {t:"Where to go from here",u:"verify.html?b=7#verify-self",s:9000,
   p:`The verifier checking its own bytes against the pack's signed pin —
   <strong>PINNED</strong>. Beyond this tour: JUDGE.md maps every claim to its
   artifact; README runs the whole story in one terminal.`,

@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Append-only export diff · Attest</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:64em;margin:0 auto;
+padding:1.4rem 1.2rem;color:#1c1c1e;line-height:1.5}
+h1{font-size:1.35rem;margin-bottom:.1rem}
+code{background:#f4f4f5;padding:.08rem .35rem;border-radius:4px;
+font-size:.85em;word-break:break-all}
+.sides{display:flex;gap:1rem;flex-wrap:wrap;margin:1rem 0}
+.side{flex:1;min-width:16em;border:1px solid #e4e4e7;border-radius:8px;
+padding:.7rem .9rem}
+.path{font-family:ui-monospace,monospace;font-size:.85rem;font-weight:600;
+word-break:break-all}
+.meta{font-size:.8rem;color:#52525b;margin-top:.3rem}
+.stamp{font-weight:700;font-size:1.05rem;padding:.8rem 1.1rem;
+border-radius:10px;margin:.9rem 0 .3rem}
+.stamp.ok{background:#f0fdf4;border:1px solid #86efac;color:#166534}
+.stamp.drift{background:#fffbeb;border:1px solid #fde68a;color:#92400e}
+.stamp.bad{background:#fef2f2;border:1px solid #fecaca;color:#991b1b}
+table{border-collapse:collapse;width:100%;font-size:.86rem;margin-top:1rem}
+th,td{text-align:left;padding:.4rem .6rem;border-bottom:1px solid #e4e4e7;
+vertical-align:top}
+.chip{display:inline-block;font-size:.72rem;font-weight:700;
+letter-spacing:.03em;border-radius:5px;padding:.1rem .45rem}
+.chip.ok{background:#dcfce7;color:#166534}
+.chip.info{background:#dbeafe;color:#1d4ed8}
+.chip.drift{background:#fef3c7;color:#92400e}
+.chip.bad{background:#fee2e2;color:#991b1b}
+.small{color:#6b6b70;font-size:.8rem}
+footer{margin-top:2rem;padding-top:.8rem;border-top:1px solid #e4e4e7;
+color:#6b6b70;font-size:.78rem}
+</style>
+</head>
+<body>
+<main>
+<h1>Append-only export diff</h1>
+<p class="small">Two signed evidence exports compared member-by-member.
+Appended records are normal; a vanished or altered one is an anomaly —
+records are append-only.</p>
+<div class="sides">
+<div class="side"><div class="path">docs/sample-pack-earlier.zip</div><div class="meta">case-pack · issuer <code title="qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=">qRNo7hHrwwi2zNlV7t…</code></div><div class="meta"><span class="chip ok">VERIFIED</span> all signed contents verify</div></div>
+<div class="side"><div class="path">docs/sample-pack.zip</div><div class="meta">case-pack · issuer <code title="qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=">qRNo7hHrwwi2zNlV7t…</code></div><div class="meta"><span class="chip ok">VERIFIED</span> all signed contents verify</div></div>
+</div>
+
+<div class="stamp drift">APPEND-ONLY DRIFT — 0 anomalies</div>
+<p class="small">New signed records appeared (normal export growth); nothing vanished and nothing was altered.</p>
+<table>
+<thead><tr><th>verdict</th><th>member</th><th>what the diff found</th></tr></thead>
+<tbody><tr><td><span class="chip info">compare</span></td><td>—</td><td>docs/sample-pack-earlier.zip [case-pack] -&gt; docs/sample-pack.zip [case-pack]</td></tr><tr><td><span class="chip drift">drift</span></td><td><code>old</code></td><td>old artifact: 6 record(s) signed by a revoked issuer inside its suspect window — integrity intact, trust qualified</td></tr><tr><td><span class="chip drift">drift</span></td><td><code>old</code></td><td>old artifact: 1 key-lifecycle receipt(s) signed inside a suspect window — the trust pivot itself inherits the doubt</td></tr><tr><td><span class="chip drift">drift</span></td><td><code>old</code></td><td>old artifact: 4 verifier tool(s) pinned by issuer-signed manifest</td></tr><tr><td><span class="chip drift">drift</span></td><td><code>old</code></td><td>old artifact: 97 receipt(s) proven inside the deployment transparency log at checkpoint size 176 — cosigned by 1 witness(es) (1 anchored in the witness&#x27;s own published log)</td></tr><tr><td><span class="chip ok">ok</span></td><td><code>old</code></td><td>old artifact: all signed contents verify under the issuer qRNo7hHrwwi2zNlV7tGC… (self-declared)</td></tr><tr><td><span class="chip drift">drift</span></td><td><code>new</code></td><td>new artifact: 6 record(s) signed by a revoked issuer inside its suspect window — integrity intact, trust qualified</td></tr><tr><td><span class="chip drift">drift</span></td><td><code>new</code></td><td>new artifact: 1 key-lifecycle receipt(s) signed inside a suspect window — the trust pivot itself inherits the doubt</td></tr><tr><td><span class="chip drift">drift</span></td><td><code>new</code></td><td>new artifact: 4 verifier tool(s) pinned by issuer-signed manifest</td></tr><tr><td><span class="chip drift">drift</span></td><td><code>new</code></td><td>new artifact: 106 receipt(s) proven inside the deployment transparency log at checkpoint size 194 — cosigned by 1 witness(es) (1 anchored in the witness&#x27;s own published log) — 32 prior signed head(s) embedded for cross-export reconciliation</td></tr><tr><td><span class="chip ok">ok</span></td><td><code>new</code></td><td>new artifact: all signed contents verify under the issuer qRNo7hHrwwi2zNlV7tGC… (self-declared)</td></tr><tr><td><span class="chip ok">ok</span></td><td><code>log_checkpoint.json</code></td><td>the size-194 head provably extends the size-176 head — 9 signed checkpoint hop(s) verified inside the newer pack&#x27;s embedded chain, no network needed</td></tr><tr><td><span class="chip info">new</span></td><td><code>rcpt_336b513b353e41eeb373b60c64dbad2d</code></td><td>attestation case_export (rcpt_336b513b353e41e…): new site event</td></tr><tr><td><span class="chip info">new</span></td><td><code>rcpt_7a588437a1d344a6897f3ff775f5cff4</code></td><td>attestation case_export (rcpt_7a588437a1d344a…): new site event</td></tr><tr><td><span class="chip info">new</span></td><td><code>rcpt_7d56d9f3bb1c4be5b857eb345c4ce2da</code></td><td>attestation case_export (rcpt_7d56d9f3bb1c4be…): new site event</td></tr><tr><td><span class="chip info">new</span></td><td><code>rcpt_8d71b697bafa40df9e3cc3185c31a958</code></td><td>attestation case_export (rcpt_8d71b697bafa40d…): new site event</td></tr><tr><td><span class="chip info">new</span></td><td><code>rcpt_97963d9c7bc54c55b8d33cb1769752ad</code></td><td>attestation case_export (rcpt_97963d9c7bc54c5…): new site event</td></tr><tr><td><span class="chip info">new</span></td><td><code>rcpt_af651ed3e3324c6b8eff14b2e339fa33</code></td><td>attestation case_export (rcpt_af651ed3e3324c6…): new site event</td></tr><tr><td><span class="chip info">new</span></td><td><code>rcpt_afc4630e8a61445aa15b3d60cc9b6129</code></td><td>attestation case_export (rcpt_afc4630e8a61445…): new site event</td></tr><tr><td><span class="chip info">new</span></td><td><code>rcpt_b541fe35c462493d9751daa005c81c6a</code></td><td>attestation case_export (rcpt_b541fe35c462493…): new site event</td></tr><tr><td><span class="chip info">new</span></td><td><code>rcpt_dfff1aad0aa64568a580785ae1b43231</code></td><td>attestation case_export (rcpt_dfff1aad0aa6456…): new site event</td></tr><tr><td><span class="chip ok">ok</span></td><td>—</td><td>clean: all changes are append-only</td></tr></tbody>
+</table>
+<footer>Generated by <code>attest diff --html</code>. This page is a readable
+rendering, not a signed artifact — re-derive the same events any time with
+<code>attest diff &lt;old&gt; &lt;new&gt; --json</code> (exit 1 on anomaly),
+or verify each export on its own merits with <code>attest verify</code> or
+the bundled <code>verify.html</code>. "Both verify" and "identical" are
+different claims; this page separates them.</footer>
+</main>
+</body>
+</html>

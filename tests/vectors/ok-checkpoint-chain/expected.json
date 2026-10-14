@@ -1,0 +1,13 @@
+{
+  "kind": "case",
+  "pin": "declared",
+  "verdict": "ok",
+  "detail_contains": [
+    "prior signed head(s)"
+  ],
+  "js": {
+    "bundle_ok": true,
+    "verdict": "ok"
+  },
+  "note": "the pack embeds prior signed checkpoint heads \u2014 each verified under the issuer lineage so two exports can reconcile non-adjacent heads offline, hop-by-hop"
+}

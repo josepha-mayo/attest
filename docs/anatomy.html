@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1l6 2v5c0 3.5-2.6 6-6 7-3.4-1-6-3.5-6-7V3z' fill='%231c1c1e'/%3E%3Cpath d='M4.6 8.2l2.2 2.2 4.6-4.9' stroke='%23fff' stroke-width='1.5' fill='none'/%3E%3C/svg%3E">
 <title>Anatomy of a signed receipt · Attest</title>
 <meta property="og:title" content="Anatomy of a signed receipt · Attest">
 <meta property="og:description" content="A real signed receipt, decomposed field-by-field — what the signature covers, what it never claims, and how the chain holds.">
@@ -88,7 +89,7 @@ const FIELDS={
  signature:["Ed25519 over <code>payload_hash</code> bytes. Proves bytes-under-key — integrity and origin — never that the events inside are physically true."],
  public_key:["the issuer's raw Ed25519 key (base64). Mid-history rotations are bridged by the signed key-chain in the issuer document — an ancestor inherits trust only through a consented pivot."],
  issued_at:["the wall-clock claim, signed — evidence of what the issuer <em>said</em> the time was. Cross-checks (schedules, event windows, rotation order) are what make it meaningful."],
- payload:["the signed facts — canonicalized and hashed. Record type says what kind of statement it is: observation, statement, conclusion, checkpoint, attestation. A camera observation stays an observation forever — it is never promoted to attendance."]
+ payload:["the signed facts — canonicalized and hashed. The payload's own <code>record_type</code> says what kind of statement it is — <code>visit_record</code>, <code>coverage_attestation</code>, <code>log_checkpoint</code>, <code>case_export</code>, <code>key_rotation</code>, <code>verifier_manifest</code>… A camera observation stays an observation forever — it is never promoted to attendance."]
 };
 const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -154,7 +155,7 @@ async function boot(){
   const pick=$('pick');
   receipts.forEach((r,k)=>{
     const o=document.createElement('option');o.value=k;
-    o.textContent=r.id+' — '+(r.payload&&r.payload.record_type||'record')+' · '+(r.visit_id||'');
+    o.textContent=r.id+' — '+(r.payload&&r.payload.record_type||'visit_record')+' · '+(r.visit_id||'');
     pick.appendChild(o);});
   pick.onchange=()=>show(receipts[+pick.value]);
   const m=location.hash.match(/^#(rcpt_[0-9a-f]+)/);
@@ -201,7 +202,9 @@ function show(r){
           :'<strong class="badc">MISMATCH</strong>');
   }).catch(()=>{if(seq===showSeq)cp.textContent='(canonicalization unavailable — the per-receipt file did not load)';});
 }
-boot().catch(e=>{$('rows').innerHTML='<tr><td colspan="3">load failed: '+esc(e.message)+'</td></tr>';});
+boot().catch(e=>{$('rows').innerHTML='<tr><td colspan="3">load failed: '+esc(e.message)
+  +(location.protocol==='file:'?' — this page fetches its receipts over HTTP; serve the directory (<code>python -m http.server</code>) or use the hosted copy':'')
+  +'</td></tr>';});
 </script>
 <p class="small">Elsewhere: <a href="index.html">landing</a> ·
 <a href="tour.html">two-minute tour</a> ·

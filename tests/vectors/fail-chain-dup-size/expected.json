@@ -1,0 +1,13 @@
+{
+  "kind": "case",
+  "pin": "declared",
+  "verdict": "fail",
+  "detail_contains": [
+    "two signed heads"
+  ],
+  "js": {
+    "bundle_ok": true,
+    "verdict": "fail"
+  },
+  "note": "two issuer-signed heads at one tree size inside a single document is a fork claim the reconcile cannot read honestly \u2014 the pack refuses it at verification time"
+}

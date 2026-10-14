@@ -119,14 +119,16 @@ def _log_pin_check(z, names, trusted, member_ids, failures, notes):
         return None
     if not res:
         return None
-    proven, size, cosigs, anchored, head = res
+    proven, size, cosigs, anchored, head, chain = res
     note = f"{proven} receipt(s) proven inside the deployment transparency log at checkpoint size {size}"
     if cosigs:
         note += f" — cosigned by {cosigs} witness(es)"
         if anchored:
             note += f" ({anchored} anchored in the witness's own published log)"
+    if chain:
+        note += f" — {len(chain)} prior signed head(s) embedded for cross-export reconciliation"
     notes.append(note)
-    return head
+    return {"head": head, "chain": chain}
 
 
 def _bundle_receipt_ids(bundle) -> list[tuple[str, str, str]]:
@@ -366,6 +368,60 @@ def check_log_pin(
             return None, (
                 "log_checkpoint.json: unreferenced inclusion proof does not reach the signed tree head"
             )
+    # The signed checkpoint chain (`chain`): prior heads the export embeds
+    # so packs exported far apart can reconcile offline — each member is a
+    # full signed checkpoint receipt whose own `extends` bridge does the
+    # hopping. Members verify like embedded evidence receipts minus the
+    # inclusion proof (checkpoints are heads, not leaves), each must sit
+    # strictly below the doc's head, and one tree size may carry only one
+    # root — two signed roots at a single size inside one document is a
+    # fork claim the walk cannot read honestly, so it fails closed.
+    chain_members: list = []
+    chain = doc.get("chain")
+    if chain is not None:
+        if not isinstance(chain, list) or len(chain) > 64:
+            return None, "log_checkpoint.json: 'chain' must be a list of at most 64"
+        seen_cids: set = set()
+        seen_sizes: dict = {}
+        for raw in chain:
+            try:
+                mr = Receipt.model_validate(raw)
+            except Exception as exc:  # noqa: BLE001
+                return None, f"log_checkpoint.json: chain member malformed ({exc})"
+            if mr.id in seen_cids:
+                return None, f"log_checkpoint.json: chain member {mr.id[:24]}… listed twice"
+            seen_cids.add(mr.id)
+            mp = mr.payload
+            if not isinstance(mp, dict) or mp.get("record_type") != "log_checkpoint":
+                return None, (
+                    f"log_checkpoint.json: chain member {mr.id[:24]}… is not a log_checkpoint receipt"
+                )
+            if mr.public_key not in trusted:
+                return None, (
+                    f"log_checkpoint.json: chain member {mr.id[:24]}… signed outside the issuer lineage"
+                )
+            ok3, why3 = verify_receipt(mr, public_key=mr.public_key)
+            if not ok3:
+                return None, f"log_checkpoint.json: chain member {mr.id[:24]}… invalid: {why3}"
+            msize, mroot = mp.get("tree_size"), mp.get("root_sha256")
+            if (
+                not json_is_int(msize)
+                or not 1 <= int(msize) < size
+                or not isinstance(mroot, str)
+                or len(mroot) != 64
+            ):
+                return None, (
+                    f"log_checkpoint.json: chain member {mr.id[:24]}… carries a malformed or non-prior head"
+                )
+            if verify_extends(mp) is False:
+                return None, (
+                    f"log_checkpoint.json: chain member {mr.id[:24]}… signs a bridge it cannot prove"
+                )
+            if msize in seen_sizes and seen_sizes[msize] != mroot:
+                return None, (f"log_checkpoint.json: chain carries two signed heads at size {msize}")
+            seen_sizes[msize] = mroot
+            chain_members.append({"id": mr.id, "size": int(msize), "root": mroot, "payload": mp})
+        chain_members.sort(key=lambda m: m["size"])
     # Witness counter-signatures ride the checkpoint document: verified
     # under each cosig's own key + subject binding, reported as auxiliary
     # attestation — never the gate the issuer's own checkpoint is.
@@ -380,8 +436,10 @@ def check_log_pin(
     # The validated checkpoint payload rides out so callers diffing two
     # packs can compare the SIGNED heads themselves — same-size different-
     # root is a proven fork; an embedded extends bridge proves append-only
-    # growth between consecutive exports with no network at all.
-    return (proven, size, cosigs, anchored, payload), None
+    # growth between consecutive exports with no network at all. `chain`
+    # members ride alongside so the reconcile can multi-hop: a signed head
+    # reached by walking verified bridges is as proven as a direct one.
+    return (proven, size, cosigs, anchored, payload, chain_members), None
 
 
 def _key_pool(z, attestations: dict) -> list:
@@ -1263,16 +1321,78 @@ different claims; this page separates them.</footer>
 """
 
 
+def _walk_chain(hi: dict, lo_size: int, lo_root: bytes) -> tuple[str, int] | None:
+    """Walk the newer side's embedded checkpoint chain hop-by-hop toward the
+    older head. Each hop re-verifies the signed `extends` bridge inside the
+    CURRENT head's payload against the signed chain member it names — a hop
+    that lands exactly on `lo` proves append-only across arbitrarily many
+    intervening checkpoints with no network at all.
+
+    Returns ("extends", hops) when the walk lands on the older head,
+    ("fork", hops) when it collides — a signed member occupies the target
+    size under a different root, or a head's own signed bridge fails against
+    the member it names — and None when the chain simply cannot reach the
+    older head (a gap, a missing bridge, or no chain at all)."""
+    from .transparency import hex_bytes, verify_extends
+
+    by_size = {m["size"]: m for m in hi.get("chain") or []}
+    # A chain member occupying the OLDER head's exact size under a different
+    # root is already the collision — two issuer-signed heads at one tree
+    # size, no bridging walk needed.
+    probe = by_size.get(lo_size)
+    if probe is not None:
+        try:
+            if hex_bytes(probe["root"], length=32) != lo_root:
+                return "fork", 0
+        except (KeyError, TypeError, ValueError):
+            return None
+    cur = hi["head"]
+    hops = 0
+    while hops <= len(by_size):
+        ext = cur.get("extends") if isinstance(cur, dict) else None
+        first = ext.get("first") if isinstance(ext, dict) else None
+        if not isinstance(first, int) or isinstance(first, bool):
+            return None  # no usable bridge — cannot descend further
+        if first == lo_size:
+            r = verify_extends(cur, first=lo_size, first_root=lo_root)
+            if r is True:
+                return "extends", hops + 1
+            if r is False:
+                # The signed bridge names the older head's SIZE but not its
+                # ROOT — the issuer's own proof material contradicts it.
+                return "fork", hops + 1
+            return None
+        m = by_size.get(first)
+        if m is None:
+            return None  # chain gap — the head bridges somewhere we can't see
+        try:
+            mroot = hex_bytes(m["root"], length=32)
+        except (KeyError, TypeError, ValueError):
+            return None
+        r = verify_extends(cur, first=m["size"], first_root=mroot)
+        if r is True:
+            cur, hops = m["payload"], hops + 1
+            continue
+        if r is False:
+            # cur's signed bridge names a member at `first` whose signed root
+            # differs from what the bridge attests — a same-size collision.
+            return "fork", hops + 1
+        return None
+    return None
+
+
 def _log_head_verdict(a: dict, b: dict) -> tuple[str, str] | None:
-    """Compare two VALIDATED log_checkpoint payloads — the signed tree
-    heads two exports committed to. Returns (severity, line) or None when
-    a head is too malformed to judge (the pack verify loop already flags
-    malformed checkpoints; this only sees ones that parsed)."""
+    """Compare two VALIDATED log heads — ``{head, chain}`` per pack, the
+    signed tree heads two exports committed to plus the signed prior-head
+    chain each embeds. Returns (severity, line) or None when a head is too
+    malformed to judge (the pack verify loop already flags malformed
+    checkpoints; this only sees ones that parsed)."""
+    ah, bh = a.get("head") or {}, b.get("head") or {}
     try:
         from .transparency import hex_bytes
 
-        sa, sb = int(a["tree_size"]), int(b["tree_size"])
-        ra, rb = hex_bytes(a["root_sha256"], length=32), hex_bytes(b["root_sha256"], length=32)
+        sa, sb = int(ah["tree_size"]), int(bh["tree_size"])
+        ra, rb = hex_bytes(ah["root_sha256"], length=32), hex_bytes(bh["root_sha256"], length=32)
     except (KeyError, TypeError, ValueError):
         return None
     if sa == sb:
@@ -1283,49 +1403,97 @@ def _log_head_verdict(a: dict, b: dict) -> tuple[str, str] | None:
             f"both exports carry size-{sa} log heads with DIFFERENT roots — "
             "the issuer signed two histories at one tree size: a provable fork",
         )
-    # Direction matters: a LARGER head on the new pack bridged from the
-    # old is proven append-only growth. A SMALLER one is not symmetric —
-    # the old head extends it just as provably, but that is exactly the
-    # shape a rollback attack produces (an old signed head replayed), so
-    # it reports as drift, not a clean append.
-    if sb < sa:
-        from .transparency import verify_extends
+    # Direction matters: the LARGER head walked back to the smaller proves
+    # append-only growth — a single embedded bridge for adjacent heads, or
+    # the multi-hop signed chain the export carries for non-adjacent ones.
+    # A reached member at the target size under a DIFFERENT root upgrades
+    # 'undecidable' to a provable fork collision.
+    from .transparency import verify_extends
 
-        if verify_extends(a, first=sb, first_root=rb) is True:
+    if sb > sa:
+        hi, lo_size, lo_root, lo_tag, hi_tag = b, sa, ra, "old", "new"
+    else:
+        hi, lo_size, lo_root, lo_tag, hi_tag = a, sb, rb, "new", "old"
+    hi_head = hi["head"]
+    # Fork probe, consulted before any bridge: a signed chain member at the
+    # smaller head's exact size under a DIFFERENT root is two issuer-signed
+    # heads at one tree size — evidence that stands even when the bridge
+    # itself verifies (the pack carries a head contradicting its own
+    # attested ancestry).
+    probe = next((m for m in hi.get("chain") or [] if m["size"] == lo_size), None)
+    if probe is not None:
+        try:
+            if hex_bytes(probe["root"], length=32) != lo_root:
+                return (
+                    "anomaly",
+                    f"the {hi_tag} export's embedded chain carries a signed head at "
+                    f"size {lo_size} whose root differs from the {lo_tag} export's — "
+                    "two issuer-signed heads at one tree size: a provable fork",
+                )
+        except (KeyError, TypeError, ValueError):
+            pass
+    bridged = verify_extends(hi_head, first=lo_size, first_root=lo_root)
+    if bridged is True:
+        if sb > sa:
             return (
-                "drift",
-                f"the newer export pins an EARLIER signed head (size {sb} < {sa}) — "
-                "the old head provably extends it: either this pack was exported "
-                "before the old one, or the deployment served a regressed head "
-                "(a rollback is indistinguishable from an older export offline)",
+                "ok",
+                f"the size-{sb} head provably extends the size-{sa} head "
+                "via the larger checkpoint's own signed bridge — the log only "
+                "appended between these exports",
             )
         return (
             "drift",
-            f"the newer export pins an earlier signed head (size {sb} < {sa}) with "
-            "no bridge — an older export or a regression, undecidable offline",
-        )
-    from .transparency import verify_extends
-
-    bridged = verify_extends(b, first=sa, first_root=ra)
-    if bridged is True:
-        return (
-            "ok",
-            f"the size-{sb} head provably extends the size-{sa} head "
-            "via the larger checkpoint's own signed bridge — the log only appended "
-            "between these exports",
+            f"the newer export pins an EARLIER signed head (size {sb} < {sa}) — "
+            "the old head provably extends it: either this pack was exported "
+            "before the old one, or the deployment served a regressed head "
+            "(a rollback is indistinguishable from an older export offline)",
         )
     if bridged is False:
         return (
             "anomaly",
-            f"the size-{sb} checkpoint's signed extends bridge names the "
-            f"size-{sa} head but does not reach it — the issuer's own proof "
-            "material contradicts the pack: fork evidence",
+            f"the {hi_tag} export's size-{max(sa, sb)} checkpoint signs a bridge "
+            f"naming the {lo_tag} head's size but not its root — the issuer's "
+            "own proof material contradicts the pack: fork evidence",
+        )
+    # No direct bridge — walk the embedded signed chain hop-by-hop.
+    walked = _walk_chain(hi, lo_size, lo_root)
+    if walked is not None:
+        outcome, hops = walked
+        if outcome == "extends":
+            if sb > sa:
+                return (
+                    "ok",
+                    f"the size-{sb} head provably extends the size-{sa} head — "
+                    f"{hops} signed checkpoint hop(s) verified inside the "
+                    "newer pack's embedded chain, no network needed",
+                )
+            return (
+                "drift",
+                f"the {hi_tag} export's size-{sa} head provably extends the "
+                f"{lo_tag} export's size-{sb} head over {hops} signed "
+                "checkpoint hop(s) — the 'newer' pack is a verified EARLIER "
+                "snapshot of the same log: exported before, or a regressed "
+                "head honestly identified (a rollback stays indistinguishable "
+                "from an older export offline)",
+            )
+        return (
+            "anomaly",
+            f"the embedded signed chain COLLIDES with the {lo_tag} export's "
+            f"size-{lo_size} head after {hops} verified hop(s) — two signed "
+            "heads claim different roots at one tree size: a provable fork",
+        )
+    if sb > sa:
+        return (
+            "info",
+            f"export log heads differ (size {sa} vs {sb}) with no embedded "
+            "bridge or chain reaching between them — `attest consistency` "
+            "against the live deployment decides",
         )
     return (
-        "info",
-        f"export log heads differ (size {sa} vs {sb}) with no embedded bridge "
-        "between them — checkpoints bridge only adjacent heads; `attest "
-        "consistency` against the live deployment decides",
+        "drift",
+        f"the newer export pins an earlier signed head (size {sb} < {sa}) with "
+        "no bridge or chain reaching back — an older export or a regression, "
+        "undecidable offline",
     )
 
 
@@ -1385,10 +1553,12 @@ def _diff_events(old: dict, new: dict, key: str | None, old_path: str, new_path:
         anomalies += 1
 
     # Two exports = two snapshots of the same transparency log, each
-    # carrying a signed tree head. Same head is agreement; adjacent
-    # checkpoints bridge via the embedded extends proof (append-only
-    # between exports, verified offline); same-size different-root is a
-    # PROVEN fork — the issuer signed two different roots at one size.
+    # carrying a signed tree head and the signed prior-head chain its
+    # export embedded. Same head is agreement; adjacent checkpoints bridge
+    # via the embedded extends proof; non-adjacent heads reconcile by
+    # walking the signed chain hop-by-hop (append-only between exports,
+    # verified offline either way); a signed chain member colliding at the
+    # other head's size under a different root is a PROVEN fork.
     oh, nh = old.get("log_head"), new.get("log_head")
     if oh is not None and nh is not None:
         verdict = _log_head_verdict(oh, nh)

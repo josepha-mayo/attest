@@ -743,9 +743,12 @@ def test_family_statement_appends_the_households_voice(api, store, household, t0
         auth=None,
         data={"perception": "saw_someone", "statement": "I saw a courier at 10:15, not our aide."},
     )
-    assert posted.status_code == 200
-    assert "Your account was added to the signed record" in posted.text
-    assert "I saw a courier at 10:15" in posted.text  # echoed back verbatim in the chain
+    # PRG — a refresh re-GETs, it can never re-append the account.
+    assert posted.status_code == 303 and posted.headers["location"].startswith(path)
+    landed = api.get(posted.headers["location"], auth=None)
+    assert landed.status_code == 200
+    assert "Your account was added to the signed record" in landed.text
+    assert "I saw a courier at 10:15" in landed.text  # echoed back verbatim in the chain
 
     # multi-use: the link still opens after appending
     again = api.get(path, auth=None)
@@ -887,7 +890,7 @@ def test_family_statement_cap_stops_chain_flooding(api, store, household, t0):
             auth=None,
             data={"perception": "saw_someone", "statement": f"note {i}"},
         )
-        assert r.status_code == 200
+        assert r.status_code == 303
 
     # the 11th is refused with the styled page — the link itself still works
     r = api.post(

@@ -75,11 +75,14 @@
 {% block chrome %}
 <header>
   <div class="brand">Attest<span>.</span></div>
-  <nav><a href="/"{% if request.url.path == "/" %} aria-current="page"{% endif %}>Records</a><a href="/setup"{% if request.url.path == "/setup" %} aria-current="page"{% endif %}>Setup &amp; schedules</a><a href="/integrity"{% if request.url.path == "/integrity" %} aria-current="page"{% endif %}>Integrity</a><a href="/verify"{% if request.url.path == "/verify" %} aria-current="page"{% endif %}>Verify (journal)</a><a href="/verify-pack"{% if request.url.path == "/verify-pack" %} aria-current="page"{% endif %}>Verify (pack)</a><a href="/about"{% if request.url.path == "/about" %} aria-current="page"{% endif %}>Claim boundary</a><a href="/receipts.json" download>Receipts (JSON)</a></nav>
+  <nav><a href="/"{% if request.url.path == "/" %} aria-current="page"{% endif %}>Records</a><a href="/setup"{% if request.url.path == "/setup" %} aria-current="page"{% endif %}>Setup &amp; schedules</a><a href="/integrity"{% if request.url.path == "/integrity" %} aria-current="page"{% endif %}>Integrity</a><a href="/verify"{% if request.url.path == "/verify" %} aria-current="page"{% endif %}>Verify (server)</a><a href="/verify-pack"{% if request.url.path == "/verify-pack" %} aria-current="page"{% endif %}>Verify (browser)</a><a href="/about"{% if request.url.path == "/about" %} aria-current="page"{% endif %}>Claim boundary</a><a href="/receipts.json" download>Receipts (JSON)</a></nav>
   <div class="meta">{% if settings.ring_base_url == "https://api.amazonvision.com" %}Ring API configured{% else %}Local / test data{% endif %} &middot; configured summary provider: {{ summarizer }}</div>
 </header>
-{% if clock.mode == "replay" %}<div class="replay-banner">LOCAL REPLAY — not a live visit. Event clock: {{ clock.now or "not started" }}. Security expiry and signature issuance use real time.</div>{% endif %}
 {% endblock %}
+{# Replay marker rides OUTSIDE the chrome block — scoped pages (check-in,
+   household, review) override chrome wholesale and must not lose the
+   "simulated clock" disclosure. #}
+{% if clock.mode == "replay" %}<div class="replay-banner">{% if s is defined and s and s.get('hh_replay') %}{{ s.hh_replay }}{% else %}LOCAL REPLAY — not a live visit.{% endif %} Event clock: {{ clock.now or "not started" }}. Security expiry and signature issuance use real time.</div>{% endif %}
 <main id="main" tabindex="-1">{% block body %}{% endblock %}</main>
 </body>
 </html>

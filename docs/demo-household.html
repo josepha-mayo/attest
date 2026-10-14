@@ -291,10 +291,14 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible{
   <div class="small" style="color:var(--muted);margin-bottom:10px">Camera snapshots</div>
   <div class="snap">
   <figure>
-    <img src="demo-media/first_observation.png" alt="Snapshot 11:31 AM">
+    <img src="demo-media/first_observation.png" alt="Snapshot 11:31 AM"
+      onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+    <div class="mediafailed" style="display:none;padding:24px 12px;border:1px dashed var(--line);border-radius:8px;color:var(--muted);font-size:.85rem">Image no longer served — its signed hash still stands in the record.</div>
     <figcaption>11:31 AM · file hash matches the signed record</figcaption>
   </figure><figure>
-    <img src="demo-media/departure_cue.png" alt="Snapshot 12:36 PM">
+    <img src="demo-media/departure_cue.png" alt="Snapshot 12:36 PM"
+      onerror="this.style.display='none';this.nextElementSibling.style.display='block'">
+    <div class="mediafailed" style="display:none;padding:24px 12px;border:1px dashed var(--line);border-radius:8px;color:var(--muted);font-size:.85rem">Image no longer served — its signed hash still stands in the record.</div>
     <figcaption>12:36 PM · file hash matches the signed record</figcaption>
   </figure>
   </div>

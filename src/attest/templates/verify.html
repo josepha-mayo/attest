@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% block title %}Verify a receipt or pack{% endblock %}
+{% block title %}Verify on this server{% endblock %}
 {% block body %}
-<h1>Verify a receipt or pack</h1>
-<p class="muted">Paste a single receipt or the full ledger export — or upload an exported pack (.zip) to check every record, its review chain, media digests, and the signed manifest. Verification is offline: it recomputes the payload hash and checks the Ed25519 signature. Nothing is stored.</p>
+<h1>Verify on this server</h1>
+<p class="muted">Paste a single receipt or the full ledger export — or upload an exported pack (.zip) to check every record, its review chain, media digests, and the signed manifest. Verified against <strong>this deployment's</strong> issuer lineage — including key pivots the pack predates. To verify without trusting this server at all, use <a href="/verify-pack" style="color:var(--accent)">the in-browser verifier</a> or the pack's own <code>verify_case.py</code>. Nothing is stored.</p>
 {% if result %}
 <div class="card" style="margin:14px 0;font-size:17px">{% if result[0] %}<span class="ok">&#10003; {{ result[1] }}</span>{% else %}<span class="bad">&#10007; {{ result[1] }}</span>{% endif %}</div>
 {% endif %}

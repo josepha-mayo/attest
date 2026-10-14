@@ -2744,7 +2744,7 @@ def test_two_pack_drop_compares_signed_membership(tmp_path):
     still reconcile the heads via the embedded extends bridge; self-vs-self is
     byte-identical evidence."""
     docs = Path(__file__).resolve().parents[1] / "docs"
-    for n in ("sample-pack.zip", "sample-pack-tampered.zip"):
+    for n in ("sample-pack.zip", "sample-pack-tampered.zip", "sample-pack-earlier.zip"):
         assert (docs / n).exists(), n
     # Adversarial variants built from the shipped pack — a JSON member so
     # malformed the browser's verify aborts mid-render (B3: the compare must
@@ -2821,6 +2821,12 @@ const mk=(n)=>new File([fs.readFileSync(path.join(dir,n))],n);
   out.innerHTML='';out.kids=[];
   await __d(mk('sample-pack.zip'),vload('bad-head.zip'),out);
   console.log('T5:',out.innerHTML.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').slice(0,2000));
+  // cross-age reconcile — the earlier export's head is NOT adjacent to the
+  // current head; the walk must bridge it through the newer pack's embedded
+  // checkpoint chain, entirely offline
+  out.innerHTML='';out.kids=[];
+  await __d(mk('sample-pack-earlier.zip'),mk('sample-pack.zip'),out);
+  console.log('T6:',out.innerHTML.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').slice(0,2400));
 })().catch(e=>{console.log('ERR',e.message);process.exit(2);});
 """
     (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
@@ -2848,7 +2854,8 @@ const mk=(n)=>new File([fs.readFileSync(path.join(dir,n))],n);
     assert "pack B self-verdict: FAILED" in t1, t1
     t3 = proc.stdout.split("T3:")[1].split("T4:")[0]
     t4 = proc.stdout.split("T4:")[1].split("T5:")[0]
-    t5 = proc.stdout.split("T5:")[1]
+    t5 = proc.stdout.split("T5:")[1].split("T6:")[0]
+    t6 = proc.stdout.split("T6:")[1]
     # identical-but-failed: the stamp folds the red self-verdicts in
     assert "IDENTICAL BYTES" in t3 and "both copies FAILED" in t3, t3
     # a crashed verify still surfaces a FAILED self-verdict, not a dead compare
@@ -2856,3 +2863,5 @@ const mk=(n)=>new File([fs.readFileSync(path.join(dir,n))],n);
     # an unverified head is never reconciled as evidence of fork/agreement
     assert "failed their own verification" in t5 or "only one pack" in t5, t5
     assert "DIFFERENT roots" not in t5 and "commit to the same" not in t5, t5
+    # the chain walk proves append-only growth offline — never "unverifiable"
+    assert "provably extends" in t6 and "hop" in t6, t6

@@ -1542,6 +1542,13 @@ def _verify_log_doc(
         # issuer's lineage AND carry an inclusion proof — the two checks
         # together prove 'this signed observation sits inside this signed
         # head' with no store access needed.
+        allowed = {cp.public_key}
+        if pinned_key:
+            allowed = {pinned_key}
+            if known_rotations is not None:
+                allowed = ledger.trusted_issuer_keys(pinned_key, known_rotations) | (
+                    ledger.descendant_issuer_keys(pinned_key, known_rotations)
+                )
         receipts = data.get("receipts")
         if receipts is not None:
             if not isinstance(receipts, list) or len(receipts) > 2048:
@@ -1549,13 +1556,6 @@ def _verify_log_doc(
                     "checkpoint document: 'receipts' must be a list of at most 2048",
                     kind="log_checkpoint",
                 )
-            allowed = {cp.public_key}
-            if pinned_key:
-                allowed = {pinned_key}
-                if known_rotations is not None:
-                    allowed = ledger.trusted_issuer_keys(pinned_key, known_rotations) | (
-                        ledger.descendant_issuer_keys(pinned_key, known_rotations)
-                    )
             seen_ids: set[str] = set()
             for raw in receipts:
                 try:
@@ -1584,6 +1584,65 @@ def _verify_log_doc(
             detail_extra = f" — {len(receipts)} embedded receipt(s) verified inside the signed head"
         else:
             detail_extra = ""
+        # The signed checkpoint chain (`chain`) — prior heads an export
+        # embeds so two packs reconcile offline. Same closed discipline as
+        # the pack surfaces: each member is a signed log_checkpoint receipt
+        # inside the issuer lineage, strictly below the doc's head, one root
+        # per tree size.
+        chain = data.get("chain")
+        if chain is not None:
+            if not isinstance(chain, list) or len(chain) > 64:
+                fail(
+                    "checkpoint document: 'chain' must be a list of at most 64",
+                    kind="log_checkpoint",
+                )
+            seen_cids: set[str] = set()
+            seen_sizes: dict[int, str] = {}
+            for raw in chain:
+                try:
+                    mr = Receipt.model_validate(raw)
+                except Exception as exc:  # noqa: BLE001
+                    fail(f"chain member malformed: {exc}", kind="log_checkpoint")
+                if mr.id in seen_cids:
+                    fail(f"chain member {mr.id[:24]}… listed twice", kind="log_checkpoint")
+                seen_cids.add(mr.id)
+                mp = mr.payload
+                if not isinstance(mp, dict) or mp.get("record_type") != "log_checkpoint":
+                    fail(
+                        f"chain member {mr.id[:24]}… is not a log_checkpoint receipt",
+                        kind="log_checkpoint",
+                    )
+                if mr.public_key not in allowed:
+                    fail(
+                        f"chain member {mr.id[:24]}… signed by a key outside the issuer lineage",
+                        kind="log_checkpoint",
+                    )
+                ok, why = ledger.verify_receipt(mr, public_key=mr.public_key)
+                if not ok:
+                    fail(f"chain member {mr.id[:24]}… invalid: {why}", kind="log_checkpoint")
+                msize, mroot = mp.get("tree_size"), mp.get("root_sha256")
+                if (
+                    not transparency.json_is_int(msize)
+                    or not 1 <= int(msize) < size
+                    or not isinstance(mroot, str)
+                    or len(mroot) != 64
+                ):
+                    fail(
+                        f"chain member {mr.id[:24]}… carries a malformed or non-prior head",
+                        kind="log_checkpoint",
+                    )
+                if transparency.verify_extends(mp) is False:
+                    fail(
+                        f"chain member {mr.id[:24]}… signs a bridge it cannot prove",
+                        kind="log_checkpoint",
+                    )
+                if msize in seen_sizes and seen_sizes[msize] != mroot:
+                    fail(
+                        f"chain carries two signed heads at size {msize}",
+                        kind="log_checkpoint",
+                    )
+                seen_sizes[msize] = mroot
+            detail_extra += f" — {len(chain)} prior signed head(s) verified in the embedded chain"
         detail = f"signed transparency head: tree size {size}, root {cp.payload['root_sha256'][:16]}…"
         detail += detail_extra
         if proven is not None:
@@ -2505,6 +2564,17 @@ def _checkpoint(args: argparse.Namespace) -> None:
             "checkpoint": receipt.model_dump(mode="json"),
             "boundary": p.get("boundary"),
         }
+        # The signed checkpoint chain — prior heads, oldest first — so a
+        # monitor (or a second export) holding an older head reconciles this
+        # doc offline hop-by-hop, the same walk `attest diff` performs.
+        prior = [
+            r
+            for r in store.receipts()
+            if r.payload.get("record_type") == "log_checkpoint" and r.id != receipt.id
+        ]
+        prior.sort(key=lambda r: r.payload.get("tree_size") or 0)
+        if prior:
+            out["chain"] = [r.model_dump(mode="json") for r in prior[-32:]]
         witnesses = getattr(args, "witness", None) or []
         if witnesses:
             out["cosignatures"] = []
@@ -3749,7 +3819,7 @@ Attest — records, not verdicts. The ten-minute path:
 
   Zero install (hosted):
     0. rather watch than click? https://josepha-mayo.github.io/attest/tour.html
-       — ten self-playing beats, every frame the live artifact
+       — twelve self-playing beats, every frame the live artifact
     1. green VERIFIED … https://josepha-mayo.github.io/attest/verify.html#sample-pack
     2. red FAILED   … https://josepha-mayo.github.io/attest/verify.html#sample-pack-tampered
        (one doctored field — the contested visit's observed span padded past
@@ -3771,6 +3841,9 @@ Attest — records, not verdicts. The ten-minute path:
        + #compare-packs — two packs at once: each verified, then their signed
          membership diffed and the two log heads reconciled ("both verify" and
          "both identical" are different claims)
+       + #compare-earlier — the same compare, weeks apart: the pack I kept vs
+         today's export, reconciled offline through embedded signed checkpoint
+         hops — no server contacted
     4. after a green stamp: open index.html — the pack hands you its own
        record browser, which re-verifies every record itself
     5. the product face, no install: demo-dashboard.html, demo-visit.html (the

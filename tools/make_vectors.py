@@ -795,6 +795,89 @@ def main() -> None:
         },
     )
 
+    # --- the embedded checkpoint chain: prior signed heads ride the pack so
+    # non-adjacent exports reconcile offline. Mint a mid-history checkpoint
+    # first so the export's `chain` list is non-empty. ---
+    engine.issue_log_checkpoint()
+    chain_pack = _case_pack(store, engine, site, [v1, v2], tmp / "d1")
+    _write_vector(
+        "ok-checkpoint-chain",
+        chain_pack,
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "ok",
+            "detail_contains": ["prior signed head(s)"],
+            "js": {"bundle_ok": True, "verdict": "ok"},
+            "note": "the pack embeds prior signed checkpoint heads — each "
+            "verified under the issuer lineage so two exports can reconcile "
+            "non-adjacent heads offline, hop-by-hop",
+        },
+    )
+
+    _RESERVED = {"schema", "sequence", "prev_hash", "receipt_id", "issued_at", "visit_id"}
+
+    def _foreign_chain_member(doc: dict) -> dict:
+        doc = dict(doc)
+        m0 = doc["chain"][0]["payload"]
+        foreign = ATTACKER.issue(
+            visit_id="log-fork:foreign",
+            sequence=1,
+            prev_hash=None,
+            facts={k: v for k, v in m0.items() if k not in _RESERVED},
+        ).model_dump(mode="json")
+        doc["chain"] = doc["chain"] + [foreign]
+        return doc
+
+    _write_vector(
+        "fail-chain-foreign-member",
+        _log_edit(chain_pack, _foreign_chain_member),
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "fail",
+            "detail_contains": ["outside the issuer lineage"],
+            "js": {"bundle_ok": True, "verdict": "fail"},
+            "note": "a chain member signed by a foreign key — the walk could "
+            "never trust a bridge it names, so the pack fails closed",
+        },
+    )
+
+    def _dup_chain_head(doc: dict) -> dict:
+        # A second signed head at an existing chain member's size under a
+        # different root — the issuer's own key signs it, so only the
+        # one-root-per-size rule can catch it.
+        doc = dict(doc)
+        mp = dict(doc["chain"][0]["payload"])
+        forged = engine.signer.issue(
+            visit_id=f"log-fork-dup:{mp['tree_size']}",
+            sequence=1,
+            prev_hash=None,
+            facts={
+                "record_type": "log_checkpoint",
+                "tree_size": mp["tree_size"],
+                "root_sha256": "ab" * 32,
+                "journal_head": "ab" * 32,
+            },
+        ).model_dump(mode="json")
+        doc["chain"] = doc["chain"] + [forged]
+        return doc
+
+    _write_vector(
+        "fail-chain-dup-size",
+        _log_edit(chain_pack, _dup_chain_head),
+        {
+            "kind": "case",
+            "pin": "declared",
+            "verdict": "fail",
+            "detail_contains": ["two signed heads"],
+            "js": {"bundle_ok": True, "verdict": "fail"},
+            "note": "two issuer-signed heads at one tree size inside a single "
+            "document is a fork claim the reconcile cannot read honestly — "
+            "the pack refuses it at verification time",
+        },
+    )
+
     # --- a cosigned checkpoint: the witness attestation riding the pack ---
     def _attach_cosig(doc: dict) -> dict:
         from attest.ledger import Signer

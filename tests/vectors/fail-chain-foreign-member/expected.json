@@ -1,0 +1,13 @@
+{
+  "kind": "case",
+  "pin": "declared",
+  "verdict": "fail",
+  "detail_contains": [
+    "outside the issuer lineage"
+  ],
+  "js": {
+    "bundle_ok": true,
+    "verdict": "fail"
+  },
+  "note": "a chain member signed by a foreign key \u2014 the walk could never trust a bridge it names, so the pack fails closed"
+}

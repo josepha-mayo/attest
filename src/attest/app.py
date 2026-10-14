@@ -382,7 +382,8 @@ def create_app(
                     "This link was used too many times in a short period. Wait a moment, then try again."
                 ),
                 mechanics="Nothing was recorded — rate limits protect the record, they don't change it.",
-                cta="Back",
+                back_href=str(request.url.path),
+                back_label="Try again",
             )
             resp.status_code = 429
         else:
@@ -591,6 +592,29 @@ def create_app(
         if request.method == "GET" and "text/html" in accept:
             return _not_found(request, "page")
         return JSONResponse({"detail": exc.detail}, status_code=404)
+
+    @app.exception_handler(503)
+    async def _catch_all_503(request: Request, exc: HTTPException):
+        """A bare deployment (no ATTEST_ADMIN_TOKEN) hits raw JSON on every
+        page — someone exploring the console gets the styled surface naming
+        the fix; API clients keep the machine-readable detail."""
+        accept = request.headers.get("accept", "")
+        if request.method == "GET" and "text/html" in accept:
+            resp = render(
+                request,
+                "link_expired.html",
+                title="Not configured",
+                heading="This deployment isn't configured yet",
+                detail=str(exc.detail),
+                mechanics=(
+                    "Set the admin token and restart — every console page unlocks behind HTTP Basic auth."
+                ),
+                back_href="/",
+                back_label="try the console",
+            )
+            resp.status_code = 503
+            return resp
+        return JSONResponse({"detail": exc.detail}, status_code=503)
 
     @app.exception_handler(StoreCorrupt)
     async def _store_corrupt(request: Request, exc: StoreCorrupt):
@@ -1325,6 +1349,7 @@ def create_app(
             f"/family/{token}",
             via_link=True,
             lang=_req_lang(request),
+            statement_posted=request.query_params.get("posted") == "1",
         )
 
     @app.post("/family/{token}/statement", response_class=HTMLResponse)
@@ -1360,9 +1385,9 @@ def create_app(
                     statement_error=s["err_limit"],
                 )
             return _dead_link(request, "family view")
-        return _household_render(
-            request, visit, f"/family/{token}", via_link=True, lang=lang, statement_posted=True
-        )
+        # PRG: a refresh after posting must re-GET, never re-POST the account
+        # into the signed chain a second time.
+        return RedirectResponse(f"/family/{token}?posted=1&lang={lang}", status_code=303)
 
     @app.get("/family/{token}/media/{name}")
     async def family_media(token: str = PathParam(max_length=128), name: str = PathParam(max_length=255)):
@@ -2430,12 +2455,14 @@ def _verify_log_pin(z, trusted: set, member_ids: list[tuple[str, str, str]]) -> 
         return False, err
     if res is None:
         return True, ""
-    proven, size, cosigs, anchored, _head = res
+    proven, size, cosigs, anchored, _head, chain = res
     note = f"{proven} receipt(s) proven inside the deployment transparency log at checkpoint size {size}"
     if cosigs:
         note += f" — cosigned by {cosigs} witness(es)"
         if anchored:
             note += f" ({anchored} anchored in the witness's own published log)"
+    if chain:
+        note += f" — {len(chain)} prior signed head(s) embedded for cross-export reconciliation"
     return True, note
 
 
