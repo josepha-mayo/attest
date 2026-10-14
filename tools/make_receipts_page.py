@@ -49,6 +49,21 @@ def _ctype(rec: dict) -> str:
     return rec["payload"].get("record_type") or "visit_record"
 
 
+def _subject(rec: dict) -> str:
+    """Human subject for pseudo-visit ids — a pack-verify hex slug tells a
+    judge nothing, but 'pack 5638…→ok' is the claim the receipt makes."""
+    p = rec["payload"]
+    t = _ctype(rec)
+    if t == "pack_verification":
+        return f"pack {str(p.get('pack_sha256'))[:8]}… → {p.get('verdict')}"
+    if t == "pack_comparison":
+        return (
+            f"{str(p.get('pack_a_sha256'))[:8]}… ↔ {str(p.get('pack_b_sha256'))[:8]}…"
+            f" → {p.get('log_heads') or 'unpaired'}"
+        )
+    return rec["visit_id"]
+
+
 def _pos(i: int) -> tuple[int, int]:
     row, col = divmod(i, COLS)
     if row % 2:  # serpentine: odd rows run right-to-left
@@ -139,7 +154,7 @@ def main() -> int:
     for r in receipts:
         t = _ctype(r)
         ts = r["issued_at"].replace("+00:00", "Z").replace("T", " ")
-        subj = htmllib.escape(r["visit_id"])
+        subj = htmllib.escape(str(_subject(r)))
         rid = r["id"]
         rows.append(
             f'<tr><th scope="row"><a href="demo-receipts/{rid}.json"><code>{rid}</code></a></th>'

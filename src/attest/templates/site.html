@@ -230,9 +230,10 @@ async function disconnectSource() {
       const d = await r.json();
       if (!r.ok) { status.textContent = d.detail || ('Could not open live view (' + r.status + ')'); pc.close(); pc = null; openBtn.disabled = false; return; }
       sid = d.session_id;
-      try { await pc.setRemoteDescription({type: 'answer', sdp: d.sdp_answer}); }
-      catch (e) { status.textContent = 'Session established and journaled — this browser could not attach the stream (the record stands either way).'; }
-      else status.textContent = 'Live view open — journaled as a human-attention record: session time is attested, viewership is not.';
+      try {
+        await pc.setRemoteDescription({type: 'answer', sdp: d.sdp_answer});
+        status.textContent = 'Live view open — journaled as a human-attention record: session time is attested, viewership is not.';
+      } catch (e) { status.textContent = 'Session established and journaled — this browser could not attach the stream (the record stands either way).'; }
       openBtn.style.display = 'none'; closeBtn.style.display = 'inline-block';
       closeBtn.onclick = () => closeSession(sid);
     } catch (e) { status.textContent = 'Live view failed: ' + e; if (pc) { pc.close(); pc = null; } openBtn.disabled = false; }

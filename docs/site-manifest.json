@@ -1,5 +1,5 @@
 {
- "id": "rcpt_2cd2e6822ddc40a683566c3bb7147322",
+ "id": "rcpt_c5515538c22740f6ba6432f404b03c05",
  "visit_id": "site:josepha-mayo.github.io/attest",
  "sequence": 1,
  "prev_hash": null,
@@ -16,13 +16,13 @@
    "anchor-demo.json.ots": "275361f19e795ba61ff03bb7ebd6d6c510888b12caaabd5f1d35b1e9bf825803",
    "badge-verified.svg": "13288e4b2611f29d14650bc6a9f9cdaacb7a2d204f4da2847d80eac335b8501a",
    "chain.svg": "28b6133680552bd9918c27e8c216be9e08b5e40d839c30d4b9a0e599b506eb37",
-   "demo-dashboard.html": "e74f8676c5f18d096cff5223729985981e37b5fe86a8ba21425438ea68b5a9b5",
+   "demo-dashboard.html": "f7bd87cfa59399918679eebd5a3943c76b8024316871cbab771c23610e63212c",
    "demo-family-es.html": "e865776b6f749a0582aa0c654f0e6dc2c29f55a534d567f0348e3f81272f5952",
    "demo-family.html": "2100f4298fe920b727a91a70c93cae7acf2b27a0c62b82ad55f9880bda5f225b",
    "demo-household-es.html": "4538aa20f7750a4b9999b3cc870d31e82986992423ec058fd29901d9f33ceba3",
    "demo-household.html": "2f95e285cbb5a722f2366d50f22953c0903c9899cd128a4cfbbf6e2a6363124e",
-   "demo-integrity.html": "199f7ba89dbc390520afd7d2ee7ee542a25b63f8fa413e070898186097d3a3f7",
-   "demo-integrity.json": "acafad0b4f84f830cbd5bd2b0350081021df07a40f75034e55d57663afe6c6e6",
+   "demo-integrity.html": "780218ba303311070a719d0c1020cd9bd8e5b0edf5229623842e0bc53309ad50",
+   "demo-integrity.json": "990912905ce95615c885a5b015d33f191705ca4c659248aab6d75954254f0f6e",
    "demo-media/departure_cue.png": "cc56f09f352d5f6ef7e91977afc369d4dc574012a792d7fd83257de071931e62",
    "demo-media/first_observation.png": "b85ccab328138c7e3cbcf6d8cce21b452be2267c6fe12bc9a682b77ea1c35ebd",
    "demo-receipts/rcpt_0007d4c23e774c849e0e12787f11f4f1.json": "129080eab6e71707808e9f6f624ca7385e234aed57829f17ad9a9e7f406b2076",
@@ -357,9 +357,9 @@
    "demo-receipts/rcpt_fede5b19d0d24006bdc1248d771a6446.json": "1e58bb2f8c8be22f70642ef4d0de1523f48967bd50712a3a6b4faa42007c499c",
    "demo-receipts/rcpt_ff6c170ea30b4e8d961afa5a0438b750.json": "308ea6f99e7a7d821a8657e1b850864e24674a37c7f4f09044b2b75ba00cf647",
    "demo-receipts/rcpt_ffdda7f44f814301852f8cfb3016877b.json": "714a220814007eee9820fe58f010d2d8d44dd2b9048fca9f0b0da6d3e45d03c5",
-   "demo-receipts.html": "444026c9a9219890a361dbc279489a9b8429ca844ff84e8c193092278aa517ec",
+   "demo-receipts.html": "a016032266f05c24b2c9cc12f088a5c8bf774e9431932e0e983c07a952613adc",
    "demo-receipts.json": "b3eb0ead6a607342ca36a8ba14b092027bb6c10921bd7e672b59fa80192a1026",
-   "demo-site.html": "1620fa06dec9d36e389a7dff34ef0210b99f5b74d50108f5a18cbab702a091b9",
+   "demo-site.html": "908e63fcf1f845a8ab0014411ed0779ebd4eaad7ca8f6e220ba173fa8f735548",
    "demo-visit-brief.html": "67b3cfd3b3f49e82751ca39b2cdf1b82555c5da6cc2552ea9ec924a3b06ddcc4",
    "demo-visit.html": "f078c932523c5aec35e224879022df1c638144775995aa7bb8fdc8a842823d60",
    "demo-worker-es.html": "a562a9b97b4df16f8584957754d2ece9ba1b4b8d490f9731eba048bf3f5ff699",
@@ -437,11 +437,11 @@
   "sequence": 1,
   "prev_hash": null,
   "visit_id": "site:josepha-mayo.github.io/attest",
-  "receipt_id": "rcpt_2cd2e6822ddc40a683566c3bb7147322",
-  "issued_at": "2026-10-14T18:09:36.631468+00:00"
+  "receipt_id": "rcpt_c5515538c22740f6ba6432f404b03c05",
+  "issued_at": "2026-10-14T18:22:27.225175+00:00"
  },
- "payload_hash": "6b0816ea387414da8f50795ddb904f289b6cd6686e3791bc9e96ed169960d3dd",
- "signature": "pdT52lb9/LsJt3sA6Os4LS4O/AxhOFt1tEUAijGZb4ScnzOOc4vQJVYwkadPJXeLTlSbmPBkkOUuGuokvpmfBw==",
+ "payload_hash": "8dd7b9f0b04575dc39fbc325969042156ce8f73d01ed640a6d417dcf2e6a88ad",
+ "signature": "u0O6kmJjgZNLmDj9q9porV31Gq7ZsjMJDysPSxlBPBUTiPMmpBodc028cCC6bIgQfdn2gHxinR5QfmNEQyAvCg==",
  "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
- "issued_at": "2026-10-14T18:09:36.631468Z"
+ "issued_at": "2026-10-14T18:22:27.225175Z"
 }
