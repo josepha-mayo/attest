@@ -8,6 +8,7 @@ Skipped when node is not installed (CI without a JS runtime still passes).
 import hashlib
 import io
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -2573,7 +2574,8 @@ global.fetch=async(u,o)=>{if(o&&o.method==='HEAD')return{ok:false};
   if(!b)return{ok:false};
   return{ok:true,arrayBuffer:async()=>b.buffer.slice(b.byteOffset,b.byteOffset+b.byteLength),text:async()=>b.toString()};};
 const els={};const mk=id=>els[id]||(els[id]={hidden:true,innerHTML:'',value:'',
-  setAttribute:()=>{},focus:()=>{},onclick:null,dataset:{},click(){if(this.onclick)this.onclick()}});
+  setAttribute:()=>{},focus:()=>{},onclick:null,dataset:{},click(){if(this.onclick)this.onclick()},
+  insertAdjacentHTML(pos,h){this.innerHTML=(pos==='afterbegin'?h+this.innerHTML:this.innerHTML+h)}});
 global.document={getElementById:mk,querySelectorAll:()=>[],createElement:()=>({setAttribute:()=>{},style:{}})};
 eval(src + `
 (async()=>{
@@ -2611,6 +2613,40 @@ eval(src + `
     )
     assert proc2.returncode == 0, proc2.stderr
     assert "vec-fail: true true" in proc2.stdout, proc2.stdout
+    # fail-wrong-pin: the one vector whose oracle FAILs only under a --key
+    # pin — the browser stamps it green self-declared, and the oracle row
+    # must explain that this green IS the attack, not a corpus disagreement
+    pinv = (docs / "vectors" / "fail-wrong-pin.zip").read_bytes()
+    (tmp_path / "pin.zip").write_bytes(pinv)
+    manifest = json.dumps(json.loads((docs / "vectors-manifest.json").read_text(encoding="utf-8")))
+    driver3 = driver.replace("#vectors/ok-clean-bundle", "#vectors/fail-wrong-pin")
+    driver3 = driver3.replace("let serve=okB;", "let serve=pinB;")
+    driver3 = driver3.replace(
+        "const failB=fs.readFileSync(process.argv[4]);", "const pinB=fs.readFileSync(process.argv[5]);"
+    )
+    driver3 = driver3.replace(
+        "  const b=String(u).startsWith('vectors/')?serve:null;",
+        "  if(String(u)==='vectors-manifest.json')"
+        "return{ok:true,json:async()=>JSON.parse(process.env.MAN),"
+        "text:async()=>process.env.MAN};"
+        "  const b=String(u).startsWith('vectors/')?serve:null;",
+    )
+    driver3 = driver3.replace("'vec-ok:'", "'vec-pin:'").replace(
+        "h1.includes('VERIFIED'),!h1.includes('FAILED')",
+        "h1.includes('VERIFIED'),h1.includes('the attack the pin defeats'),h1.includes('must FAIL')",
+    )
+    (tmp_path / "drive3.js").write_text(driver3, encoding="utf-8")
+    env = {**os.environ, "MAN": manifest}
+    proc3 = subprocess.run(
+        [NODE, "drive3.js", "verify.js", "ok.zip", "fail.zip", "pin.zip"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+    )
+    assert proc3.returncode == 0, proc3.stderr
+    assert "vec-pin: true true true" in proc3.stdout, proc3.stdout
 
 
 @pytest.mark.skipif(NODE is None, reason="node runtime not available")

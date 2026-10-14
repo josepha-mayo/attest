@@ -37,7 +37,7 @@ h1{margin-bottom:.2rem}
 <main>
 <h1>Anatomy of a signed receipt</h1>
 <p class="snap">Every claim Attest makes reduces to objects like this one. Pick
-any of the 313 real receipts the demo deployment issued — the annotations are
+any of the 328 real receipts the demo deployment issued — the annotations are
 per-field, the chain links are real <code>prev_hash</code> edges, and the
 <strong>verify →</strong> button runs the receipt through the same browser
 verifier the packs use. Nothing here is a mockup.</p>
@@ -45,9 +45,9 @@ verifier the packs use. Nothing here is a mockup.</p>
 <p><label>receipt <select id="pick" aria-label="choose a receipt"></select></label>
 <a id="vlink" href="#" hidden>verify →</a></p>
 <noscript><p class="warnbox"><strong>This page needs JavaScript</strong> — it
-fetches the 313 signed receipts and rebuilds canonical payloads locally. The
-same anatomy verifies offline with <code>attest explain &lt;receipt-id&gt;</code>
-or in <a href="demo-receipts.html">the receipts index</a>.</p></noscript>
+fetches the 328 signed receipts and rebuilds canonical payloads locally. Any
+one verifies offline with <code>attest verify demo-receipts/&lt;receipt-id&gt;.json</code>
+or browse <a href="demo-receipts.html">the receipts index</a>.</p></noscript>
 
 <div class="chain" id="chain"></div>
 
@@ -89,7 +89,7 @@ const FIELDS={
  signature:["Ed25519 over <code>payload_hash</code> bytes. Proves bytes-under-key — integrity and origin — never that the events inside are physically true."],
  public_key:["the issuer's raw Ed25519 key (base64). Mid-history rotations are bridged by the signed key-chain in the issuer document — an ancestor inherits trust only through a consented pivot."],
  issued_at:["the wall-clock claim, signed — evidence of what the issuer <em>said</em> the time was. Cross-checks (schedules, event windows, rotation order) are what make it meaningful."],
- payload:["the signed facts — canonicalized and hashed. The payload's own <code>record_type</code> says what kind of statement it is — <code>visit_record</code>, <code>coverage_attestation</code>, <code>log_checkpoint</code>, <code>case_export</code>, <code>key_rotation</code>, <code>verifier_manifest</code>… A camera observation stays an observation forever — it is never promoted to attendance."]
+ payload:["the signed facts — canonicalized and hashed. Most payloads carry <code>record_type</code> naming the statement kind — <code>coverage_attestation</code>, <code>log_checkpoint</code>, <code>case_export</code>, <code>key_rotation</code>, <code>verifier_manifest</code>…; visit records are the exception — the original schema identifies by payload shape, so this page shows <code>—</code> for theirs. A camera observation stays an observation forever — it is never promoted to attendance."]
 };
 const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -208,7 +208,7 @@ boot().catch(e=>{$('rows').innerHTML='<tr><td colspan="3">load failed: '+esc(e.m
 </script>
 <p class="small">Elsewhere: <a href="index.html">landing</a> ·
 <a href="tour.html">two-minute tour</a> ·
-<a href="demo-receipts.html">all 313 receipts as the chain</a> ·
+<a href="demo-receipts.html">all 328 receipts as the chain</a> ·
 <a href="vectors.html">adversarial corpus</a> ·
 <a href="verify.html">the verifier</a></p>
 </main>

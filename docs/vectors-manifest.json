@@ -127,7 +127,8 @@
  {
   "name": "fail-wrong-pin",
   "verdict": "fail",
-  "note": "pinning an unrelated key must not bless the pack"
+  "note": "pinning an unrelated key must not bless the pack",
+  "pin_required": true
  },
  {
   "name": "ok-chain-case-roots",
