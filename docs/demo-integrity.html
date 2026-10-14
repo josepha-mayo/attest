@@ -97,19 +97,19 @@ This page describes the evidence system's health, not whether any worker was hon
 <div class="grid" style="margin-top:16px">
   <div class="card">
     <h2 style="margin-top:0;font-size:1.05rem">Receipt chain</h2>
-    <span class="ok">&#10003; 332 receipts, chain intact across 1 signed key rotation</span>
+    <span class="ok">&#10003; 336 receipts, chain intact across 1 signed key rotation</span>
 
     <div class="muted small" style="margin-top:.5rem">
-      332 signed receipts · latest sequence #332
+      336 signed receipts · latest sequence #336
     </div>
   </div>
   <div class="card">
     <h2 style="margin-top:0;font-size:1.05rem">Mutation journal</h2>
-    <span class="ok">&#10003; 782 entries, intact</span>
+    <span class="ok">&#10003; 789 entries, intact</span>
 
     <div class="muted small" style="margin-top:.5rem">
-      337 signature-pinned heads · head <code>94d07de1e14e…</code>
-      <br>10 newest entries not yet covered by a signed head — `attest anchor` pins them
+      341 signature-pinned heads · head <code>2f1a7363f4c6…</code>
+      <br>4 newest entries not yet covered by a signed head — `attest anchor` pins them
 
     </div>
   </div>
@@ -119,9 +119,9 @@ This page describes the evidence system's health, not whether any worker was hon
       <span class="ok">&#10003; 104 signed checkpoint(s)</span>
 
     <div class="muted small" style="margin-top:.5rem">
-      228 receipts in the Merkle tree · head <code>1fd7d73ccab6…</code>
+      232 receipts in the Merkle tree · head <code>a0d36ceec5ac…</code>
       <br>latest checkpoint <code>rcpt_936d4a1eb7c…</code> · Oct 14, 9:48 AM
-        — covers 224 leaves<br><span class="warn">4 receipt(s) not yet covered by a checkpoint</span> — <code>attest checkpoint</code> signs them in
+        — covers 224 leaves<br><span class="warn">8 receipt(s) not yet covered by a checkpoint</span> — <code>attest checkpoint</code> signs them in
       <br>Inclusion + consistency proofs at <code>/api/log/*</code> — <code>attest monitor</code> pins this head and catches a rewrite.
       <br><span class="muted">No witness pins yet — another deployment can ask this one to cosign via <code>/api/witness/cosign</code>.</span>
     </div>
@@ -170,9 +170,9 @@ This page describes the evidence system's health, not whether any worker was hon
 
   <tr><td>log checkpoint</td><td>104</td><td class="muted">Oct 14, 9:48 AM · <a href="demo-receipts/rcpt_936d4a1eb7c444fcb695c6e1d73e6d50.json">receipt</a></td></tr>
 
-  <tr><td>pack comparison</td><td>2</td><td class="muted">Oct 14, 11:04 AM · <a href="demo-receipts/rcpt_e34a0ec0d1e748799d2515391c250f85.json">receipt</a></td></tr>
+  <tr><td>pack comparison</td><td>4</td><td class="muted">Oct 14, 12:05 PM · <a href="demo-receipts/rcpt_04e76505de334bbcb6230e687adf7f6f.json">receipt</a></td></tr>
 
-  <tr><td>pack verification</td><td>2</td><td class="muted">Oct 14, 10:41 AM · <a href="demo-receipts/rcpt_e5b54b9b11b84879829b122aa5f0ac76.json">receipt</a></td></tr>
+  <tr><td>pack verification</td><td>4</td><td class="muted">Oct 14, 12:06 PM · <a href="demo-receipts/rcpt_f43f830ab53643e7b0de4e2a583aa342.json">receipt</a></td></tr>
 
   <tr><td>period digest</td><td>1</td><td class="muted">Oct 9, 11:06 AM · <a href="demo-receipts/rcpt_c44581e230574aa5919a280f808f489c.json">receipt</a></td></tr>
 

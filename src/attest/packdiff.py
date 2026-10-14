@@ -1306,6 +1306,19 @@ def diff_html(report: dict) -> str:
             f"{esc(str(src))}.</p>"
         )
 
+    att = report.get("attestation") or {}
+    att_html = ""
+    if att.get("receipt_id"):
+        # The comparison act was itself signed — name the receipt so this
+        # unsigned rendering still points back at the journal entry.
+        att_html = (
+            f'<p class="small attested">This comparison was itself attested — '
+            f"signed as <code>{esc(str(att['receipt_id']))}</code> in the issuing "
+            f"deployment's journal (event-stream sha256 "
+            f"<code>{esc(str(att.get('events_sha256') or '')[:24])}…</code>). "
+            f"The receipt — not this page — is the evidence.</p>"
+        )
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1339,6 +1352,8 @@ letter-spacing:.03em;border-radius:5px;padding:.1rem .45rem}}
 .chip.drift{{background:#fef3c7;color:#92400e}}
 .chip.bad{{background:#fee2e2;color:#991b1b}}
 .small{{color:#6b6b70;font-size:.8rem}}
+.attested{{background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;
+padding:.5rem .8rem}}
 footer{{margin-top:2rem;padding-top:.8rem;border-top:1px solid #e4e4e7;
 color:#6b6b70;font-size:.78rem}}
 </style>
@@ -1356,6 +1371,7 @@ records are append-only.</p>
 {pin_line}
 {stamp}
 <p class="small">{stamp_sub}</p>
+{att_html}
 <table>
 <thead><tr><th>verdict</th><th>member</th><th>what the diff found</th></tr></thead>
 <tbody>{"".join(rows)}</tbody>

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg viewBox="0 0 672 1903" xmlns="http://www.w3.org/2000/svg" role="group" aria-label="Hash chain of the 332 signed receipts">
+<svg viewBox="0 0 672 1903" xmlns="http://www.w3.org/2000/svg" role="group" aria-label="Hash chain of the 336 signed receipts">
 <line x1="57" y1="52" x2="119" y2="52" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
 <line x1="119" y1="52" x2="181" y2="52" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
 <line x1="181" y1="52" x2="243" y2="52" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
@@ -331,6 +331,10 @@
 <line x1="553" y1="1716" x2="615" y2="1716" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
 <line x1="615" y1="1716" x2="615" y2="1768" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
 <line x1="615" y1="1768" x2="553" y2="1768" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="553" y1="1768" x2="491" y2="1768" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="491" y1="1768" x2="429" y2="1768" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="429" y1="1768" x2="367" y2="1768" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
+<line x1="367" y1="1768" x2="305" y2="1768" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray=""/>
 <g font-family="system-ui,sans-serif" font-size="11">
 <rect x="26" y="1851" width="9" height="9" rx="2" fill="#7c3aed"/>
 <text x="38" y="1859" fill="#475569">case_export</text>
@@ -340,12 +344,12 @@
 <text x="294" y="1859" fill="#475569">log_checkpoint</text>
 <rect x="410" y="1851" width="9" height="9" rx="2" fill="#2563eb"/>
 <text x="422" y="1859" fill="#475569">visit_record</text>
-<rect x="538" y="1851" width="9" height="9" rx="2" fill="#d97706"/>
-<text x="550" y="1859" fill="#475569">coverage_attestation</text>
-<rect x="26" y="1873" width="9" height="9" rx="2" fill="#0891b2"/>
-<text x="38" y="1881" fill="#475569">pack_verification</text>
-<rect x="154" y="1873" width="9" height="9" rx="2" fill="#0e7490"/>
-<text x="166" y="1881" fill="#475569">pack_comparison</text>
+<rect x="538" y="1851" width="9" height="9" rx="2" fill="#0891b2"/>
+<text x="550" y="1859" fill="#475569">pack_verification</text>
+<rect x="26" y="1873" width="9" height="9" rx="2" fill="#0e7490"/>
+<text x="38" y="1881" fill="#475569">pack_comparison</text>
+<rect x="154" y="1873" width="9" height="9" rx="2" fill="#d97706"/>
+<text x="166" y="1881" fill="#475569">coverage_attestation</text>
 <rect x="282" y="1873" width="9" height="9" rx="2" fill="#16a34a"/>
 <text x="294" y="1881" fill="#475569">verification_report</text>
 <rect x="410" y="1873" width="9" height="9" rx="2" fill="#db2777"/>
@@ -689,4 +693,8 @@
 <a href="verify.html#demo-receipts/rcpt_e5b54b9b11b84879829b122aa5f0ac76"><rect x="606" y="1707" width="18" height="18" rx="4" fill="#0891b2" stroke="#fff" stroke-width="1.2"><title>rcpt_e5b54b9b11b84879829b122aa5f0ac76 · pack_verification · seq 330 · 2026-10-14T17:41:51.622079Z</title></rect></a>
 <a href="verify.html#demo-receipts/rcpt_0040a29e48a946d0bbb5d186ad554ae0"><rect x="606" y="1759" width="18" height="18" rx="4" fill="#0e7490" stroke="#fff" stroke-width="1.2"><title>rcpt_0040a29e48a946d0bbb5d186ad554ae0 · pack_comparison · seq 331 · 2026-10-14T18:04:43.635843Z</title></rect></a>
 <a href="verify.html#demo-receipts/rcpt_e34a0ec0d1e748799d2515391c250f85"><rect x="544" y="1759" width="18" height="18" rx="4" fill="#0e7490" stroke="#fff" stroke-width="1.2"><title>rcpt_e34a0ec0d1e748799d2515391c250f85 · pack_comparison · seq 332 · 2026-10-14T18:04:46.133823Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_9826c4bc4bce4fc9b7d4b286c50986c4"><rect x="482" y="1759" width="18" height="18" rx="4" fill="#0e7490" stroke="#fff" stroke-width="1.2"><title>rcpt_9826c4bc4bce4fc9b7d4b286c50986c4 · pack_comparison · seq 333 · 2026-10-14T19:05:40.365463Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_04e76505de334bbcb6230e687adf7f6f"><rect x="420" y="1759" width="18" height="18" rx="4" fill="#0e7490" stroke="#fff" stroke-width="1.2"><title>rcpt_04e76505de334bbcb6230e687adf7f6f · pack_comparison · seq 334 · 2026-10-14T19:05:41.292647Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_6913e637f971474fa9a5f39f2670d398"><rect x="358" y="1759" width="18" height="18" rx="4" fill="#0891b2" stroke="#fff" stroke-width="1.2"><title>rcpt_6913e637f971474fa9a5f39f2670d398 · pack_verification · seq 335 · 2026-10-14T19:05:59.035675Z</title></rect></a>
+<a href="verify.html#demo-receipts/rcpt_f43f830ab53643e7b0de4e2a583aa342"><rect x="296" y="1759" width="18" height="18" rx="4" fill="#0891b2" stroke="#fff" stroke-width="1.2"><title>rcpt_f43f830ab53643e7b0de4e2a583aa342 · pack_verification · seq 336 · 2026-10-14T19:06:00.059665Z</title></rect></a>
 </svg>

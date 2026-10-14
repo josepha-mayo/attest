@@ -4048,9 +4048,9 @@ def _diff(args: argparse.Namespace) -> None:
         except (OSError, RuntimeError) as exc:
             sys.exit(f"attest: --attest unavailable — {exc}")
 
-    def _attest_comparison(report: dict) -> None:
+    def _attest_comparison(report: dict):
         if attest_engine is None:
-            return
+            return None
         import hashlib
         import json as _json
 
@@ -4089,6 +4089,7 @@ def _diff(args: argparse.Namespace) -> None:
             f"Attestation {receipt.id}: comparison signed into this deployment's journal",
             file=sys.stderr,
         )
+        return receipt
 
     try:
         if getattr(args, "json", False) or getattr(args, "html", None) or attest_engine is not None:
@@ -4100,7 +4101,20 @@ def _diff(args: argparse.Namespace) -> None:
                 if getattr(args, "issuer_url", None):
                     report["pin"]["issuer_url"] = args.issuer_url
                     report["pin"]["lifecycle_receipts"] = len(extra)
-            _attest_comparison(report)
+            att = _attest_comparison(report)
+            if att is not None:
+                # The report names the receipt that signs it — a mediator's
+                # attachable page points back at the audit entry itself.
+                import hashlib as _hl
+                import json as _jl
+
+                report["attestation"] = {
+                    "receipt_id": att.id,
+                    "pseudo_id": att.visit_id,
+                    "events_sha256": _hl.sha256(
+                        _jl.dumps(report["events"], sort_keys=True, separators=(",", ":")).encode()
+                    ).hexdigest(),
+                }
             if getattr(args, "json", False):
                 import json as _json
 

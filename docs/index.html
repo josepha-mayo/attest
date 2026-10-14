@@ -101,7 +101,7 @@ Event History?</a> — receipts keep verifying even if Attest disappears.)</p>
 <a href="verify.html#sample-pack">green VERIFIED on the sample</a> →
 <a href="verify.html#sample-pack-tampered">red FAILED on the tampered twin</a> →
 <a href="verify.html#tamper-lab"><strong>forge it yourself</strong> in the
-tamper lab</a> → <a href="demo-receipts.html">the demo runtime's 332-receipt
+tamper lab</a> → <a href="demo-receipts.html">the demo runtime's 336-receipt
 hash chain</a>. No install, no account — every stamp runs in your browser and
 nothing leaves it.</div>
 <p style="margin:.5rem 0"><a href="verify.html#sample-pack"
@@ -338,15 +338,16 @@ scoped <code>/review/</code> token sees ·
 <a href="demo-integrity.html">the self-audit page</a> (revoked-key suspect
 windows, annotated — 9 receipts in scope) ·
 <a href="demo-integrity.json">its machine-readable JSON</a> — and the raw layer
-underneath all of it: <a href="demo-receipts.html">332 signed receipts</a>,
+underneath all of it: <a href="demo-receipts.html">336 signed receipts</a>,
 drawn as the literal hash chain (every edge a <code>prev_hash</code> link —
-all 332 verify), each one-click verifiable in the same browser page —
-or <a href="verify.html#demo-receipts">all 332 at once</a>
-(<a href="demo-receipts.json">raw JSON</a>). Four of them are the deployment
+all 336 verify), each one-click verifiable in the same browser page —
+or <a href="verify.html#demo-receipts">all 336 at once</a>
+(<a href="demo-receipts.json">raw JSON</a>). Eight of them are the deployment
 auditing <em>itself</em> — <code>attest verify --attest</code> signed the
 verdicts on the clean pack and the forged twin, and
 <code>attest diff --attest</code> signed both reconciliations, into the same
-log — the audit trail of the audit is checkable too. New to the math?
+log — and each diff report names the receipt that signed its comparison —
+the audit trail of the audit is checkable too. New to the math?
 <a href="anatomy.html"><strong>Anatomy of a signed receipt</strong></a>
 decomposes one field-by-field — what the signature covers, what the
 <code>prev_hash</code> edge means, and what a valid signature can never
