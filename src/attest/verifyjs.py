@@ -2476,6 +2476,11 @@ if(location.protocol.indexOf("http")===0){
     const[a,b]=await Promise.all([fa,fb]);
     out.innerHTML="";
     await diffPacks(a,b,out);
+    /* The same pair pre-rendered as a printable report — the page a
+       coordinator actually attaches to the dispute. */
+    out.insertAdjacentHTML("beforeend","<div class='row'><a "+
+      "href='sample-diff-report.html'>the printable report of this exact "+
+      "diff</a> — what attest diff --html writes.</div>");
     }catch(e){
       out.innerHTML="<div class='row bad'>compare link failed: "+
         esc(e.message||e)+"</div>";
@@ -2854,8 +2859,10 @@ Drop <strong>two</strong> packs at once to compare them: each is verified on
 its own merits, then their signed membership is diffed — the copy the agency
 produced vs the copy you kept ("both verify" and "both identical" are
 different claims).</small></div>
-<p id="newhere" hidden><small>New here? <a href="index.html">The story</a>
-explains why the record exists. New to the math? <a href="anatomy.html">
+<p id="newhere" hidden><small>New here? <a href="story.html">The story</a>
+of one contested visit — told entirely from signed data — explains why the
+record exists, and <a href="index.html">the site</a> shows the rest. New to
+the math? <a href="anatomy.html">
 Anatomy of a signed receipt</a> decomposes one field-by-field, <a
 href="pipeline.svg">the seven gates</a> show which check kills which attack —
 or take the <a href="tour.html">two-minute tour</a> of the headline

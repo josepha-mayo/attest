@@ -20,6 +20,8 @@ h1{font-size:1.7rem;margin-bottom:.2rem}
 .card:hover{border-color:#3b82f6;box-shadow:0 1px 6px rgba(59,130,246,.25)}
 .card b{display:block;margin-bottom:.3rem}
 .card small{color:#6b6b70}
+.card.minor{opacity:.78;border-style:dashed}
+.card.minor small{font-size:.78rem}
 .badge{display:inline-block;font-size:.7rem;font-weight:700;letter-spacing:.05em;border-radius:4px;padding:.1rem .4rem;vertical-align:middle;margin-left:.4rem}
 .nav60{background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;
 padding:.6rem .9rem;font-size:.92rem;margin:.9rem 0}
@@ -58,7 +60,9 @@ summary{cursor:pointer;color:#2563eb}
 signed, self-verifying evidence record, built on the Ring Partner API — what the
 devices observed, what the worker and the household each reported, what a
 coordinator concluded. <strong>Records, not verdicts</strong> — the evidence gets
-a verdict; nobody's story does.</p>
+a verdict; nobody's story does. Not attendance tracking, not EVV, not
+surveillance: the record proves it wasn't quietly rewritten — it never claims
+to know who was at the door.</p>
 
 <p>New York's comptroller found <a href="https://www.osc.ny.gov/press/releases/2024/11/dinapoli-state-paid-145-billion-medicaid-home-care-services-lacked-verification"><strong>$14.5B</strong> paid against
 <strong>82M</strong> personal-care visits with no matching record</a>; Ohio's auditor
@@ -66,7 +70,7 @@ found <a href="https://ohioauditor.gov/Auditsearch/Reports/2024/117_Electronic_V
 adjusted</a> — invisibly. Editable records are the problem; Attest makes them
 tamper-evident — and private home services (cleaners, caregivers, contractors)
 have no EVV mandate and no shared record at all. That's the gap — and Ring's own
-end-to-end-encryption move makes independent attestation <em>more</em> valuable,
+throw-away-the-key move makes independent attestation <em>more</em> valuable,
 not less: when the platform can't see the video either, the signed record is the
 shared truth everyone can hold.</p>
 
@@ -75,11 +79,13 @@ shared truth everyone can hold.</p>
 <em>"I dispute this record — I arrived before the first observation
 shown."</em> The household first wrote: <em>"My mother was home all morning
 and says the doorbell never rang — nobody came to the door before ten."</em>
-— then a different voice: <em>"I was home that afternoon; I heard the
+— then the same account contradicted itself: <em>"I was home that afternoon; I heard the
 doorbell a little after six and saw someone at the door. I can't say how
 long she stayed."</em> Every version, verbatim and signed — including a
 garbled re-send — in one record nobody can quietly rewrite.
-<a href="demo-visit.html">Open the contested visit</a>.</p>
+<a href="story.html"><strong>Read the story the signed bytes tell</strong></a>
+(every quote below deep-links to its verification) — or
+<a href="demo-visit.html">open the live record page</a>.</p>
 
 <p>"He said / she said" disputes stop being memory contests:
 every observation, statement, and conclusion is a separate signed receipt on a
@@ -94,7 +100,7 @@ Event History?</a> — receipts keep verifying even if Attest disappears.)</p>
 <a href="verify.html#sample-pack">green VERIFIED on the sample</a> →
 <a href="verify.html#sample-pack-tampered">red FAILED on the tampered twin</a> →
 <a href="verify.html#tamper-lab"><strong>forge it yourself</strong> in the
-tamper lab</a> → <a href="demo-receipts.html">the demo runtime's 253-receipt
+tamper lab</a> → <a href="demo-receipts.html">the demo runtime's 265-receipt
 hash chain</a>. No install, no account — every stamp runs in your browser and
 nothing leaves it.</div>
 <p style="margin:.5rem 0"><a href="verify.html#sample-pack"
@@ -123,7 +129,7 @@ rebuilt zip — the signature refuses <em>your</em> forgery, not ours.</small>
 </a>
 <a class="card" href="tour.html">
 <b>Watch the two-minute tour</b>
-<small>Ten beats, self-playing — every frame is the live artifact, not a
+<small>Ten beats, self-playing — every frame is the real product page, not a
 screenshot. The fastest possible entry if you'd rather look than click.</small>
 </a>
 <a class="card" href="verify.html#gauntlet">
@@ -144,7 +150,7 @@ packs that aren't the same records is the whole point.</small>
 <small>The signed <code>verify-live --sign</code> report from the actual
 <code>api.amazonvision.com</code> run — a lone receipt, auto-verified on load.</small>
 </a>
-<a class="card" href="verify.html#sample-pack">
+<a class="card minor" href="verify.html#sample-pack">
 <b>Verify it on your phone</b>
 <img src="qr-verify.svg" width="112" height="112"
 alt="QR code linking to the verifier's one-click sample-pack check"
@@ -152,7 +158,7 @@ style="display:block;margin:.2rem 0 .4rem">
 <small>Scan — the same one-click check runs entirely in the mobile browser.
 The pack bytes never leave the phone either.</small>
 </a>
-<a class="card" href="#aws">
+<a class="card minor" href="#aws">
 <b>AWS services<span class="badge ok">3 verified live</span></b>
 <small>Lambda re-verifies packs with our pinned code, KMS wraps the signing
 key, S3 holds checkpoints — Bedrock+Strands wired (5 total) with honest
@@ -180,7 +186,7 @@ var lines=[
  ["mut","  Day 3: the Ring plan lapses mid-visit \u2014 observation stops being delivered"],
  ["mut","  Demo is live \u2014 simulated data only, no real Ring account involved \u2192 http://127.0.0.1:8000"],
  ["cmd","$ attest verify sample-pack.zip"],
- ["ok","  OK: case pack verified \u2014 9 visit record(s) intact (export signed: 9 record(s); 4 verifier tool(s) pinned; 80 receipt(s) proven inside the deployment transparency log \u2026)"],
+ ["ok","  OK: case pack verified \u2014 9 visit record(s) intact (export signed: 9 record(s); 4 verifier tool(s) pinned; 97 receipt(s) proven inside the deployment transparency log \u2026)"],
  ["mut","  Note: a valid pack proves record integrity under the pack's self-declared issuer key \u2014 signatures are not physical truth."],
  ["cmd","$ attest attack-demo"],
  ["ok","  CAUGHT  forge a visit row (state -> attended_verified)"],
@@ -234,7 +240,7 @@ cosigns the tree head. Export a pack and strangers verify it — in a browser,
 in bare Python, in an AWS Lambda — without asking us, Ring, or the issuer
 whether the bytes are still honest.</p>
 
-<svg viewBox="0 0 760 250" width="100%" role="img"
+<div style="overflow-x:auto"><svg viewBox="0 0 760 250" width="100%" style="min-width:620px" role="img"
  aria-label="Trust chain: observations and statements become signed receipts on a hash-chained ledger, committed to a Merkle transparency log whose signed head is cosigned by an independent witness; the exported pack is checked by independent verifiers."
  style="margin:.5rem 0 1rem">
   <defs><marker id="ar" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L8,4L0,8z" fill="#8a8a8e"/></marker></defs>
@@ -250,24 +256,24 @@ whether the bytes are still honest.</p>
     <line x1="588" y1="38" x2="588" y2="62" stroke="#8a8a8e" marker-end="url(#ar)"/>
     <!-- ledger -->
     <rect x="18" y="62" width="740" height="34" rx="7" fill="#1c1c1e"/>
-    <text x="388" y="83" fill="#fff">Ed25519-signed receipts — each links the previous by hash</text>
+    <text x="388" y="83" fill="#fff">Ed25519-signed receipts — each links the previous by hash<title>an Ed25519 signature proves the bytes haven't changed since the issuer signed — it never proves what a camera saw</title></text>
     <line x1="388" y1="96" x2="388" y2="118" stroke="#8a8a8e" marker-end="url(#ar)"/>
     <!-- transparency log -->
     <rect x="18" y="118" width="500" height="34" rx="7" fill="#2d5d3f"/>
-    <text x="268" y="139" fill="#fff">Merkle transparency log — receipts commit into a checkable tree</text>
+    <text x="268" y="139" fill="#fff">Merkle transparency log — receipts commit into a checkable tree<title>each receipt's hash becomes a leaf of a hash tree — anyone can prove a receipt was committed, and prove the tree only ever grew</title></text>
     <rect x="528" y="118" width="230" height="34" rx="7" fill="#f9edd4" stroke="#d9a83c"/>
-    <text x="643" y="139" fill="#6b4d0f">signed tree head + witness cosign</text>
+    <text x="643" y="139" fill="#6b4d0f">signed tree head + witness cosign<title>the deployment periodically signs the tree root; an independent witness counter-signs only a head it watched extend — a secret fork would need both parties lying</title></text>
     <line x1="518" y1="135" x2="528" y2="135" stroke="#8a8a8e" marker-end="url(#ar)"/>
     <line x1="388" y1="152" x2="388" y2="174" stroke="#8a8a8e" marker-end="url(#ar)"/>
     <!-- pack -->
     <rect x="18" y="174" width="500" height="34" rx="7" fill="#eef4fb" stroke="#b9cfe8"/>
     <text x="268" y="195" fill="#1e3a5f">export pack — receipts + proofs + checkpoint + its own verifier</text>
     <rect x="528" y="174" width="230" height="34" rx="7" fill="#f0fdf4" stroke="#7cc79a"/>
-    <text x="643" y="195" fill="#146c2e">independent verifiers → verdict</text>
+    <text x="643" y="195" fill="#146c2e">independent verifiers → verdict<title>the pack checks in bare Python, in this browser, or in an AWS Lambda — no Attest service in the loop</title></text>
     <line x1="518" y1="191" x2="528" y2="191" stroke="#8a8a8e" marker-end="url(#ar)"/>
     <text x="388" y="238" fill="#8a5a00" font-size="11">not present: anyone trusted. Every layer is checkable without us.</text>
   </g>
-</svg>
+</svg></div>
 
 <h2 id="event-history">"Isn't this just Ring's event history?"</h2>
 <table style="border-collapse:collapse;font-size:.92rem;margin:.6rem 0">
@@ -291,8 +297,10 @@ whether the bytes are still honest.</p>
 without Ring — and without us. Incumbent tracking puts a GPS ankle monitor on
 the worker's phone, spoofable and resented; Attest anchors observation to the
 household's own premises, with the household's own cameras. And the trend cuts
-our way: as Ring moves traffic toward end-to-end encryption (TAKE — Ring's own E2E
-mode), the platform holds less and less producible content — which makes a
+our way: as Ring moves traffic toward throw-away-the-key encryption (TAKE —
+Throw Away the Key Encryption, the new default where Ring deletes the content
+keys within ~24h, so even Ring can't produce the video later), the platform
+holds less and less producible content — which makes a
 <em>signed</em>, independently checkable evidence trail more valuable, not
 less. Encryption decides who can see the bytes; attestation decides whether
 anyone can quietly change them.</p>
@@ -318,10 +326,10 @@ scoped <code>/review/</code> token sees ·
 <a href="demo-integrity.html">the self-audit page</a> (revoked-key suspect
 windows, annotated — 9 receipts in scope) ·
 <a href="demo-integrity.json">its machine-readable JSON</a> — and the raw layer
-underneath all of it: <a href="demo-receipts.html">253 signed receipts</a>,
+underneath all of it: <a href="demo-receipts.html">265 signed receipts</a>,
 drawn as the literal hash chain (every edge a <code>prev_hash</code> link —
-all 253 verify), each one-click verifiable in the same browser page —
-or <a href="verify.html#demo-receipts">all 253 at once</a>
+all 265 verify), each one-click verifiable in the same browser page —
+or <a href="verify.html#demo-receipts">all 265 at once</a>
 (<a href="demo-receipts.json">raw JSON</a>). New to the math?
 <a href="anatomy.html"><strong>Anatomy of a signed receipt</strong></a>
 decomposes one field-by-field — what the signature covers, what the
@@ -377,7 +385,7 @@ stamp:</p>
   <a href="sample-pack-attack-forged-verifier.zip" download>zip</a></li>
 </ul>
 <figure style="margin:1rem 0;overflow-x:auto"><figcaption style="font-size:.85rem;color:#6b6b70"><strong>The seven gates.</strong> Every verification runs all of them in order — each attack dies at a different one. Labels deep-link to the check or its public corpus; <span style="color:#6b6b70">→</span> marks an annotation, not a failure. <a href="pipeline.svg">open the SVG alone</a>.</figcaption>
-<svg viewBox="0 0 672 512" xmlns="http://www.w3.org/2000/svg" role="group" aria-label="The seven verification gates and which attacks die at each">
+<svg viewBox="0 0 672 512" xmlns="http://www.w3.org/2000/svg" style="min-width:560px" role="group" aria-label="The seven verification gates and which attacks die at each">
 <style>text{font-family:system-ui,sans-serif}.g{font-size:13px;font-weight:700;fill:#1c1c1e}.d{font-size:11.5px;fill:#6b6b70}.a{font-size:10.5px;fill:#b3261e;font-weight:600}.n{font-size:13px;font-weight:800;fill:#fff}</style>
 <text class="g" x="20" y="24" font-size="14">Every verify runs every gate — the attack determines which one kills it</text>
 <rect x="20" y="44" width="632" height="54" rx="9" fill="#fff" stroke="#d4d4d8"/>
@@ -485,7 +493,7 @@ pack's embedded script — data and code come from different parties:</li>
   <pre style="min-height:0"><span class="p">$ aws lambda invoke --function-name attest-verify-pack \
     --payload fileb://pack.json out.json</span>
 <span class="ok">  {"ok": true} — 2 visit records, 43 receipts proven inside the log</span>
-<span class="mut">  (transcript of the 2026-09-18 run — the current pack carries 9 visit records, 93 receipts)</span>
+<span class="mut">  (transcript of the 2026-09-18 run — the current pack carries 9 visit records, 97 receipts)</span>
 <span class="p">$ # doctor one byte in a signed payload, invoke again</span>
 <span class="bad">  {"ok": false} — payload hash mismatch (payload was altered)</span>
 <span class="mut">  the function catches exactly what the local verifiers catch</span></pre>
@@ -608,7 +616,7 @@ for the key either. Three ways to pin:</p>
   <a href="verify.html#verify-self">the page hashes its own bytes</a> →
   <strong>PINNED</strong>/<strong>PIN MISMATCH</strong>; and
   <a href="verify.html#verify-site"><code>site-manifest.json</code> pins all
-  332 artifacts this site ships</a> → <strong>SITE VERIFIED</strong>/<strong>SITE
+  346 artifacts this site ships</a> → <strong>SITE VERIFIED</strong>/<strong>SITE
   TAMPER</strong>, drifted files named.</li>
 </ul>
 

@@ -751,13 +751,41 @@ def _demo(args: argparse.Namespace) -> None:
                 e.receipt.payload.get("actor", {}).get("role") == "worker" for e in store.reviews_for(v.id)
             ):
                 family_token = engine.issue_family_link(v.id)
-                ReviewService(store, engine.signer, engine.clock).household_statement(
+                svc = ReviewService(store, engine.signer, engine.clock)
+                svc.household_statement(
                     family_token,
                     HouseholdStatementInput(
                         perception="no_one_seen",
                         statement=(
                             "My mother was home all morning and says the doorbell "
                             "never rang — nobody came to the door before ten."
+                        ),
+                    ),
+                )
+                # The household's own account contradicts itself — the product
+                # thesis made literal: first nobody came, then somebody was
+                # seen, and the garbled original plus its re-send both stay
+                # signed on the chain (the U+FFFD is the "typo" — verbatim).
+                svc.household_statement(
+                    family_token,
+                    HouseholdStatementInput(
+                        perception="saw_someone",
+                        statement=(
+                            "I was home that afternoon � I heard the doorbell "
+                            "a little after six and saw someone at the door. "
+                            "I can't say how long she stayed."
+                        ),
+                    ),
+                )
+                svc.household_statement(
+                    family_token,
+                    HouseholdStatementInput(
+                        perception="saw_someone",
+                        statement=(
+                            "I was home that afternoon; I heard the doorbell "
+                            "a little after six and saw someone at the door. "
+                            "I can't say how long she stayed. (Re-sending — "
+                            "my earlier message had a garbled character.)"
                         ),
                     ),
                 )
@@ -791,7 +819,7 @@ def _demo(args: argparse.Namespace) -> None:
                 )
                 break
         # Period digest last — it counts review entries, so it must see the
-        # worker dispute and household statement that just landed.
+        # worker dispute and household statements that just landed.
         if sites:
             dreceipt = engine.issue_period_digest(sites[0], end - timedelta(days=args.days, hours=1), end)
             print(
@@ -824,10 +852,12 @@ def _demo(args: argparse.Namespace) -> None:
     print("     'Run agent brief' for the Strands/Bedrock agent's own read.", flush=True)
     print("  2. Open the contested visit from 'Needs review' — the worker's signed", flush=True)
     print("     dispute sits atop the evidence, and Source divergence shows their", flush=True)
-    print("     check-in landing ~65 min after the camera saw them. 'Conclude the", flush=True)
-    print("     record' signs the coordinator's call — pick a coded reason too:", flush=True)
-    print("     EVV-style exception codes classify the stated explanation, never", flush=True)
-    print("     a verified cause, and they aggregate on the signed period digest.", flush=True)
+    print("     check-in landing ~65 min after the camera saw them. The household's", flush=True)
+    print("     signed account contradicts itself — 'nobody came', then 'I heard the", flush=True)
+    print("     doorbell', then a re-send a day later; the chain keeps all three.", flush=True)
+    print("     'Conclude the record' signs the coordinator's call — coded reasons", flush=True)
+    print("     classify the stated explanation, never a verified cause, and they", flush=True)
+    print("     aggregate on the signed period digest.", flush=True)
     if args.rotate_day is not None:
         print(
             f"     (The signing key rotated on story day {args.rotate_day} — receipts",
@@ -3767,6 +3797,10 @@ Attest — records, not verdicts. The ten-minute path:
     attest verify pack.zip --witness-url <w> --witness-threshold 2
                           # require k-of-n named witnesses to have vouched
     attest export --tamper-twin twin.zip --attack forged-verifier
+    attest diff pack.zip twin.zip --html report.html
+                          # append-only audit — names the moved field, proves
+                          # the log only grew (or calls the fork), writes the
+                          # page a mediator attaches to the dispute
     attest status && attest doctor
 
   To read: JUDGE.md (scoring map) · THREATMODEL.md (limits are the point) ·
@@ -3803,9 +3837,7 @@ def _diff(args: argparse.Namespace) -> None:
         )
 
     try:
-        if getattr(args, "json", False):
-            import json as _json
-
+        if getattr(args, "json", False) or getattr(args, "html", None):
             from .packdiff import diff_report
 
             report = diff_report(args.old, args.new, key=key, extra_key_receipts=extra)
@@ -3814,13 +3846,29 @@ def _diff(args: argparse.Namespace) -> None:
                 if getattr(args, "issuer_url", None):
                     report["pin"]["issuer_url"] = args.issuer_url
                     report["pin"]["lifecycle_receipts"] = len(extra)
-            print(_json.dumps(report, indent=2))
-            sys.exit(0 if report["clean"] else 1)
-        lines, anomalies = diff(args.old, args.new, key=key, extra_key_receipts=extra)
+            if getattr(args, "json", False):
+                import json as _json
+
+                print(_json.dumps(report, indent=2))
+                sys.exit(0 if report["clean"] else 1)
+            # --html: the text lines and the page render the same event
+            # stream — `line` rides the report so the two can never disagree.
+            for e in report["events"]:
+                if e.get("line"):
+                    print(e["line"])
+            anomalies = report["anomalies"]
+            from pathlib import Path
+
+            from .packdiff import diff_html
+
+            Path(args.html).write_text(diff_html(report), encoding="utf-8")
+            print(f"html report written: {args.html}")
+        else:
+            lines, anomalies = diff(args.old, args.new, key=key, extra_key_receipts=extra)
+            for line in lines:
+                print(line)
     except (ValueError, OSError, KeyError, TypeError, AttributeError, zipfile.BadZipFile) as exc:
         sys.exit(f"cannot compare: {exc}")
-    for line in lines:
-        print(line)
     if anomalies:
         sys.exit(1)
 
@@ -4510,6 +4558,13 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="emit a machine-readable report (severity/target/detail per event) — "
         "exit 1 on any anomaly, so the append-only audit can gate CI",
+    )
+    s.add_argument(
+        "--html",
+        metavar="PATH",
+        help="also write a self-contained HTML report of the diff — the "
+        "attachable version a mediator or filing gets; renders the same "
+        "events the text output prints",
     )
     s.set_defaults(fn=_diff)
 

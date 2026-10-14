@@ -1,27 +1,27 @@
 {
-  "id": "rcpt_9160439d763f4f5c999ca1f2dbb3f340",
+  "id": "rcpt_7b5d1203b211453fa5016657fa21020b",
   "visit_id": "anchor",
-  "sequence": 254,
-  "prev_hash": "2cfd93aca77b39efde6bb36cbbe5e891b6dcfea8d87b17cb2ce55e9798024ec7",
+  "sequence": 266,
+  "prev_hash": "8fa0256b6503f208cbb339384fdeea1f9ba2f95e9d26f612550f27923d1c16c7",
   "payload": {
     "record_type": "anchor",
-    "journal_head": "eed20bb9a4793d2cddecb41a0183ba63fbc5a5fc54c0dea50c730d5825ff3ee5",
-    "journal_entries": 667,
-    "receipt_head": "2cfd93aca77b39efde6bb36cbbe5e891b6dcfea8d87b17cb2ce55e9798024ec7",
-    "receipt_count": 253,
-    "log_tree_size": 174,
-    "log_root_sha256": "c154c339e61adc54751eee17e3ba454735eb9e4eef405fcbf20acf971b65f545",
+    "journal_head": "96b98544d716dc2ee056855944cb646316618d7dbea60d219c13c0f47022145e",
+    "journal_entries": 682,
+    "receipt_head": "8fa0256b6503f208cbb339384fdeea1f9ba2f95e9d26f612550f27923d1c16c7",
+    "receipt_count": 265,
+    "log_tree_size": 182,
+    "log_root_sha256": "ae2449aa7a700bacd306fa7965b97dabf376d6d8df0fcef9e9a9c51d819aa3d7",
     "visit_count": 9,
     "boundary": "Anchors that a record state existed at issuance. Truncating the journal or removing receipts after this anchor is provable — and the pinned Merkle head lets a holder verify an inclusion proof for any receipt committed up to log_tree_size.",
     "schema": "attest.receipt/2",
-    "sequence": 254,
-    "prev_hash": "2cfd93aca77b39efde6bb36cbbe5e891b6dcfea8d87b17cb2ce55e9798024ec7",
+    "sequence": 266,
+    "prev_hash": "8fa0256b6503f208cbb339384fdeea1f9ba2f95e9d26f612550f27923d1c16c7",
     "visit_id": "anchor",
-    "receipt_id": "rcpt_9160439d763f4f5c999ca1f2dbb3f340",
-    "issued_at": "2026-10-13T13:22:58.353228+00:00"
+    "receipt_id": "rcpt_7b5d1203b211453fa5016657fa21020b",
+    "issued_at": "2026-10-14T10:54:48.882039+00:00"
   },
-  "payload_hash": "f72f1525f38dc6ef3a0ad861db6764d65d7966798983ba3f5b223e2bc14a5b9d",
-  "signature": "be2E2yOuNH1Tgr03XCDbe6a44QezveQUu82F2Qwcpshnzqh0RmeqYjZs/bTYUKkrQJsVj2OT396fjqkQ/e5BAw==",
+  "payload_hash": "9622e02192dda0e7d3191525e3fee4a889504cedf81568d739bdfa38edd0759f",
+  "signature": "/BcxV7YvrTB8E+LnD853uqVCOF5et1rChIYs3kGBaI7jmFvS7MPVMuJuiO4F1o2neUO7LG1B/dffs4KFnz5ZAQ==",
   "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
-  "issued_at": "2026-10-13T13:22:58.353228Z"
+  "issued_at": "2026-10-14T10:54:48.882039Z"
 }

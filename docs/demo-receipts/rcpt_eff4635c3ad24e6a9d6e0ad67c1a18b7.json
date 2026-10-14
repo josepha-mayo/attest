@@ -1,0 +1,37 @@
+{
+  "id": "rcpt_eff4635c3ad24e6a9d6e0ad67c1a18b7",
+  "visit_id": "log:176:d7ba87987cffdbf2",
+  "sequence": 256,
+  "prev_hash": "f5cd6e250eac09de9f73208435ad989c142b56d906aecdbacc5a0c8a65153e5a",
+  "payload": {
+    "record_type": "log_checkpoint",
+    "tree_size": 176,
+    "root_sha256": "d7ba87987cffdbf2973716b00d818934ee9a3928db6132b02066f74c3c58deef",
+    "leaf_input": "receipt.payload_hash (raw bytes, sequence order)",
+    "boundary": "A signed commitment that exactly these receipts, in this order, formed the log at this size — receipts in an export can prove inclusion, and a later checkpoint can prove it extends this one without rewriting history.",
+    "journal_head": "886578cff5c8993fbfbe915d8b7db4675e9d2cbf2728f58ac62899bc77e00c43",
+    "extends": {
+      "first": 174,
+      "first_root_sha256": "c154c339e61adc54751eee17e3ba454735eb9e4eef405fcbf20acf971b65f545",
+      "checkpoint_id": "rcpt_5f83f4b2c4554a93aabd74be759fddab",
+      "proof": [
+        "80d63f942bbbfdb1941f54276fca8e829e4f325a2b70641872e84225490ef71a",
+        "c4f8f0d7ff70ce64a3e936b3db34635c7a4e0d0245360cc99f15cd323c87f4f8",
+        "937edc8979cc2f3f251878f8b5181c75c215cf050db66d13de0415b8e1124640",
+        "d565a84e93a8a5189913f92c65ede34902a96e08308dfed32560353889da1cae",
+        "fad5a3920523f059f7f4bcd1407e5ca21334959875f9f11dbf97adac98847b8d",
+        "c0cd7f5d7ed43d9d0dc8fa2b492d2656463d5debf13578ec5decf0d4dafc7855"
+      ]
+    },
+    "schema": "attest.receipt/2",
+    "sequence": 256,
+    "prev_hash": "f5cd6e250eac09de9f73208435ad989c142b56d906aecdbacc5a0c8a65153e5a",
+    "visit_id": "log:176:d7ba87987cffdbf2",
+    "receipt_id": "rcpt_eff4635c3ad24e6a9d6e0ad67c1a18b7",
+    "issued_at": "2026-10-14T10:53:40.064488+00:00"
+  },
+  "payload_hash": "b914eeb7ad9e30508fea4c8225eaf15b71766f450b421bca61449180e5422771",
+  "signature": "ojKHJ1aP8MARIhDy71yOD45J5GbmS6839P0jHattd3rsmFxhgBXfVDK2fPJC5AcBmYSnbpJjgpqJ4aIgAt6sBQ==",
+  "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+  "issued_at": "2026-10-14T10:53:40.064488Z"
+}

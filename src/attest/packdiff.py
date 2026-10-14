@@ -1081,11 +1081,168 @@ def diff_report(
         "old": {"path": str(old_path), **side(old)},
         "new": {"path": str(new_path), **side(new)},
         "events": [
-            {k: e[k] for k in ("severity", "target", "detail") if e.get(k) is not None} for e in events
+            {k: e[k] for k in ("severity", "target", "detail", "line") if e.get(k) is not None}
+            for e in events
         ],
         "anomalies": anomalies,
         "clean": anomalies == 0,
     }
+
+
+_SEV_CLASS = {"ok": "ok", "info": "info", "drift": "drift", "anomaly": "bad"}
+_SEV_LABEL = {"ok": "ok", "info": "new", "drift": "drift", "anomaly": "anomaly"}
+
+
+def _side_card(side: dict, label: str) -> str:
+    import html as h
+
+    name = h.escape(side.get("path") or label)
+    kind = h.escape(side.get("kind") or "?")
+    issuer = side.get("issuer")
+    issuer_txt = (
+        f'issuer <code title="{h.escape(issuer)}">{h.escape(issuer[:18])}…</code>'
+        if isinstance(issuer, str)
+        else "issuer unknown"
+    )
+    fails = side.get("verify_failures")
+    if fails == []:
+        verdict = '<span class="chip ok">VERIFIED</span> all signed contents verify'
+    elif fails is None:
+        verdict = '<span class="chip drift">UNVERIFIED</span> no verification ran'
+    else:
+        n = len(fails)
+        verdict = f'<span class="chip bad">FAILED</span> {n} verification failure(s)'
+    return (
+        f'<div class="side"><div class="path">{name}</div>'
+        f'<div class="meta">{kind} · {issuer_txt}</div>'
+        f'<div class="meta">{verdict}</div></div>'
+    )
+
+
+def diff_html(report: dict) -> str:
+    """Render a `diff_report` dict as a self-contained HTML page — the
+    attachable rendering of `attest diff` (a coordinator hands a mediator a
+    page, not a JSON dump). Everything on the page is re-derivable:
+    `attest diff A B --json` emits the same events the table shows. The page
+    itself is unsigned — the packs are the evidence; this is a reading."""
+    import html as h
+
+    esc = h.escape
+    anomalies = report.get("anomalies") or 0
+    events = report.get("events") or []
+    # Per-side rows (target "old"/"new") are each pack's self-reported notes,
+    # not pack-vs-pack movement — only events naming a member or the log head
+    # mean the two exports actually differ.
+    cross = [
+        e
+        for e in events
+        if e.get("severity") in ("drift", "anomaly") and e.get("target") not in ("old", "new")
+    ]
+    appended = [
+        e for e in events if e.get("severity") == "info" and e.get("target") not in (None, "old", "new")
+    ]
+
+    if anomalies:
+        stamp = f'<div class="stamp bad">ANOMALIES DETECTED — {anomalies}</div>'
+        stamp_sub = (
+            "Vanished or altered signed records — one export is inauthentic, "
+            "or a record was edited after signing."
+        )
+    elif cross or appended:
+        stamp = '<div class="stamp drift">APPEND-ONLY DRIFT — 0 anomalies</div>'
+        stamp_sub = (
+            "New signed records appeared (normal export growth); nothing vanished and nothing was altered."
+        )
+    else:
+        stamp = '<div class="stamp ok">NO SIGNED DIFFERENCES</div>'
+        stamp_sub = "Both exports verify and carry the same signed contents."
+
+    rows = []
+    for e in events:
+        sev = e.get("severity") or "info"
+        cls = _SEV_CLASS.get(sev, "info")
+        target = e.get("target")
+        lab = "compare" if target is None and sev == "info" else _SEV_LABEL.get(sev, sev)
+        target_html = f"<code>{esc(target)}</code>" if target else "—"
+        detail = esc(e.get("detail") or "")
+        rows.append(
+            f'<tr><td><span class="chip {cls}">{lab}</span></td><td>{target_html}</td><td>{detail}</td></tr>'
+        )
+
+    pin = report.get("pin") or {}
+    pin_line = ""
+    if pin.get("issuer_key"):
+        src = pin.get("issuer_url") or "a trusted --key"
+        pin_line = (
+            f'<p class="small">Trust anchor pinned to '
+            f"<code>{esc(str(pin['issuer_key'])[:24])}…</code> via "
+            f"{esc(str(src))}.</p>"
+        )
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Append-only export diff · Attest</title>
+<style>
+body{{font-family:system-ui,sans-serif;max-width:64em;margin:0 auto;
+padding:1.4rem 1.2rem;color:#1c1c1e;line-height:1.5}}
+h1{{font-size:1.35rem;margin-bottom:.1rem}}
+code{{background:#f4f4f5;padding:.08rem .35rem;border-radius:4px;
+font-size:.85em;word-break:break-all}}
+.sides{{display:flex;gap:1rem;flex-wrap:wrap;margin:1rem 0}}
+.side{{flex:1;min-width:16em;border:1px solid #e4e4e7;border-radius:8px;
+padding:.7rem .9rem}}
+.path{{font-family:ui-monospace,monospace;font-size:.85rem;font-weight:600;
+word-break:break-all}}
+.meta{{font-size:.8rem;color:#52525b;margin-top:.3rem}}
+.stamp{{font-weight:700;font-size:1.05rem;padding:.8rem 1.1rem;
+border-radius:10px;margin:.9rem 0 .3rem}}
+.stamp.ok{{background:#f0fdf4;border:1px solid #86efac;color:#166534}}
+.stamp.drift{{background:#fffbeb;border:1px solid #fde68a;color:#92400e}}
+.stamp.bad{{background:#fef2f2;border:1px solid #fecaca;color:#991b1b}}
+table{{border-collapse:collapse;width:100%;font-size:.86rem;margin-top:1rem}}
+th,td{{text-align:left;padding:.4rem .6rem;border-bottom:1px solid #e4e4e7;
+vertical-align:top}}
+.chip{{display:inline-block;font-size:.72rem;font-weight:700;
+letter-spacing:.03em;border-radius:5px;padding:.1rem .45rem}}
+.chip.ok{{background:#dcfce7;color:#166534}}
+.chip.info{{background:#dbeafe;color:#1d4ed8}}
+.chip.drift{{background:#fef3c7;color:#92400e}}
+.chip.bad{{background:#fee2e2;color:#991b1b}}
+.small{{color:#6b6b70;font-size:.8rem}}
+footer{{margin-top:2rem;padding-top:.8rem;border-top:1px solid #e4e4e7;
+color:#6b6b70;font-size:.78rem}}
+</style>
+</head>
+<body>
+<main>
+<h1>Append-only export diff</h1>
+<p class="small">Two signed evidence exports compared member-by-member.
+Appended records are normal; a vanished or altered one is an anomaly —
+records are append-only.</p>
+<div class="sides">
+{_side_card(report.get("old") or {}, "old export")}
+{_side_card(report.get("new") or {}, "new export")}
+</div>
+{pin_line}
+{stamp}
+<p class="small">{stamp_sub}</p>
+<table>
+<thead><tr><th>verdict</th><th>member</th><th>what the diff found</th></tr></thead>
+<tbody>{"".join(rows)}</tbody>
+</table>
+<footer>Generated by <code>attest diff --html</code>. This page is a readable
+rendering, not a signed artifact — re-derive the same events any time with
+<code>attest diff &lt;old&gt; &lt;new&gt; --json</code> (exit 1 on anomaly),
+or verify each export on its own merits with <code>attest verify</code> or
+the bundled <code>verify.html</code>. "Both verify" and "identical" are
+different claims; this page separates them.</footer>
+</main>
+</body>
+</html>
+"""
 
 
 def _log_head_verdict(a: dict, b: dict) -> tuple[str, str] | None:

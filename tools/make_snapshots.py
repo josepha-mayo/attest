@@ -98,7 +98,9 @@ SIBLING = [
     ('href="/sites/site_a55d249ad6dd"', 'href="demo-site.html"'),
     ('href="/receipts.json"', 'href="demo-receipts.json"'),
     ('href="/verify-pack"', 'href="verify.html"'),
-    ('href="/verify"', 'href="verify.html"'),
+    # /verify is the journal-receipt route — its static equivalent is the
+    # receipts-index deep link, not the bare pack verifier.
+    ('href="/verify"', 'href="verify.html#demo-receipts"'),
     ('href="/integrity.json"', 'href="demo-integrity.json"'),
     ('href="/integrity"', 'href="demo-integrity.html"'),
     ('href="/about"', 'href="index.html"'),

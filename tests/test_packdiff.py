@@ -296,6 +296,72 @@ def test_diff_json_report_is_structured_and_consistent(exports, tmp_path, capsys
     assert any(e["severity"] == "anomaly" and e.get("target") == v2 for e in out["events"])
 
 
+def test_diff_html_report_matches_the_same_event_stream(exports, tmp_path, capsys):
+    """--html renders the same events the text report prints — one
+    verification pass, two renderings. The page stamps ANOMALIES on a
+    tampered pack and names the moved field; a clean pair stamps honest."""
+    import argparse
+
+    from attest import cli
+    from attest.packdiff import diff_report
+
+    first, second, v1, v2 = exports
+    out = tmp_path / "diff.html"
+
+    # Clean pair: exit 0, page stamps no-difference drift honestly.
+    cli._diff(
+        argparse.Namespace(
+            old=str(first),
+            new=str(second),
+            key=None,
+            issuer_url=None,
+            json=False,
+            html=str(out),
+        )
+    )
+    page = out.read_text(encoding="utf-8")
+    assert "APPEND-ONLY DRIFT" in page  # v2 is a new visit in the second pack
+    assert "ANOMALIES" not in page
+    assert v1 in page and v2 in page
+    assert "attest diff" in page  # the re-derive note rides the footer
+
+    # Tampered pack: the page names the field, text+page share one stream,
+    # and the anomaly still drives exit 1 for CI.
+    zin = zipfile.ZipFile(second)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zout:
+        for name in zin.namelist():
+            data = zin.read(name)
+            if name == f"visits/{v1}/bundle.json":
+                b = json.loads(data)
+                b["original"]["payload"]["observed_span_minutes"] = 999.5
+                data = json.dumps(b)
+            zout.writestr(name, data)
+    forged = second.with_name("forged-html.zip")
+    forged.write_bytes(buf.getvalue())
+
+    with pytest.raises(SystemExit) as se:
+        cli._diff(
+            argparse.Namespace(
+                old=str(first),
+                new=str(forged),
+                key=None,
+                issuer_url=None,
+                json=False,
+                html=str(out),
+            )
+        )
+    assert se.value.code == 1
+    page = out.read_text(encoding="utf-8")
+    assert "ANOMALIES DETECTED" in page
+    assert "observed_span_minutes" in page
+    # Text output and the HTML name the same event stream — `line` fields.
+    report = diff_report(first, forged)
+    assert all("line" in e for e in report["events"])
+    captured = capsys.readouterr()
+    assert "observed_span_minutes" in captured.out
+
+
 def test_diff_json_with_issuer_url_keeps_stdout_parseable(exports, tmp_path, capsys):
     """--json + --issuer-url: the human pin note must ride on stderr — a CI
     gate piping stdout into a JSON parser gets the report, not prose."""

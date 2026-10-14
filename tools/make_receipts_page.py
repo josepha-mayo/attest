@@ -206,7 +206,8 @@ fetchable — the bytes are what was signed, not a rendering of them.</p>
 </table></div>
 <p class="small">Back to the <a href="index.html">landing page</a> ·
 <a href="demo-receipts.json">all {n} as one JSON array</a> ·
-<a href="verify.html">the verifier</a></p>
+<a href="verify.html">the verifier</a> ·
+<a href="story.html">the story these receipts tell</a></p>
 </main>
 </body>
 </html>

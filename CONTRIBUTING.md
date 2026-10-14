@@ -61,12 +61,16 @@ code or the demo store's contents, re-sync in this order:
    (the pack embeds `verify.html` byte-for-byte — it drifts on any
    `verifyjs.py` change)
 4. attack gallery: `--tamper-twin --attack {missing-record,smuggled-file,forged-verifier}`
-5. `attest verify docs/sample-pack.zip --badge docs/badge-verified.svg ...`
-6. `attest anchor --out docs/anchor-demo.json --timestamp` (anchor + `.ots`
+5. `tools/make_story.py` + `attest diff docs/sample-pack.zip
+   docs/sample-pack-tampered.zip --html docs/sample-diff-report.html`
+   (story/diff both read the pack pair — drift on every pack regen; the diff
+   exits 1 by design)
+6. `attest verify docs/sample-pack.zip --badge docs/badge-verified.svg ...`
+7. `attest anchor --out docs/anchor-demo.json --timestamp` (anchor + `.ots`
    together — a stale sidecar pins an old head)
-7. `tools/make_site_manifest.py --key <key>` — **always last**; it pins the
+8. `tools/make_site_manifest.py --key <key>` — **always last**; it pins the
    sha256 of every shipped artifact.
-8. Sweep hard-coded counts (receipt total, checkpoint size, artifact count)
+9. Sweep hard-coded counts (receipt total, checkpoint size, artifact count)
    across README/JUDGE/DEVPOST/docs — they drift on every export.
 
 `tests/test_verifyjs.py` guards all of it: hosted-copy sync, manifest
