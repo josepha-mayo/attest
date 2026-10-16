@@ -97,6 +97,11 @@ self-verifying evidence record. This is the fastest honest path through it.
    — `site-manifest.json` is a signed receipt pinning every shipped artifact's
    sha256; the page verifies the manifest, then hashes every file this site
    ships against it: **SITE VERIFIED** or **SITE TAMPER**, drifted files named.
+   (On the Netlify mirror this reads SITE TAMPER naming exactly the served
+   HTML files: Netlify injects a one-comment hosting banner into HTML
+   responses, so the manifest catches the host red-handed — the feature
+   working as designed. The GitHub Pages deploy serves bytes unmodified
+   and verifies SITE VERIFIED.)
 6. [Signed real-API sweep](https://josepha-mayo.github.io/attest/verify.html#live-sweep-receipt)
    — the `verify-live --sign` report from the actual `api.amazonvision.com`
    run, auto-verified in your browser on load like everything else.
