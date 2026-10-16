@@ -649,9 +649,9 @@ def main() -> None:
             "detail_excludes": ["pinned by issuer-signed manifest"],
             "js": {
                 "bundle_ok": True,
-                "trusted_count": 1,
-                "suspect_count": 0,
-                "lifecycle_suspect_count": 0,
+                "trusted_count": 2,
+                "suspect_count": 1,
+                "lifecycle_suspect_count": 1,
                 "verdict": "ok",
             },
             "note": "a pre-pin pack still verifies — the manifest is optional "

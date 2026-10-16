@@ -12,9 +12,9 @@
   ],
   "js": {
     "bundle_ok": true,
-    "trusted_count": 1,
-    "suspect_count": 0,
-    "lifecycle_suspect_count": 0,
+    "trusted_count": 2,
+    "suspect_count": 1,
+    "lifecycle_suspect_count": 1,
     "verdict": "ok"
   },
   "note": "a pre-pin pack still verifies \u2014 the manifest is optional when absent, mandatory when present"
