@@ -1,6 +1,21 @@
-# docs/verify.html is byte-compared against attest.verifyjs.VERIFY_HTML in CI —
-# a CRLF checkout on Windows would drift it. Generated artifact: never convert.
-docs/verify.html -text
+# The hosted site is byte-pinned: docs/site-manifest.json signs the sha256 of
+# every served file, and static hosts serve repo-blob bytes — so a CRLF
+# checkout on Windows would break #verify-site everywhere. Text artifacts
+# under docs/ are LF-canonical on every OS. Binary artifacts are never
+# converted (an explicit text rule disables git's binary autodetection,
+# so binaries are pinned back to -text individually).
+docs/**/*.html text eol=lf
+docs/**/*.json text eol=lf
+docs/**/*.svg text eol=lf
+docs/**/*.srt text eol=lf
+docs/**/*.txt text eol=lf
+docs/**/*.md text eol=lf
+docs/**/*.css text eol=lf
+docs/**/*.js text eol=lf
+docs/**/*.xml text eol=lf
+docs/.nojekyll text eol=lf
+docs/**/*.zip -text
+docs/**/*.png -text
+docs/**/*.ots -text
 # Conformance vectors are fixed bytes — CRLF conversion would corrupt them.
 tests/vectors/** -text
-docs/sample-pack.zip -text

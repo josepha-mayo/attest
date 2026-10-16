@@ -26,3 +26,6 @@ attest.lock
 # Lambda build artifacts — emitted by attest.disputepack.write_verifiers()
 extras/lambda/verifier_case.py
 extras/lambda/verifier_bundle.py
+
+# Local Netlify folder
+.netlify
