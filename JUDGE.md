@@ -145,8 +145,7 @@ self-verifying evidence record. This is the fastest honest path through it.
    deep link — or [all 447 at once](https://josepha-mayo.github.io/attest/verify.html#demo-receipts).
    New to the math? [anatomy.html](https://josepha-mayo.github.io/attest/anatomy.html)
    decomposes any of the 447 field-by-field — what the signature covers, what
-   `prev_hash` chains, and what a valid signature can never prove. Twenty-eight of them are the deployment
-   auditing *itself*: `verify --attest`
+   `prev_hash` chains, and what a valid signature can never prove. Twenty-eight of them are the deployment auditing *itself*: `verify --attest`
    signs a `pack_verification` receipt binding sha256(pack bytes) + the
    verdict + the verifier's content identity + the trust context, and
    `diff --attest` signs the `pack_comparison` — the coordinator attested the

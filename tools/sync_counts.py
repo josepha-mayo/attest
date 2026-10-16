@@ -119,7 +119,7 @@ def build_patches(d: dict[str, int]) -> list[tuple[str, str, str]]:
         ("../JUDGE.md", r"decomposes any of the \d+ field-by-field",
          "decomposes any of the {receipts} field-by-field"),
         ("../JUDGE.md", r"(?:Twenty|Thirty|Forty|Fifty|Sixty|Seventy|Eighty|Ninety)"
-                         r"(?:-[a-z]+)? of them are the deployment auditing",
+                         r"(?:-[a-z]+)? of them are the deployment\s+auditing",
          f"{audit_w} of them are the deployment auditing"),
         ("../JUDGE.md", r"\d+ receipts in scope", "{suspect} receipts in scope"),
         ("../src/attest/verifyjs.py", r"renders all \d+ live verdicts",

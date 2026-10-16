@@ -1,0 +1,10 @@
+# Attest static-site deploy (judge path is fully static — no build step).
+# docs/ ships the verifier, tour, story, snapshots, vectors, and packs as-is.
+# Byte fidelity matters: site-manifest.json pins every file's sha256, so no
+# post-processing, bundling, or minification may touch publish output.
+[build]
+  publish = "docs"
+  command = ""
+
+# The issuer doc is origin-rooted here (unlike project-pages hosting),
+# so verify.html#sample-pack-pinned pins against a proper well-known root.
