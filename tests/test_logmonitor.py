@@ -411,7 +411,7 @@ def test_verify_cross_checks_the_packs_head_against_the_live_log(
         [(visit, bundle, countersign_status(bundle))],
         manifest_signer=lambda m: engine.issue_export_manifest(site, m),
         tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"site:{site.id}", t),
-        log_fn=lambda rs: log_member(engine, rs),
+        log_fn=lambda rs, pack_members=None: log_member(engine, rs, pack_members=pack_members),
     )
     pack = tmp_path / "case.zip"
     pack.write_bytes(data)
@@ -1043,8 +1043,8 @@ def test_verify_witness_key_gates_on_named_witnesses(
     w_store, w_signer = _witness_deployment()
     issuer_doc = _doc_for(engine)
 
-    def log_with_cosig(rs):
-        doc = log_member(engine, rs)
+    def log_with_cosig(rs, pack_members=None):
+        doc = log_member(engine, rs, pack_members=pack_members)
         status, out = logmonitor.witness_cosign(
             w_store, w_signer, {"issuer_doc": issuer_doc, "checkpoint": doc["checkpoint"]}
         )
@@ -1576,8 +1576,8 @@ def test_verify_witness_url_resolves_deployments_and_threshold(
     w2_store, w2_signer = _witness_deployment()
     issuer_doc = _doc_for(engine)
 
-    def log_with_cosigs(rs):
-        doc = log_member(engine, rs)
+    def log_with_cosigs(rs, pack_members=None):
+        doc = log_member(engine, rs, pack_members=pack_members)
         doc["cosignatures"] = []
         for w_store, w_signer in ((w1_store, w1_signer), (w2_store, w2_signer)):
             status, out = logmonitor.witness_cosign(
@@ -1650,7 +1650,7 @@ def test_verify_witness_url_resolves_deployments_and_threshold(
         [(visit, bundle, countersign_status(bundle))],
         manifest_signer=lambda m: engine.issue_export_manifest(site, m),
         tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"site:{site.id}", t),
-        log_fn=lambda rs: {
+        log_fn=lambda rs, pack_members=None: {
             **log_member(engine, rs),
             "cosignatures": [
                 logmonitor.witness_cosign(
@@ -1798,8 +1798,8 @@ def test_verify_threshold_counts_witness_identities_not_lineage_keys(
     }
     assert logmonitor._trusted_set(w_doc) == {w_old.public_key_b64, w_new.public_key_b64}
 
-    def log_with_cosigs(rs):
-        doc = log_member(engine, rs)
+    def log_with_cosigs(rs, pack_members=None):
+        doc = log_member(engine, rs, pack_members=pack_members)
         cpd = doc["checkpoint"]  # the head that actually ships in this pack
         facts = {
             "record_type": "witness_cosignature",
@@ -3581,3 +3581,306 @@ def test_embedded_cosig_helpers_survive_unhashable_fields(engine, store, househo
     with pytest.raises(SystemExit):
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             _anchors(doc)
+
+
+def _crafted_checkpoint(signer, real_cp, receipt_id, **overrides):
+    """A validly-signed checkpoint whose receipt_id (and listed fields) is
+    caller-chosen — the witness audit's collision recipe needs controlled
+    ids; the signature covers the payload so each craft is genuine
+    issuer-signed evidence under a picked identity."""
+    from attest.ledger import payload_hash
+    from attest.models import Receipt
+
+    p = dict(real_cp.payload)
+    p.update(overrides)
+    p["receipt_id"] = receipt_id
+    h = payload_hash(p)
+    return Receipt(
+        id=receipt_id,
+        visit_id=p["visit_id"],
+        sequence=p["sequence"],
+        prev_hash=p.get("prev_hash"),
+        issued_at=real_cp.issued_at,
+        payload=p,
+        payload_hash=h,
+        signature=signer.sign_hash(h),
+        public_key=signer.public_key_b64,
+    )
+
+
+def test_witness_full_depth_slot_reoffer_is_idempotent(engine, store, household, schedule, t0):
+    """Witness-audit regression: a cosignature minted in the FULLY-QUALIFIED
+    pseudo-id slot must be re-offered idempotently — the old code issued
+    without a lookup, so a retry hit put_receipt's UNIQUE constraint and
+    wedged the exact offer as a permanent HTTP 500."""
+    from attest import logmonitor
+
+    w_store, w_signer = _witness_deployment()
+    doc = _doc_for(engine)
+
+    _seed(engine, household[0], t0)
+    cp1 = engine.issue_log_checkpoint()
+    _seed(engine, household[0], t0 - timedelta(hours=5), n=1)
+    cp2 = engine.issue_log_checkpoint()
+    _seed(engine, household[0], t0 - timedelta(hours=6), n=1)
+    cp3 = engine.issue_log_checkpoint()
+    r3 = cp3.payload["root_sha256"].lower()
+
+    def offer(receipt):
+        return logmonitor.witness_cosign(
+            w_store, w_signer, {"issuer_doc": doc, "checkpoint": receipt.model_dump(mode="json")}
+        )
+
+    # (a) cp.id "A" at head 1 → base slot `…:A` attests head 1.
+    status, _ = offer(_crafted_checkpoint(engine.signer, cp1, "A"))
+    assert status == 200
+    # (b) cp.id "A:<r3[:16]>" at head 2 — its base slot spells identically to
+    #     the qualified slot step (c) falls to, now occupied by a DIFFERENT
+    #     subject. Reachable because receipt ids are requester-chosen.
+    status, _ = offer(_crafted_checkpoint(engine.signer, cp2, f"A:{r3[:16]}"))
+    assert status == 200
+    # (c) cp.id "A" at head 3 → L1 mismatch (head1), L2 mismatch (head2 under
+    #     the colliding id) → mints at the full-root slot.
+    status, out = offer(_crafted_checkpoint(engine.signer, cp3, "A"))
+    assert status == 200
+    first = out["cosignature"]
+    assert first["visit_id"].endswith(f":A:{r3}")
+    # (d) the identical re-offer must REUSE the slot — pre-fix this was a
+    #     UNIQUE-constraint 500 on every retry.
+    status, out2 = offer(_crafted_checkpoint(engine.signer, cp3, "A"))
+    assert status == 200
+    assert out2["cosignature"]["id"] == first["id"]
+
+    # (e) a deliberately poisoned full-root slot must surface as a clean 409
+    #     conflict, never a database exception.
+    r1 = cp1.payload["root_sha256"].lower()
+    w_store2, w_signer2 = _witness_deployment()
+    doc2 = _doc_for(engine)
+    st, _ = logmonitor.witness_cosign(
+        w_store2, w_signer2, {"issuer_doc": doc2, "checkpoint": cp1.model_dump(mode="json")}
+    )
+    assert st == 200
+    st, _ = logmonitor.witness_cosign(
+        w_store2,
+        w_signer2,
+        {
+            "issuer_doc": doc2,
+            "checkpoint": _crafted_checkpoint(engine.signer, cp2, f"A:{r1[:16]}").model_dump(mode="json"),
+        },
+    )
+    assert st == 200
+    st, _ = logmonitor.witness_cosign(
+        w_store2,
+        w_signer2,
+        {
+            "issuer_doc": doc2,
+            "checkpoint": _crafted_checkpoint(engine.signer, cp3, f"A:{r1}").model_dump(mode="json"),
+        },
+    )
+    assert st == 200
+    # Offer cp.id "A" at head 4 — the pin is head3, so a real extending head
+    # reaches the slot ladder: L1 "…:A" attests head1, L2 prefix slot attests
+    # head2, L3 full-r1 slot attests head3 — every qualified slot poisoned.
+    _seed(engine, household[0], t0 - timedelta(hours=9), n=1)
+    cp4 = engine.issue_log_checkpoint()
+    st, out = logmonitor.witness_cosign(
+        w_store2,
+        w_signer2,
+        {
+            "issuer_doc": doc2,
+            "checkpoint": _crafted_checkpoint(engine.signer, cp4, "A").model_dump(mode="json"),
+        },
+    )
+    # The contract: either an honest cosignature lands or a deliberate 409 —
+    # never an unhandled 500.
+    if st == 200:
+        assert out["cosignature"]["payload"]["subject_tree_size"] == cp4.payload["tree_size"]
+    else:
+        assert st == 409 and "collision" in out["error"]
+
+
+def test_witness_case_variant_root_is_the_same_head(engine, store, household, schedule, t0):
+    """Hex spelling is not identity: a validly-signed checkpoint spelling the
+    same root bytes UPPERCASE is the same head — it must cosign (never 409),
+    and its cosignature still counts when the subject is spelled lowercase."""
+    from attest import logmonitor
+
+    w_store, w_signer = _witness_deployment()
+    doc = _doc_for(engine)
+
+    _seed(engine, household[0], t0)
+    cp1 = engine.issue_log_checkpoint()
+    status, out = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": doc, "checkpoint": cp1.model_dump(mode="json")}
+    )
+    assert status == 200
+
+    # Re-offer the same head spelled uppercase — same size, same root bytes,
+    # different signed spelling: the pre-fix code 409'd this as a fork.
+    variant = _crafted_checkpoint(
+        engine.signer, cp1, f"{cp1.id}-v2", root_sha256=cp1.payload["root_sha256"].upper()
+    )
+    status, out2 = logmonitor.witness_cosign(
+        w_store, w_signer, {"issuer_doc": doc, "checkpoint": variant.model_dump(mode="json")}
+    )
+    assert status == 200
+    # The attested subject records the verbatim signed spelling (evidence),
+    # while slot identity and subject matching ride decoded bytes.
+    assert out2["cosignature"]["payload"]["subject_root_sha256"].endswith(
+        cp1.payload["root_sha256"].upper()[16:]
+    )
+    # Counting: the uppercase-subject cosig must count when the subject arg
+    # is spelled lowercase — decoded bytes, not strings.
+    n, keys = logmonitor.check_cosignatures(
+        {"checkpoint": variant.model_dump(mode="json"), "cosignatures": [out2["cosignature"]]},
+        variant.id,
+        cp1.payload["tree_size"],
+        cp1.payload["root_sha256"].lower(),
+        issuer_keys={engine.signer.public_key_b64},
+    )
+    assert n == 1 and keys == [w_signer.public_key_b64]
+
+
+def test_live_check_case_variant_live_head(engine, store, household, schedule, t0):
+    """A live head spelling the same root uppercase must still read as 'the
+    live head' — not a fork verdict manufactured by string compare."""
+    from attest import logmonitor
+
+    _seed(engine, household[0], t0)
+    cp1 = engine.issue_log_checkpoint()
+    variant = _crafted_checkpoint(
+        engine.signer, cp1, f"{cp1.id}-v2", root_sha256=cp1.payload["root_sha256"].upper()
+    )
+
+    def unreachable(*a, **k):  # must never run on an equal head
+        raise AssertionError("consistency fetch should not run on an equal head")
+
+    trusted = {engine.signer.public_key_b64}
+    verdict, line = logmonitor.live_check(
+        cp1.model_dump(mode="json"), _head(engine, variant), unreachable, trusted
+    )
+    assert verdict is True and "live head" in line
+
+
+def test_merkle_proof_bounds_reject_oversized_material(engine, store, household, schedule, t0):
+    """MAX_PROOF_NODES caps every attacker-controlled proof array — the same
+    bound on the writer transaction, the offline verifier, and the browser."""
+    from attest import disputepack
+    from attest.transparency import (
+        MAX_PROOF_NODES,
+        MAX_TREE_SIZE,
+        coerce_int,
+        verify_consistency,
+        verify_extends,
+        verify_inclusion,
+    )
+
+    huge = ["00" * 32] * (MAX_PROOF_NODES + 1)
+    assert verify_consistency(b"\x00" * 32, 1, b"\x00" * 32, 2, huge) is False
+    assert verify_inclusion("00" * 32, 2, 0, huge, "00" * 32) is False
+    # verify_extends treats an over-bound proof as ABSENT (None), not a
+    # contradiction — malformed material can't manufacture a fork verdict.
+    ext = {
+        "extends": {"first": 1, "first_root_sha256": "00" * 32, "proof": huge},
+        "tree_size": 2,
+        "root_sha256": "11" * 32,
+    }
+    assert verify_extends(ext, first=1, first_root=b"\x00" * 32) is None
+
+    # Giant coercible ints saturate to the same convicting value on every
+    # surface — a 5000-digit string can't wrap or diverge.
+    assert coerce_int("9" * 5000) == MAX_TREE_SIZE + 1
+    assert coerce_int("0" * 5000) == 0  # leading zeros are a real integer
+    assert coerce_int("-" + "9" * 5000) == -(MAX_TREE_SIZE + 1)
+    assert coerce_int("  0007  ") == 7  # padded zeros stay small
+    assert coerce_int(True) == 1 and coerce_int(" 5 ") == 5
+    with pytest.raises(ValueError):
+        coerce_int("nope")  # uncoercible raises — never a silent None
+
+    # The embedded stdlib verifier shares the path grammar: absent is fine,
+    # ANY non-list (dict, bool, number, string) is malformed — not "[]".
+    ns: dict = {}
+    exec(compile(disputepack._VERIFIER_LIB, "vlib", "exec"), ns)
+    inc = ns["_merkle_inclusion"]
+    assert inc("00" * 32, 2, 0, {"a": 1}, "00" * 32) is False
+    assert inc("00" * 32, 2, 0, False, "00" * 32) is False
+    assert inc("00" * 32, 2, 0, "", "00" * 32) is False
+
+
+def test_embedded_cosig_anchor_map_searches_full_list(engine, store, household, schedule, t0):
+    """Audit P1 regression: _cosig_anchors resolves anchor keys against the
+    WHOLE cosignature list — capping the map at 64 made a valid anchor FAIL
+    only in the pack-embedded verifier (same bytes, two verdicts)."""
+    import io
+    from contextlib import redirect_stderr, redirect_stdout
+
+    from attest import disputepack, logmonitor
+
+    ns: dict = {}
+    exec(compile(disputepack._VERIFIER_LIB, "vlib", "exec"), ns)
+    _anchors = ns["_cosig_anchors"]
+
+    _seed(engine, household[0], t0)
+    cp = engine.issue_log_checkpoint()
+    w_store, w_signer = _witness_deployment()
+    status, out = logmonitor.witness_cosign(
+        w_store,
+        w_signer,
+        {"issuer_doc": _doc_for(engine), "checkpoint": cp.model_dump(mode="json")},
+    )
+    assert status == 200
+    real = out["cosignature"]
+
+    # The witness_anchor a pin response carries: the witness's OWN signed log
+    # head plus an inclusion proof that the cosignature is a leaf of that
+    # log. Build it for real — the witness ledger holds the cosig receipt.
+    from attest.ledger import payload_hash
+    from attest.models import utcnow
+    from attest.transparency import inclusion_proof, leaf_hashes
+    from attest.transparency import root as tree_root
+
+    w_receipts = w_store.receipts()
+    leaves = leaf_hashes(w_receipts)
+    ap = {
+        "schema": "attest.receipt/2",
+        "sequence": 1,
+        "prev_hash": None,
+        "visit_id": "log:anchor",
+        "receipt_id": "rcpt_anchor",
+        "issued_at": utcnow().isoformat(),
+        "record_type": "log_checkpoint",
+        "tree_size": len(leaves),
+        "root_sha256": tree_root(leaves).hex(),
+    }
+    ah = payload_hash(ap)
+    anchor = {
+        "checkpoint": {
+            "id": "rcpt_anchor",
+            "visit_id": "log:anchor",
+            "sequence": 1,
+            "prev_hash": None,
+            "issued_at": ap["issued_at"],
+            "payload": ap,
+            "payload_hash": ah,
+            "signature": w_signer.sign_hash(ah),
+            "public_key": w_signer.public_key_b64,
+        },
+        "proof": inclusion_proof(leaves, real["payload_hash"], size=len(leaves)),
+    }
+
+    # 64 inert pads push the real cosignature to index 64 — past the old cap.
+    pad = [{"id": f"rcpt_pad{i:02d}", "payload": {"record_type": "x"}} for i in range(64)]
+    doc = {
+        "checkpoint": cp.model_dump(mode="json"),
+        "cosignatures": pad + [real],
+        "cosig_anchors": {real["id"]: anchor},
+    }
+    anchored, errors = logmonitor.check_cosig_anchors(doc)
+    assert errors == [] and anchored == 1
+    with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+        try:
+            _anchors(doc)
+            rc = 0
+        except SystemExit as exc:
+            rc = exc.code
+    assert rc == 0  # the embedded verifier agrees with the native one

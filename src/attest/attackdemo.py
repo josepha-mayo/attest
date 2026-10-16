@@ -25,17 +25,58 @@ class _Rollback(Exception):
     pass
 
 
-def _attempt(store: Store, name: str, fn) -> dict:
+def _media_snapshot(media_root: Path | None) -> tuple[tuple[str, str], ...]:
+    """(relpath, sha256) pairs for every file under the media root — the
+    rollback guard covers journal state, and media bytes need the same
+    before/after proof since a disk write survives the transaction."""
+    if media_root is None or not Path(media_root).is_dir():
+        return ()
+    import hashlib
+
+    return tuple(
+        sorted(
+            (
+                p.relative_to(media_root).as_posix(),
+                hashlib.sha256(p.read_bytes()).hexdigest(),
+            )
+            for p in Path(media_root).rglob("*")
+            if p.is_file()
+        )
+    )
+
+
+def _attempt(store: Store, name: str, fn, *, boundary: bool = False) -> dict:
     """Run one attack inside a transaction; fn returns (caught, detail) where
     caught is True/False, or None when the store has nothing to attack — a
-    skipped attempt is not a missed defense."""
+    skipped attempt is not a missed defense. ``boundary`` marks a deliberate
+    documented-miss case: the run still reports MISSED, but it demonstrates
+    where detection ends, not a defense that failed. An unexpected exception
+    is a battery fault — caught="error" — never a silent crash of the run."""
+    import sqlite3
+
     try:
         with store.transaction():
             caught, detail = fn()
             raise _Rollback
     except _Rollback:
         pass
-    return {"attack": name, "caught": caught, "detail": detail}
+    except sqlite3.IntegrityError as exc:
+        # The schema itself refused the write — a catch by constraint rather
+        # than by check. Report which layer did it, never crash the battery.
+        return {
+            "attack": name,
+            "caught": True,
+            "detail": f"caught by schema constraint: {exc}",
+            "boundary": boundary,
+        }
+    except Exception as exc:  # noqa: BLE001 — a wrong-type escape is a finding
+        return {
+            "attack": name,
+            "caught": "error",
+            "detail": f"battery error: {type(exc).__name__}: {exc}",
+            "boundary": boundary,
+        }
+    return {"attack": name, "caught": caught, "detail": detail, "boundary": boundary}
 
 
 def run(store: Store, media_root: Path | None = None, inbox=None, engine=None) -> dict:
@@ -55,6 +96,7 @@ def run(store: Store, media_root: Path | None = None, inbox=None, engine=None) -
     else:
         baseline_note = None
 
+    media_before = _media_snapshot(media_root)
     results = []
 
     def forge_row() -> tuple[bool, str]:
@@ -372,7 +414,7 @@ def run(store: Store, media_root: Path | None = None, inbox=None, engine=None) -
             manifest_signer=lambda m: engine.issue_export_manifest(site, m),
             issuer_key=engine.signer.public_key_b64,
             tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"site:{site.id}", t),
-            log_fn=lambda rs: log_member(engine, rs),
+            log_fn=lambda rs, pack_members=None: log_member(engine, rs, pack_members=pack_members),
         )
         with zipfile.ZipFile(io.BytesIO(data)) as z:
             items = [(n, z.read(n)) for n in z.namelist()]
@@ -409,6 +451,136 @@ def run(store: Store, media_root: Path | None = None, inbox=None, engine=None) -
         )
     )
 
+    def truncate_review_tail() -> tuple[bool, str]:
+        """Drop the last statement off a packed bundle.json. Reviews are not
+        transparency-log leaves, so on receipt signatures alone the shortened
+        chain still verifies as a valid prefix — only the signed
+        export_pin.json (count + tip hash) makes the silence detectable."""
+        if engine is None:
+            return None, "no signing engine — cannot mint a pinned pack to attack"
+        from .disputepack import build_pack, log_member
+        from .models import ReviewBundle
+
+        target, bundle = None, None
+        for visit in store.visits(limit=None):
+            receipt = store.receipt_for_visit(visit.id)
+            if receipt is None:
+                continue
+            candidate = ReviewBundle(
+                kind="attest.review_bundle/1",
+                original=receipt,
+                reviews=store.reviews_for(visit.id),
+            )
+            if len(candidate.reviews) >= 1:
+                target, bundle = visit, candidate
+                break
+        if target is None:
+            return None, "no visit with a review chain to truncate"
+        data = build_pack(
+            store,
+            media_root or Path("media"),
+            bundle,
+            redact_media=True,
+            tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"visit:{target.id}", t),
+            log_fn=lambda rs, pack_members=None: log_member(engine, rs, pack_members=pack_members),
+            pin_fn=engine.issue_export_pin,
+        )
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            items = [(n, z.read(n)) for n in z.namelist()]
+        forged = io.BytesIO()
+        with zipfile.ZipFile(forged, "w") as z:
+            for name, body in items:
+                if name == "bundle.json":
+                    doc = json.loads(body)
+                    doc["reviews"] = doc["reviews"][:-1]
+                    body = json.dumps(doc).encode()
+                z.writestr(name, body)
+        fd, tmp = tempfile.mkstemp(suffix=".zip", prefix="attest-attack-")
+        try:
+            with open(fd, "wb") as raw:
+                raw.write(forged.getvalue())
+            from .packdiff import load_artifact
+
+            out = load_artifact(tmp)
+            hits = [f for f in out["verify_failures"] if "export_pin" in f or "review" in f or "pin" in f]
+            return bool(hits), (
+                hits[0] if hits else f"truncated review tail accepted: {out['verify_failures']}"
+            )
+        finally:
+            Path(tmp).unlink(missing_ok=True)
+
+    results.append(
+        _attempt(
+            store,
+            "drop the last review statement off a packed bundle",
+            truncate_review_tail,
+        )
+    )
+
+    def self_journaled_forgery() -> tuple[bool, str]:
+        """The detection boundary, demonstrated honestly. The mutation journal
+        is an UNKEYED sha256 chain: anyone with write access to the database
+        file can forge a row AND append a covering journal entry whose
+        body_hash matches the forgery — the replay stays green because the
+        last op per row is authoritative. Nothing in-process catches this;
+        only a journal head pinned into a signed receipt and anchored
+        externally (`attest anchor --publish`) bounds it. Reported MISSED on
+        purpose — the battery names its own edge."""
+        from .store import _iso, _sha
+
+        row = store._conn.execute("SELECT id, body, state FROM visits LIMIT 1").fetchone()
+        if not row:
+            return None, "no visits to forge"
+        visit_id, body, _old_state = row
+        forged = json.loads(body)
+        forged["state"] = "attended_verified"
+        new_body = json.dumps(forged)
+        store._conn.execute(
+            "UPDATE visits SET body=?, state=? WHERE id=?",
+            (new_body, forged["state"], visit_id),
+        )
+        prev = store._conn.execute("SELECT hash FROM journal ORDER BY seq DESC LIMIT 1").fetchone()
+        prev_hash = prev[0] if prev else "0" * 64
+        at = _iso(datetime.now(tz=UTC))
+        body_hash = _sha(new_body)
+        digest = _sha(
+            json.dumps(
+                {
+                    "at": at,
+                    "table": "visits",
+                    "row_id": visit_id,
+                    "op": "put",
+                    "body_hash": body_hash,
+                    "prev_hash": prev_hash,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
+        store._conn.execute(
+            "INSERT INTO journal (at, table_name, row_id, op, body_hash, prev_hash, hash) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (at, "visits", visit_id, "put", body_hash, prev_hash, digest),
+        )
+        report = store.verify_journal()
+        caught = not report["intact"]
+        return caught, (
+            "verify_journal stayed green over a forged row + self-consistent "
+            "covering entry — the journal is unkeyed; this is the documented "
+            "boundary only external anchoring closes"
+            if not caught
+            else f"unexpectedly caught: {report['mismatches'][:1]}"
+        )
+
+    results.append(
+        _attempt(
+            store,
+            "forge a row AND its covering journal entry (detection boundary)",
+            self_journaled_forgery,
+            boundary=True,
+        )
+    )
+
     def graft_unlogged_receipt() -> tuple[bool, str]:
         """The graft only the transparency log can catch: a receipt the
         deployment's own key really signed, minted off-chain and never
@@ -432,7 +604,7 @@ def run(store: Store, media_root: Path | None = None, inbox=None, engine=None) -
             media_root or Path("media"),
             bundle,
             tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"visit:{visit.id}", t),
-            log_fn=lambda rs: log_member(engine, rs),
+            log_fn=lambda rs, pack_members=None: log_member(engine, rs, pack_members=pack_members),
         )
         ghost = engine.signer.issue(
             visit_id="key:ghost-never-logged",
@@ -473,7 +645,10 @@ def run(store: Store, media_root: Path | None = None, inbox=None, engine=None) -
             from .packdiff import load_artifact
 
             out = load_artifact(tmp)
-            hits = [f for f in out["verify_failures"] if "inclusion proof" in f]
+            # pack_members fires first on the smuggled member file; the
+            # inclusion-proof gate is the deeper net when the member is
+            # declared. Either failure is the graft caught.
+            hits = [f for f in out["verify_failures"] if "inclusion proof" in f or "never declared" in f]
             return bool(hits), (
                 hits[0] if hits else f"unlogged-but-signed graft accepted: {out['verify_failures']}"
             )
@@ -654,9 +829,12 @@ def run(store: Store, media_root: Path | None = None, inbox=None, engine=None) -
     results.append(_attempt(store, "swap media bytes on disk after signing", swap_media))
 
     after = store.verify_journal()
+    media_after = _media_snapshot(media_root)
     out = {
         "results": results,
-        "unchanged": after["intact"] == before["intact"] and after["entries"] == before["entries"],
+        # Full-dict equality: intact/entries alone would miss a silent
+        # mismatch list, a lost pin, or a forged tail the replay swallowed.
+        "unchanged": after == before and media_after == media_before,
         "journal": after,
     }
     if baseline_note:

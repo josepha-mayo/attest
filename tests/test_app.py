@@ -211,6 +211,83 @@ def test_chaos_duplicated_deliveries_collapse_to_one_event(api, store, household
     assert len(device_events) == 1
 
 
+def test_webhook_route_rejects_absurd_signed_timestamp(api, household, t0):
+    """attributes.timestamp is converted lazily inside the model — a signed
+    delivery carrying a timestamp beyond the datetime range must 400, never
+    escape as an uncaught 500 on every retry."""
+
+    payload = webhooks.build_event(
+        event_type="button_press",
+        device_id=household[2].id,
+        occurred_at=t0,
+    )
+    payload["data"]["attributes"]["timestamp"] = 10**25  # year ~10^5 — parses, then overflows
+    body = webhooks.encode(payload)
+    response = api.post(
+        "/webhooks/ring",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            webhooks.SIGNATURE_HEADER: webhooks.sign(KEY, body),
+        },
+    )
+    assert response.status_code == 400
+    assert "timestamp" in response.json()["error"]
+
+
+def test_webhook_route_rejects_far_future_signed_timestamp(api, household, t0):
+    """A far-future occurred_at would park the queue slot at its own
+    admissibility instant — beyond the horizon it fails loud instead."""
+    from datetime import UTC, datetime
+
+    payload = webhooks.build_event(
+        event_type="button_press",
+        device_id=household[2].id,
+        occurred_at=datetime(2099, 1, 1, tzinfo=UTC),
+    )
+    body = webhooks.encode(payload)
+    response = api.post(
+        "/webhooks/ring",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            webhooks.SIGNATURE_HEADER: webhooks.sign(KEY, body),
+        },
+    )
+    assert response.status_code == 202  # queued — the worker bounds the park
+    api.post("/api/process-webhooks")
+    entries = api.attest_state.inbox.entries()
+    mine = [d for d in entries if d["id"].endswith(payload["meta"]["request_id"])]
+    assert mine and mine[0]["status"] == "failed"
+    assert mine[0]["error_code"] == "far_future_timestamp"
+
+
+def test_unbound_delivery_retries_instead_of_rejecting(api, t0):
+    """'Not bound to a site' is transient — a webhook can land before its
+    site's binding. It must burn the failure budget (requeue-able), not sit
+    terminally 'rejected' where no retry path reaches it."""
+    payload = webhooks.build_event(
+        event_type="motion_detected",
+        device_id="cam-bound-later",
+        occurred_at=t0,
+    )
+    body = webhooks.encode(payload)
+    response = api.post(
+        "/webhooks/ring",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            webhooks.SIGNATURE_HEADER: webhooks.sign(KEY, body),
+        },
+    )
+    assert response.status_code == 202
+    api.post("/api/process-webhooks")
+    entries = api.attest_state.inbox.entries()
+    mine = [d for d in entries if d["id"].endswith(payload["meta"]["request_id"])]
+    assert mine and mine[0]["status"] == "pending"
+    assert mine[0]["error_code"] == "not_bound_to_site"
+
+
 def test_webhook_to_receipt(api, store, household, schedule, t0):
     site, worker, cam, sensor = household
     t = t0 + timedelta(minutes=1)

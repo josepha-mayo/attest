@@ -1,0 +1,37 @@
+{
+  "id": "rcpt_07f967543e064770bf5eedea40be0d16",
+  "visit_id": "pack-verify:6cbe5bbc3978f42b",
+  "sequence": 373,
+  "prev_hash": "137b7b2621f445f6010888998fd19d21346020ed72ad0e303c073ce7d63d6851",
+  "payload": {
+    "record_type": "pack_verification",
+    "pack_sha256": "8a543dadf3efab5e41e2f30b056c85333bbe6b664081f1e1a7e589530804bb43",
+    "pack_bytes": 488415,
+    "verdict": "fail",
+    "detail": "verification failed: vis_70e42116a4cf: bundle: original: payload hash mismatch (payload was altered)",
+    "verifier": {
+      "name": "attest-cli",
+      "version": "0.1.0",
+      "checker": "attest.app._verify_pack",
+      "verifier_sha256": "32bf00d60fa099ac6df2ababd3a0e980b4e6eb94fc01c3ae8a5c9dc20eaae155"
+    },
+    "context": {
+      "issuer_pin": null,
+      "lifecycle_sha256": null,
+      "witness_policy": null,
+      "live_log": null
+    },
+    "boundary": "This receipt attests only that the named verifier produced the named verdict on the byte-string digest above, under the recorded trust context. It does not prove the verdict is right — re-run the pinned verifier to check — and says nothing about physical truth.",
+    "journal_head": "3733b5d5dcd0efa6a7a854340bfd21220a3a27acc2a739a5d0a10bdbafb9c0dc",
+    "schema": "attest.receipt/2",
+    "sequence": 373,
+    "prev_hash": "137b7b2621f445f6010888998fd19d21346020ed72ad0e303c073ce7d63d6851",
+    "visit_id": "pack-verify:6cbe5bbc3978f42b",
+    "receipt_id": "rcpt_07f967543e064770bf5eedea40be0d16",
+    "issued_at": "2026-10-14T23:46:18.480456+00:00"
+  },
+  "payload_hash": "99b5396a5bb08c06af5890fa436b51f17c83ded9a0fe7eeca5cd052e959fded5",
+  "signature": "yzGZEXxyU4hgBjyAb+LqQLbpXZggHZ6GehNcgkM8Hg6c9QmfjFebE4pOm7ejvsDVRqKLnSTZVbaS/K1x9OOtCQ==",
+  "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+  "issued_at": "2026-10-14T23:46:18.480456Z"
+}

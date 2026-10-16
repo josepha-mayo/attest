@@ -51,6 +51,10 @@ jobs:
         working-directory: attest
         run: >-
           python -c "import subprocess; paths = subprocess.check_output(['git', 'ls-files', '--', 'data/', 'data-*/', '*.sqlite3*', '*.key', '*.pem', '.env*'], text=True); assert not paths.strip(), 'Runtime files must not be tracked'"
+      - name: Reject tracked private-key material
+        working-directory: attest
+        run: >-
+          python -c "import subprocess; bad = [p for p in subprocess.check_output(['git', 'ls-files'], text=True).splitlines() if 'PRIVATE KEY-----' in open(p, 'rb').read().decode('utf-8', 'ignore')]; assert not bad, 'private key material tracked: %s' % bad"
       - name: Lint Attest
         working-directory: attest
         run: python -m ruff check src tests

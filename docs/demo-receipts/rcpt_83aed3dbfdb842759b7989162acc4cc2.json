@@ -1,0 +1,40 @@
+{
+  "id": "rcpt_83aed3dbfdb842759b7989162acc4cc2",
+  "visit_id": "pack-diff:dda0d96776f46878",
+  "sequence": 375,
+  "prev_hash": "a6b69696dac93faa6d00183b518daf492293465c14fe53e2b24ffcfc33270969",
+  "payload": {
+    "record_type": "pack_comparison",
+    "pack_a_sha256": "a3f68acbbad897c5db128a21158dada6441ee1b0be758ab75c31b733b44f1f67",
+    "pack_b_sha256": "8a543dadf3efab5e41e2f30b056c85333bbe6b664081f1e1a7e589530804bb43",
+    "pack_a_bytes": 488414,
+    "pack_b_bytes": 488415,
+    "log_heads": "same",
+    "clean": false,
+    "anomalies": 2,
+    "events_sha256": "052087a461cd26de98c32819a8987fdb081a249fb9da6a976e821d658e14df6d",
+    "detail": "log heads: same — 2 anomaly(ies), anomalous",
+    "verifier": {
+      "name": "attest-cli",
+      "version": "0.1.0",
+      "checker": "attest.packdiff.diff_report",
+      "verifier_sha256": "68b4813a9383a1c9ec4dbaa56b7acd0f2351351836ce6378ca89cb717640caa5"
+    },
+    "context": {
+      "issuer_pin": null,
+      "lifecycle_sha256": null
+    },
+    "boundary": "This receipt attests only that the named differ produced the named comparison on the two byte-string digests above, under the recorded trust context. It does not prove the comparison is right — re-run attest diff on the named bytes to check — and says nothing about physical truth.",
+    "journal_head": "2af9c94b2e0af2d3c9b0c3b169d731c24f1f71ec5efc07551b22cc674ec91160",
+    "schema": "attest.receipt/2",
+    "sequence": 375,
+    "prev_hash": "a6b69696dac93faa6d00183b518daf492293465c14fe53e2b24ffcfc33270969",
+    "visit_id": "pack-diff:dda0d96776f46878",
+    "receipt_id": "rcpt_83aed3dbfdb842759b7989162acc4cc2",
+    "issued_at": "2026-10-14T23:46:24.443716+00:00"
+  },
+  "payload_hash": "a4e7ef99e6b310b248093316575a7d706a29b7077e1091ba0550b99980e4e40d",
+  "signature": "3c7227k8TlqcVT9r0bggNpAZnO0XrMfnME65O+IlpYWDuykR+u28lsB+NMCqGZUULGz6Kz5MtaQSmfkdOws4AA==",
+  "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+  "issued_at": "2026-10-14T23:46:24.443716Z"
+}

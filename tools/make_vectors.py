@@ -128,7 +128,7 @@ def _case_pack(store, engine, site, visits, tmp: Path, *, redact=False, log_fn=N
         manifest_signer=lambda m: engine.issue_export_manifest(site, m),
         issuer_key=engine.signer.public_key_b64,
         tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"site:{site.id}", t),
-        log_fn=log_fn or (lambda rs: log_member(engine, rs)),
+        log_fn=log_fn or (lambda rs, pack_members=None: log_member(engine, rs, pack_members=pack_members)),
     )
 
 
@@ -136,12 +136,15 @@ def _dispute_pack(store, engine, media_root, bundle, **kw) -> bytes:
     """A single-visit pack pinned like a real export: the verifier_manifest
     receipt binds this pack's visit scope."""
     vid = bundle.original.visit_id
+    kw.setdefault(
+        "log_fn",
+        lambda rs, pack_members=None: log_member(engine, rs, pack_members=pack_members),
+    )
     return build_pack(
         store,
         media_root,
         bundle,
         tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"visit:{vid}", t),
-        log_fn=lambda rs: log_member(engine, rs),
         **kw,
     )
 
@@ -622,11 +625,20 @@ def main() -> None:
         },
     )
 
-    # Legacy packs predate the pin — absence is reported, never failed.
+    # Legacy packs predate the pin — absence is reported, never failed. The
+    # checkpoint is minted WITHOUT pack_members (an old export carries no
+    # signed member list) so stripping the manifest can't trip presence
+    # enforcement — compat mode, not a missed strip.
     _write_vector(
         "ok-legacy-no-manifest",
         _rewrite_zip(
-            clean_bundle,
+            _dispute_pack(
+                store,
+                engine,
+                media_root,
+                bundle1,
+                log_fn=lambda rs, pack_members=None: log_member(engine, rs),
+            ),
             lambda name, body: None if name == "verifier_manifest.json" else body,
         ),
         {
@@ -1070,7 +1082,7 @@ def main() -> None:
         site,
         [v1],
         tmp / "d1",
-        log_fn=lambda rs: log_member(engine, rs, cosign_fn=_cosign_with_anchor),
+        log_fn=lambda rs, pack_members=None: log_member(engine, rs, cosign_fn=_cosign_with_anchor, pack_members=pack_members),
     )
     _write_vector(
         "ok-witness-anchored",
@@ -1130,8 +1142,8 @@ def main() -> None:
         }
     )
 
-    def _log_embed(rs):
-        doc = log_member(engine, rs)
+    def _log_embed(rs, pack_members=None):
+        doc = log_member(engine, rs, pack_members=pack_members)
         n = int(doc["checkpoint"]["payload"]["tree_size"])
         doc["receipts"] = [r.model_dump(mode="json") for r in (obs1, obs2)]
         for r in (obs1, obs2):
@@ -1337,8 +1349,8 @@ def main() -> None:
         tree_size — the signature stays valid, so the vector isolates the
         tree-head type/bounds check rather than signature rejection."""
 
-        def _log_fn(rs):
-            doc = log_member(engine, rs)
+        def _log_fn(rs, pack_members=None):
+            doc = log_member(engine, rs, pack_members=pack_members)
             payload = doc["checkpoint"]["payload"]
             n = payload["tree_size"]
             cp = engine.signer.issue(

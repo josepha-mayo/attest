@@ -20,7 +20,7 @@ from datetime import timedelta
 from ring_sandbox import RingAPIError, RingClient, WebhookEvent, webhooks
 from ring_sandbox.models import HistoryEvent
 
-from .engine import VisitEngine
+from .engine import NotYetAdmissible, VisitEngine
 from .models import PollObservation
 from .store import Store
 
@@ -87,6 +87,43 @@ class HistoryPoller:
                     )
                 )
                 continue
+            new = 0
+            # occurred_at is a lazy conversion — an absurd upstream timestamp
+            # raises here, and it must not poison this site's poll (or every
+            # site after it in the loop).
+            ordered = []
+            for ev in pending.values():
+                try:
+                    ordered.append((ev.occurred_at, ev.request_id, ev))
+                except (OverflowError, OSError, ValueError):
+                    log.warning(
+                        "history event %s has a malformed occurred_at; skipped",
+                        ev.id,
+                    )
+            ordered.sort(key=lambda t: (t[0], t[1]))  # oldest first
+            for _, _, ev in ordered:
+                try:
+                    outcome = self.engine.ingest(ev, source="history")
+                except NotYetAdmissible:
+                    # Claimed occurrence is still ahead — it re-appears in the
+                    # next lookback window and is ingested when admissible.
+                    log.info(
+                        "history event %s not yet admissible; deferred",
+                        ev.request_id,
+                    )
+                    continue
+                except Exception:  # noqa: BLE001 — one bad event must never stall the site's poll
+                    log.exception("history event %s failed ingest; skipped", ev.request_id)
+                    continue
+                # "duplicate request_id" means a prior poll already delivered this
+                # event; anything else is the pipeline seeing it for the first time.
+                if outcome.ignored_reason != "duplicate request_id":
+                    new += 1
+                if outcome.ignored_reason is None:
+                    ingested += 1
+            # Written after ingest so ``new_events`` reflects dedupe — and so a
+            # crash mid-ingest under-reports coverage rather than claiming a poll
+            # whose deliveries were lost.
             self.store.put_poll_observation(
                 PollObservation(
                     site_id=site.id,
@@ -95,12 +132,9 @@ class HistoryPoller:
                     since=since,
                     ok=True,
                     events_returned=seen,
+                    new_events=new,
                 )
             )
-            for ev in sorted(pending.values(), key=lambda e: (e.occurred_at, e.request_id)):  # oldest first
-                outcome = self.engine.ingest(ev, source="history")
-                if outcome.ignored_reason is None:
-                    ingested += 1
         return ingested
 
 

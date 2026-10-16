@@ -1,0 +1,37 @@
+{
+  "id": "rcpt_ba17789141c54247b52da910298bbf05",
+  "visit_id": "pack-verify:4ef20473691561db",
+  "sequence": 372,
+  "prev_hash": "bbf457ef2a0575f2f696430ba0993e7333174d914d32cc4292011db00c26aeb6",
+  "payload": {
+    "record_type": "pack_verification",
+    "pack_sha256": "a3f68acbbad897c5db128a21158dada6441ee1b0be758ab75c31b733b44f1f67",
+    "pack_bytes": 488414,
+    "verdict": "ok",
+    "detail": "case pack verified — 9 visit record(s) intact (export signed: 9 record(s); 4 verifier tool(s) pinned by issuer-signed manifest; 143 receipt(s) proven inside the deployment transparency log at checkpoint size 252 — cosigned by 2 witness(es) (2 anchored in the witness's own published log) — 32 prior signed head(s) embedded for cross-export reconciliation; 2 issuer keys linked via the signed rotation chain; 6 record(s) signed by a revoked issuer inside its suspect window; 1 key-lifecycle receipt(s) signed inside a suspect window — the trust pivot itself is qualified): vis_ac04986742ad: closed (no_statement) — 0/2 signed media digests found in pack, 2 withheld by redaction; vis_5b7958271e00: closed (no_statement) — 0/2 signed media digests found in pack, 2 withheld by redaction; vis_f34460136366: no_observation (resolved) — 0/0 signed media digests found in pack; vis_3feab06a831b: closed (no_statement) — 0/1 signed media digests found in pack, 1 withheld by redaction; vis_32a86d6fdbe4: no_observation (no_statement) — 0/0 signed media digests found in pack; vis_1071d3b1997a: closed (no_statement) — 0/1 signed media digests found in pack, 1 withheld by redaction; vis_6a79c8145c2e: closed (no_statement) — 0/1 signed media digests found in pack, 1 withheld by redaction; vis_70e42116a4cf: closed (contested) — 0/2 signed media digests found in pack, 2 withheld by redaction; vis_8243499a3a78: closed (no_statement) — 0/2 signed media digests found in pack, 2 withheld by redaction",
+    "verifier": {
+      "name": "attest-cli",
+      "version": "0.1.0",
+      "checker": "attest.app._verify_pack",
+      "verifier_sha256": "32bf00d60fa099ac6df2ababd3a0e980b4e6eb94fc01c3ae8a5c9dc20eaae155"
+    },
+    "context": {
+      "issuer_pin": null,
+      "lifecycle_sha256": null,
+      "witness_policy": null,
+      "live_log": null
+    },
+    "boundary": "This receipt attests only that the named verifier produced the named verdict on the byte-string digest above, under the recorded trust context. It does not prove the verdict is right — re-run the pinned verifier to check — and says nothing about physical truth.",
+    "journal_head": "a81ba7b8dff6c9ad2ad3f793a7717588a338bb988322866df376c6e8944fb43f",
+    "schema": "attest.receipt/2",
+    "sequence": 372,
+    "prev_hash": "bbf457ef2a0575f2f696430ba0993e7333174d914d32cc4292011db00c26aeb6",
+    "visit_id": "pack-verify:4ef20473691561db",
+    "receipt_id": "rcpt_ba17789141c54247b52da910298bbf05",
+    "issued_at": "2026-10-14T23:46:16.423043+00:00"
+  },
+  "payload_hash": "137b7b2621f445f6010888998fd19d21346020ed72ad0e303c073ce7d63d6851",
+  "signature": "MJvJ5786oMRRdlLNHd1DHBaczkvvxZT5KivYXjQvLCuyIPrgcu1BOZ/+4meXnjE7YZgmOOKgzzEFZX4zOHWMBw==",
+  "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+  "issued_at": "2026-10-14T23:46:16.423043Z"
+}

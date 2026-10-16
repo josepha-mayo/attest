@@ -22,6 +22,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -169,12 +170,20 @@ def _dpapi_path(path: Path) -> Path:
 
 def _atomic_write(path: Path, data: bytes) -> None:
     """tmp file + ``os.replace`` so a crash never leaves a truncated custody
-    artifact to fail unwrap on next boot; 0600 on POSIX like the key itself."""
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_bytes(data)
-    if os.name == "posix":
-        os.chmod(tmp, 0o600)
-    os.replace(tmp, path)
+    artifact to fail unwrap on next boot. The tmp is born 0600 — writing the
+    wrapped key into a umask-default file first would expose it (or, for the
+    plaintext-custody rotate, the raw PEM itself) in a world-readable window,
+    and an orphaned ``*.tmp`` must never linger with key material in it."""
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
+    try:
+        if os.name == "posix":
+            os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 def _drop_stale_plaintext(path: Path, pem: bytes) -> None:
@@ -226,6 +235,7 @@ def load_or_create_signer(
     kms_client: Any | None = None,
     aws_region: str = "us-east-1",
     custody: str | None = None,
+    create: bool = True,
 ) -> Signer:
     """Load the deployment signing key, creating it on first run.
 
@@ -235,28 +245,39 @@ def load_or_create_signer(
     external dependency. A configured custody path that cannot unwrap fails
     loudly — silently falling back to a plaintext key file would be a
     downgrade the operator never asked for.
-    """
+
+    ``create=False`` is the read-only contract: load existing key material
+    under its existing custody form — never mint a key, never wrap+delete a
+    plaintext PEM, never drop a stale plaintext. Commands that only read a
+    runtime (explain/triage/issuer) must not mutate its key custody."""
     _check_custody_combo(kms_key_id, custody)
     _check_stray_custody_artifact(path, kms_key_id, custody)
     if not kms_key_id and custody != "dpapi":
-        return Signer.load_or_create(path)
+        return Signer.load_or_create(path) if create else Signer.load(path)
 
     if custody == "dpapi":
         box = DpapiBox()
         blob_path = _dpapi_path(path)
         if blob_path.exists():
             pem = box.unwrap(blob_path.read_bytes())
-            _drop_stale_plaintext(path, pem)
+            if create:
+                _drop_stale_plaintext(path, pem)
         elif path.exists():
             # Enabling custody on a plaintext deployment must wrap THAT key —
             # minting a new one silently rotates the issuer identity and
             # strands every signed record. Order matters: only remove the
-            # plaintext after the blob is durably written.
-            pem = path.read_bytes()
-            blob_path.parent.mkdir(parents=True, exist_ok=True)
-            _atomic_write(blob_path, box.wrap(pem))
-            path.unlink()
+            # plaintext after the blob is durably written. Read-only loads
+            # skip the migration entirely — the plaintext loads as-is.
+            if create:
+                pem = path.read_bytes()
+                blob_path.parent.mkdir(parents=True, exist_ok=True)
+                _atomic_write(blob_path, box.wrap(pem))
+                path.unlink()
+            else:
+                pem = path.read_bytes()
         else:
+            if not create:
+                raise FileNotFoundError(f"no signing key at {path}")
             from cryptography.hazmat.primitives import serialization
             from cryptography.hazmat.primitives.asymmetric.ed25519 import (
                 Ed25519PrivateKey,
@@ -276,7 +297,8 @@ def load_or_create_signer(
         )
 
         sk = serialization.load_pem_private_key(pem, password=None)
-        assert isinstance(sk, Ed25519PrivateKey)
+        if not isinstance(sk, Ed25519PrivateKey):
+            raise ValueError("key file does not hold an Ed25519 private key")
         return Signer(sk)
 
     box = KmsBox(kms_key_id, kms_client or _kms_client(aws_region))
@@ -285,20 +307,25 @@ def load_or_create_signer(
     if wrapped_path.exists():
         record = json.loads(wrapped_path.read_text(encoding="utf-8"))
         pem = box.unwrap(record)
-        _drop_stale_plaintext(path, pem)
+        if create:
+            _drop_stale_plaintext(path, pem)
     elif path.exists():
         # Enabling KMS on a deployment that already has a plaintext signing
         # key must wrap THAT key — minting a new one silently rotates the
         # issuer identity and strands every signed record (chain verify under
         # the old key fails, review links die). Order matters: only remove the
         # plaintext after the wrapped record is durably written; if KMS is
-        # unreachable the wrap raises first and the PEM stays put.
+        # unreachable the wrap raises first and the PEM stays put. Read-only
+        # loads skip the migration entirely — the plaintext loads as-is.
         pem = path.read_bytes()
-        record = box.wrap(pem)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        _atomic_write(wrapped_path, json.dumps(record, indent=2).encode("utf-8"))
-        path.unlink()  # plaintext key no longer needed — KMS can re-unwrap
+        if create:
+            record = box.wrap(pem)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            _atomic_write(wrapped_path, json.dumps(record, indent=2).encode("utf-8"))
+            path.unlink()  # plaintext key no longer needed — KMS can re-unwrap
     else:
+        if not create:
+            raise FileNotFoundError(f"no signing key at {path}")
         from cryptography.hazmat.primitives import serialization
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -315,7 +342,8 @@ def load_or_create_signer(
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
     sk = serialization.load_pem_private_key(pem, password=None)
-    assert isinstance(sk, Ed25519PrivateKey)
+    if not isinstance(sk, Ed25519PrivateKey):
+        raise ValueError("key file does not hold an Ed25519 private key")
     return Signer(sk)
 
 

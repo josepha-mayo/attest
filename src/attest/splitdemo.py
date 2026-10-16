@@ -24,6 +24,7 @@ with `attest verify`.
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -104,7 +105,11 @@ def run(out_dir: Path | None = None, *, echo=print) -> dict:
     _seed(fork_store, issuer_keypair, "fork")
     cp_fork = fork.issue_log_checkpoint()
     fork_size, fork_root = cp_fork.payload["tree_size"], cp_fork.payload["root_sha256"]
-    assert fork_size == true_size and fork_root != true_root
+    if not (fork_size == true_size and fork_root != true_root):
+        raise RuntimeError(
+            "split-demo: fabricated fork is not divergent — the demo cannot "
+            "proceed without two same-size, different-root histories"
+        )
     step(
         f"2. same issuer key signs a different {fork_size}-leaf history — "
         f"checkpoint {cp_fork.id[:20]}…, root {fork_root[:24]}… — both verify"
@@ -120,7 +125,8 @@ def run(out_dir: Path | None = None, *, echo=print) -> dict:
         w_signer,
         {"issuer_doc": doc, "checkpoint": cp_fork.model_dump(mode="json")},
     )
-    assert status == 200, out
+    if status != 200:
+        raise RuntimeError(f"split-demo: witness refused the fork pin — {out}")
     step(
         f"3. witness was shown the FORK — cosigned it (rcpt "
         f"{out['cosignature']['id'][:20]}…) and pinned size {fork_size}"
@@ -151,7 +157,8 @@ def run(out_dir: Path | None = None, *, echo=print) -> dict:
     }
     now = datetime.now(tz=UTC).isoformat()
     mine, ok, lines = logmonitor.check(None, doc, served_head, issuer.consistency_proof, now)
-    assert ok and mine is not None, lines
+    if not (ok and mine is not None):
+        raise RuntimeError(f"split-demo: monitor pin of the true head failed — {lines}")
     step(f"4. monitor pins the TRUE head (size {mine['tree_size']}) — locally green")
     verdict, line = logmonitor.compare_views(
         mine,
@@ -162,7 +169,14 @@ def run(out_dir: Path | None = None, *, echo=print) -> dict:
         issuer_lineage={issuer_keypair.public_key_b64},
     )
     step(f"   cross-view: [{verdict}] {line}")
-    assert verdict == "diverged", (verdict, line)
+    if verdict != "diverged":
+        # Under -O an assert would silently skip this and the observation
+        # below would be signed claiming 'diverged' over agreeing views —
+        # a false attestation. The gate is a runtime check, not an assert.
+        raise RuntimeError(
+            f"split-demo: cross-view did not detect the fork — [{verdict}] {line}; "
+            "refusing to sign a monitor_observation that claims divergence"
+        )
 
     # --- Act 5: the catch is itself evidence --------------------------------
     j_store = Store(":memory:")
@@ -224,7 +238,11 @@ def run(out_dir: Path | None = None, *, echo=print) -> dict:
             ),
         }
         path = out_dir / "divergence-checkpoint.json"
-        path.write_text(json.dumps(doc_out, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        # Atomic like every evidence output — a truncated evidence doc is
+        # worse than none.
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(doc_out, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        os.replace(tmp, path)
         step(f"6. evidence written: {path}")
         step(
             "   verify it: attest verify "

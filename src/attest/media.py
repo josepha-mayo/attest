@@ -11,13 +11,14 @@ _EXT = {"image/jpeg": "jpg", "image/png": "png", "video/mp4": "mp4"}
 
 
 class MediaStore:
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, *, create: bool = True):
         self.root = root.resolve()
-        self.root.mkdir(parents=True, exist_ok=True)
-        try:  # evidence bytes are private-record content — tighten on POSIX
-            self.root.chmod(0o700)
-        except OSError:
-            pass
+        if create:
+            self.root.mkdir(parents=True, exist_ok=True)
+            try:  # evidence bytes are private-record content — tighten on POSIX
+                self.root.chmod(0o700)
+            except OSError:
+                pass
 
     def save(self, visit_id: str, label: str, content: bytes, content_type: str) -> tuple[str, Path]:
         if any(

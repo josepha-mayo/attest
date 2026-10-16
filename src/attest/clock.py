@@ -9,21 +9,28 @@ from .store import Store
 
 
 class ExecutionClock:
-    def __init__(self, store: Store, *, replay: bool, ring_base_url: str):
+    def __init__(self, store: Store, *, replay: bool, ring_base_url: str, persist: bool = True):
         self.store = store
         self.replay = replay
         url = urlsplit(ring_base_url)
         if replay and (url.scheme != "http" or url.hostname not in ("127.0.0.1", "localhost", "::1")):
             raise ValueError("replay requires a loopback HTTP emulator, never the real Ring API")
         mode = "replay" if replay else "wall"
-        with store.transaction():
-            existing = store.setting("execution_mode")
-            if existing and existing.get("mode") != mode:
-                raise ValueError("runtime clock mode cannot change; choose a separate data directory")
-            if not existing:
-                if replay and (store.sites() or store.workers() or store.visits() or store.schedules()):
-                    raise ValueError("replay requires a fresh private runtime directory")
-                store.put_setting("execution_mode", {"mode": mode})
+        existing = store.setting("execution_mode")
+        if existing and existing.get("mode") != mode:
+            raise ValueError("runtime clock mode cannot change; choose a separate data directory")
+        if not existing and persist:
+            # The mode row is a journaled write — only a command allowed to
+            # mutate may persist it; read paths (explain/triage) pass
+            # persist=False and must never mint state into the runtime.
+            with store.transaction():
+                existing = store.setting("execution_mode")
+                if existing and existing.get("mode") != mode:
+                    raise ValueError("runtime clock mode cannot change; choose a separate data directory")
+                if not existing:
+                    if replay and (store.sites() or store.workers() or store.visits() or store.schedules()):
+                        raise ValueError("replay requires a fresh private runtime directory")
+                    store.put_setting("execution_mode", {"mode": mode})
 
     def snapshot(self) -> dict:
         state = self.store.setting("replay_clock") if self.replay else None

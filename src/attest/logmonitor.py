@@ -19,9 +19,24 @@ import json
 from typing import Any
 
 from . import transparency
-from .transparency import MAX_TREE_SIZE, json_is_int
+from .transparency import MAX_PROOF_NODES, MAX_TREE_SIZE, hex_bytes, json_is_int
 
 STATE_SCHEMA = "attest.log-monitor/1"
+
+
+def _roots_equal(a, b) -> bool:
+    """Same-32-bytes compare for two hex root spellings — never raises.
+
+    Hex is a spelling, not an identity: ``AB…`` and ``ab…`` commit to the
+    same head, and a verbatim string compare manufactures a "different
+    roots" verdict out of one root (a false fork at an equality gate —
+    the one verdict no signature can forge honestly). Undecodable input
+    can never spell the same root, so decode failure answers False — the
+    mismatch branch, which is fail-loud everywhere it is used."""
+    try:
+        return hex_bytes(a, length=32) == hex_bytes(b, length=32)
+    except (TypeError, ValueError):
+        return False
 
 
 def _doc_checkpoint(head: dict) -> dict | None:
@@ -197,7 +212,7 @@ def check(
                 "remove the state file to repin rather than paper over it"
             ],
         )
-    if size == old_size and root_hex == old_root:
+    if size == old_size and _roots_equal(root_hex, old_root):
         lines.append(f"head unchanged — checkpoint still commits to {size} leaves")
         return new_state, True, lines
     if size < old_size:
@@ -320,7 +335,7 @@ def live_check(
         return None, f"live checkpoint does not validate ({err}) — cannot cross-check"
     live_size, live_root = int(live_payload["tree_size"]), live_payload["root_sha256"]
     if pack_size == live_size:
-        if pack_root == live_root:
+        if _roots_equal(pack_root, live_root):
             return True, f"pack's signed head is the live head — tree size {pack_size}"
         return False, (
             f"FORK: pack and live heads both sign tree size {pack_size} with "
@@ -411,6 +426,11 @@ def witness_cosign(store, signer, body: dict) -> tuple[int, dict]:
     issuer_doc = body.get("issuer_doc")
     if not isinstance(issuer_doc, dict) or not isinstance(issuer_doc.get("issuer_key"), str):
         return 422, {"error": "issuer_doc missing or malformed"}
+    # Requester-controlled strings land verbatim in signed receipt payloads and
+    # `witness:*` settings-row names — bound every one or each accepted request
+    # is permanent ledger bloat (the per-IP limiter caps rate, not size).
+    if len(issuer_doc["issuer_key"]) > 128 or len(json.dumps(issuer_doc)) > 65_536:
+        return 422, {"error": "issuer_doc exceeds bounds"}
     # A requester-supplied key_receipts pool feeds the lineage walks — bound it:
     # real lineages are single-digit hops, but every candidate is an Ed25519
     # verification, so an oversized pool is a CPU denial-of-service amplifier.
@@ -431,6 +451,8 @@ def witness_cosign(store, signer, body: dict) -> tuple[int, dict]:
         return 422, {"error": f"checkpoint rejected: {err}"}
     issuer_key = issuer_doc["issuer_key"]
     cp = Receipt.model_validate(cp_raw)
+    if len(cp.id) > 128:
+        return 422, {"error": "checkpoint id exceeds bounds"}
     size, root_hex = int(payload["tree_size"]), payload["root_sha256"]
     # The continuity pin keys on the issuer's CANONICAL lineage identity —
     # the family ROOT, not the claimed tip and not a set-ordering artifact:
@@ -467,7 +489,8 @@ def witness_cosign(store, signer, body: dict) -> tuple[int, dict]:
             # path — a REFUSED offer must leave every slot untouched or a
             # fork offer could burn the pin it was refused for.
             legacy_pin = None
-            for slot_name, legacy in store.settings_by_prefix("witness:").items():
+            slots = store.settings_by_prefix("witness:")
+            for slot_name, legacy in slots.items():
                 if (
                     slot_name != f"witness:{canonical}"
                     and isinstance(legacy, dict)
@@ -490,6 +513,12 @@ def witness_cosign(store, signer, body: dict) -> tuple[int, dict]:
                     legacy_pin = legacy
             if legacy_pin is not None:
                 state = legacy_pin
+            elif len(slots) >= 512:
+                # A fresh lineage = a fresh permanent pin slot + signed
+                # cosignature receipt. 512 distinct witnessed issuers is far
+                # past real use; past it a flood of self-signed identities
+                # would only mint ledger bloat.
+                return 429, {"error": "witness pin slots exhausted"}
         if state and state.get("schema") != WITNESS_SCHEMA:
             return 500, {"error": "witness pin state is corrupt — refusing to repin"}
         old_size = state.get("tree_size")
@@ -504,7 +533,7 @@ def witness_cosign(store, signer, body: dict) -> tuple[int, dict]:
             except ValueError:
                 return 500, {"error": "witness pin fields are corrupt — refusing to repin"}
         if old_size is not None:
-            if size < int(old_size) or (size == int(old_size) and root_hex != old_root):
+            if size < int(old_size) or (size == int(old_size) and not _roots_equal(root_hex, old_root)):
                 return 409, {
                     "error": "offered head forks or regresses the pinned head",
                     "pinned": {
@@ -521,6 +550,10 @@ def witness_cosign(store, signer, body: dict) -> tuple[int, dict]:
                         bridge = (
                             isinstance(cons, dict)
                             and isinstance(cons.get("proof"), list)
+                            # Bound before decode — this list-comp runs inside
+                            # the write transaction; a real proof never needs
+                            # more than MAX_PROOF_NODES nodes (≈2·log2 n).
+                            and len(cons["proof"]) <= MAX_PROOF_NODES
                             and json_is_int(cons.get("first"))
                             and json_is_int(cons.get("tree_size"))
                             and cons["first"] == int(old_size)
@@ -555,20 +588,38 @@ def witness_cosign(store, signer, body: dict) -> tuple[int, dict]:
         # a mismatched attestation.
         if cosig is not None and (
             cosig.payload.get("subject_tree_size") != size
-            or cosig.payload.get("subject_root_sha256") != root_hex
+            or not _roots_equal(cosig.payload.get("subject_root_sha256"), root_hex)
         ):
             cosig = None
-            pseudo_id = f"witness:{canonical[:24]}:{cp.id}:{root_hex[:16]}"
+            # The root embedded in a pseudo-id keys the slot, so it must
+            # spell canonically — a case-variant re-offer of the same head
+            # is the same claim and must land on the same slot.
+            pseudo_id = f"witness:{canonical[:24]}:{cp.id}:{root_hex.lower()[:16]}"
             cosig = store.receipt_for_visit(pseudo_id)
             if cosig is not None and (
                 cosig.payload.get("subject_tree_size") != size
-                or cosig.payload.get("subject_root_sha256") != root_hex
+                or not _roots_equal(cosig.payload.get("subject_root_sha256"), root_hex)
             ):
                 # A 64-bit root-prefix collision landed a different
                 # attestation under the qualified pseudo — never reuse it;
                 # fall deeper so the fresh cosig still stores uniquely.
                 cosig = None
-                pseudo_id = f"witness:{canonical[:24]}:{cp.id}:{root_hex}"
+                pseudo_id = f"witness:{canonical[:24]}:{cp.id}:{root_hex.lower()}"
+                cosig = store.receipt_for_visit(pseudo_id)
+                if cosig is not None and (
+                    cosig.payload.get("subject_tree_size") != size
+                    or not _roots_equal(cosig.payload.get("subject_root_sha256"), root_hex)
+                ):
+                    # The full-root slot is occupied by a receipt claiming a
+                    # different subject — there is no deeper qualifier to fall
+                    # to. Refuse loudly: a silent 500 would wedge every retry
+                    # of this exact offer on the same UNIQUE violation.
+                    return 409, {
+                        "error": "cosignature slot collision — a stored receipt "
+                        "occupies the fully-qualified attestation id for this "
+                        "checkpoint while claiming a different subject",
+                        "checkpoint_id": cp.id,
+                    }
         if cosig is None:
             prev = store.latest_receipt()
             cosig = signer.issue(
@@ -702,20 +753,17 @@ def anchor_published_pins(store, heads: dict) -> dict:
     newest checkpoint stay unanchored — absence is honest, never a claim."""
     from .models import Receipt
 
-    receipts = store.receipts()
-    latest_cp = next(
-        (r for r in reversed(receipts) if r.payload.get("record_type") == "log_checkpoint"),
-        None,
-    )
+    # keyed lookups, not full-table parses — this serves a public endpoint
+    latest_cp = store.latest_checkpoint_receipt()
     if latest_cp is None:
         return heads
     try:
         size = int(latest_cp.payload["tree_size"])
     except (TypeError, ValueError):
         return heads  # a malformed own-checkpoint just can't anchor anything
-    from .transparency import inclusion_proof, leaf_hashes
+    from .transparency import inclusion_proof
 
-    leaves = leaf_hashes(receipts)  # compute once, not per pin
+    leaves = store.cached_leaf_hashes()  # tip-keyed memo, not a per-request scan
     for pin in heads.get("pins") or []:
         cosig = pin.get("cosignature")
         if not isinstance(cosig, dict):
@@ -879,7 +927,10 @@ def compare_views(
             if not json_is_int(leaf_index):
                 raise ValueError("leaf_index is not an integer")
             leaf_index = int(leaf_index)
-            nodes = [hex_bytes(h, length=32) for h in (aproof.get("path") or [])]
+            pv = aproof.get("path")
+            if pv is not None and (not isinstance(pv, list) or len(pv) > MAX_PROOF_NODES):
+                raise ValueError("anchor proof path is not a list")
+            nodes = [hex_bytes(h, length=32) for h in pv or []]
             a_size = int(ap["tree_size"])
             a_root = hex_bytes(ap["root_sha256"], length=32)
         except (AttributeError, KeyError, TypeError, ValueError):
@@ -1025,7 +1076,7 @@ def compare_views(
             "witness signed them, so this is its own attestation failing",
         )
     w_id = cosig.id[:24]
-    if my_size == w_size and my_root == w_root:
+    if my_size == w_size and _roots_equal(my_root, w_root):
         return (
             "agree",
             f"witness attests the same head I see ({w_size} leaves, cosig {w_id}…) — "
@@ -1124,7 +1175,9 @@ def check_cosignatures(
     verified, signers = 0, []
     seen_ids, seen_keys = set(), set()
     cosig_list = doc.get("cosignatures")
-    for raw in cosig_list if isinstance(cosig_list, list) else []:
+    # Same bound discipline as key_receipts: an over-long cosig list is a
+    # CPU amplifier (an Ed25519 verify per entry), never a real deployment.
+    for raw in cosig_list[:64] if isinstance(cosig_list, list) else []:
         try:
             cosig = Receipt.model_validate(raw)
             p = cosig.payload
@@ -1138,13 +1191,17 @@ def check_cosignatures(
                 # count — JS can't distinguish 5.0 from 5 post-parse.
                 or not json_is_int(p.get("subject_tree_size"))
                 or p.get("subject_tree_size") != size
-                or p.get("subject_root_sha256") != root_hex
+                or not _roots_equal(p.get("subject_root_sha256"), root_hex)
             ):
                 continue
             # The cosig must name THIS issuer — one attesting another
             # deployment's head never counts here (compare_views parity).
             # Only gated when the caller computed a lineage — without it the
-            # issuer family can't be told apart from a foreign one.
+            # issuer family can't be told apart from a foreign one. With no
+            # lineage supplied, a foreign-issuer cosig can still count —
+            # defensible only because it must mirror this exact (checkpoint
+            # id, size, root), i.e. identical signed content; callers that
+            # have the lineage pass it.
             if issuer_keys and p.get("subject_issuer") not in self_keys:
                 continue
             if cosig.id in seen_ids or cosig.public_key in seen_keys:
@@ -1187,7 +1244,9 @@ def check_cosig_anchors(doc: dict) -> tuple[int, list[str]]:
         if isinstance(raw, dict) and isinstance(raw.get("id"), str):
             cosigs.setdefault(raw["id"], raw)  # first-wins: the counting path counts the first id
     anchored, errors = 0, []
-    for cid, anchor in anchors.items():
+    # An anchor costs a signature verify + inclusion walk per entry — cap
+    # the map like cosignatures/key_receipts (a real witness set is small).
+    for cid, anchor in list(anchors.items())[:64]:
         cosig = cosigs.get(cid)
         if cosig is None:
             errors.append(f"cosig_anchors: {cid} — anchor for a cosignature the doc doesn't carry")
@@ -1195,6 +1254,15 @@ def check_cosig_anchors(doc: dict) -> tuple[int, list[str]]:
         try:
             if not isinstance(anchor, dict):
                 raise ValueError("anchor is not an object")
+            # The anchor commits cosig.payload_hash into the witness's log —
+            # meaningful only when that cosig is itself a valid attestation;
+            # anchoring junk bytes proves nothing.
+            co = Receipt.model_validate(cosig)
+            if co.payload.get("record_type") != "witness_cosignature":
+                raise ValueError("anchored entry is not a witness_cosignature")
+            ok_c, why_c = verify_receipt(co, public_key=co.public_key)
+            if not ok_c:
+                raise ValueError(f"anchored cosig invalid: {why_c}")
             acp = Receipt.model_validate(anchor.get("checkpoint"))
             p = acp.payload
             if p.get("record_type") != "log_checkpoint":
@@ -1215,7 +1283,10 @@ def check_cosig_anchors(doc: dict) -> tuple[int, list[str]]:
             proof = anchor.get("proof")
             if not isinstance(proof, dict):
                 raise ValueError("anchor proof is not an object")
-            path = [hex_bytes(h, length=32) for h in proof.get("path") or []]
+            pv = proof.get("path")
+            if pv is not None and (not isinstance(pv, list) or len(pv) > MAX_PROOF_NODES):
+                raise ValueError("anchor proof path is not a list")
+            path = [hex_bytes(h, length=32) for h in pv or []]
             idx = proof.get("leaf_index")
             if not json_is_int(idx) or not verify_inclusion(leaf, size, int(idx), path, root):
                 raise ValueError("the cosig does not reach the anchor's signed tree head")
@@ -1300,8 +1371,11 @@ def post_json(url: str, body: dict, client=None, *, bound: int = 4 * 1024 * 1024
     as a trusted verdict. Everything in the exchange is verification
     material — signatures authenticate; transport denial can only stall,
     never forge."""
+    import time
+
     import httpx
 
+    deadline = time.monotonic() + 30
     try:
         if client is not None:
             # Injected clients honor the .post contract; the byte bound
@@ -1310,6 +1384,8 @@ def post_json(url: str, body: dict, client=None, *, bound: int = 4 * 1024 * 1024
             status_code, raw = r.status_code, r.content
             if len(raw) > bound:
                 raise ValueError(f"{url} response exceeds the 4 MB bound")
+            if time.monotonic() > deadline:
+                raise ValueError(f"{url} timed out")
         else:
             with httpx.stream("POST", url, json=body, timeout=15) as r:
                 status_code = r.status_code
@@ -1318,6 +1394,10 @@ def post_json(url: str, body: dict, client=None, *, bound: int = 4 * 1024 * 1024
                     raw.extend(chunk)
                     if len(raw) > bound:
                         raise ValueError(f"{url} response exceeds the 4 MB bound")
+                    # fetch_json parity: a drip-feeding witness can't hold
+                    # the issuer's caller open past the wall-clock bound
+                    if time.monotonic() > deadline:
+                        raise ValueError(f"{url} timed out")
     except httpx.HTTPError as exc:
         raise ValueError(f"{url} unreachable: {exc}") from exc
     except httpx.InvalidURL as exc:

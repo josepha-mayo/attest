@@ -75,6 +75,20 @@ def _serve(args: argparse.Namespace) -> None:
 def _seed(args: argparse.Namespace) -> dict:
     """Create a site bound to the sandbox's doorbell + contact sensor, a worker, and a schedule
     whose window starts now (so the very next arrival cue opens a matched visit)."""
+    # The admin token rides every request below — it must never leave in
+    # cleartext to a non-local target. Loopback HTTP is the dev path;
+    # anything else requires HTTPS.
+    try:
+        parsed = urlsplit(args.public_url)
+    except ValueError:
+        sys.exit(f"malformed --public-url {args.public_url!r}")
+    if (
+        parsed.scheme == "http" and parsed.hostname not in ("127.0.0.1", "localhost", "::1")
+    ) or parsed.scheme not in ("http", "https"):
+        sys.exit(
+            "seed sends admin credentials — --public-url must be HTTPS, "
+            "or loopback HTTP for local development"
+        )
     with RingClient(settings.ring_access_token, base_url=args.ring_url) as ring:
         bundles = ring.devices(include=["capabilities", "status"])
     cam = next((b for b in bundles if b.capabilities and b.capabilities.is_camera), None)
@@ -160,7 +174,7 @@ def _replay(args: argparse.Namespace) -> None:
 
     if not settings.admin_token or not math.isfinite(args.speed) or args.speed <= 0:
         sys.exit("Replay requires admin authentication and a finite positive speed.")
-    if not settings.ring_webhook_key:
+    if not settings.webhook_signing_key:
         sys.exit(
             "Replay signs simulated webhooks — set ATTEST_RING_WEBHOOK_KEY to the "
             "same value the target server verifies with. `attest demo` mints one "
@@ -275,6 +289,7 @@ def _replay(args: argparse.Namespace) -> None:
             "blackout",
             "sub_lapse",
             "liveview",
+            "late_delivery",
         }
         patterns = [p.strip() for p in args.story.split(",") if p.strip()] if args.story else []
         if bad := set(patterns) - story_patterns:
@@ -414,6 +429,13 @@ def _replay(args: argparse.Namespace) -> None:
             elif pattern == "unmatched":
                 shift = (args.window_minutes + settings.arrival_grace_minutes + 10) * 60
                 steps = [dataclasses.replace(s, offset_s=s.offset_s + shift) for s in steps]
+            elif pattern == "late_delivery":
+                # Nothing arrives inside the window — it lapses to
+                # no_observation at the final sweep; the buffered webhook that
+                # only delivers AFTER that is posted below (post-sweep), where
+                # it lands as a late event AND flags the lapsed record
+                # contradicted_no_observation.
+                steps = []
             previous_offset = 0
             did_checkin = False
             liveview_done = False
@@ -473,7 +495,7 @@ def _replay(args: argparse.Namespace) -> None:
                     auth=None,
                     headers={
                         "Content-Type": "application/json",
-                        webhooks.SIGNATURE_HEADER: webhooks.sign(settings.ring_webhook_key, raw),
+                        webhooks.SIGNATURE_HEADER: webhooks.sign(settings.webhook_signing_key, raw),
                     },
                 )
                 response.raise_for_status()
@@ -514,6 +536,48 @@ def _replay(args: argparse.Namespace) -> None:
         for visit in visits:
             if visit["state"] in ("open", "in_progress", "unmatched"):
                 api.post(f"/api/visits/{visit['id']}/close").raise_for_status()
+        if "late_delivery" in patterns:
+            # The camera's motion webhook was buffered upstream and only
+            # delivers now — its occurred_at sits INSIDE a window that already
+            # lapsed to no_observation at the sweep above. The engine keeps it
+            # as a late event and flags that signed record
+            # contradicted_no_observation: the ledger admits when its own
+            # earlier claim was contested.
+            day_idx = patterns.index("late_delivery")
+            if day_idx >= args.days:
+                sys.exit(
+                    "--story slots late_delivery at day "
+                    f"{day_idx + 1} but --days is {args.days} — "
+                    "that window never ran, so nothing lapsed to contradict"
+                )
+            late_at = start + timedelta(days=day_idx, minutes=5)
+            response = sandbox.post(
+                "/_sandbox/events",
+                json={
+                    "device_id": seeded["camera"],
+                    "type": "motion_detected",
+                    "sub_type": "human",
+                    "at": late_at.isoformat(),
+                    "deliver": False,
+                },
+            )
+            response.raise_for_status()
+            raw = webhooks.encode(response.json()["webhook"])
+            api.post(
+                "/webhooks/ring",
+                content=raw,
+                auth=None,
+                headers={
+                    "Content-Type": "application/json",
+                    webhooks.SIGNATURE_HEADER: webhooks.sign(settings.webhook_signing_key, raw),
+                },
+            ).raise_for_status()
+            drain(api)
+            print(
+                f"Late-delivered a motion event from {late_at.isoformat()} — the "
+                "lapsed record now carries a contradicted_no_observation flag",
+                flush=True,
+            )
         if args.worker_review:
             targets = [
                 v
@@ -633,7 +697,7 @@ def _demo(args: argparse.Namespace) -> None:
     # Webhook HMAC keys are never shipped: mint a fresh one per run and hand it
     # to both the app's verifier and the in-process replay driver's signer.
     webhook_key = secrets.token_urlsafe(32)
-    settings.ring_webhook_key = webhook_key
+    settings.ring_webhook_key = SecretStr(webhook_key)
     demo = Settings(
         _env_file=None,
         admin_token=token,
@@ -905,7 +969,8 @@ def _demo(args: argparse.Namespace) -> None:
     print("      export, coverage, digest, rotate-key, attack-demo — take the", flush=True)
     print("      single-instance lock, so Ctrl+C the demo first. The dashboard's", flush=True)
     print("      pack download and /api/admin/rotate-key are the live paths.)", flush=True)
-    print(" 11. attest attack-demo — the tamper battery, every attempt caught", flush=True)
+    print(" 11. attest attack-demo — the tamper battery; 21 caught, 1 named", flush=True)
+    print("     boundary (the unkeyed journal needs an external anchor)", flush=True)
     print("     and rolled back (offline runtimes only — it holds the writer lock)", flush=True)
     print(" 12. rotate the signing key live — the pivot is a signed chain event", flush=True)
     print("     and receipts on both sides still verify:", flush=True)
@@ -1076,12 +1141,15 @@ def _verify(args: argparse.Namespace) -> None:
     def fail(detail: str, **kw) -> None:
         """Every verification verdict exits the same way on both surfaces —
         with --json stdout still carries exactly one object, so a pipeline
-        can gate on .ok without parsing prose."""
+        can gate on .ok without parsing prose. The verdict emits BEFORE the
+        badge write — a badge path that can't be written must never eat
+        the machine-readable answer."""
+        if json_mode:
+            print(json.dumps({"ok": False, "detail": detail, **kw}, indent=2))
         _write_verdict_badge(
             getattr(args, "badge", None), False, detail, link=getattr(args, "badge_link", None)
         )
         if json_mode:
-            print(json.dumps({"ok": False, "detail": detail, **kw}, indent=2))
             sys.exit(1)
         sys.exit(detail)
 
@@ -1190,6 +1258,10 @@ def _verify(args: argparse.Namespace) -> None:
                     if n > 256 * 1024 * 1024:
                         fail("artifact exceeds the 256 MB verification bound")
                     raw.extend(chunk)
+        except httpx.InvalidURL as exc:
+            # InvalidURL extends Exception, not HTTPError — a malformed
+            # URL must not escape the verdict path as a traceback.
+            fail(f"fetch failed: malformed URL {args.bundle}: {exc}")
         except httpx.HTTPError as exc:
             fail(f"fetch failed: {exc}")
         path = Path(args.bundle.rstrip("/").rsplit("/", 1)[-1] or "remote-artifact")
@@ -1216,6 +1288,12 @@ def _verify(args: argparse.Namespace) -> None:
         return
     if getattr(args, "attest", False):
         fail("--attest signs a verdict on a pack .zip — pass the zip itself")
+    if getattr(args, "badge", None):
+        # The zip path is the only one that writes the badge on PASS —
+        # elsewhere a stale green/red file would outlive this verdict.
+        # sys.exit, not fail() — this is a usage refusal, not a verdict,
+        # and fail() would write a red badge for a pack never checked.
+        sys.exit("attest: --badge renders a pack-verdict shield — pass the .zip itself")
     try:
         data = transparency.json_loads(raw.decode("utf-8"))
     except UnicodeDecodeError:
@@ -1335,6 +1413,15 @@ def _verify(args: argparse.Namespace) -> None:
             witness_threshold=witness_threshold,
         )
         return
+
+    if required_witnesses or getattr(args, "witness_threshold", None):
+        # The flags looked like they did something — "requiring witness X"
+        # printed — but nothing below enforces them. Refuse instead of
+        # letting a passed verdict carry a policy it never checked.
+        fail(
+            "--witness-* applies to pack .zip and checkpoint documents — "
+            "nothing else has a log head to cosign"
+        )
 
     try:
         bundle = ReviewBundle.model_validate(data)
@@ -1908,12 +1995,16 @@ def _attestation_engine():
 
 def _lifecycle_fp(pool: list | None) -> str | None:
     """Content fingerprint of an issuer-lifecycle receipt pool — part of the
-    trust context an attestation binds (a changed pool is a changed claim)."""
+    trust context an attestation binds (a changed pool is a changed claim).
+    Hashes payload_hash (content-derived), not receipt ids — a pool member
+    swapped under a reused id still changes the fingerprint."""
     import hashlib
 
     if not pool:
         return None
-    return hashlib.sha256(json.dumps(sorted(r.id for r in pool), separators=(",", ":")).encode()).hexdigest()
+    return hashlib.sha256(
+        json.dumps(sorted(r.payload_hash for r in pool), separators=(",", ":")).encode()
+    ).hexdigest()
 
 
 def _checker_verifier(checker: str, func) -> dict:
@@ -2177,7 +2268,6 @@ def _write_verdict_badge(path: str | None, ok: bool, detail: str, link: str | No
     if not path:
         return
     from html import escape as _esc
-    from pathlib import Path
 
     label, value, color = "attest", ("verified" if ok else "FAILED"), ("#2e8b57" if ok else "#c0392b")
     # ~6.2px per Verdana-11 glyph plus padding, per the shields.io convention.
@@ -2208,7 +2298,7 @@ def _write_verdict_badge(path: str | None, ok: bool, detail: str, link: str | No
             )
             .replace("</svg>", "</a></svg>", 1)
         )
-    Path(path).write_text(svg, encoding="utf-8")
+    _atomic_write(path, svg)
     print(f"verdict badge written to {path}", file=sys.stderr)
 
 
@@ -2256,6 +2346,9 @@ def _anchor(args: argparse.Namespace) -> None:
             aws_region=settings.aws_region,
         )
         prev = store.latest_receipt()
+        from .ledger import check_signer_continuity
+
+        check_signer_continuity(prev, signer)
         entries = store._conn.execute("SELECT COUNT(*) FROM journal").fetchone()[0]
         # The Merkle head too: receipt_head alone only proves the tail's hash —
         # an auditor holding just this anchor could verify a chain, but not a
@@ -2287,7 +2380,7 @@ def _anchor(args: argparse.Namespace) -> None:
             },
         )
         out = Path(args.out or "attest-anchor.json")
-        out.write_text(anchor.model_dump_json(indent=2), encoding="utf-8")
+        _atomic_write(out, anchor.model_dump_json(indent=2))
         print(
             f"wrote {out} — journal head {anchor.payload['journal_head'][:16]}…, "
             f"{entries} entries, {anchor.payload['receipt_count']} receipts, "
@@ -2393,20 +2486,25 @@ def _triage(args: argparse.Namespace) -> None:
     db = settings.data_dir / "attest.sqlite3"
     if not db.exists():
         sys.exit(f"no store at {db}")
-    store = Store(db)
+    store = Store(db, read_only=True)
     try:
         signer = load_or_create_signer(
             settings.key_path,
             kms_key_id=settings.kms_key_id,
             custody=settings.key_custody,
             aws_region=settings.aws_region,
+            create=False,  # triage is read-only — never mint or migrate a key
         )
         from .clock import ExecutionClock
 
-        # Triage never writes; the clock only needs to match the store's mode.
+        # Triage never writes; the clock only needs to match the store's mode
+        # and must not persist the mode row (journaled write) either.
         replay = (store.setting("execution_mode") or {}).get("mode") == "replay"
         clock = ExecutionClock(
-            store, replay=replay, ring_base_url="http://127.0.0.1" if replay else settings.ring_base_url
+            store,
+            replay=replay,
+            ring_base_url="http://127.0.0.1" if replay else settings.ring_base_url,
+            persist=False,
         )
         reviews = ReviewService(store, signer, clock)
         result = run_triage(
@@ -2424,21 +2522,45 @@ def _triage(args: argparse.Namespace) -> None:
         store.close()
 
 
-def _must_store():
+def _atomic_write(path, data) -> None:
+    """Temp-file-then-rename for every artifact the CLI publishes — a crash
+    mid-write must never leave a truncated pack, badge, report, or evidence
+    document that reads like the real thing."""
+    import os
+    from pathlib import Path
+
+    path = Path(path)
+    tmp = path.with_name(path.name + ".tmp")
+    if isinstance(data, str):
+        tmp.write_text(data, encoding="utf-8")
+    else:
+        tmp.write_bytes(data)
+    os.replace(tmp, path)
+
+
+def _must_store(*, read_only: bool = False):
     """Open the runtime store — or refuse. An integrity/inspection command must
     never let SQLite silently CREATE an empty db and then report it intact
-    ('attest journal' on a never-written dir must not print entries: 0, ok)."""
+    ('attest journal' on a never-written dir must not print entries: 0, ok).
+    ``read_only`` opens without schema DDL or journal-mode writes, so an
+    inspection can't leave marks in the runtime it audits."""
     from .store import Store
 
     db = settings.data_dir / "attest.sqlite3"
     if not db.exists():
         sys.exit(f"no store at {db} — run `attest serve` or `attest replay` first")
-    return Store(db)
+    return Store(db, read_only=read_only)
 
 
-def _cli_engine(store):
+def _cli_engine(store, *, read_only: bool = False):
     """A real VisitEngine over an existing store for offline issuance commands
-    (coverage/digest/export signing). The Ring client is never called."""
+    (coverage/digest/export signing). The Ring client is never called.
+
+    ``read_only=True`` is the contract for explain/triage-style callers:
+    the signer only *loads* (never mints, never custody-migrates), the
+    clock never persists its mode row, and the media dir is never created —
+    a command documented as read-only must not write into the runtime it
+    inspects."""
     from ring_sandbox import RingClient
 
     from .engine import VisitEngine
@@ -2455,18 +2577,36 @@ def _cli_engine(store):
     base = settings.ring_base_url
     if eff.replay_mode and urlsplit(base).hostname not in ("127.0.0.1", "localhost", "::1"):
         base = "http://127.0.0.1:9"  # inert — satisfies the loopback-only guard
-    return VisitEngine(
-        store,
-        RingClient(settings.ring_access_token, base_url=base),
-        load_or_create_signer(
+    try:
+        signer = load_or_create_signer(
             settings.key_path,
             kms_key_id=settings.kms_key_id,
             custody=settings.key_custody,
             aws_region=settings.aws_region,
-        ),
-        MediaStore(settings.data_dir / "media"),
+            create=not read_only,
+        )
+    except FileNotFoundError:
+        if not read_only:
+            raise
+        # Keyless store: a deployment that never signed has no PEM to load —
+        # and read-only commands must not mint one. Verification paths never
+        # trust the engine signer's own key (receipts carry their public key);
+        # an ephemeral stand-in preserves that, just without a disk write.
+        from .ledger import Signer
+
+        signer = Signer.ephemeral()
+    if not read_only:
+        from .ledger import check_signer_continuity
+
+        check_signer_continuity(store.latest_receipt(), signer)
+    return VisitEngine(
+        store,
+        RingClient(settings.ring_access_token, base_url=base),
+        signer,
+        MediaStore(settings.data_dir / "media", create=not read_only),
         TemplateSummarizer(settings.timezone),
         eff,
+        persist_clock=not read_only,
     )
 
 
@@ -2518,7 +2658,7 @@ def _rotate_key(args: argparse.Namespace) -> None:
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-    from .keycustody import load_or_create_signer, persist_signer_key
+    from .keycustody import persist_signer_key
     from .ledger import Signer
     from .store import Store
 
@@ -2543,6 +2683,11 @@ def _rotate_key(args: argparse.Namespace) -> None:
         new_key = new_signer.public_key_b64
 
         def _adopt() -> Signer:
+            # Adopt from the key material in hand once the persist lands —
+            # never a second custody round-trip: a post-persist load failure
+            # would leave disk on the new key while this signer stayed retired,
+            # and receipts minted in that gap break the chain the moment the
+            # next boot's adoption sweep consummates the pivot.
             persist_signer_key(
                 settings.key_path,
                 pem,
@@ -2550,12 +2695,7 @@ def _rotate_key(args: argparse.Namespace) -> None:
                 custody=settings.key_custody,
                 aws_region=settings.aws_region,
             )
-            return load_or_create_signer(
-                settings.key_path,
-                kms_key_id=settings.kms_key_id,
-                custody=settings.key_custody,
-                aws_region=settings.aws_region,
-            )
+            return Signer(sk)
 
         # Shared rotate path: pending-adoption resume, pivot, persist+reload,
         # adoption — serialized under the signing barrier so a crash window
@@ -2598,7 +2738,10 @@ def _revoke_key(args: argparse.Namespace) -> None:
             except ValueError:
                 sys.exit(f"--suspect-after is not ISO 8601: {args.suspect_after!r}")
             if when.tzinfo is None:
-                when = when.replace(tzinfo=UTC)
+                # Same contract sweep/check-in enforce: a signed timestamp
+                # must name its offset — guessing UTC for a forensic cutoff
+                # silently shifts which records fall suspect.
+                sys.exit("--suspect-after must be timezone-aware (ISO 8601 with offset)")
         else:
             # Default: the key's first signed receipt — when a compromise was
             # discovered is knowable, when it started is not; the honest
@@ -2637,13 +2780,16 @@ def _issuer(args: argparse.Namespace) -> None:
     db = settings.data_dir / "attest.sqlite3"
     if not db.exists():
         sys.exit(f"no store at {db}")
-    store = Store(db)
+    store = Store(db, read_only=True)
     try:
         signer = load_or_create_signer(
             settings.key_path,
             kms_key_id=settings.kms_key_id,
             custody=settings.key_custody,
             aws_region=settings.aws_region,
+            # issuer is read-only against the runtime: minting a fresh key
+            # here would publish an identity with no lineage behind it.
+            create=False,
         )
         doc = ledger.issuer_document(signer.public_key_b64, store.receipts())
     finally:
@@ -2668,6 +2814,10 @@ def _checkpoint(args: argparse.Namespace) -> None:
     from .instance import acquire_instance_lock
     from .store import Store
 
+    if getattr(args, "timestamp", False) and not args.out:
+        # Validate before minting — a refused flag combination must not leave
+        # a checkpoint receipt in the ledger anyway.
+        sys.exit("--timestamp needs --out — the notarized proof rides next to the checkpoint file")
     db = settings.data_dir / "attest.sqlite3"
     if not db.exists():
         sys.exit(f"no store at {db}")
@@ -2679,8 +2829,20 @@ def _checkpoint(args: argparse.Namespace) -> None:
         # verifier rejects it as a malformed tree head, so serving it would
         # make a monitor ALERT forever against an honest deployment. Refuse
         # before minting: an empty log is 'nothing to pin yet'.
-        if not engine.log_leaves():
+        leaves_pre = engine.log_leaves()
+        if not leaves_pre:
             sys.exit("log is empty — nothing to checkpoint yet")
+        include = getattr(args, "include", None) or []
+        embedded_pre: list = []
+        if include:
+            # Validate the include set against the CURRENT tree before the
+            # mint — a receipt outside it has no inclusion path, and a
+            # refused --include must not leave the checkpoint it rode on.
+            embedded_pre = [r for r in store.receipts() if any(r.visit_id.startswith(p) for p in include)]
+            leaf_hashes = set(leaves_pre)
+            for r in embedded_pre:
+                if bytes.fromhex(r.payload_hash) not in leaf_hashes:
+                    sys.exit(f"--include: receipt {r.id} is not inside the committed tree")
         receipt = engine.issue_log_checkpoint()
         p = receipt.payload
         out = {
@@ -2723,39 +2885,31 @@ def _checkpoint(args: argparse.Namespace) -> None:
                     print(f"witness {base}: {line}")
                 else:
                     print(f"witness {base}: {line}", file=sys.stderr)
-        include = getattr(args, "include", None) or []
         if include:
             # Embed the matching receipts plus an inclusion proof each —
             # the doc then proves 'these signed observations are inside
             # this signed head' on its own, no store access needed. The
-            # checkpoint already commits them (it heads the whole log);
-            # a receipt outside the tree has no path — refuse, don't
-            # silently drop evidence the operator asked for.
-            embedded = [r for r in store.receipts() if any(r.visit_id.startswith(p) for p in include)]
+            # membership check already ran pre-mint; this block only builds
+            # proofs.
             from .transparency import inclusion_path
 
             leaves = engine.log_leaves()[: int(p["tree_size"])]
             proofs = {}
-            for r in embedded:
-                try:
-                    idx = leaves.index(bytes.fromhex(r.payload_hash))
-                except ValueError:
-                    sys.exit(f"--include: receipt {r.id} is not inside the committed tree")
+            for r in embedded_pre:
+                idx = leaves.index(bytes.fromhex(r.payload_hash))
                 proofs[r.payload_hash] = {
                     "leaf_index": idx,
                     "path": [n.hex() for n in inclusion_path(leaves, idx)],
                 }
-            if embedded:
-                out["receipts"] = [r.model_dump(mode="json") for r in embedded]
+            if embedded_pre:
+                out["receipts"] = [r.model_dump(mode="json") for r in embedded_pre]
                 out["proofs"] = proofs
             else:
                 print(f"note: --include {include} matched no receipts", file=sys.stderr)
-        if getattr(args, "timestamp", False) and not args.out:
-            sys.exit("--timestamp needs --out — the notarized proof rides next to the checkpoint file")
         if args.out:
             from pathlib import Path
 
-            Path(args.out).write_text(json.dumps(out, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            _atomic_write(args.out, json.dumps(out, indent=2, ensure_ascii=False) + "\n")
             print(f"wrote {args.out}")
         print(
             f"checkpoint {receipt.id[:24]}… — tree size {p['tree_size']}, "
@@ -2777,7 +2931,7 @@ def _prove(args: argparse.Namespace) -> None:
     db = settings.data_dir / "attest.sqlite3"
     if not db.exists():
         sys.exit(f"no store at {db}")
-    store = Store(db)
+    store = Store(db, read_only=True)
     try:
         receipt = store.receipt(args.receipt_id)
         if receipt is None:
@@ -2803,7 +2957,7 @@ def _consistency(args: argparse.Namespace) -> None:
     db = settings.data_dir / "attest.sqlite3"
     if not db.exists():
         sys.exit(f"no store at {db}")
-    store = Store(db)
+    store = Store(db, read_only=True)
     try:
         from . import transparency
 
@@ -2843,6 +2997,10 @@ def _monitor(args: argparse.Namespace) -> None:
 
     from . import logmonitor
 
+    if getattr(args, "interval", None) is not None and (
+        not math.isfinite(args.interval) or args.interval <= 0
+    ):
+        sys.exit("--interval must be a finite positive number")
     base = _https_base(args.url, "monitoring a remote deployment")
     import hashlib
 
@@ -2855,6 +3013,8 @@ def _monitor(args: argparse.Namespace) -> None:
     # Mutating, so the runtime's single-writer lock applies — unlike the
     # default lock-free monitor.
     j_engine = None
+    j_store = None
+    journal_failed = {"v": False}  # a failed journal write must leak into the exit code
     if getattr(args, "journal", False):
         from .instance import acquire_instance_lock
         from .store import Store
@@ -2863,7 +3023,8 @@ def _monitor(args: argparse.Namespace) -> None:
         db = settings.data_dir / "attest.sqlite3"
         if not db.exists():
             print(f"note: initializing monitor journal at {db}", file=sys.stderr)
-        j_engine = _cli_engine(Store(db))
+        j_store = Store(db)
+        j_engine = _cli_engine(j_store)
 
     def _journal(
         ok: bool,
@@ -2937,7 +3098,9 @@ def _monitor(args: argparse.Namespace) -> None:
             obs_receipt = j_engine.issue_monitor_observation(observation)
             lines.append(f"journaled observation {obs_receipt.id[:24]}… ({outcome})")
         except Exception as exc:  # noqa: BLE001 — a failed journal write
-            # must not silence the watch; the trail records the gap.
+            # must not silence the watch; the trail records the gap, and the
+            # process exit code reports that a cycle went unrecorded.
+            journal_failed["v"] = True
             lines.append(f"journal write failed: {exc}")
 
     def cycle() -> tuple[bool, list[str], dict | None, bool]:
@@ -3249,29 +3412,35 @@ def _monitor(args: argparse.Namespace) -> None:
         )
         return ok, lines, new_state, repin
 
-    while True:
-        ok, lines, new_state, repin = cycle()
-        if getattr(args, "json", False):
-            print(json.dumps({"ok": ok, "state": new_state, "lines": lines}, ensure_ascii=False))
-        else:
-            for line in lines:
-                print(line)
-        if new_state is not None and (ok or repin):
-            try:
-                logmonitor.state_save(state_path, new_state)
-            except OSError as exc:
-                sys.exit(f"cannot persist monitor state at {state_path}: {exc}")
-        if args.once:
-            sys.exit(0 if ok else 1)
-        if not ok:
-            if repin and new_state is not None:
-                print(
-                    "watch continues — locally-verified head repinned; the "
-                    "cross-view failure stays on the record"
-                )
+    try:
+        while True:
+            ok, lines, new_state, repin = cycle()
+            if getattr(args, "json", False):
+                print(json.dumps({"ok": ok, "state": new_state, "lines": lines}, ensure_ascii=False))
             else:
-                print(f"watch continues — pinned state at {state_path} unchanged")
-        time.sleep(args.interval)
+                for line in lines:
+                    print(line)
+            if new_state is not None and (ok or repin):
+                try:
+                    logmonitor.state_save(state_path, new_state)
+                except OSError as exc:
+                    sys.exit(f"cannot persist monitor state at {state_path}: {exc}")
+            if args.once:
+                # A journaled run that failed to journal reports failure — an
+                # unrecorded cycle must not read as a clean exit.
+                sys.exit(0 if ok and not journal_failed["v"] else 1)
+            if not ok:
+                if repin and new_state is not None:
+                    print(
+                        "watch continues — locally-verified head repinned; the "
+                        "cross-view failure stays on the record"
+                    )
+                else:
+                    print(f"watch continues — pinned state at {state_path} unchanged")
+            time.sleep(args.interval)
+    finally:
+        if j_store is not None:
+            j_store.close()
 
 
 def _digest(args: argparse.Namespace) -> None:
@@ -3336,6 +3505,7 @@ def _tamper_demo(args: argparse.Namespace) -> None:
         class _Rollback(Exception):
             pass
 
+        report = None
         try:
             with store.transaction():
                 store._conn.execute("UPDATE visits SET body=? WHERE id=?", (json.dumps(forged), visit_id))
@@ -3347,14 +3517,21 @@ def _tamper_demo(args: argparse.Namespace) -> None:
                 raise _Rollback  # roll back both the forged row and the check
         except _Rollback:
             pass
+        # The demo exists to PROVE detection — an intact verdict on a forged
+        # row, or a store that fails to restore clean, is a failed demo, not
+        # a quiet zero.
+        if report is None or report["intact"]:
+            sys.exit("tamper-demo failed — the journal did not detect the forged row")
         after = store.verify_journal()
         print(f"after rollback — intact: {after['intact']}, entries: {after['entries']}")
+        if not after["intact"]:
+            sys.exit("tamper-demo failed — the store did not restore to a clean journal")
     finally:
         store.close()
 
 
 def _journal(args: argparse.Namespace) -> None:
-    store = _must_store()
+    store = _must_store(read_only=not args.baseline)
     try:
         if args.baseline:
             from .instance import acquire_instance_lock
@@ -3380,7 +3557,7 @@ def _status(args: argparse.Namespace) -> None:
     db = settings.data_dir / "attest.sqlite3"
     if not db.exists():
         sys.exit(f"no store at {db} — run `attest serve` or `attest replay` first")
-    store = Store(db)
+    store = Store(db, read_only=True)
     try:
         stats = store.stats()
         journal = store.verify_journal()
@@ -3389,15 +3566,31 @@ def _status(args: argparse.Namespace) -> None:
         inbox_path = settings.data_dir / "webhooks.sqlite3"
         queue: dict = {}
         if inbox_path.exists():
-            inbox = WebhookInbox(inbox_path)
+            inbox = WebhookInbox(inbox_path, read_only=True)
             try:
                 queue = inbox.counts()
             finally:
                 inbox.close()
         by_state = ", ".join(f"{k}={n}" for k, n in stats["visits"]["by_state"].items())
+        # A zero-receipt store isn't unhealthy — but "healthy" must not read as
+        # "the ledger is populated". Report the empty state loudly and on its
+        # own line so a wiped deployment can't hide behind a green word — and
+        # when the journal records receipt-table writes, zero receipts is not
+        # "fresh", it's a wipe: the journal just testified records existed.
+        empty = not all_receipts
+        receipt_writes = 0
+        if empty:
+            receipt_writes = store._conn.execute(
+                "SELECT COUNT(*) FROM journal WHERE table_name='receipts'"
+            ).fetchone()[0]
         # A row with no journal entry at all means an out-of-band write (or
         # journal rows truncated after the last pin) — never "healthy".
-        healthy = journal["intact"] and chain_ok and journal["untracked_rows"] == 0
+        healthy = (
+            journal["intact"]
+            and chain_ok
+            and journal["untracked_rows"] == 0
+            and not (empty and receipt_writes)
+        )
         mode = (store.setting("execution_mode") or {}).get("mode", "wall")
         # Site-level chain events: coverage certs, digests, exports, disconnects —
         # the signed ledger's record of watching, summarizing, and consent.
@@ -3458,6 +3651,7 @@ def _status(args: argparse.Namespace) -> None:
                 json.dumps(
                     {
                         "healthy": healthy,
+                        "empty": empty,
                         "store": str(db),
                         "mode": mode,
                         "journal": journal,
@@ -3533,7 +3727,17 @@ def _status(args: argparse.Namespace) -> None:
                 f"revoked:  {len(revoked)} issuer key(s) declared suspect — "
                 f"{suspect_n} receipt(s) sit inside suspect windows"
             )
-        print(f"status:   {'healthy' if healthy else 'ATTENTION — integrity check failed'}")
+        if receipt_writes:
+            print(
+                f"status:   ATTENTION — journal records {receipt_writes} receipt write(s) "
+                "but the receipts table is empty (the journal itself is intact)"
+            )
+        elif empty and healthy:
+            # EMPTY only when the store is clean — an empty store with
+            # untracked rows or journal damage is a signal, not a fresh start.
+            print("status:   EMPTY — no signed records yet")
+        else:
+            print(f"status:   {'healthy' if healthy else 'ATTENTION — integrity check failed'}")
         if not healthy:
             sys.exit(1)
     finally:
@@ -3566,7 +3770,7 @@ def _doctor(args: argparse.Namespace) -> None:
         )
     else:
         add("ok", "admin token", "set — private surfaces are authenticated")
-    if settings.ring_webhook_key:
+    if settings.webhook_signing_key:
         add(
             "ok",
             "webhook intake",
@@ -3749,7 +3953,7 @@ def _export(args: argparse.Namespace) -> None:
         if site is None:
             sys.exit("no site found — seed or run a replay first")
         entries = []
-        for visit in store.visits(site_id=site.id, limit=10_000):
+        for visit in store.visits(site_id=site.id, limit=None):
             receipt = store.receipt_for_visit(visit.id)
             if receipt is None:
                 continue  # open visits have no signed record to export
@@ -3799,14 +4003,14 @@ def _export(args: argparse.Namespace) -> None:
             manifest_signer=lambda m: engine.issue_export_manifest(site, m),
             issuer_key=engine.signer.public_key_b64,
             tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"site:{site.id}", t),
-            log_fn=lambda rs: log_member(engine, rs, cosign_fn=cosign_fn),
+            log_fn=lambda rs, pack_members=None: log_member(
+                engine, rs, cosign_fn=cosign_fn, pack_members=pack_members
+            ),
         )
         out = Path(args.out or f"case-{site.id}.zip")
-        out.write_bytes(data)
-        note = " (media withheld — digests preserved)" if args.redact_media else ""
-        print(f"wrote {out}{note} — {len(entries)} visit record(s); verify with `python verify_case.py .`")
-        # Self-check before shipping: an export that doesn't verify is worse
-        # than no export — catch a corrupted zip at write time, not at review.
+        # Self-check BEFORE shipping: an export that doesn't verify is worse
+        # than no export — catch a corrupted build here, not at review, and
+        # never leave the bad bytes on disk for someone to ship anyway.
         import io
         import zipfile
 
@@ -3814,17 +4018,18 @@ def _export(args: argparse.Namespace) -> None:
 
         with zipfile.ZipFile(io.BytesIO(data)) as z:
             ok, why = _verify_case_pack(z, engine.signer.public_key_b64)
-        if ok:
-            print("self-check: pack verifies under this deployment's issuer key")
-        else:
-            print(f"WARNING: self-check failed — {why}", file=sys.stderr)
-            sys.exit(2)
+        if not ok:
+            sys.exit(f"refusing to write — pack self-check failed: {why}")
+        _atomic_write(out, data)
+        note = " (media withheld — digests preserved)" if args.redact_media else ""
+        print(f"wrote {out}{note} — {len(entries)} visit record(s); verify with `python verify_case.py .`")
+        print("self-check: pack verifies under this deployment's issuer key")
         if args.tamper_twin:
             from .disputepack import tamper_twin
 
             tdata, desc = tamper_twin(data, attack=args.attack, visit=getattr(args, "tamper_visit", None))
             tpath = Path(args.tamper_twin)
-            tpath.write_bytes(tdata)
+            _atomic_write(tpath, tdata)
             print(f"wrote {tpath} — doctored: {desc}")
             # Mirror-image self-check: a twin that verifies must never ship.
             with zipfile.ZipFile(io.BytesIO(tdata)) as z:
@@ -3870,19 +4075,43 @@ def _attack_demo(args: argparse.Namespace) -> None:
         out = run(store, settings.data_dir / "media", inbox=inbox, engine=engine)
         if out.get("baseline_note"):
             print(out["baseline_note"])
-        caught = skipped = 0
+        caught = skipped = errors = boundaries = 0
         for r in out["results"]:
-            mark = "SKIPPED" if r["caught"] is None else ("CAUGHT " if r["caught"] else "MISSED ")
+            mark = (
+                "SKIPPED"
+                if r["caught"] is None
+                else (
+                    "ERROR  "
+                    if r["caught"] == "error"
+                    else (
+                        "BOUNDARY — EXPECTED MISS"
+                        if r.get("boundary") and r["caught"] is False
+                        else ("CAUGHT " if r["caught"] else "MISSED ")
+                    )
+                )
+            )
             skipped += r["caught"] is None
+            errors += r["caught"] == "error"
             caught += r["caught"] is True
+            boundaries += bool(r.get("boundary") and r["caught"] is False)
             print(f"{mark} {r['attack']}\n        {r['detail']}")
-        attempted = len(out["results"]) - skipped
+        attempted = len(out["results"]) - skipped - errors
         suffix = f" — {skipped} not applicable on this store" if skipped else ""
+        err_suffix = f" — {errors} battery error(s)" if errors else ""
+        bound_suffix = (
+            f" — {boundaries} documented detection boundary (external anchoring required)"
+            if boundaries
+            else ""
+        )
         print(
-            f"{caught}/{attempted} attacks caught{suffix} — "
+            f"{caught}/{attempted} attacks caught{suffix}{bound_suffix}{err_suffix} — "
             f"store {'unchanged' if out['unchanged'] else 'CHANGED (investigate)'}"
         )
-        if not out["unchanged"]:
+        # A MISSED attack is a failed self-test — exit 1 so a CI gate can't
+        # read "store unchanged" as success on an undetected tamper. Documented
+        # boundary cases are expected misses and do not fail the run; an ERROR
+        # verdict always does — the battery itself is suspect.
+        if not out["unchanged"] or errors or caught + boundaries < attempted:
             sys.exit(1)
     finally:
         store.close()
@@ -3936,6 +4165,30 @@ def _judge(args: argparse.Namespace) -> None:
         nv = str(len(_vm if isinstance(_vm, list) else _vm["vectors"]))
     except Exception:
         pass
+    # The battery's size is a property of attackdemo.run()'s attempt list —
+    # count the appends so this paragraph can never drift from the battery.
+    try:
+        import inspect as _inspect
+
+        from . import attackdemo as _ad
+
+        _src = _inspect.getsource(_ad)
+        na = str(_src.count("results.append"))
+        nb = str(_src.count("boundary=True"))
+    except Exception:
+        na, nb = "several", "one"
+    # The gauntlet's artifact count lives in verifyjs.py's seq list — count
+    # the ["name","expect"] rows so the claim tracks the page it describes.
+    try:
+        import re as _re
+
+        from . import verifyjs as _vj
+
+        _vsrc = _inspect.getsource(_vj)
+        _seq = _re.search(r"const seq=\[(.*?)\];", _vsrc, _re.S)
+        ng = str(len(_re.findall(r'\["[^"\]]+","', _seq.group(1)))) if _seq else "nine"
+    except Exception:
+        ng = "nine"
     print(
         """\
 Attest — records, not verdicts. The ten-minute path:
@@ -3959,8 +4212,8 @@ Attest — records, not verdicts. The ten-minute path:
          __N__ artifact sha256s; hash every file → SITE VERIFIED or TAMPER
        + #tamper-lab — commit the attack yourself: rewrite a signed field
          in-page, download your doctored pack, watch the signature refuse it
-       + #gauntlet — one click verifies all nine shipped artifacts against
-         the shared oracle and scores agreement: ORACLE AGREEMENT 9/9
+       + #gauntlet — one click verifies all __G__ shipped artifacts against
+         the shared oracle and scores agreement: ORACLE AGREEMENT __G__/__G__
        + #compare-packs — two packs at once: each verified, then their signed
          membership diffed and the two log heads reconciled ("both verify" and
          "both identical" are different claims)
@@ -3975,7 +4228,8 @@ Attest — records, not verdicts. The ten-minute path:
        and demo-worker.html (+ -es) — snapshots of the running app
     6. the raw layer: demo-receipts.html — all __R__ signed receipts, drawn as
        the hash chain itself, each a one-click verify.html deep link —
-       incl. the four verify/diff --attest receipts (the audit, audited)
+       incl. the verify/diff --attest receipts (the audit, audited — a new
+       schema minted alongside the old; identical claims dedupe per schema)
        (+ anatomy.html — one receipt decomposed field-by-field, chain links
        walkable)
     7. the adversarial corpus: vectors.html — __V__ conformance packs the oracle
@@ -3987,9 +4241,11 @@ Attest — records, not verdicts. The ten-minute path:
       … append ?lang=es   # household/worker surfaces in Spanish (accessibility)
     attest tamper-demo    # 5 seconds: forge a visit in-place, watch the
                           # journal catch it, roll back — non-destructive
-    attest attack-demo    # 21 real tamper attacks — 21/21 caught on the
-                          # demo store, zero skips (a SKIPPED row means the
-                          # fixture lacked a target, never a pass)
+    attest attack-demo    # __A__ real tamper attempts — all caught on the
+                          # demo store except __B__ deliberate EXPECTED MISS
+                          # naming the journal's boundary (unkeyed chain —
+                          # only external anchoring bounds it); zero skips
+                          # (a SKIPPED row means the fixture lacked a target)
     attest split-demo     # a witness + monitor catching a forked log
     attest verify pack.zip --witness-url <w> --witness-threshold 2
                           # require k-of-n named witnesses to have vouched
@@ -4008,6 +4264,9 @@ Attest — records, not verdicts. The ten-minute path:
 """.replace("__N__", n)
         .replace("__R__", nr)
         .replace("__V__", nv)
+        .replace("__A__", na)
+        .replace("__B__", nb)
+        .replace("__G__", ng)
     )
 
 
@@ -4115,6 +4374,13 @@ def _diff(args: argparse.Namespace) -> None:
                         _jl.dumps(report["events"], sort_keys=True, separators=(",", ":")).encode()
                     ).hexdigest(),
                 }
+            # --html writes BEFORE the --json exit: the flags compose ("also
+            # write"), not either/or — the page renders the same event stream
+            # the JSON and text lines carry.
+            if getattr(args, "html", None):
+                from .packdiff import diff_html
+
+                _atomic_write(args.html, diff_html(report))
             if getattr(args, "json", False):
                 import json as _json
 
@@ -4128,11 +4394,6 @@ def _diff(args: argparse.Namespace) -> None:
                     print(e["line"])
             anomalies = report["anomalies"]
             if getattr(args, "html", None):
-                from pathlib import Path
-
-                from .packdiff import diff_html
-
-                Path(args.html).write_text(diff_html(report), encoding="utf-8")
                 print(f"html report written: {args.html}")
         else:
             lines, anomalies = diff(args.old, args.new, key=key, extra_key_receipts=extra)
@@ -4150,7 +4411,7 @@ def _deliveries(args: argparse.Namespace) -> None:
     inbox_path = settings.data_dir / "webhooks.sqlite3"
     if not inbox_path.exists():
         sys.exit(f"no webhook inbox at {inbox_path}")
-    inbox = WebhookInbox(inbox_path)
+    inbox = WebhookInbox(inbox_path, read_only=not args.requeue)
     try:
         if args.requeue:
             # Requeue mutates the durable inbox — hold the writer lock so a
@@ -4160,7 +4421,14 @@ def _deliveries(args: argparse.Namespace) -> None:
             acquire_instance_lock(settings.data_dir)
             print(json.dumps({"requeued": inbox.requeue(), "queue": inbox.counts()}))
         else:
-            print(json.dumps({"counts": inbox.counts(), "entries": inbox.entries()}, indent=2))
+            entries = inbox.entries()
+            total = sum(inbox.counts().values())
+            out = {"counts": inbox.counts(), "entries": entries}
+            if len(entries) < total:
+                # entries() caps at 1000 — say so rather than let a flooded
+                # queue read as smaller than it is.
+                out["truncated"] = f"showing {len(entries)} of {total} deliveries"
+            print(json.dumps(out, indent=2))
     finally:
         inbox.close()
 
@@ -4176,7 +4444,7 @@ def _explain(args: argparse.Namespace) -> None:
     db = settings.data_dir / "attest.sqlite3"
     if not db.exists():
         sys.exit(f"no store at {db}")
-    store = Store(db)
+    store = Store(db, read_only=True)
     try:
         visit = store.visit(args.visit)
         if visit is None:
@@ -4186,7 +4454,7 @@ def _explain(args: argparse.Namespace) -> None:
         schedule = store.schedule(visit.schedule_id) if visit.schedule_id else None
         evidence = store.evidence_for(visit.id)
         receipt = store.receipt_for_visit(visit.id)
-        engine = _cli_engine(store)
+        engine = _cli_engine(store, read_only=True)
         reviews = ReviewService(store, engine.signer, engine.clock)
 
         if getattr(args, "json", False):
@@ -4239,10 +4507,24 @@ def _explain(args: argparse.Namespace) -> None:
         else:
             print("No signed receipt — record still open.")
         bundle = reviews.bundle(visit.id) if receipt else None
+        failed = False
         if bundle:
-            ok, why = verify_bundle(
-                bundle, trusted_keys=reviews.trusted_issuer_keys(bundle.original.public_key)
-            )
+            # Trust anchors in this deployment's issuer lineage — never in the
+            # receipt's self-declared key (a forged receipt would vouch for
+            # its own attacker key and read OK). The verified receipt chain
+            # plus the loaded signer's rotation links are the deployment's
+            # attested key set.
+            from .ledger import descendant_issuer_keys, trusted_issuer_keys, verify_chain
+
+            trusted = reviews.trusted_issuer_keys()
+            all_rcpts = store.receipts()
+            chain_ok, _chain_detail = verify_chain(all_rcpts)
+            if chain_ok:
+                rots = [r for r in all_rcpts if r.visit_id.startswith("key:")]
+                for k in {r.public_key for r in all_rcpts}:
+                    trusted |= trusted_issuer_keys(k, rots) | descendant_issuer_keys(k, rots)
+            ok, why = verify_bundle(bundle, trusted_keys=trusted)
+            failed = failed or not ok
             print(f"Review chain: {'OK' if ok else 'FAILED'} — {why}")
             for r in bundle.reviews:
                 rv = r.receipt.payload["review"]
@@ -4265,6 +4547,7 @@ def _explain(args: argparse.Namespace) -> None:
             or r.visit_id.startswith(f"coverage:{visit.site_id}:")
             or r.visit_id.startswith(f"digest:{visit.site_id}:")
             or r.visit_id.startswith(f"export:{visit.site_id}:")
+            or r.visit_id.startswith(f"late:{visit.site_id}:")
         ]
         if attestations:
             print()
@@ -4288,6 +4571,8 @@ def _explain(args: argparse.Namespace) -> None:
         print()
         print("Boundary: sources establish what they reported; the signature proves")
         print("the record is intact — never identity, attendance, or physical truth.")
+        if failed:
+            sys.exit(1)
     finally:
         store.close()
 
@@ -4384,6 +4669,7 @@ def _explain_report(store, visit, site, schedule, evidence, receipt, reviews) ->
         or r.visit_id.startswith(f"coverage:{visit.site_id}:")
         or r.visit_id.startswith(f"digest:{visit.site_id}:")
         or r.visit_id.startswith(f"export:{visit.site_id}:")
+        or r.visit_id.startswith(f"late:{visit.site_id}:")
     ]
     return out
 
@@ -4396,6 +4682,15 @@ def _explain_attestation(store, ident: str, *, as_json: bool = False) -> None:
     receipt = store.receipt_for_visit(ident)
     if receipt is None:
         receipt = next((r for r in store.receipts() if r.id == ident), None)
+    if receipt is None:
+        # Content-keyed pseudo-ids carry a `:<fp>` suffix — a bare
+        # coverage:/digest: window resolves iff exactly one version exists.
+        matches = [r for r in store.receipts() if r.visit_id.startswith(ident + ":")]
+        if len(matches) == 1:
+            receipt = matches[0]
+        elif len(matches) > 1:
+            names = "\n".join(f"  {r.visit_id}" for r in matches)
+            sys.exit(f"{ident} has {len(matches)} signed versions — name one fully:\n{names}")
     if receipt is None:
         sys.exit(f"no visit or attestation {ident}")
     ok, why = verify_receipt(receipt, public_key=receipt.public_key)
@@ -4423,6 +4718,8 @@ def _explain_attestation(store, ident: str, *, as_json: bool = False) -> None:
                 default=str,
             )
         )
+        if not ok:
+            sys.exit(1)
         return
     print(f"{receipt.id} — {rtype} · seq {receipt.sequence} · {receipt.payload_hash[:16]}…")
     print(f"  signature: {'OK' if ok else 'FAILED'} — {why}")
@@ -4465,6 +4762,19 @@ def _explain_attestation(store, ident: str, *, as_json: bool = False) -> None:
     elif rtype == "case_export":
         n = len(p.get("receipt_hashes", {}))
         print(f"  export manifest pins {n} record(s), sha256 {str(p.get('manifest_sha256'))[:16]}…")
+    elif rtype == "late_event":
+        e = p.get("event", {})
+        c = p.get("contradicts", {})
+        w = c.get("window") or []
+        print(
+            f"  {e.get('event_type', 'event')} occurred {e.get('occurred_at')} — "
+            f"delivered {p.get('delivered_at')}"
+        )
+        print(
+            f"  contests {c.get('visit_id')} ({c.get('claim')}) — "
+            f"its signed window {w[0][:19] if w else '?'} -> {w[1][11:19] if len(w) > 1 else '?'}"
+        )
+        print("  the earlier receipt stands unedited; the ledger admits the claim was contradicted")
     elif rtype == "verification_report":
         print(f"  official-API sweep — {p.get('base_url')} · {p.get('generated_at')}")
         for c in p.get("checks", []):
@@ -4549,6 +4859,8 @@ def _explain_attestation(store, ident: str, *, as_json: bool = False) -> None:
     print()
     print("Boundary: a signature attests what the record claims and that it is")
     print("intact under the issuer key — never identity, attendance, or truth.")
+    if not ok:
+        sys.exit(1)
 
 
 def _retention(args: argparse.Namespace) -> None:
@@ -4567,9 +4879,9 @@ def _retention(args: argparse.Namespace) -> None:
         coverage_events_days=settings.retention_coverage_days,
         liveview_sessions_days=settings.retention_liveview_days,
     )
-    store = _must_store()
+    store = _must_store(read_only=not args.apply)
     inbox_path = settings.data_dir / "webhooks.sqlite3"
-    inbox = WebhookInbox(inbox_path) if inbox_path.exists() else None
+    inbox = WebhookInbox(inbox_path, read_only=not args.apply) if inbox_path.exists() else None
     media_dir = settings.data_dir / "media"
     try:
         if args.apply:
@@ -4593,7 +4905,6 @@ def _retention(args: argparse.Namespace) -> None:
 
 def _verify_live(args: argparse.Namespace) -> None:
     """Sweep the official API with a live token and print an evidence report."""
-    from pathlib import Path
 
     from ring_sandbox import RingClient
 
@@ -4624,10 +4935,10 @@ def _verify_live(args: argparse.Namespace) -> None:
             store.close()
         print(f"signed into the ledger as {receipt.id} (record_type=verification_report)")
         if args.out:
-            Path(args.out).write_text(receipt.model_dump_json(indent=2), encoding="utf-8")
+            _atomic_write(args.out, receipt.model_dump_json(indent=2))
             print(f"wrote {args.out} — verify with `attest verify {args.out}`")
     elif args.out:
-        Path(args.out).write_text(json.dumps(report, indent=2), encoding="utf-8")
+        _atomic_write(args.out, json.dumps(report, indent=2))
         print(f"wrote {args.out}")
     icon = {"pass": "PASS", "fail": "FAIL", "warn": "WARN", "skip": "SKIP"}
     print(f"official-API verification — {report['generated_at']} — {report['base_url']}")
@@ -4697,7 +5008,7 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--json", action="store_true", help="emit the checks as a single JSON object")
     s.set_defaults(fn=_doctor)
 
-    s = sub.add_parser("verify", help="verify a downloaded bundle.json offline")
+    s = sub.add_parser("verify", help="verify a signed artifact — pack, receipt, checkpoint, anchor, or URL")
     s.add_argument(
         "bundle",
         help="bundle.json, receipt, anchor, receipts.json, a pack .zip — or an http(s) URL to one",
@@ -5089,7 +5400,8 @@ def main(argv: list[str] | None = None) -> None:
     )
     s.add_argument(
         "visit",
-        help="visit id, or an attestation (coverage:/digest:/export:/source: pseudo id, or receipt id)",
+        help="visit id, or an attestation (coverage:/digest:/export:/source: pseudo id — a bare "
+        "coverage:/digest: window resolves when exactly one signed version exists — or receipt id)",
     )
     s.add_argument("--json", action="store_true", help="emit the same account machine-readable")
     s.set_defaults(fn=_explain)
@@ -5169,10 +5481,10 @@ def main(argv: list[str] | None = None) -> None:
             s.add_argument("--days", type=int, default=8)
             s.add_argument(
                 "--story",
-                default="observed,late,blackout,sub_lapse,no_show,early_out,unmatched,liveview",
+                default="observed,late,blackout,sub_lapse,late_delivery,early_out,unmatched,liveview",
                 metavar="PATTERNS",
                 help="day-pattern cycle: observed,late,blackout,sub_lapse,early_out,no_show,"
-                "unmatched,liveview",
+                "unmatched,liveview,late_delivery",
             )
             s.add_argument("--speed", type=float, default=10000)
             s.add_argument(
@@ -5227,22 +5539,31 @@ def main(argv: list[str] | None = None) -> None:
                 default=None,
                 metavar="PATTERNS",
                 help="comma list cycled across --days: observed,late,blackout,early_out,no_show,"
-                "unmatched,sub_lapse,liveview "
+                "unmatched,sub_lapse,liveview,late_delivery "
                 "(e.g. --days 5 --story observed,late,no_show,early_out,observed)",
             )
         s.set_defaults(fn=fn)
 
     args = p.parse_args(argv)
+    import sqlite3 as _sqlite3
+
     from .store import StoreCorrupt
 
     try:
         args.fn(args)
-    except (StoreCorrupt, OSError, ValueError) as exc:
+    except httpx.HTTPError as exc:
+        # Seed/replay/monitor/witness talk HTTP — a connection refused or an
+        # unexpected 500 must never end as a traceback.
+        sys.exit(f"attest: request failed — {exc}")
+    except (StoreCorrupt, OSError, ValueError, RuntimeError, _sqlite3.Error) as exc:
         # Fail closed with an error line, never a traceback — the surfaces that
         # report "valid/invalid" must never crash ambiguously. StoreCorrupt is
         # the store's own fail-closed signal; ValueError covers malformed
         # artifact JSON (pydantic), bad --from/--to dates, and missing files
-        # the subcommand didn't phrase for a human.
+        # the subcommand didn't phrase for a human. RuntimeError covers the
+        # writer lock's contention refusal (names the holding pid); sqlite3
+        # errors cover a locked/corrupt/non-db attest.sqlite3 — the read-only
+        # commands open it too, so the catch lives here, not per-command.
         sys.exit(f"attest: {exc}")
 
 

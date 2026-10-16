@@ -142,10 +142,20 @@ class VisitEngine:
         media: MediaStore,
         summarizer: Summarizer,
         settings: Settings,
+        *,
+        persist_clock: bool = True,
     ):
         self.store, self.ring, self.signer, self.media = store, ring, signer, media
         self.summarizer, self.settings = summarizer, settings
-        self.clock = ExecutionClock(store, replay=settings.replay_mode, ring_base_url=ring.base_url)
+        # persist_clock=False is the read-only contract (explain/triage):
+        # the clock validates against any persisted mode but never writes
+        # the journaled mode row into a runtime this caller only reads.
+        self.clock = ExecutionClock(
+            store,
+            replay=settings.replay_mode,
+            ring_base_url=ring.base_url,
+            persist=persist_clock,
+        )
 
     # ------------------------------------------------------------------ webhooks
 
@@ -202,6 +212,92 @@ class VisitEngine:
 
     @atomic
     def _ingest(self, ev: WebhookEvent, source: str, net: _NetBundle) -> Outcome:
+        outcome = self._ingest_apply(ev, source, net)
+        visit = outcome.visit
+        if visit is not None and outcome.ignored_reason is None:
+            self._annotate_contradicted_windows(visit.site_id, ev.occurred_at, exclude=visit.id, ev=ev)
+        return outcome
+
+    def _annotate_contradicted_windows(
+        self, site_id: str, at: datetime, *, exclude: str, ev: WebhookEvent
+    ) -> None:
+        """An event that just bound to a live visit can fall inside a lapsed
+        schedule's ``no_observation`` window — the pipeline DID observe activity
+        then. The receipt stands immutable; flag the working row so the record
+        shows the claim was later contradicted rather than hiding it. The flag
+        alone is mutable state, so each newly-contested record also gets a
+        signed ``late_event`` receipt — the admission itself can't be quietly
+        deleted, and the receipt travels in case packs as a site attestation."""
+        for v in self.store.visits(site_id=site_id, states=[VisitState.NO_OBSERVATION], limit=None):
+            if v.id == exclude or not (v.arrived_at <= at <= v.last_activity_at):
+                continue
+            receipt = self._issue_late_event(v, ev, at)
+            if not any(f.code == "contradicted_no_observation" for f in v.flags):
+                v.flags.append(
+                    Flag(
+                        code="contradicted_no_observation",
+                        severity="warn",
+                        message=(
+                            "An event arriving later fell inside this window — the "
+                            "'no matching observation' claim is contested by the "
+                            f"bound record's timeline (signed admission {receipt.id})"
+                        ),
+                    )
+                )
+                self.store.put_visit(v)
+
+    def _issue_late_event(self, visit: Visit, ev: WebhookEvent, at: datetime) -> Receipt:
+        """Sign the admission that a late-delivered event fell inside ``visit``'s
+        already-signed ``no_observation`` window. Scoped under a ``late:``
+        pseudo-id so the receipt is site-level evidence — it rides case packs
+        as an attestation and can never be silently erased like a flag can.
+        Idempotent per (visit, event): re-delivery replays the same claim."""
+        pseudo_id = f"late:{visit.site_id}:{visit.id}:{ev.request_id}"
+        existing = self.store.receipt_for_visit(pseudo_id)
+        if existing:
+            return existing
+        prev = self.store.latest_receipt()
+        receipt = self.signer.issue(
+            visit_id=pseudo_id,
+            sequence=prev.sequence + 1 if prev else 1,
+            prev_hash=prev.payload_hash if prev else None,
+            facts={
+                "record_type": "late_event",
+                "site_id": visit.site_id,
+                "event": {
+                    "request_id": ev.request_id,
+                    "event_type": ev.event_type,
+                    "sub_type": ev.sub_type,
+                    "device_id": ev.device_id,
+                    "occurred_at": at.isoformat(),
+                },
+                "delivered_at": self.clock.now().isoformat(),
+                "contradicts": {
+                    "visit_id": visit.id,
+                    "receipt_id": visit.receipt_id,
+                    "claim": "no_observation",
+                    "window": [
+                        visit.arrived_at.isoformat(),
+                        visit.last_activity_at.isoformat(),
+                    ],
+                },
+                "boundary": (
+                    "Attests that an event claiming this occurred_at was delivered "
+                    "after the window lapsed and fell inside it — the earlier "
+                    "'no matching observation' receipt stands unedited; the record "
+                    "admits its claim was later contested. Never proof the event "
+                    "physically happened or that anyone attended."
+                ),
+                "journal_head": self.store.journal_head(),
+            },
+        )
+        try:
+            self.store.put_receipt(receipt)
+        except sqlite3.IntegrityError:
+            return self.store.receipt_for_visit(pseudo_id)
+        return receipt
+
+    def _ingest_apply(self, ev: WebhookEvent, source: str, net: _NetBundle) -> Outcome:
         # Account-scoped lifecycle events name the account, not a device, as
         # their source — they route to every site bound to that Ring account.
         if ev.data.attributes.source_type == "accounts":
@@ -248,17 +344,28 @@ class VisitEngine:
                 )
             )
             return Outcome(ignored_reason=None)
-        recent = self.store.visits(site_id=site.id, limit=1)
-        if recent and (
-            at < recent[0].last_activity_at
+        # Lateness is bound by the ACTIVE visit's watermark when one is live —
+        # a newer no_observation visit (a lapsed schedule window sits in the
+        # past but sorts newest) must not divert events the open visit still
+        # owns, and an event before the open visit's last activity would be a
+        # silent rewrite of live state, not of signed history.
+        bound = self.store.active_visit(site.id)
+        if bound is None:
+            bound = next(iter(self.store.visits(site_id=site.id, limit=1)), None)
+        if bound and (
+            at < bound.last_activity_at
             or (
-                recent[0].state in (VisitState.CLOSED, VisitState.NO_OBSERVATION)
-                and at == recent[0].last_activity_at
+                bound.state in (VisitState.CLOSED, VisitState.NO_OBSERVATION) and at == bound.last_activity_at
             )
         ):
             self.store.record_late_event(
                 f"{site.ring_account_id}:{ev.request_id}", site.id, ev.model_dump_json()
             )
+            # The event is retained — but it can also contradict a lapsed
+            # no_observation record it landed inside. Flag that record too:
+            # the signed receipt stands while the working row admits the
+            # pipeline did observe activity in its window.
+            self._annotate_contradicted_windows(site.id, at, exclude="", ev=ev)
             return Outcome(ignored_reason="late event retained for review")
 
         if et == "motion_detected" and is_camera:
@@ -444,6 +551,7 @@ class VisitEngine:
         )
         return token
 
+    @atomic
     def issue_family_link(self, visit_id: str) -> str:
         visit = self.store.visit(visit_id)
         if visit is None:
@@ -485,6 +593,10 @@ class VisitEngine:
     @atomic
     def check_in(self, token: str, at: datetime | None = None) -> Visit | None:
         at = at or self.clock.now()
+        if at.tzinfo is None:
+            raise ValueError("check-in timestamp must be timezone-aware")
+        if at > self.clock.now() + timedelta(seconds=30):
+            raise ValueError("check-in timestamp is in the future")
         target = self.checkin_target(token)
         if target is None:
             return None
@@ -524,8 +636,19 @@ class VisitEngine:
 
         Idleness is *webhook silence* (wall clock since the last cue we ingested), not the
         event timestamp: Ring retries can deliver late, and replayed scenarios are back-dated.
+        ``now`` is clamped to the engine clock — a caller-supplied instant past it
+        would mass-mint signed no-observation receipts over windows that haven't
+        even elapsed yet and lapse their schedules permanently. A genuinely
+        future sweep is a client error, not a signed fact.
         """
         now = now or self.clock.now()
+        if now.tzinfo is None:
+            raise ValueError("sweep instant must be timezone-aware")
+        if now > self.clock.now():
+            raise ValueError(
+                "cannot sweep a future instant — advance the clock (replay) or fix "
+                "the request (wall mode) rather than signing records over unelapsed time"
+            )
         nets = self._prefetch_sweep(now)
         return self._sweep(now, nets)
 
@@ -617,6 +740,11 @@ class VisitEngine:
                     ns.summary = "No matching observation was received. This does not establish a no-show."
                     self.store.put_visit(ns)
                     self._issue_receipt(ns, site)
+                    # the window is consumed — leaving it "scheduled" wedges it:
+                    # it blocks overlapping registrations forever while
+                    # cancel_schedule refuses (a visit now names it)
+                    sch.status = "lapsed"
+                    self.store.put_schedule(sch)
                     changed.append(ns)
         return changed
 
@@ -923,7 +1051,16 @@ class VisitEngine:
             # An inverted or not-yet-arrived window has nothing to attest —
             # signing one would put the deployment's key on an empty claim.
             raise ValueError("coverage window is empty (end <= start after clamping to now)")
-        pseudo_id = f"coverage:{site.id}:{start.isoformat()}:{end.isoformat()}"
+        # The pseudo-id binds window AND content: a re-request after new poll
+        # rows land must mint the *richer* report, not replay a stale receipt
+        # that under-claims what is now observable. Identical content still
+        # dedupes — "same window, same facts" is one claim.
+        import json as _json
+
+        content_fp = hashlib.sha256(
+            _json.dumps(report, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()[:12]
+        pseudo_id = f"coverage:{site.id}:{start.isoformat()}:{end.isoformat()}:{content_fp}"
         existing = self.store.receipt_for_visit(pseudo_id)
         if existing:
             return existing
@@ -959,14 +1096,14 @@ class VisitEngine:
 
         if end <= start:
             raise ValueError("digest window is empty (end <= start) — nothing to summarize")
-        pseudo_id = f"digest:{site.id}:{start.isoformat()}:{end.isoformat()}"
-        existing = self.store.receipt_for_visit(pseudo_id)
-        if existing:
-            return existing
+        # Half-open [start, end): a visit arriving exactly at ``end`` belongs to
+        # the NEXT period's digest — a closed upper bound would double-count it
+        # across adjacent digests. Unbounded fetch: a signed digest over a
+        # silently truncated visit set would lie about the period.
         visits = [
             v
-            for v in self.store.visits(site_id=site.id, limit=10_000)
-            if v.arrived_at is not None and start <= v.arrived_at <= end
+            for v in self.store.visits(site_id=site.id, limit=None)
+            if v.arrived_at is not None and start <= v.arrived_at < end
         ]
         entries = [e for v in visits for e in self.store.reviews_for(v.id)]
 
@@ -1057,6 +1194,30 @@ class VisitEngine:
             ),
         }
         device = site.door_camera_id or site.door_sensor_id
+        coverage = coverage_report(self.store, device, start, end, now=self.clock.now(), site_id=site.id)
+        # The pseudo-id binds window AND summarized content: re-requesting the
+        # same window after new records or poll rows land must mint the
+        # *updated* digest, not replay a receipt that under-claims what the
+        # ledger now holds. journal_head is excluded — it's a signature-time
+        # stamp, not a claim, so identical facts still dedupe.
+        import json as _json
+
+        content_fp = hashlib.sha256(
+            _json.dumps(
+                {
+                    "interval": [start.isoformat(), end.isoformat()],
+                    "counts": counts,
+                    "summarized_receipts": receipts,
+                    "coverage": coverage,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()[:12]
+        pseudo_id = f"digest:{site.id}:{start.isoformat()}:{end.isoformat()}:{content_fp}"
+        existing = self.store.receipt_for_visit(pseudo_id)
+        if existing:
+            return existing
         prev = self.store.latest_receipt()
         receipt = self.signer.issue(
             visit_id=pseudo_id,
@@ -1068,12 +1229,11 @@ class VisitEngine:
                 "interval": {"start": start.isoformat(), "end": end.isoformat()},
                 "counts": counts,
                 "summarized_receipts": receipts,
-                "coverage": coverage_report(
-                    self.store, device, start, end, now=self.clock.now(), site_id=site.id
-                ),
+                "coverage": coverage,
                 "boundary": (
-                    "Counts the signed records this deployment wrote in the interval — "
-                    "a statement about the ledger, never about physical presence or absence."
+                    "Counts the signed records this deployment wrote in the half-open "
+                    "interval [start, end) — a statement about the ledger, never about "
+                    "physical presence or absence."
                 ),
                 "journal_head": self.store.journal_head(),
             },
@@ -1192,6 +1352,73 @@ class VisitEngine:
                     "The named files must byte-match these sha256 digests — a "
                     "verifier inside a pack that doesn't match was modified "
                     "after export and must not be trusted to report honestly."
+                ),
+                "journal_head": self.store.journal_head(),
+            },
+        )
+        try:
+            self.store.put_receipt(receipt)
+        except sqlite3.IntegrityError:
+            return self.store.receipt_for_visit(pseudo_id)
+        return receipt
+
+    @atomic
+    def issue_export_pin(self, bundle) -> Receipt:
+        """Sign the review chain's completeness at export — the count and tip
+        hash a single-visit pack must reproduce. Case packs pin this through
+        the signed manifest's per-visit ``reviews`` field; a standalone
+        bundle.json had no equivalent, so truncating its last statements
+        verified as a valid prefix. The pin makes silence detectable: a
+        shortened chain fails the signed count/tip, and the receipt itself is
+        a log leaf whose inclusion proof rides the pack checkpoint —
+        stripping the pin member leaves an orphaned proof that fails too.
+        Idempotent per identical chain tip via a ``pack-pin:`` pseudo
+        visit_id. Never a statement that the reviews are *true* — only that
+        this many existed, ending here, when the pack was cut."""
+        import hashlib
+        import json as _json
+
+        visit_id = bundle.original.visit_id
+        reviews = list(bundle.reviews)
+        tip = reviews[-1].receipt.payload_hash if reviews else None
+        # The pin commits the bundle's SIGNED evidence list — never the live
+        # store table: verifiers only see original.payload.evidence, so pinning
+        # live rows would fail honest packs on post-signing additions.
+        media_digests = sorted(
+            e.get("media_sha256")
+            for e in bundle.original.payload.get("evidence", [])
+            if isinstance(e, dict) and e.get("media_sha256")
+        )
+        canonical = _json.dumps(
+            {
+                "subject_visit": visit_id,
+                "review_count": len(reviews),
+                "review_tip": tip,
+                "media_sha256": media_digests,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        pseudo_id = f"pack-pin:{visit_id}:{hashlib.sha256(canonical.encode()).hexdigest()[:16]}"
+        existing = self.store.receipt_for_visit(pseudo_id)
+        if existing:
+            return existing
+        prev = self.store.latest_receipt()
+        receipt = self.signer.issue(
+            visit_id=pseudo_id,
+            sequence=prev.sequence + 1 if prev else 1,
+            prev_hash=prev.payload_hash if prev else None,
+            facts={
+                "record_type": "export_pin",
+                "subject_visit": visit_id,
+                "review_count": len(reviews),
+                "review_tip": tip,
+                "media_sha256": media_digests,
+                "boundary": (
+                    "The count + tip the packed review chain must reproduce — a "
+                    "statement about completeness at export time, never about "
+                    "whether any statement in the chain is true."
                 ),
                 "journal_head": self.store.journal_head(),
             },
@@ -1387,19 +1614,14 @@ class VisitEngine:
         leaves: a checkpoint commits to the content log's head, and making
         the checkpoint itself a leaf would grow the tree past the head it
         just signed — self-reference that also breaks idempotent re-issue."""
-        from . import transparency
-
-        return transparency.leaf_hashes(self.store.receipts())
+        return list(self.store.cached_leaf_hashes())
 
     def log_head(self) -> tuple[int, bytes]:
         """(tree_size, Merkle Tree Head) over every chained receipt."""
-        leaves = self.log_leaves()
-        from .transparency import root
-
-        return len(leaves), root(leaves)
+        return self.store.cached_log_head()
 
     @atomic
-    def issue_log_checkpoint(self) -> Receipt:
+    def issue_log_checkpoint(self, extra_facts: dict | None = None) -> Receipt:
         """Sign the current Merkle Tree Head — the transparency log's STH.
 
         The receipt chain proves order and continuity; the tree head makes
@@ -1408,16 +1630,31 @@ class VisitEngine:
         bridged by a consistency proof — 'append-only' becomes a checkable
         claim, not an enumeration. Idempotent per tree state via a
         ``log:`` pseudo visit_id: re-issuing an unchanged head returns the
-        existing checkpoint."""
+        existing checkpoint. ``extra_facts`` merges caller-scoped claims
+        into the signed payload (pack exports sign their member list so a
+        stripped member can't hide behind an unsigned proofs map) — it is
+        fingerprinted into the pseudo-id so a member-listed head never
+        dedupes into the bare head of the same tree."""
         leaves = self.log_leaves()
         if not leaves:
             # Every verifier surface requires tree_size >= 1 — a size-0
             # checkpoint would be a signed artifact that can never verify.
             raise ValueError("cannot checkpoint an empty log")
+        import hashlib
+        import json as _json
+
         from .transparency import consistency_nodes, root
 
         head = root(leaves)
-        pseudo_id = f"log:{len(leaves)}:{head.hex()[:16]}"
+        extra_fp = ""
+        if extra_facts:
+            extra_fp = (
+                ":"
+                + hashlib.sha256(
+                    _json.dumps(extra_facts, sort_keys=True, separators=(",", ":")).encode()
+                ).hexdigest()[:12]
+            )
+        pseudo_id = f"log:{len(leaves)}:{head.hex()[:16]}{extra_fp}"
         existing = self.store.receipt_for_visit(pseudo_id)
         if existing:
             return existing
@@ -1429,10 +1666,7 @@ class VisitEngine:
         # chain self-proves its own continuity offline, no /api/consistency
         # call needed when an auditor already holds the earlier head.
         extends: dict | None = None
-        prev_cp = next(
-            (r for r in reversed(self.store.receipts()) if r.payload.get("record_type") == "log_checkpoint"),
-            None,
-        )
+        prev_cp = self.store.latest_checkpoint_receipt()
         if prev_cp is not None:
             try:
                 prev_size = int(prev_cp.payload["tree_size"])
@@ -1459,6 +1693,8 @@ class VisitEngine:
             ),
             "journal_head": self.store.journal_head(),
         }
+        if extra_facts:
+            facts.update(extra_facts)
         if extends is not None:
             facts["extends"] = extends
         receipt = self.signer.issue(
@@ -1594,7 +1830,14 @@ class VisitEngine:
         recovery path for a crash between successor persist and adoption.
         Each adoption is idempotent via its ``key:``:``adopted`` pseudo
         visit_id, so calling this on boot and before every rotate is safe:
-        a fully consummated history returns []."""
+        a fully consummated history returns [].
+
+        A rotation is only safe to consummate when NO receipt after it was
+        signed by the retiring key — such receipts exist only if a process
+        kept minting under the old signer after the successor persisted, and
+        adopting the pivot now would retroactively break every one of them.
+        That state is a wedge, not a crash recovery: refuse loudly and leave
+        the rotation unconsented (restore the prior key file to un-wedge)."""
         from .ledger import _adoption_consent
 
         new_key = self.signer.public_key_b64
@@ -1607,6 +1850,21 @@ class VisitEngine:
                 and p.get("new_key") == new_key
                 and not _adoption_consent(receipts, r, new_key)
             ):
+                stranded = [
+                    s for s in receipts if s.sequence > r.sequence and s.public_key == p["previous_key"]
+                ]
+                if stranded:
+                    import logging
+
+                    logging.getLogger(__name__).error(
+                        "unconsented key_rotation %s names this signer but %d later "
+                        "receipt(s) carry the retiring key — adopting now would "
+                        "break the chain; refusing. Restore the previous key file "
+                        "(the rotation stays inert) or reconcile manually.",
+                        r.id,
+                        len(stranded),
+                    )
+                    continue
                 issued.append(self.issue_key_adoption(p["previous_key"], r))
         return issued
 
@@ -1629,10 +1887,23 @@ class VisitEngine:
                 "successor key already signed receipts — re-adopting a retired "
                 "key would make lineage non-monotonic; generate a fresh key"
             )
+        # the pseudo-id keys 12-char prefixes — idempotent only when the
+        # existing receipt names THIS key pair (a prefix alias must not return
+        # a receipt endorsing different keys)
+        # the pseudo-id keys 12-char prefixes — idempotent only when the
+        # existing receipt names THIS key pair; a prefix alias must not return
+        # a receipt endorsing different keys
         pseudo_id = f"key:{old_key[:12]}:{new_public_key[:12]}"
         existing = self.store.receipt_for_visit(pseudo_id)
         if existing:
-            return existing
+            if (
+                existing.payload.get("previous_key") == old_key
+                and existing.payload.get("new_key") == new_public_key
+            ):
+                return existing
+            raise ValueError(
+                "rotation pseudo-id collides with a receipt naming different keys — refusing to alias it"
+            )
         prev = self.store.latest_receipt()
         receipt = self.signer.issue(
             visit_id=pseudo_id,
@@ -1677,7 +1948,11 @@ class VisitEngine:
         pseudo_id = f"key:{previous_public_key[:12]}:{new_key[:12]}:adopted"
         existing = self.store.receipt_for_visit(pseudo_id)
         if existing:
-            return existing
+            if existing.payload.get("previous_key") == previous_public_key and existing.public_key == new_key:
+                return existing
+            raise ValueError(
+                "adoption pseudo-id collides with a receipt naming different keys — refusing to alias it"
+            )
         prev = self.store.latest_receipt()
         receipt = self.signer.issue(
             visit_id=pseudo_id,
@@ -1796,7 +2071,11 @@ class VisitEngine:
         ``source_disconnected`` receipt naming exactly what was unbound. The
         binding stays recorded as historical fact; ingestion and polling stop.
         One-way — reconnecting is a new site, not a silent re-bind."""
-        if site.disconnected_at is not None:
+        # re-read inside the transaction — the caller's Site was fetched before
+        # the lock, so a racing disconnect could already have tombstoned it;
+        # proceeding on the stale object dies on the visit_id UNIQUE slot (500)
+        fresh = self.store.site(site.id)
+        if fresh is not None and fresh.disconnected_at is not None:
             raise ValueError(f"site {site.id} source already disconnected")
         at = utcnow()
         prev = self.store.latest_receipt()
@@ -1823,6 +2102,7 @@ class VisitEngine:
             },
         )
         self.store.put_receipt(receipt)
+        site = fresh or site
         site.disconnected_at = at
         site.disconnected_reason = reason
         self.store.put_site(site)
@@ -1848,9 +2128,16 @@ class VisitEngine:
             raise ValueError("site's Ring source is disconnected — live view ends with consent")
         if not site.door_camera_id:
             raise ValueError("site has no camera bound")
+        offer_bytes = sdp_offer.encode() if isinstance(sdp_offer, str) else sdp_offer
+        if not offer_bytes.lstrip().startswith(b"v="):
+            # pre-request refusal — the attempt never reached Ring, journal nothing
+            raise ValueError("sdp_offer must be an SDP offer (starts with v=)")
         try:
             session = self.ring.whep_session(device_id=site.door_camera_id, sdp_offer=sdp_offer)
-        except (RingAPIError, httpx.HTTPError) as exc:
+        except (RingAPIError, httpx.HTTPError, ValueError) as exc:
+            # the offer passed validation, so a ValueError here is the
+            # post-request kind — a reached-but-protocol-violating response;
+            # the attempt reached Ring, so it journals failed like the rest
             self._liveview_failed(site, exc)
             raise
         return self._liveview_opened(site, session)
@@ -1868,7 +2155,12 @@ class VisitEngine:
 
     @atomic
     def _liveview_failed(self, site: Site, exc: Exception) -> None:
-        reason = f"Ring API HTTP {exc.status_code}" if isinstance(exc, RingAPIError) else "Ring unreachable"
+        if isinstance(exc, RingAPIError):
+            reason = f"Ring API HTTP {exc.status_code}"
+        elif isinstance(exc, ValueError):
+            reason = "Ring response violated the session protocol"
+        else:
+            reason = "Ring unreachable"
         self.store.put_liveview_session(
             LiveViewSession(
                 site_id=site.id,

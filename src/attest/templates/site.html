@@ -251,7 +251,7 @@ async function disconnectSource() {
   <tr>
     <td><a href="/visits/{{ v.id }}" style="color:var(--accent)">{{ v.id[:14] }}…</a></td>
     <td>{{ workers[v.worker_id].name if v.worker_id in workers else "—" }}</td>
-    <td>{{ t(v.arrived_at) if v.has_observations else "None" }}</td>
+    <td>{{ t(v.arrived_at) if v.has_observations else "—" }}</td>
     <td>{% if v.observed_span_minutes is not none %}{{ "%.0f"|format(v.observed_span_minutes) }} min{% else %}—{% endif %}</td>
     <td class="small">{% set c = coverage.get(v.id) %}
       {% if c %}<span class="{{ 'ok' if c.fraction > 0.8 else ('warn' if c.fraction > 0.3 else 'bad') }}">{{ "%.0f"|format(c.fraction * 100) }}%</span>

@@ -111,6 +111,110 @@ def test_pack_verifier_rejects_broken_chain(pack):
 
 
 @pytest.fixture
+def pinned_pack(engine, store, household, schedule, t0, tmp_path):
+    """A single-visit pack carrying the signed export pin — the member set
+    the app's pack route ships (pin + checkpoint that proves it)."""
+    from attest.disputepack import log_member
+
+    event = WebhookEvent.model_validate(
+        webhooks.build_event(
+            event_type="button_press",
+            device_id=household[2].id,
+            occurred_at=t0,
+        )
+    )
+    visit = engine.ingest(event).visit
+    engine.close_for_review(visit.id)
+    service = ReviewService(store, engine.signer, engine.clock)
+    service.coordinator_review(visit.id, ReviewInput(decision="confirm", statement="Looks right."))
+    bundle = service.bundle(visit.id)
+    data = build_pack(
+        store,
+        tmp_path / "media",
+        bundle,
+        log_fn=lambda rs, pack_members=None: log_member(engine, rs, pack_members=pack_members),
+        pin_fn=engine.issue_export_pin,
+    )
+    out = tmp_path / "pinned"
+    zipfile.ZipFile(io.BytesIO(data)).extractall(out)
+    return out
+
+
+def test_export_pin_verifies_and_is_a_proven_leaf(pinned_pack):
+    assert (pinned_pack / "export_pin.json").exists()
+    pin = json.loads((pinned_pack / "export_pin.json").read_text(encoding="utf-8"))
+    assert pin["payload"]["record_type"] == "export_pin"
+    # the pin rides the checkpoint's proven-member set — it is a real log
+    # leaf, not just a file in the zip.
+    checkpoint = json.loads((pinned_pack / "log_checkpoint.json").read_text(encoding="utf-8"))
+    assert pin["payload_hash"] in checkpoint["proofs"]
+    result = _run(pinned_pack)
+    assert result.returncode == 0, result.stderr
+
+
+def test_export_pin_rejects_truncated_reviews(pinned_pack):
+    """The pack-layer completeness attack the pin exists for: reviews are not
+    log leaves, so without the pin a trimmed chain verified as a valid
+    prefix."""
+    bundle_path = pinned_pack / "bundle.json"
+    bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+    bundle["reviews"] = bundle["reviews"][:-1]
+    bundle_path.write_text(json.dumps(bundle), encoding="utf-8")
+    result = _run(pinned_pack)
+    assert result.returncode != 0
+    assert "export_pin" in result.stderr
+
+
+def test_export_pin_rejects_stripped_pin(pinned_pack):
+    """Deleting the pin member fails closed: the checkpoint's signed
+    pack_members declared it, so a stripped file+proof pair can't hide."""
+    (pinned_pack / "export_pin.json").unlink()
+    result = _run(pinned_pack)
+    assert result.returncode != 0
+    assert "export_pin.json" in result.stderr and "missing" in result.stderr
+
+
+def test_export_pin_rejects_swapped_pin(pinned_pack, engine, store, household, t0, tmp_path):
+    """A pin minted for a different visit names that visit — swapping it in
+    fails on subject, not just signature."""
+    from attest.disputepack import log_member
+
+    event = WebhookEvent.model_validate(
+        webhooks.build_event(
+            event_type="button_press",
+            device_id=household[2].id,
+            occurred_at=t0 + timedelta(minutes=90),
+        )
+    )
+    other = engine.ingest(event).visit
+    engine.close_for_review(other.id)
+    service = ReviewService(store, engine.signer, engine.clock)
+    other_bundle = service.bundle(other.id)
+    data = build_pack(
+        store,
+        tmp_path / "media",
+        other_bundle,
+        log_fn=lambda rs, pack_members=None: log_member(engine, rs, pack_members=pack_members),
+        pin_fn=engine.issue_export_pin,
+    )
+    other_dir = tmp_path / "pinned-other"
+    zipfile.ZipFile(io.BytesIO(data)).extractall(other_dir)
+    (pinned_pack / "export_pin.json").write_bytes((other_dir / "export_pin.json").read_bytes())
+    result = _run(pinned_pack)
+    assert result.returncode != 0
+    assert "different visit" in result.stderr or "export_pin" in result.stderr
+
+
+def test_export_pin_rejects_tampered_pin_receipt(pinned_pack):
+    pin_path = pinned_pack / "export_pin.json"
+    pin = json.loads(pin_path.read_text(encoding="utf-8"))
+    pin["payload"]["review_count"] = 99
+    pin_path.write_text(json.dumps(pin), encoding="utf-8")
+    result = _run(pinned_pack)
+    assert result.returncode != 0
+
+
+@pytest.fixture
 def case_pack(engine, store, household, schedule, t0, tmp_path):
     """Two closed visits for one site, packaged as a site-level case pack."""
     service = ReviewService(store, engine.signer, engine.clock)

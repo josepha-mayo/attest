@@ -22,8 +22,8 @@ class Settings(BaseSettings):
     # deployment that forgets to configure a real key — forged HMAC-signed
     # webhooks would ingest as genuine Ring traffic. The demo mints a fresh
     # per-run key; `attest replay` needs ATTEST_RING_WEBHOOK_KEY set to the
-    # server's value.
-    ring_webhook_key: str | None = None
+    # server's value. SecretStr so a Settings repr/log can't leak it.
+    ring_webhook_key: SecretStr | None = None
     # Freshness bound on inbound webhooks: meta.time is inside the signed body,
     # so a captured delivery replayed verbatim is authentic but stale. Generous
     # default — must comfortably exceed Ring's retry window; it bounds replay
@@ -86,6 +86,15 @@ class Settings(BaseSettings):
     @property
     def key_path(self) -> Path:
         return self.signing_key_path or (self.data_dir / "attest-ed25519.key")
+
+    @property
+    def webhook_signing_key(self) -> str | None:
+        """The raw HMAC key — or None when unset/empty. model_copy(update=…)
+        bypasses validation, so a raw string landing here still resolves."""
+        v = self.ring_webhook_key
+        if isinstance(v, SecretStr):
+            v = v.get_secret_value()
+        return v or None
 
 
 settings = Settings()

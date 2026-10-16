@@ -101,7 +101,7 @@ Event History?</a> — receipts keep verifying even if Attest disappears.)</p>
 <a href="verify.html#sample-pack">green VERIFIED on the sample</a> →
 <a href="verify.html#sample-pack-tampered">red FAILED on the tampered twin</a> →
 <a href="verify.html#tamper-lab"><strong>forge it yourself</strong> in the
-tamper lab</a> → <a href="demo-receipts.html">the demo runtime's 336-receipt
+tamper lab</a> → <a href="demo-receipts.html">the demo runtime's 447-receipt
 hash chain</a>. No install, no account — every stamp runs in your browser and
 nothing leaves it.</div>
 <p style="margin:.5rem 0"><a href="verify.html#sample-pack"
@@ -135,8 +135,8 @@ screenshot. The fastest possible entry if you'd rather look than click.</small>
 </a>
 <a class="card" href="verify.html#gauntlet">
 <b>Run the whole gauntlet<span class="badge ok">9/9</span></b>
-<small>One click, every artifact: clean pack, its older pre-chain sibling,
-the doctored twin, all three attacks, the real-API sweep, the signed fork, the
+<small>One click, every artifact: clean pack, its older export sibling,
+the four attack twins, the real-API sweep, the signed fork, the
 Bitcoin anchor — each verdict scored
 against the shared oracle, live. The whole demo as a single stream.</small>
 </a>
@@ -181,7 +181,7 @@ fallback.</small>
   <div class="bar" aria-hidden="true"><i></i><i></i><i></i></div>
   <pre id="termbody"><span class="mut">$ attest demo &amp;&amp; attest attack-demo — loading the real transcript…</span></pre>
   <noscript><pre>$ attest demo … $ attest attack-demo
-  21/21 attacks caught — store unchanged
+  22/23 attacks caught — 1 documented detection boundary — store unchanged
   (enable JavaScript for the animated replay; the commands are real either way)</pre></noscript>
 </div>
 <p><small>Real output from this repo's demo runtime, lightly trimmed —
@@ -197,7 +197,7 @@ var lines=[
  ["mut","  Day 3: the Ring plan lapses mid-visit \u2014 observation stops being delivered"],
  ["mut","  Demo is live \u2014 simulated data only, no real Ring account involved \u2192 http://127.0.0.1:8000"],
  ["cmd","$ attest verify sample-pack.zip"],
- ["ok","  OK: case pack verified \u2014 9 visit record(s) intact (export signed: 9 record(s); 4 verifier tool(s) pinned; 121 receipt(s) proven inside the deployment transparency log \u2026)"],
+ ["ok","  OK: case pack verified \u2014 9 visit record(s) intact (export signed: 9 record(s); 4 verifier tool(s) pinned; 175 receipt(s) proven inside the deployment transparency log at checkpoint size 305 \u2014 cosigned by 2 witness(es) (2 anchored in the witness's own published log) \u2026)"],
  ["mut","  Note: a valid pack proves record integrity under the pack's self-declared issuer key \u2014 signatures are not physical truth."],
  ["cmd","$ attest attack-demo"],
  ["ok","  CAUGHT  forge a visit row (state -> attended_verified)"],
@@ -207,8 +207,11 @@ var lines=[
  ["ok","  CAUGHT  graft a sequence-0 key_revocation ahead of the chain"],
  ["ok","  CAUGHT  graft a genuinely-signed receipt the deployment never logged"],
  ["ok","  CAUGHT  ship a forged always-green verifier inside a genuine pack"],
+ ["ok","  CAUGHT  drop the last review statement off a packed bundle"],
  ["mut","  \u2026 fourteen more"],
- ["ok","  21/21 attacks caught \u2014 store unchanged"]
+ ["mut","  BOUNDARY \u2014 EXPECTED MISS  forge a row AND its covering journal entry"],
+ ["mut","         (the journal is unkeyed; only an external anchor bounds it)"],
+ ["ok","  22/23 attacks caught \u2014 1 documented detection boundary \u2014 store unchanged"]
 ];
 var body=document.getElementById("termbody");
 function esc(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;");}
@@ -246,8 +249,10 @@ if("IntersectionObserver" in window){
 padding:.2rem 0 .2rem .9rem;margin:.6rem 0">"The record gets a verdict;
 nobody's story does."</p>
 <p>Every observation and statement becomes a signed receipt; receipts chain by
-hash into a publicly checkable Merkle tree; an independent witness
-cosigns the tree head. Export a pack and strangers verify it — in a browser,
+hash into a publicly checkable Merkle tree; independent witnesses
+cosign the tree head — <strong>the shipped sample pack below carries two real
+counter-signatures from separate deployments</strong>, each anchored in the
+witness's own log. Export a pack and strangers verify it — in a browser,
 in bare Python, in an AWS Lambda — without asking us, Ring, or the issuer
 whether the bytes are still honest.</p>
 
@@ -318,7 +323,8 @@ less. Encryption decides who can see the bytes; attestation decides whether
 anyone can quietly change them.</p>
 
 <h2>The product behind the proofs</h2>
-<p><code>attest demo</code> boots a local Ring emulator and plays an eight-day story —
+<p><code>attest demo</code> boots a local Ring emulator and plays an eight-day story
+(9 visits over 8 days) —
 a disputed visit, a camera blackout mid-window, a lapsed subscription, a coordinator
 live view — then serves the whole product on a printed localhost URL (<code>--port 8000</code> pins it).
 Or peek at a snapshot first, no install:
@@ -338,14 +344,15 @@ scoped <code>/review/</code> token sees ·
 <a href="demo-integrity.html">the self-audit page</a> (revoked-key suspect
 windows, annotated — 9 receipts in scope) ·
 <a href="demo-integrity.json">its machine-readable JSON</a> — and the raw layer
-underneath all of it: <a href="demo-receipts.html">336 signed receipts</a>,
+underneath all of it: <a href="demo-receipts.html">447 signed receipts</a>
+(the demo store's full log) —
 drawn as the literal hash chain (every edge a <code>prev_hash</code> link —
-all 336 verify), each one-click verifiable in the same browser page —
-or <a href="verify.html#demo-receipts">all 336 at once</a>
-(<a href="demo-receipts.json">raw JSON</a>). Eight of them are the deployment
+all 447 verify), each one-click verifiable in the same browser page —
+or <a href="verify.html#demo-receipts">all 447 at once</a>
+(<a href="demo-receipts.json">raw JSON</a>). Twenty-eight of them are the deployment
 auditing <em>itself</em> — <code>attest verify --attest</code> signed the
-verdicts on the clean pack and the forged twin, and
-<code>attest diff --attest</code> signed both reconciliations, into the same
+verdicts on the clean pack and the forged twin across regenerations, and
+<code>attest diff --attest</code> signed the reconciliations, into the same
 log — and each diff report names the receipt that signed its comparison —
 the audit trail of the audit is checkable too. New to the math?
 <a href="anatomy.html"><strong>Anatomy of a signed receipt</strong></a>
@@ -404,6 +411,12 @@ stamp:</p>
   The pack defends its own checker.
   <a href="sample-pack-attack-forged-verifier.zip" download>zip</a></li>
 </ul>
+<p>Nineteen more attacks die <em>inside the store</em> — forged rows, erased
+journal entries, grafted keys, swapped media —
+<a href="attacks.html"><strong>the battery's live verdict table</strong></a>
+renders all 23 verdicts from a real <code>attest attack-demo</code> run
+against the demo store (22 caught, rolled back — the 23rd is a named
+detection boundary, marked EXPECTED MISS on purpose).</p>
 <figure style="margin:1rem 0;overflow-x:auto"><figcaption style="font-size:.85rem;color:#6b6b70"><strong>The seven gates.</strong> Every verification runs all of them in order — each attack dies at a different one. Labels deep-link to the check or its public corpus; <span style="color:#6b6b70">→</span> marks an annotation, not a failure. <a href="pipeline.svg">open the SVG alone</a>.</figcaption>
 <svg viewBox="0 0 672 512" xmlns="http://www.w3.org/2000/svg" style="min-width:560px" role="group" aria-label="The seven verification gates and which attacks die at each">
 <style>text{font-family:system-ui,sans-serif}.g{font-size:13px;font-weight:700;fill:#1c1c1e}.d{font-size:11.5px;fill:#6b6b70}.a{font-size:10.5px;fill:#b3261e;font-weight:600}.n{font-size:13px;font-weight:800;fill:#fff}</style>
@@ -455,7 +468,7 @@ stamp:</p>
 <text class="d" x="64" y="455">verifier_manifest pins the checker's own bytes · media digests match or withheld</text>
 <a href="verify.html#sample-pack-attack-forged-verifier"><text class="a" x="640" y="430" text-anchor="end" text-decoration="underline">forged verifier ✗</text></a>
 <a href="verify.html#vectors/fail-missing-pinned-tool"><text class="a" x="640" y="443" text-anchor="end" text-decoration="underline">missing tool ✗</text></a>
-<text class="d" x="20" y="498">…then the verdict — <tspan fill="#146c2e" font-weight="700">VERIFIED</tspan> only when every gate passed. All 21 demo-store attacks die at one of these gates.</text>
+<text class="d" x="20" y="498">…then the verdict — <tspan fill="#146c2e" font-weight="700">VERIFIED</tspan> only when every gate passed. 22 of 23 demo-store attacks die at one of these gates — the twenty-third is the named detection boundary.</text>
 </svg>
 </figure>
 <p><small>Mint your own: <code>attest export --tamper-twin twin.zip --attack
@@ -513,7 +526,7 @@ pack's embedded script — data and code come from different parties:</li>
   <pre style="min-height:0"><span class="p">$ aws lambda invoke --function-name attest-verify-pack \
     --payload fileb://pack.json out.json</span>
 <span class="ok">  {"ok": true} — 2 visit records, 43 receipts proven inside the log</span>
-<span class="mut">  (transcript of the 2026-09-18 run — the current pack carries 9 visit records, 121 receipts)</span>
+<span class="mut">  (transcript of the 2026-09-18 run — the current pack carries 9 visit records, 175 receipts proven at checkpoint size 305)</span>
 <span class="p">$ # doctor one byte in a signed payload, invoke again</span>
 <span class="bad">  {"ok": false} — payload hash mismatch (payload was altered)</span>
 <span class="mut">  the function catches exactly what the local verifiers catch</span></pre>

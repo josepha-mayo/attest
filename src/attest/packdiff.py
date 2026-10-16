@@ -28,7 +28,17 @@ class BoundedZip:
         # outside the shared envelope: extract_version is the same
         # version-needed field the JS reader checks, and any member
         # genuinely needing it is definitionally over the bounds below.
+        if len(z.infolist()) > 4096:
+            # No legitimate pack approaches this — a member flood is a
+            # slowdown attack on the member-name and manifest sweeps.
+            raise ValueError("zip carries more than 4096 members")
         for i in z.infolist():
+            if i.flag_bits & 0x1:
+                # Encrypted members: the browser reader inflates the
+                # ciphertext to a controlled member-level FAIL — match that
+                # direction (reject) rather than a zipfile RuntimeError at
+                # open, which escapes the catch tuple as a verdictless exit.
+                raise ValueError(f"encrypted member {i.filename!r} exceeds the verification envelope")
             if i.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
                 raise ValueError(
                     f"unsupported compression method {i.compress_type} for member {i.filename!r}"
@@ -37,6 +47,7 @@ class BoundedZip:
                 i.extract_version >= zipfile.ZIP64_VERSION
                 or i.file_size == 0xFFFFFFFF
                 or i.compress_size == 0xFFFFFFFF
+                or i.header_offset == 0xFFFFFFFF
             ):
                 # The browser reader rejects the 0xFFFFFFFF sentinels outright;
                 # zipfile would decode a smuggled ZIP64 extra field even when
@@ -84,12 +95,18 @@ def _tools_pin_check(z, names, trusted, scope, failures, notes):
     membership whitelists check *names* — only this signed receipt pins the
     *bytes*, which is what stops a forged always-green verifier riding a real
     pack. Same rule the server and embedded verifiers enforce."""
-    pinned, err = check_tools_pin(
-        lambda n: z.read(n) if n in names else None,
-        names,
-        trusted or set(),
-        scope,
-    )
+    try:
+        pinned, err = check_tools_pin(
+            lambda n: z.read(n) if n in names else None,
+            names,
+            trusted or set(),
+            scope,
+        )
+    except Exception as exc:  # noqa: BLE001 — same discipline as
+        # _log_pin_check: hostile member bytes must fail the diff closed,
+        # never kill the whole comparison.
+        failures.append(f"verifier_manifest.json: checker crashed on malformed pack data ({exc})")
+        return
     if err:
         failures.append(err)
     elif pinned:
@@ -108,6 +125,7 @@ def _log_pin_check(z, names, trusted, member_ids, failures, notes):
             lambda n: z.read(n) if n in names else None,
             member_ids,
             trusted or set(),
+            actual_members=list(names),
         )
     except Exception as exc:  # noqa: BLE001 — a pack member is hostile input:
         # an unhandled shape inside the checker must fail the diff closed,
@@ -208,11 +226,77 @@ def check_tools_pin(read_member, names, trusted: set, scope: str) -> tuple[int |
     return len(tools), None
 
 
+_EXPORT_PIN_NAME = "export_pin.json"
+
+
+def check_export_pin(read_member, bundle: dict, trusted: set) -> tuple[object | None, str | None]:
+    """Validate the issuer-signed ``export_pin.json`` receipt against the
+    packed bundle it pins — the review chain's count + tip and the signed
+    evidence media digests at export. Without it a bundle whose last
+    statements were trimmed verifies as a clean prefix (reviews aren't log
+    leaves; only the signed count/tip makes silence detectable). Absent →
+    (None, None): a pre-pin pack or a dropped member — a completeness
+    downgrade callers note, mirroring the absent-checkpoint convention.
+    ``bundle`` is the parsed dict (the same shape every surface reads).
+    Returns (Receipt, None) on success or (None, error)."""
+    raw = read_member(_EXPORT_PIN_NAME)
+    if raw is None:
+        return None, None
+    from .ledger import verify_receipt
+    from .models import Receipt
+
+    try:
+        pin = Receipt.model_validate(transparency.json_loads(raw))
+    except Exception as exc:  # noqa: BLE001
+        return None, f"{_EXPORT_PIN_NAME}: not a receipt ({exc})"
+    if pin.public_key not in trusted:
+        return None, f"{_EXPORT_PIN_NAME}: signed outside the trusted issuer chain"
+    ok, why = verify_receipt(pin, public_key=pin.public_key)
+    if not ok:
+        return None, f"{_EXPORT_PIN_NAME}: {why}"
+    payload = pin.payload
+    if payload.get("record_type") != "export_pin":
+        return None, f"{_EXPORT_PIN_NAME}: not an export_pin receipt"
+    original = bundle.get("original") if isinstance(bundle, dict) else None
+    if not isinstance(original, dict):
+        return None, f"{_EXPORT_PIN_NAME}: bundle has no original to pin against"
+    if payload.get("subject_visit") != original.get("visit_id"):
+        return None, f"{_EXPORT_PIN_NAME}: pins a different visit than the packed bundle"
+    reviews = bundle.get("reviews") or []
+    if not isinstance(reviews, list):
+        reviews = []
+    if payload.get("review_count") != len(reviews):
+        return None, (
+            f"{_EXPORT_PIN_NAME}: signed review count {payload.get('review_count')} != "
+            f"packed {len(reviews)} — the chain was trimmed"
+        )
+    tip = None
+    if reviews and isinstance(reviews[-1], dict):
+        r = reviews[-1].get("receipt")
+        tip = r.get("payload_hash") if isinstance(r, dict) else None
+    if payload.get("review_tip") != tip:
+        return None, f"{_EXPORT_PIN_NAME}: signed review tip differs — the packed chain's tail moved"
+    opayload = original.get("payload") if isinstance(original.get("payload"), dict) else {}
+    signed_media = sorted(
+        e.get("media_sha256")
+        for e in opayload.get("evidence", [])
+        if isinstance(e, dict) and e.get("media_sha256")
+    )
+    if payload.get("media_sha256") != signed_media:
+        return None, f"{_EXPORT_PIN_NAME}: signed media digests do not match the bundle"
+    return pin, None
+
+
 _LOG_MEMBER = "log_checkpoint.json"
 
 
 def check_log_pin(
-    read_member, receipt_ids: list[tuple[str, str, str]], trusted: set
+    read_member,
+    receipt_ids: list[tuple[str, str, str]],
+    trusted: set,
+    *,
+    check_members: bool = True,
+    actual_members=None,
 ) -> tuple[tuple | None, str | None]:
     """Validate ``log_checkpoint.json``: a signed Merkle Tree Head plus an
     RFC 6962 inclusion path proving every receipt in the pack sat inside the
@@ -235,6 +319,7 @@ def check_log_pin(
     from .ledger import verify_receipt
     from .models import Receipt
     from .transparency import (
+        MAX_PROOF_NODES,
         MAX_TREE_SIZE,
         hex_bytes,
         json_is_int,
@@ -276,6 +361,43 @@ def check_log_pin(
     # self-check parity with the standalone checkpoint path).
     if verify_extends(payload) is False:
         return None, "log_checkpoint.json: extends bridge attests a history it cannot prove"
+    # pack_members — the export's signed member list. The proofs map is
+    # unsigned, so without this a stripped file+proof pair downgrades
+    # silently (export_pin.json gone → 'unpinned' note). A malformed list is
+    # a signed-payload defect everywhere; presence probing only runs for
+    # callers that hold the whole pack (``check_members``) — a standalone
+    # checkpoint doc carries the claim but has no sibling members to test.
+    pm = payload.get("pack_members")
+    if pm is not None:
+        if not isinstance(pm, list) or not pm or len(pm) > 4096:
+            return None, "log_checkpoint.json: malformed pack_members"
+        for m in pm:
+            if (
+                not isinstance(m, str)
+                or not m
+                or len(m) > 256
+                or ".." in m.split("/")
+                or m.startswith(("/", "\\"))
+                or ":" in m
+                or "\\" in m
+            ):
+                return None, "log_checkpoint.json: malformed pack_members entry"
+        if check_members:
+            for m in pm:
+                if read_member(m) is None:
+                    return None, (
+                        f"log_checkpoint.json: signed member {m!r} missing from pack — "
+                        "the export declared it; a stripped member cannot hide"
+                    )
+            if actual_members is not None:
+                declared = set(pm)
+                for m in actual_members:
+                    if m not in declared:
+                        return None, (
+                            f"log_checkpoint.json: member {m!r} rides the pack but the "
+                            "signed export never declared it — a smuggled member, "
+                            "even inert, is not what the deployment signed"
+                        )
     proven = 0
     referenced_ph: set = set()
     for rid, ph, pub in receipt_ids:
@@ -293,8 +415,9 @@ def check_log_pin(
                 "never committed to the deployment log"
             )
         path_v = p.get("path")
-        if path_v is not None and not isinstance(path_v, list):
-            # a dict path would iterate keys — reject outright on all surfaces
+        if path_v is not None and (not isinstance(path_v, list) or len(path_v) > MAX_PROOF_NODES):
+            # a dict path would iterate keys — reject outright on all
+            # surfaces; an over-bound path is malformed, not just slow
             return None, f"log_checkpoint.json: malformed proof for receipt {rid}"
         try:
             path = [hex_bytes(h, length=32) for h in path_v or []]
@@ -340,8 +463,18 @@ def check_log_pin(
                 return None, (
                     f"log_checkpoint.json: embedded receipt {er.id[:24]}… carries no working inclusion proof"
                 )
+            if p.get("path") is not None and (
+                not isinstance(p["path"], list) or len(p["path"]) > MAX_PROOF_NODES
+            ):
+                # same closed shape as the receipt-proof loop: a dict path
+                # would iterate keys where JS rejects the non-array — never
+                # a proof; over-bound is malformed, not just slow
+                return None, (f"log_checkpoint.json: malformed proof for receipt {er.id[:24]}…")
             try:
-                path = [hex_bytes(h, length=32) for h in p.get("path") or []]
+                pv = p.get("path")
+                if pv is not None and (not isinstance(pv, list) or len(pv) > MAX_PROOF_NODES):
+                    raise ValueError("proof path is not a list")
+                path = [hex_bytes(h, length=32) for h in pv or []]
                 idx = p.get("leaf_index")
                 leaf_b = hex_bytes(er.payload_hash, length=32)
             except (TypeError, ValueError):
@@ -361,7 +494,10 @@ def check_log_pin(
         if not isinstance(p, dict):
             return None, "log_checkpoint.json: unreferenced inclusion proof is malformed"
         try:
-            path = [hex_bytes(h, length=32) for h in p.get("path") or []]
+            pv = p.get("path")
+            if pv is not None and (not isinstance(pv, list) or len(pv) > MAX_PROOF_NODES):
+                raise ValueError("proof path is not a list")
+            path = [hex_bytes(h, length=32) for h in pv or []]
             idx = p.get("leaf_index")
             leaf_b = hex_bytes(ph, length=32)
         except (TypeError, ValueError):
@@ -654,6 +790,18 @@ def _manifest_consistency(manifest: dict, bundles: dict, notes: list[str]) -> li
             c = claimed[:12] if isinstance(claimed, str) else repr(claimed)
             a = actual[:12] if isinstance(actual, str) else repr(actual)
             failures.append(f"{vid}: manifest claims {c}… but bundle hashes {a}…")
+        # Parity with verify_case.py: the manifest's signed labels must name the
+        # bundle it ships — a truncated review tail or mislabeled visit must not
+        # verify green.
+        if bundle:
+            orig = bundle["original"]
+            if orig.get("visit_id") != vid or orig.get("id") != v.get("receipt_id"):
+                failures.append(f"{vid}: manifest names a different receipt than the bundle carries")
+            if v.get("reviews") != len(bundle.get("reviews") or []):
+                failures.append(
+                    f"{vid}: manifest signs {v.get('reviews')} review receipt(s), "
+                    f"bundle carries {len(bundle.get('reviews') or [])}"
+                )
     if manifest.get("signature_receipt") is None:
         notes.append("unsigned manifest — listed states and worker stances are unverified claims")
     return failures
@@ -741,7 +889,11 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
 
     # One read, one identity — the digest and byte count recorded on the
     # normalized map name the exact bytes this verdict ran over, so an
-    # attestation bound to them can't drift to a swapped file.
+    # attestation bound to them can't drift to a swapped file. A stat()
+    # precheck keeps a multi-GB blob from MemoryError-ing the process: no
+    # legitimate artifact approaches the inflated-content bound anyway.
+    if path.stat().st_size > 512 * 1024 * 1024:
+        raise ValueError(f"{path}: artifact exceeds the 512 MB verification bound")
     blob = path.read_bytes()
     digest = hashlib.sha256(blob).hexdigest()
     visits: dict[str, dict] = {}
@@ -764,17 +916,39 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                 manifest = transparency.json_loads(z.read("manifest.json"))
                 if not isinstance(manifest, dict):
                     raise ValueError(f"{path}: manifest.json is not an object")
+                # The same structural gates every other surface enforces —
+                # verify_case.py / app._verify_case_pack / verify.html all
+                # fail a case-pack manifest missing schema or list-typed
+                # visits; a diff that skipped them would report "verified"
+                # where attest verify fails the same bytes.
+                if manifest.get("schema") != "attest.case-pack/1":
+                    failures.append(f"manifest: unsupported schema {manifest.get('schema')!r}")
+                if not isinstance(manifest.get("visits"), list):
+                    failures.append("manifest: visits is missing or not a list")
+                if manifest.get("attestations") is not None and not isinstance(
+                    manifest.get("attestations"), list
+                ):
+                    failures.append("manifest: attestations is not a list")
                 declared = manifest.get("issuer_key")
+                if declared is not None and not isinstance(declared, str):
+                    failures.append("manifest: issuer_key is not a string")
+                    declared = None
                 issuer = key or declared
                 attestations = {}
-                for a in manifest.get("attestations", []):
-                    if not isinstance(a, dict) or not a.get("receipt_id"):
+                # `or []` would still iterate a truthy non-list (true, 5, "x")
+                for a in (
+                    manifest.get("attestations") if isinstance(manifest.get("attestations"), list) else []
+                ):
+                    if not isinstance(a, dict) or not isinstance(a.get("receipt_id"), str):
                         failures.append("manifest attestation entry malformed")
+                        continue
+                    if a["receipt_id"] in attestations:
+                        failures.append("manifest: attestation receipt_id listed twice")
                         continue
                     attestations[a["receipt_id"]] = a
                 entries = {}
-                for v in manifest.get("visits", []):
-                    if not isinstance(v, dict) or not v.get("visit_id"):
+                for v in manifest.get("visits") if isinstance(manifest.get("visits"), list) else []:
+                    if not isinstance(v, dict) or not isinstance(v.get("visit_id"), str):
                         failures.append("manifest visit entry malformed")
                         continue
                     entries[v["visit_id"]] = v
@@ -894,7 +1068,12 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                     z,
                     names,
                     trusted,
-                    f"site:{(_site.get('id') if isinstance(_site, dict) else None) or ''}",
+                    "site:"
+                    + (
+                        _site.get("id")
+                        if isinstance(_site, dict) and isinstance(_site.get("id"), str)
+                        else ""
+                    ),
                     failures,
                     notes,
                 )
@@ -926,6 +1105,7 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                     "issuer": issuer,
                     "visits": visits,
                     "attestations": attestations,
+                    "key_pool": pool,
                     "kind": "case-pack",
                     "log_head": log_head,
                     "verify_failures": failures,
@@ -996,6 +1176,7 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                     "key_rotations.json",
                     "verifier_manifest.json",
                     "log_checkpoint.json",
+                    "export_pin.json",
                 }
                 for name in names:
                     if name.endswith("/") or name in allowed or name.startswith("media/"):
@@ -1024,6 +1205,28 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                 # Only the pack's own key_rotations.json members need proofs —
                 # --issuer doc receipts are external pin material, not members.
                 member_ids += [(r.id, r.payload_hash, r.public_key) for r in kr_member]
+                pin_receipt = None
+                try:
+                    pin_receipt, pin_err = check_export_pin(
+                        lambda n: z.read(n) if n in names else None,
+                        bundle,
+                        _trusted_set(issuer, kr_pool) or {issuer},
+                    )
+                except Exception as exc:  # noqa: BLE001 — hostile member bytes
+                    # fail closed, never kill the diff
+                    pin_err = f"export_pin.json: checker crashed on malformed pack data ({exc})"
+                if pin_err:
+                    failures.append(pin_err)
+                elif pin_receipt is not None:
+                    member_ids.append((pin_receipt.id, pin_receipt.payload_hash, pin_receipt.public_key))
+                    notes.append(
+                        "review-chain completeness pinned by signed export_pin (count + tip + media digests)"
+                    )
+                else:
+                    notes.append(
+                        "no export_pin.json — review-chain completeness unpinned "
+                        "(a trimmed statement tail would not be caught)"
+                    )
                 if "verifier_manifest.json" in names:
                     try:
                         vm = transparency.json_loads(z.read("verifier_manifest.json"))
@@ -1042,6 +1245,7 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
                 return {
                     "issuer": issuer,
                     "visits": visits,
+                    "key_pool": kr_pool,
                     "kind": "pack",
                     "log_head": log_head,
                     "verify_failures": failures,
@@ -1055,7 +1259,7 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
         raise ValueError(f"{path}: not a pack artifact (expected a JSON object)")
     if "original" in data:
         original = data.get("original")
-        if not isinstance(original, dict) or not original.get("visit_id"):
+        if not isinstance(original, dict) or not isinstance(original.get("visit_id"), str):
             raise ValueError(f"{path}: 'original' receipt missing or malformed")
         issuer = key or original.get("public_key")
         visits[original["visit_id"]] = _visit_summary(data)
@@ -1065,6 +1269,7 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
         return {
             "issuer": issuer,
             "visits": visits,
+            "key_pool": list(extra_key_receipts or []),
             "kind": "bundle",
             "verify_failures": failures,
             "notes": notes,
@@ -1074,6 +1279,9 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
     if "visits" in data:  # a bare manifest without its bundles
         declared = data.get("issuer_key")
         issuer = key or declared
+        if issuer is not None and not isinstance(issuer, str):
+            failures.append("manifest: issuer_key is not a string")
+            issuer = None
         bare_pool = list(extra_key_receipts or [])
         bare_trusted = _ancestor_set(declared, bare_pool)
         if not _pin_linked(key, declared, bare_pool):
@@ -1087,8 +1295,12 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
         else:
             failures.append("bare manifest: bundle signatures cannot be checked without the packs")
         seen = set()
-        for v in data["visits"]:
-            if not isinstance(v, dict) or not v.get("visit_id"):
+        _visits = data["visits"]
+        if not isinstance(_visits, list):
+            failures.append("manifest: visits is not a list")
+            _visits = []
+        for v in _visits:
+            if not isinstance(v, dict) or not isinstance(v.get("visit_id"), str):
                 failures.append("manifest visit entry malformed")
                 continue
             vid = v["visit_id"]
@@ -1111,7 +1323,12 @@ def load_artifact(path: str | Path, key: str | None = None, extra_key_receipts: 
         return {
             "issuer": issuer,
             "visits": visits,
-            "attestations": {a["receipt_id"]: a for a in data.get("attestations", [])},
+            "attestations": {
+                a["receipt_id"]: a
+                for a in (data.get("attestations") if isinstance(data.get("attestations"), list) else [])
+                if isinstance(a, dict) and isinstance(a.get("receipt_id"), str)
+            },
+            "key_pool": bare_pool,
             "kind": "manifest",
             "verify_failures": failures,
             "notes": notes,
@@ -1228,15 +1445,22 @@ def diff_html(report: dict) -> str:
     import html as h
 
     esc = h.escape
-    anomalies = report.get("anomalies") or 0
+    # diff_html is public — a hand-built report dict could pass a markup
+    # string; coerce to int so the stamp can't inject.
+    try:
+        anomalies = int(report.get("anomalies") or 0)
+    except (TypeError, ValueError):
+        anomalies = 0
     events = report.get("events") or []
     # Per-side rows (target "old"/"new") are each pack's self-reported notes,
-    # not pack-vs-pack movement — only events naming a member or the log head
-    # mean the two exports actually differ.
+    # not pack-vs-pack movement — only events naming a record member mean the
+    # signed CONTENTS moved; log-head events (target log_checkpoint.json) are
+    # posture, handled by the heads_* branches below.
     cross = [
         e
         for e in events
-        if e.get("severity") in ("drift", "anomaly") and e.get("target") not in ("old", "new")
+        if e.get("severity") in ("drift", "anomaly")
+        and e.get("target") not in ("old", "new", "log_checkpoint.json")
     ]
     appended = [
         e
@@ -1274,7 +1498,29 @@ def diff_html(report: dict) -> str:
             "New signed records appeared (normal export growth); nothing vanished and nothing was altered."
             + heads_note
         )
-    elif heads_open:
+    elif heads_kind == "extends_earlier":
+        stamp = '<div class="stamp drift">PROVEN EARLIER SNAPSHOT — 0 record differences</div>'
+        stamp_sub = (
+            "The 'newer' export pins a signed head the older pack provably "
+            "extends — append-only direction verified hop-by-hop over signed "
+            "checkpoints; an older export or a regressed head, honestly "
+            "labeled rather than hidden."
+        )
+    elif heads_kind == "unreconciled_earlier":
+        stamp = '<div class="stamp drift">EARLIER SIGNED HEAD — no record differences found</div>'
+        stamp_sub = (
+            "The newer export pins an earlier signed head no embedded bridge "
+            "reaches — a rollback or simply an older export; undecidable "
+            "offline, `attest consistency` against the live deployment decides."
+        )
+    elif heads_kind == "unpaired":
+        stamp = '<div class="stamp drift">ONE-SIDED LOG HEAD — no record differences found</div>'
+        stamp_sub = (
+            "Only one export carries a transparency checkpoint, so the "
+            "append-only postures can't be compared — identical signed "
+            "records, unproven continuity."
+        )
+    elif heads_open or heads_kind == "unreconciled":
         stamp = '<div class="stamp drift">LOG HEADS UNRECONCILED — no record differences found</div>'
         stamp_sub = (
             "Both exports carry the same signed membership, but their transparency-log "
@@ -1482,6 +1728,31 @@ def _log_head_verdict(a: dict, b: dict) -> tuple[str, str, str] | None:
             "the issuer signed two histories at one tree size: a provable fork",
             "fork",
         )
+
+    # Cross-check BOTH embedded chains against each other first: the head
+    # probe below only consults the larger export's chain — but each pack
+    # embeds its own issuer-signed prior heads, and two signed members
+    # colliding at one tree size under different roots is provable-fork
+    # evidence even when neither head bridges to the other.
+    def _chain_roots(art):
+        out = {}
+        for m in art.get("chain") or []:
+            try:
+                out[int(m["size"])] = hex_bytes(m["root"], length=32)
+            except (KeyError, TypeError, ValueError):
+                continue
+        return out
+
+    ch_a, ch_b = _chain_roots(a), _chain_roots(b)
+    for csize in ch_a.keys() & ch_b.keys():
+        if ch_a[csize] != ch_b[csize]:
+            return (
+                "anomaly",
+                f"both exports carry an issuer-signed chain head at size "
+                f"{csize} with DIFFERENT roots — two signed heads at one "
+                "tree size: a provable fork",
+                "fork",
+            )
     # Direction matters: the LARGER head walked back to the smaller proves
     # append-only growth — a single embedded bridge for adjacent heads, or
     # the multi-hop signed chain the export carries for non-adjacent ones.
@@ -1598,9 +1869,9 @@ def _diff_events(old: dict, new: dict, key: str | None, old_path: str, new_path:
         # detail — strip control bytes so a hostile name can't forge terminal
         # lines or inject ANSI into text output. JSON/HTML renderings escape
         # independently; this keeps all three views consistent.
-        detail = re.sub(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]", "�", str(detail))
+        detail = re.sub(r"[\x00-\x1f\x7f-\x9f]", "�", str(detail))
         if isinstance(target, str):
-            target = re.sub(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]", "�", target)
+            target = re.sub(r"[\x00-\x1f\x7f-\x9f]", "�", target)
         events.append(
             {
                 "severity": severity,
@@ -1632,13 +1903,34 @@ def _diff_events(old: dict, new: dict, key: str | None, old_path: str, new_path:
             ev("ok", label, f"{label} artifact: all signed contents verify under the {issuer_note}", "ok ")
 
     if old["issuer"] and new["issuer"] and old["issuer"] != new["issuer"]:
-        ev(
-            "anomaly",
-            None,
-            "issuer key differs between exports — one was not signed by this deployment",
-            "!! ",
-        )
-        anomalies += 1
+        # A key rotation between exports changes the issuer honestly — the
+        # anomaly is only a difference with NO signed lifecycle link. Pool
+        # BOTH artifacts' lifecycle receipts: each side may carry half the
+        # chain (a pack exported before the rotation can't carry the link,
+        # the post-rotation pack carries it).
+        from .ledger import descendant_issuer_keys, lineage_root
+
+        union_pool = (old.get("key_pool") or []) + (new.get("key_pool") or [])
+        same_lineage = lineage_root(old["issuer"], union_pool) == lineage_root(
+            new["issuer"], union_pool
+        ) or old["issuer"] in descendant_issuer_keys(new["issuer"], union_pool)
+        if same_lineage:
+            ev(
+                "info",
+                None,
+                "issuer key differs between exports but signed key_rotation "
+                "links reconcile them — an honest rotation, not a foreign pack",
+                "+  ",
+            )
+        else:
+            ev(
+                "anomaly",
+                None,
+                "issuer key differs between exports with no signed lifecycle "
+                "link — one was not signed by this deployment",
+                "!! ",
+            )
+            anomalies += 1
 
     # Two exports = two snapshots of the same transparency log, each
     # carrying a signed tree head and the signed prior-head chain its
@@ -1753,7 +2045,7 @@ def _diff_events(old: dict, new: dict, key: str | None, old_path: str, new_path:
             ev(
                 "info",
                 rid,
-                f"attestation {b['record_type'] or 'record'} ({rid[:20]}…): new site event",
+                f"attestation {b.get('record_type') or 'record'} ({rid[:20]}…): new site event",
                 "+  ",
             )
             continue
@@ -1766,7 +2058,7 @@ def _diff_events(old: dict, new: dict, key: str | None, old_path: str, new_path:
             )
             anomalies += 1
             continue
-        if a["payload_hash"] != b["payload_hash"]:
+        if a.get("payload_hash") != b.get("payload_hash"):
             ev(
                 "anomaly",
                 rid,

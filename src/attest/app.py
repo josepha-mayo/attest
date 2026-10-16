@@ -79,6 +79,11 @@ def _register_template_helpers() -> None:
 _register_template_helpers()
 
 _MAX_WEBHOOK_BYTES = 256 * 1024
+# A future-dated occurred_at reschedules its delivery rather than burning
+# retries — but only within a horizon. A signed event claiming occurrence
+# beyond this parks a queue slot for that long; past it the delivery fails
+# loud (recoverable via requeue once its admissibility instant arrives).
+_FUTURE_PARK_HORIZON_S = 7 * 24 * 3600
 _MAX_VERIFY_BYTES = 32 * 1024 * 1024
 _MAX_BODY_BYTES = 1024 * 1024
 
@@ -92,6 +97,11 @@ class _TokenBuckets:
     household's grant budget or vice versa. The map is hard-bounded: a
     spoofed-source flood gets denied once every slot is hot rather than
     growing memory without limit.
+
+    Topology note: the key is the peer's socket address — uvicorn only honors
+    X-Forwarded-* from loopback proxies by default, so behind a REMOTE load
+    balancer every client shares the balancer's one bucket (a single flooder
+    can 429 everyone). Terminate TLS on-box or run a shared limiter upstream.
     """
 
     _MAX_BUCKETS = 10_000
@@ -149,10 +159,14 @@ def create_app(
         )
     if signer is None:
         from .keycustody import load_or_create_signer
+        from .ledger import check_signer_continuity
 
         signer = load_or_create_signer(
             s.key_path, kms_key_id=s.kms_key_id, aws_region=s.aws_region, custody=s.key_custody
         )
+        # A missing key file over a populated store must never mint a fresh
+        # identity — every receipt it signed would chain-break forever.
+        check_signer_continuity(store.latest_receipt(), signer)
     media = MediaStore(s.data_dir / "media")
     summarizer = build_summarizer(
         s.summarizer, tz=s.timezone, model_id=s.bedrock_model_id, region=s.aws_region
@@ -165,7 +179,7 @@ def create_app(
     store.put_setting(
         "webhook_intake",
         {
-            "armed": bool(s.ring_webhook_key) and s.poll_history_seconds <= 0,
+            "armed": bool(s.webhook_signing_key) and s.poll_history_seconds <= 0,
             "polling": s.poll_history_seconds > 0,
             "max_age_s": s.webhook_max_age_s,
         },
@@ -178,25 +192,55 @@ def create_app(
         if job is None:
             return False
         try:
-            if not s.ring_webhook_key:
+            if not s.webhook_signing_key:
                 raise ValueError("webhook signing key not configured")
-            ev = webhooks.parse(job["raw_body"], signing_key=s.ring_webhook_key, signature=job["signature"])
+            ev = webhooks.parse(
+                job["raw_body"], signing_key=s.webhook_signing_key, signature=job["signature"]
+            )
+            try:
+                ev.occurred_at.tzinfo  # noqa: B018 — forces the lazy timestamp parse
+            except (OverflowError, OSError, ValueError):
+                # attributes.timestamp converts lazily — an absurd signed value
+                # would otherwise surface mid-ingest as an unclassified error.
+                inbox.fail(job, "malformed_event_timestamp", terminal=True)
+                return True
             outcome = engine.ingest(ev)
             reason = outcome.ignored_reason or ""
-            rejected = reason in (
-                "account mismatch",
-                "ingestion source changed; reconciliation required",
-            ) or ("not bound to a site" in reason)
-            inbox.complete(job, "rejected" if rejected else "done")
+            if "not bound to a site" in reason:
+                # Transient, not a rejection: a delivery that lands before its
+                # site's binding (or during a source move) must be able to
+                # become admissible — route it through the failure budget so
+                # it re-tries and, if binding never comes, fails loudly and
+                # requeues like every other recoverable miss.
+                inbox.fail(job, "not_bound_to_site")
+            else:
+                rejected = reason in (
+                    "account mismatch",
+                    "ingestion source changed; reconciliation required",
+                )
+                inbox.complete(job, "rejected" if rejected else "done")
         except NotYetAdmissible as exc:
             # Early, not poison: retry at the admissibility instant and never
             # let early arrivals exhaust the attempt budget into "failed".
-            inbox.fail(
-                job,
-                "future_timestamp",
-                retry_at=exc.admissible_at.timestamp(),
-                terminal=False,
-            )
+            # But bound the park — a signed event claiming occurrence decades
+            # out would otherwise hold a queue slot effectively forever.
+            # Beyond the horizon it fails loud (and requeues like any failed
+            # delivery — by the time it becomes admissible, a requeue lets it
+            # through).
+            try:
+                retry_at = exc.admissible_at.timestamp()
+            except (OverflowError, OSError, ValueError):
+                inbox.fail(job, "far_future_timestamp", terminal=True)
+                return True
+            if retry_at > time.time() + _FUTURE_PARK_HORIZON_S:
+                inbox.fail(job, "far_future_timestamp", terminal=True)
+            else:
+                inbox.fail(
+                    job,
+                    "future_timestamp",
+                    retry_at=retry_at,
+                    terminal=False,
+                )
         except Exception as exc:
             inbox.fail(job, type(exc).__name__)
             log.warning("queued webhook processing failed: %s", type(exc).__name__)
@@ -303,6 +347,10 @@ def create_app(
         # signature — a public cosigning service by design, like a CT
         # witness. Unauthenticated by choice, rate-limited for floods, and
         # browser-cross-site-blocked for writes like every other surface.
+        # Prefix exemptions are the WHOLE public surface: grant-token pages,
+        # webhook intake, and the open cosign endpoint. Adding any new route
+        # under these prefixes ships it unauthenticated — keep admin/coordinator
+        # routes outside this set.
         if request.url.path.startswith(("/checkin/", "/review/", "/family/", "/api/witness/")):
             return
         if s.admin_token is None:
@@ -478,7 +526,7 @@ def create_app(
             return JSONResponse(
                 {"error": "history polling is enabled; webhook intake disabled"}, status_code=409
             )
-        if not s.ring_webhook_key:
+        if not s.webhook_signing_key:
             return JSONResponse(
                 {"error": "no Ring webhook signing key configured — set ATTEST_RING_WEBHOOK_KEY"},
                 status_code=503,
@@ -492,7 +540,7 @@ def create_app(
         try:
             ev = webhooks.parse(
                 raw,
-                signing_key=s.ring_webhook_key,
+                signing_key=s.webhook_signing_key,
                 signature=request.headers.get(webhooks.SIGNATURE_HEADER),
                 max_age_s=s.webhook_max_age_s,
             )
@@ -510,7 +558,14 @@ def create_app(
             )
         except ValueError:
             return JSONResponse({"error": "invalid webhook payload"}, status_code=400)
-        if ev.occurred_at.tzinfo is None:
+        try:
+            occurred_at = ev.occurred_at
+        except (OverflowError, OSError, ValueError):
+            # attributes.timestamp is converted lazily inside the model — an
+            # absurd-but-signed value (year 10^5) would otherwise escape every
+            # handler and 500 the delivery on every retry.
+            return JSONResponse({"error": "malformed event timestamp"}, status_code=400)
+        if occurred_at.tzinfo is None:
             # A naive timestamp can't be ordered against aware clocks — reject at
             # intake rather than let it burn inbox retries into a TypeError.
             return JSONResponse(
@@ -862,7 +917,7 @@ def create_app(
                 else "local key file — plaintext at rest"
             ),
             webhook={
-                "armed": bool(s.ring_webhook_key) and s.poll_history_seconds <= 0,
+                "armed": bool(s.webhook_signing_key) and s.poll_history_seconds <= 0,
                 "polling": s.poll_history_seconds > 0,
                 "max_age_s": s.webhook_max_age_s,
             },
@@ -941,7 +996,7 @@ def create_app(
                     else "local key file — plaintext at rest"
                 ),
                 "webhook": {
-                    "armed": bool(s.ring_webhook_key) and s.poll_history_seconds <= 0,
+                    "armed": bool(s.webhook_signing_key) and s.poll_history_seconds <= 0,
                     "polling": s.poll_history_seconds > 0,
                     "max_age_s": s.webhook_max_age_s,
                 },
@@ -1000,11 +1055,11 @@ def create_app(
 
         def gather():
             size, head = engine.log_head()
-            checkpoints = [r for r in store.receipts() if r.payload.get("record_type") == "log_checkpoint"]
+            checkpoint = store.latest_checkpoint_receipt()
             return {
                 "tree_size": size,
                 "root_sha256": head.hex(),
-                "checkpoint": (checkpoints[-1].model_dump(mode="json") if checkpoints else None),
+                "checkpoint": (checkpoint.model_dump(mode="json") if checkpoint else None),
                 "boundary": (
                     "The root commits to the first tree_size receipt payload "
                     "hashes in sequence order. Checkpoint receipts are not "
@@ -1375,7 +1430,8 @@ def create_app(
         try:
             await asyncio.to_thread(reviews.household_statement, token, data)
         except ValueError as exc:
-            if getattr(exc, "code", None) == "statement_limit":
+            code = getattr(exc, "code", None)
+            if code == "statement_limit":
                 return _household_render(
                     request,
                     visit,
@@ -1384,6 +1440,10 @@ def create_app(
                     lang=lang,
                     statement_error=s["err_limit"],
                 )
+            if code != "invalid_family_link":
+                # A real fault (store corrupt, engine wedge) must not
+                # masquerade as an expired link — surface the 500.
+                raise
             return _dead_link(request, "family view")
         # PRG: a refresh after posting must re-GET, never re-POST the account
         # into the signed chain a second time.
@@ -1399,12 +1459,14 @@ def create_app(
                 # The signed digest is the contract: never serve bytes that
                 # fail it — a swapped file must surface as missing evidence,
                 # not render inside a page that displays the original digest.
-                if e.media_sha256 and not media.verify(e.media_path, e.media_sha256):
-                    log.warning("media digest mismatch for %s on %s", name, visit.id)
-                    raise HTTPException(410, "media failed integrity check")
+                # Hash the very bytes returned: a verify-then-read pair would
+                # leave a swap window between the syscalls.
                 data = media.read(e.media_path)
                 if data is None:
                     raise HTTPException(404)
+                if e.media_sha256 and hashlib.sha256(data).hexdigest() != e.media_sha256:
+                    log.warning("media digest mismatch for %s on %s", name, visit.id)
+                    raise HTTPException(410, "media failed integrity check")
                 mime = "image/png" if data.startswith(b"\x89PNG") else "image/jpeg"
                 return Response(content=data, media_type=mime)
         raise HTTPException(404)
@@ -1413,12 +1475,14 @@ def create_app(
     async def visit_media(visit_id: str = PathParam(max_length=128), name: str = PathParam(max_length=255)):
         for e in store.evidence_for(visit_id):
             if e.media_path and Path(e.media_path).name == name:
-                if e.media_sha256 and not media.verify(e.media_path, e.media_sha256):
-                    log.warning("media digest mismatch for %s on %s", name, visit_id)
-                    raise HTTPException(410, "media failed integrity check")
+                # Same contract, single read: the served bytes are the hashed
+                # bytes — no verify-then-read swap window.
                 data = media.read(e.media_path)
                 if data is None:
                     break
+                if e.media_sha256 and hashlib.sha256(data).hexdigest() != e.media_sha256:
+                    log.warning("media digest mismatch for %s on %s", name, visit_id)
+                    raise HTTPException(410, "media failed integrity check")
                 mime = "image/png" if data.startswith(b"\x89PNG") else "image/jpeg"
                 return Response(data, media_type=mime, headers={"X-Content-SHA256": e.media_sha256 or ""})
         raise HTTPException(404)
@@ -1517,6 +1581,9 @@ def create_app(
 
     @app.post("/api/workers")
     async def api_worker(worker: Worker):
+        # checkin_token is server-minted — a client-supplied value is both a
+        # UNIQUE-collision 500 and a planted credential
+        worker = worker.model_copy(update={"checkin_token": secrets.token_urlsafe(12)})
         registered = await action(setup.register_worker, worker)
         return registered.model_dump(exclude={"checkin_token"})
 
@@ -1650,6 +1717,10 @@ def create_app(
                 )
                 resp.status_code = 409
                 return resp
+        # pack generation signs manifests + a log checkpoint — a cross-site
+        # GET riding cached Basic creds must not force ledger growth
+        if request.headers.get("sec-fetch-site") == "cross-site":
+            raise HTTPException(403, "pack export is same-origin only")
         bundle = await action(reviews.bundle, visit_id)
         data = await asyncio.to_thread(
             build_pack,
@@ -1658,8 +1729,20 @@ def create_app(
             bundle,
             redact_media=redact_media,
             tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"visit:{visit_id}", t),
-            log_fn=lambda rs: log_member(engine, rs),
+            log_fn=lambda rs, pack_members=None: log_member(engine, rs, pack_members=pack_members),
+            pin_fn=engine.issue_export_pin,
         )
+
+        # Same self-check the CLI runs before writing: never serve bytes this
+        # deployment's own verifier would refuse.
+        def _selfcheck() -> None:
+            ok, why = _verify_pack(data, engine.signer.public_key_b64)
+            if not ok:
+                raise HTTPException(
+                    500, f"pack self-check failed — refusing to serve inconsistent bytes: {why}"
+                )
+
+        await asyncio.to_thread(_selfcheck)
         return Response(
             data,
             media_type="application/zip",
@@ -1683,9 +1766,9 @@ def create_app(
                 coverage_summaries[v.id] = cov
         workers = {w.id: w for w in store.workers()}
         schedules = {x.id: x for x in store.schedules_for_site(site.id)}
-        digests = [r for r in store.receipts() if r.visit_id.startswith(f"digest:{site.id}:")]
-        exports = [r for r in store.receipts() if r.visit_id.startswith(f"export:{site.id}:")]
-        coverage_certs = [r for r in store.receipts() if r.visit_id.startswith(f"coverage:{site.id}:")]
+        digests = store.receipts_by_visit_prefix(f"digest:{site.id}:")
+        exports = store.receipts_by_visit_prefix(f"export:{site.id}:")
+        coverage_certs = store.receipts_by_visit_prefix(f"coverage:{site.id}:")
         from .timeline import day_strips
 
         days = day_strips(
@@ -1707,9 +1790,11 @@ def create_app(
             schedules=schedules,
             countersign=stances,
             coverage=coverage_summaries,
-            coverage_events=await asyncio.to_thread(lambda: store.coverage_events(site.id, limit=20)[::-1]),
+            coverage_events=await asyncio.to_thread(
+                lambda: store.coverage_events(site.id, limit=20, desc=True)
+            ),
             liveview_sessions=await asyncio.to_thread(
-                lambda: store.liveview_sessions(site.id, limit=20)[::-1]
+                lambda: store.liveview_sessions(site.id, limit=20, desc=True)
             ),
             receipts={v.id: store.receipt_for_visit(v.id) for v in visits},
             digests=digests,
@@ -1798,7 +1883,10 @@ def create_app(
             raise HTTPException(409, "no records to digest")
         start = min(v.arrived_at for v in visits)
         end = max(v.last_activity_at for v in visits)
-        receipt = await asyncio.to_thread(engine.issue_period_digest, site, start, end)
+        try:
+            receipt = await asyncio.to_thread(engine.issue_period_digest, site, start, end)
+        except ValueError as exc:  # a single-instant window has no span
+            raise HTTPException(409, str(exc)) from exc
         return receipt.model_dump(mode="json")
 
     @app.post("/api/sites/{site_id}/disconnect")
@@ -1836,7 +1924,7 @@ def create_app(
             Ed25519PrivateKey,
         )
 
-        from .keycustody import load_or_create_signer, persist_signer_key
+        from .keycustody import persist_signer_key
 
         reason = ""
         try:
@@ -1854,6 +1942,15 @@ def create_app(
         )
 
         def _adopt() -> Signer:
+            # persist_signer_key raising here is the ONLY safe failure — once it
+            # returns, the successor is durable on disk under the configured
+            # custody posture (a KMS wrap that couldn't complete never wrote).
+            # The signer is adopted from the key material already in hand:
+            # a second custody round-trip (e.g. a transient KMS Decrypt blip)
+            # that fails post-persist would leave disk on the new key while
+            # this process keeps signing under the retired one — receipts
+            # minted in that window break the chain permanently once the
+            # boot-time adoption sweep consummates the pivot.
             persist_signer_key(
                 s.key_path,
                 pem,
@@ -1861,21 +1958,16 @@ def create_app(
                 kms_key_id=s.kms_key_id,
                 aws_region=s.aws_region,
             )
-            # Reload from the custody layer rather than trusting the PEM just
-            # written — a KMS-mode deployment must never adopt a signer KMS
-            # couldn't wrap.
-            return load_or_create_signer(
-                s.key_path,
-                custody=s.key_custody,
-                kms_key_id=s.kms_key_id,
-                aws_region=s.aws_region,
-            )
+            return Signer(sk)
 
         # One worker thread for the whole sequence: the signing barrier holds
         # the store's RLock, which is thread-affine — every step must run on
         # the thread that holds it so no @atomic issuance can slip a
         # retired-key signature into the pivot→adopt gap.
-        rotation, adoption = await asyncio.to_thread(engine.rotate_signing_key, new_key, _adopt, reason)
+        try:
+            rotation, adoption = await asyncio.to_thread(engine.rotate_signing_key, new_key, _adopt, reason)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
         signer = engine.signer
         reviews.signer = app.state.signer = signer
         return {
@@ -1895,6 +1987,8 @@ def create_app(
             body = await request.json()
         except Exception:  # noqa: BLE001
             body = {}
+        if not isinstance(body, dict):
+            raise HTTPException(400, "request body must be a JSON object")
         revoked = str(body.get("revoked_key") or "")
         if not revoked:
             raise HTTPException(400, "revoked_key is required")
@@ -1905,7 +1999,10 @@ def create_app(
             except ValueError:
                 raise HTTPException(400, "suspect_after is not ISO 8601") from None
             if when.tzinfo is None:
-                when = when.replace(tzinfo=UTC)
+                # A forensic cutoff signed over an ambiguous instant guesses
+                # the operator's timezone — same reject-naive contract the
+                # sweep and check-in surfaces hold.
+                raise HTTPException(400, "suspect_after must be timezone-aware (ISO 8601 with offset)")
         else:
             # Default: the key's first signed receipt — when a compromise was
             # discovered is knowable, when it started is not; the honest
@@ -1956,9 +2053,7 @@ def create_app(
         site = store.site(site_id)
         if site is None:
             raise HTTPException(404, "unknown site")
-        if "text/html" in (request.headers.get("accept") or "") and not any(
-            store.receipt_for_visit(v.id) for v in store.visits(site_id=site.id, limit=10_000)
-        ):
+        if "text/html" in (request.headers.get("accept") or "") and not store.site_has_receipt(site.id):
             # A browser following the export link gets a styled page, not raw JSON.
             resp = render(
                 request,
@@ -1980,18 +2075,30 @@ def create_app(
             resp.status_code = 409
             return resp
 
+        # pack generation signs manifests + a log checkpoint — a cross-site
+        # GET riding cached Basic creds must not force ledger growth
+        if request.headers.get("sec-fetch-site") == "cross-site":
+            raise HTTPException(403, "pack export is same-origin only")
+
         def build() -> bytes:
+            from .reviews import countersign_status
+
             entries = []
-            for visit in store.visits(site_id=site.id, limit=10_000):
+            # Unbounded: a fixed cap would ship a pack that verifies while
+            # silently omitting records beyond it.
+            for visit in store.visits(site_id=site.id, limit=None):
                 # Only closed records carry signed receipts; open visits have
                 # nothing to verify and are skipped from the case export.
                 if store.receipt_for_visit(visit.id) is None:
                     continue
                 bundle = reviews.bundle(visit.id)
-                entries.append((visit, bundle, reviews.countersign(visit.id)))
+                # Derive the stance from the SAME bundle snapshot we ship —
+                # re-reading (reviews.countersign) could sign a claim about a
+                # review that isn't in this pack.
+                entries.append((visit, bundle, countersign_status(bundle)))
             if not entries:
                 raise HTTPException(409, "no signed records for this site yet")
-            return build_case_pack(
+            data = build_case_pack(
                 store,
                 s.data_dir / "media",
                 site,
@@ -2000,8 +2107,17 @@ def create_app(
                 manifest_signer=lambda m: engine.issue_export_manifest(site, m),
                 issuer_key=engine.signer.public_key_b64,
                 tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"site:{site.id}", t),
-                log_fn=lambda rs: log_member(engine, rs),
+                log_fn=lambda rs, pack_members=None: log_member(engine, rs, pack_members=pack_members),
             )
+            # The HTTP path ships what the CLI self-checks: verify the built
+            # bytes under the live lineage before serving — a key rotation or
+            # review landing mid-build must not hand out an unverifiable pack.
+            ok, why = _verify_pack(data, engine.signer.public_key_b64)
+            if not ok:
+                raise HTTPException(
+                    500, f"pack self-check failed — refusing to serve inconsistent bytes: {why}"
+                )
+            return data
 
         data = await asyncio.to_thread(build)
         return Response(
@@ -2204,7 +2320,12 @@ def create_app(
 
     @app.post("/api/sweep")
     async def api_sweep(now: datetime | None = None):
-        changed = await asyncio.to_thread(engine.sweep, now)
+        if now is not None and now.tzinfo is None:
+            raise HTTPException(400, "now must be timezone-aware")
+        try:
+            changed = await asyncio.to_thread(engine.sweep, now)
+        except ValueError as exc:  # e.g. an unstarted replay clock
+            raise HTTPException(409, str(exc)) from exc
         return {"changed": [v.id for v in changed]}
 
     @app.post("/api/process-webhooks")
@@ -2229,7 +2350,21 @@ def create_app(
 
     @app.post("/api/poll")
     async def api_poll():
-        n = await asyncio.to_thread(HistoryPoller(engine, store, ring).poll_once)
+        # the poller binds the clock at construction — keep that inside the
+        # thread and translate an unstarted replay clock to 409, not a 500
+        def run():
+            return HistoryPoller(engine, store, ring).poll_once()
+
+        try:
+            n = await asyncio.to_thread(run)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except RingAPIError as exc:
+            raise HTTPException(
+                502, f"Ring API returned HTTP {exc.status_code}; check access and retry"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise HTTPException(502, "Ring service unavailable; check connectivity and retry") from exc
         return {"ingested": n}
 
     @app.post("/api/triage")
@@ -2345,12 +2480,24 @@ def _verify_pack(data: bytes, public_key: str, known_rotations: list | None = No
             "key_rotations.json",
             "verifier_manifest.json",
             "log_checkpoint.json",
+            "export_pin.json",
         }
         for name in names:
             if name.endswith("/") or name in allowed or name.startswith("media/"):
                 continue
             return False, f"{name}: present but not in the signed manifest"
         trusted_set = trusted if isinstance(trusted, set) else {trusted}
+        from .packdiff import check_export_pin
+
+        pin_receipt, pin_err = check_export_pin(
+            lambda n: z.read(n) if n in names else None,
+            bundle.model_dump(mode="json"),
+            trusted_set,
+        )
+        if pin_err:
+            return False, pin_err
+        if pin_receipt is None:
+            detail += " (no export_pin.json — review-chain completeness unpinned)"
         tok, tnote = _verify_tools_pin(z, trusted_set, f"visit:{bundle.original.visit_id}")
         if not tok:
             return False, tnote
@@ -2371,6 +2518,8 @@ def _verify_pack(data: bytes, public_key: str, known_rotations: list | None = No
                     member_ids.append((vm["id"], vm["payload_hash"], vm.get("public_key")))
             except Exception:  # noqa: BLE001 — malformed already failed above
                 pass
+        if pin_receipt is not None:
+            member_ids.append((pin_receipt.id, pin_receipt.payload_hash, pin_receipt.public_key))
         lok, lnote = _verify_log_pin(z, trusted_set, member_ids)
         if not lok:
             return False, lnote
@@ -2450,7 +2599,12 @@ def _verify_log_pin(z, trusted: set, member_ids: list[tuple[str, str, str]]) -> 
     from .packdiff import check_log_pin
 
     names = set(z.namelist())
-    res, err = check_log_pin(lambda n: z.read(n) if n in names else None, member_ids, trusted)
+    res, err = check_log_pin(
+        lambda n: z.read(n) if n in names else None,
+        member_ids,
+        trusted,
+        actual_members=list(names),
+    )
     if err:
         return False, err
     if res is None:
@@ -2543,6 +2697,16 @@ def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -
             return False, f"{vid}: {detail}"
         if bundle.original.payload_hash != v.get("payload_hash"):
             return False, f"{vid}: manifest hash disagrees with signed original"
+        # The manifest's signed labels must name the bundle it actually ships —
+        # otherwise a truncated review tail or mislabeled visit verifies green.
+        if bundle.original.visit_id != vid or bundle.original.id != v.get("receipt_id"):
+            return False, f"{vid}: manifest names a different receipt than the bundle carries"
+        if v.get("reviews") != len(bundle.reviews):
+            return (
+                False,
+                f"{vid}: manifest signs {v.get('reviews')} review receipt(s), "
+                f"bundle carries {len(bundle.reviews)}",
+            )
         marker_name = f"visits/{vid}/redaction.json"
         withheld_marker: set = set()
         if marker_name in z.namelist():
@@ -2628,9 +2792,10 @@ def _verify_case_pack(z, public_key: str, known_rotations: list | None = None) -
             continue  # digest-checked against the signed evidence above
         return False, f"{name}: present but not in the signed manifest"
     _site = manifest.get("site")
-    tok, tnote = _verify_tools_pin(
-        z, trusted, f"site:{(_site.get('id') if isinstance(_site, dict) else None) or ''}"
-    )
+    # Non-string site ids render "" — Python's str() would print "site:True"
+    # where the browser prints "site:true"; all surfaces spell "" instead.
+    _sid = _site.get("id") if isinstance(_site, dict) else None
+    tok, tnote = _verify_tools_pin(z, trusted, f"site:{_sid if isinstance(_sid, str) else ''}")
     if not tok:
         return False, tnote
     if tnote:

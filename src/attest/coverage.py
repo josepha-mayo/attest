@@ -147,8 +147,20 @@ def coverage_report(
                 for s in why
             ]
 
-    events = sum(o.events_returned for o in covering if o.ok)
+    # ``events_returned`` counts every API return mention — the anchored history
+    # window means overlapping polls repeat the same event, so summing it would
+    # inflate in proportion to poll frequency. ``new_events`` counts only events
+    # the pipeline had never delivered before. Rows predating the field carry
+    # None: their return count can't be deduped, so the signed payload marks
+    # ``events`` a lower bound rather than claiming a false zero or an
+    # inflated sum.
+    events = sum(o.new_events or 0 for o in covering if o.ok)
+    events_lower_bound = any(o.new_events is None and o.events_returned > 0 for o in covering if o.ok)
     polls = len([o for o in covering if o.ok])
+    # Even at fraction >= 0.999 ("observed") a residual blind spot can hide
+    # everything that mattered — publish the unwatched seconds explicitly so a
+    # verifier never has to infer the caveat from a rounded fraction.
+    blind_spot = max(0.0, total - covered_seconds)
     if not covering:
         state: CoverageState = "no_polls"
     elif not polls:
@@ -168,6 +180,8 @@ def coverage_report(
         "polls": polls,
         "failed_polls": len([o for o in covering if not o.ok]),
         "events": events,
+        "events_lower_bound": events_lower_bound,
+        "blind_spot_seconds": round(blind_spot, 3),
         "window": {"start": start.isoformat(), "end": end.isoformat()},
         "claim": (
             "Attest polled Ring Event History during this window; it attests what the "

@@ -305,7 +305,13 @@ def _extract_case_pack(engine, store, household, schedule, t0, tmp_path):
 
 
 def test_f8_attestations_dir_sweeps_every_member(engine, store, household, schedule, t0, tmp_path):
-    """glob('*.json') missed non-.json files and subdirs under attestations/."""
+    """glob('*.json') missed non-.json files and subdirs under attestations/.
+
+    An EMPTY directory is a container artifact — zip extractors synthesize
+    intermediate dirs with no member behind them, so only a directory
+    carrying content can smuggle. The empty case is still caught at zip
+    level: the signed pack_members list is exact, so a stray `subdir/` zip
+    entry fails the member check (test_parity's zip-side sweeps cover it)."""
     pack = _extract_case_pack(engine, store, household, schedule, t0, tmp_path)
     clean = _run_case(pack)
     assert clean.returncode == 0, clean.stderr + clean.stdout
@@ -313,12 +319,17 @@ def test_f8_attestations_dir_sweeps_every_member(engine, store, household, sched
         target = pack / "attestations" / member
         if is_dir:
             target.mkdir(parents=True, exist_ok=True)
+            (target / "payload.txt").write_text("smuggled")
         else:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text("smuggled")
         res = _run_case(pack)
         assert res.returncode != 0, (member, res.stdout)
-        target.rmdir() if is_dir else target.unlink()
+        if is_dir:
+            (target / "payload.txt").unlink()
+            target.rmdir()
+        else:
+            target.unlink()
 
 
 def test_f8_visits_dir_rejects_plain_files(engine, store, household, schedule, t0, tmp_path):

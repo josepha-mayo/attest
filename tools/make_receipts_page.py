@@ -37,6 +37,7 @@ COLORS = {
     "verification_report": "#16a34a",
     "pack_verification": "#0891b2",
     "pack_comparison": "#0e7490",
+    "late_event": "#b45309",
 }
 COLS = 10  # nodes per serpentine row
 PITCH_X = 62  # horizontal pitch between node centers
@@ -118,7 +119,7 @@ def main() -> int:
     from attest import transparency
     from attest.store import Store
 
-    store = Store(DB)
+    store = Store(DB, read_only=True)
     try:
         receipts = [transparency.json_loads(r.model_dump_json()) for r in store.receipts()]
     finally:
@@ -205,7 +206,8 @@ rewritten — bytes are the exact signed payloads.</p>
 2 issuer keys (a mid-history rotation — both lineages verify): {type_list}.</p>
 <figure style="margin:.8rem 0;overflow-x:auto"><figcaption class="small">
 <strong>The chain, literally.</strong> Each node is a receipt; every edge is a
-<code>prev_hash</code> link — all {n - 1} verify. Hover a node for its id, type,
+<code>prev_hash</code> link — all {n - 1} edges verify (the first receipt has
+no predecessor, so {n} receipts carry {n - 1} links). Hover a node for its id, type,
 sequence, and issue time; click it to verify that receipt in your browser ·
 <a href="chain.svg">open the SVG alone</a> to zoom.</figcaption>
 {svg}

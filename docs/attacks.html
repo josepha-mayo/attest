@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http%3A%2F%2Fwww.w3.org%2F2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1l6 2v5c0 3.5-2.6 6-6 7-3.4-1-6-3.5-6-7V3z' fill='%231c1c1e'/%3E%3Cpath d='M4.6 8.2l2.2 2.2 4.6-4.9' stroke='%23fff' stroke-width='1.5' fill='none'/%3E%3C/svg%3E">
+<title>Twenty-three attacks. Every one named — even the one that wins. · Attest</title>
+<meta name="description" content="The adversarial battery's real output — each tamper attempt executed against the shipped demo store, caught, and rolled back. The one attack nothing can catch is listed too, as a named boundary.">
+<meta property="og:title" content="Twenty-three attacks. Every one named — even the one that wins.">
+<meta property="og:description" content="attest attack-demo run live on the demo store — verdicts rendered verbatim.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="https://josepha-mayo.github.io/attest/og-image.png">
+<meta property="og:url" content="https://josepha-mayo.github.io/attest/attacks.html">
+<style>
+body{font-family:system-ui,sans-serif;max-width:62em;margin:0 auto;
+padding:1.4rem 1.2rem;color:#1c1c1e;line-height:1.55}
+a{color:#2563eb}
+h1{margin-bottom:.15rem}
+.sub{color:#6b6b70;margin-top:0}
+.score{font-size:1.4rem;font-weight:700;margin:1rem 0 .2rem}
+.score.ok{color:#166534} .score.miss{color:#991b1b}
+table{border-collapse:collapse;width:100%;margin:1.2rem 0;font-size:.92rem}
+td,th{text-align:left;padding:.5rem .7rem;border-bottom:1px solid #e4e4e7;
+vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;
+color:#6b6b70}
+.b{display:inline-block;border-radius:5px;padding:.08rem .45rem;
+font-size:.72rem;font-weight:700;letter-spacing:.03em;white-space:nowrap}
+.b.ok{background:#dcfce7;color:#166534}
+.b.skip{background:#fef3c7;color:#92400e}
+.b.bound{background:#ede9fe;color:#5b21b6}
+.b.miss{background:#fee2e2;color:#991b1b}
+.d{font-family:ui-monospace,monospace;font-size:.78rem;color:#52525b}
+code{background:#f4f4f5;padding:.08rem .35rem;border-radius:4px;
+font-size:.88em}
+.note{background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;
+padding:.7rem 1rem;font-size:.9rem}
+.cta{display:flex;gap:.7rem;flex-wrap:wrap;margin:1.4rem 0}
+.btn{border:1px solid #d4d4d8;border-radius:8px;padding:.55rem 1rem;
+text-decoration:none;color:inherit;font-size:.9rem;background:#fff}
+.btn:hover{border-color:#2563eb}
+.btn.pri{background:#2563eb;border-color:#2563eb;color:#fff}
+.small{color:#6b6b70;font-size:.82rem}
+footer.page{margin-top:3rem;padding-top:1rem;border-top:1px solid #e4e4e7;
+color:#6b6b70;font-size:.8rem}
+</style>
+</head>
+<body>
+<main>
+<p class="small"><a href="index.html">Attest</a> → the attack battery</p>
+<h1>Twenty-three attempts.<br>Every one named — even the one that wins.</h1>
+<p class="sub">"Tamper-evident" is a claim; this page is the test. Each row
+below is a real attempt executed against the same store the
+<a href="sample-pack.zip">shipped sample pack</a> exported from — inside a
+transaction that is never committed, so the store is byte-identical after.
+Verdicts rendered verbatim from the run; nothing on this page is
+hand-written prose about what <em>would</em> happen. The one row no
+in-process check can catch — a forged row <em>plus</em> its covering
+journal entry — is listed too, marked EXPECTED MISS: an honest battery
+names its own edge, and the fix (<code>attest anchor --publish</code>)
+is on this site.</p>
+
+<div class="score ok">22/23 caught + 1 documented detection boundary — store unchanged:
+yes</div>
+<p class="small">A SKIPPED row means the store lacked that attack's
+precondition (e.g. nothing to forge) — it is reported, never counted.
+EXPECTED MISS is a documented detection boundary, not a defense failure.
+Reproduce: <code>attest demo</code> then <code>attest attack-demo</code>
+in the checkout; the battery exits non-zero on any MISSED or ERROR.</p>
+
+<table>
+<tr><th></th><th>attack</th><th>how it was caught</th></tr>
+<tr><td><span class="b ok">CAUGHT</span></td><td>forge a visit row (state -&gt; attended_verified)</td><td class="d">visits:vis_8243499a3a78 content changed after seq 50</td></tr><tr><td><span class="b ok">CAUGHT</span></td><td>delete an evidence row</td><td class="d">evidence:ev_4a0a24e3a5a2 journaled &#x27;put&#x27; but row vanished</td></tr><tr><td><span class="b ok">CAUGHT</span></td><td>erase a journal entry mid-chain (hide a past write)</td><td class="d">journal gap at seq 4</td></tr><tr><td><span class="b ok">CAUGHT</span></td><td>truncate the journal tail (erase the log&#x27;s end)</td><td class="d">journal tail removed: pinned head 7a87b8bd0a0a... absent</td></tr><tr><td><span class="b ok">CAUGHT</span></td><td>re-sign a receipt with a different key (key swap)</td><td class="d">journal: flagged; chain verify: receipt #447: signed by a different key than this issuer</td></tr><tr><td><span class="b ok">CAUGHT</span></td><td>forge a key_rotation pivot to an attacker key</td><td class="d">pivot hop: rejected; chain verify: receipt #448: signed by a different key than this issuer</td></tr><tr><td><span class="b ok">CAUGHT</span></td><td>forge a key_revocation against the live issuer</td><td class="d">non-tip revocation ignored</td></tr><tr><td><span class="b ok">CAUGHT</span></td><td>graft a sequence-0 key_revocation ahead of the chain</td><td class="d">grafted root ignored — authority stayed on the verified lineage</td></tr><tr><td><span class="b ok">CAUGHT</span></td><td>replay a delivered webhook request_id</td><td class="d">replayed request_id ava1.ring.account.SA... accepted=False</td></tr><tr><td><span class="b ok">CAUGHT</span></td><td>insert a row out-of-band (bypass the journal)</td><td class="d">untracked rows: 0 -&gt; 1</td></tr><tr><td><span class="b ok">CAUGHT</span></td><td>corrupt a stored row&#x27;s body (crash the read surfaces)</td><td class="d">read refused with StoreCorrupt; journal flagged=True</td></tr><tr><td><span class="b ok">CAUGHT</span></td><td>corrupt a settings row (non-dict body)</td><td class="d">settings read refused: settings row &#x27;attack_demo&#x27; is not a dict — the store is corrupt</td></tr><tr><td><span class="b ok">CAUGHT</span></td><td>inject duplicate + traversal member names into a pack zip</td><td class="d">name check: duplicate member name: manifest.json; loader: C:\Users\JOSEPH~1\AppData\Local\Temp\attest-attack-ewffk7lk.zip: duplicate member name: manifest.json</td></tr><tr><td><span class="b ok">CAUGHT</span></td><td>ship a forged always-green verifier inside a genuine pack</td><td class="d">verify.html: bytes differ from the issuer-signed pin — a verifier script modified after export cannot be trusted</td></tr><tr><td><span class="b ok">CAUGHT</span></td><td>drop the last review statement off a packed bundle</td><td class="d">export_pin.json: signed review count 1 != packed 0 — the chain was trimmed</td></tr><tr><td><span class="b bound">EXPECTED MISS</span></td><td>forge a row AND its covering journal entry (detection boundary)</td><td class="d">verify_journal stayed green over a forged row + self-consistent covering entry — the journal is unkeyed; this is the documented boundary only external anchoring closes</td></tr><tr><td><span class="b ok">CAUGHT</span></td><td>graft a genuinely-signed receipt the deployment never logged</td><td class="d">log_checkpoint.json: receipt rcpt_e43b3e2d8c594a63b3a11fa9e2ec19bb has no inclusion proof — never committed to the deployment log</td></tr><tr><td><span class="b ok">CAUGHT</span></td><td>re-send a delivered request_id with different bytes</td><td class="d">refused: request id reused with different content</td></tr><tr><td><span class="b ok">CAUGHT</span></td><td>retimestamp a lifecycle row&#x27;s index column (re-explain a gap)</td><td class="d">coverage_events:cov_45b9b866a63a index column at diverges from signed body</td></tr><tr><td><span class="b ok">CAUGHT</span></td><td>retimestamp a live-view session (move human attention)</td><td class="d">liveview_sessions:lv_14e9fad67f14 index column opened_at diverges from signed body</td></tr><tr><td><span class="b ok">CAUGHT</span></td><td>forge a resolution&#x27;s reason code post-signature</td><td class="d">journal: flagged; bundle verify: refused</td></tr><tr><td><span class="b ok">CAUGHT</span></td><td>graft a forged predecessor key onto the issuer</td><td class="d">graft refused — successor never countersigned</td></tr><tr><td><span class="b ok">CAUGHT</span></td><td>swap media bytes on disk after signing</td><td class="d">first_observation.48155a6412fb.png: serve-time digest check refused the swapped bytes</td></tr>
+</table>
+
+<div class="note"><b>Attack the export, not the store.</b> The table mixes
+in-store and artifact-layer tampering — the forged-verifier, grafted-receipt,
+and truncated-review rows attack the pack format itself. Four more artifact
+attacks ship as real zips you can feed the
+<a href="verify.html">browser verifier</a> right now — a doctored number, a
+deleted record, a smuggled file, a forged verifier:
+<a href="verify.html#sample-pack-tampered">the twin</a> ·
+<a href="verify.html#sample-pack-attack-missing-record">deleted record</a> ·
+<a href="verify.html#sample-pack-attack-smuggled-file">smuggled file</a> ·
+<a href="verify.html#sample-pack-attack-forged-verifier">forged verifier</a>.
+Or <a href="verify.html#tamper-lab">forge a field yourself</a> in the tamper
+lab.</div>
+
+<div class="cta">
+<a class="btn pri" href="verify.html#gauntlet">Run the 9-artifact oracle →</a>
+<a class="btn" href="verify.html#tamper-lab">Tamper lab →</a>
+<a class="btn" href="tour.html">2-minute tour →</a>
+</div>
+
+<footer class="page">Generated by <code>tools/make_attacks.py</code> running
+<code>attackdemo.run</code> against <code>data-pack-demo</code> — every row
+above is a live verdict from that run, not a transcript pasted in.</footer>
+</main>
+</body>
+</html>

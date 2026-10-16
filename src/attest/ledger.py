@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import re
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
@@ -81,24 +82,41 @@ class Signer:
         )
 
     @classmethod
+    def load(cls, path: Path) -> Signer:
+        """Load the PEM or fail — read-only callers must never mint a key:
+        a store with none has signed nothing anyway, and minting here would
+        silently rotate identity under a command that claims to only read."""
+        if not path.exists():
+            raise FileNotFoundError(f"no signing key at {path}")
+        sk = serialization.load_pem_private_key(path.read_bytes(), password=None)
+        if not isinstance(sk, Ed25519PrivateKey):
+            raise ValueError("key file does not hold an Ed25519 private key")
+        return cls(sk)
+
+    @classmethod
     def load_or_create(cls, path: Path) -> Signer:
         if path.exists():
-            sk = serialization.load_pem_private_key(path.read_bytes(), password=None)
-            assert isinstance(sk, Ed25519PrivateKey)
-            return cls(sk)
+            return cls.load(path)
         sk = Ed25519PrivateKey.generate()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(
-            sk.private_bytes(
-                serialization.Encoding.PEM,
-                serialization.PrivateFormat.PKCS8,
-                serialization.NoEncryption(),
-            )
+        pem = sk.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
         )
-        # Owner-only permissions where the OS honors chmod; on Windows the file
-        # inherits the data dir's ACLs (THREATMODEL.md states this honestly).
-        if os.name == "posix":
-            os.chmod(path, 0o600)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # O_EXCL at 0600 from the first byte: a private key must never exist
+        # world-readable, and a crash mid-write must leave no truncated PEM
+        # for the next boot to choke on — tmp + replace is atomic either way.
+        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
+        try:
+            if os.name == "posix":
+                os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "wb") as f:
+                f.write(pem)
+            os.replace(tmp, path)
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
         return cls(sk)
 
     @classmethod
@@ -252,6 +270,25 @@ def _rotation_hop(receipts: list[Receipt], new_key: str) -> Receipt | None:
     # previous_key is the one ordering relation the requester cannot
     # re-arrange — always follow the smallest predecessor.
     return min(candidates, key=lambda r: str(r.payload["previous_key"]))
+
+
+def check_signer_continuity(tip: Receipt | None, signer: Signer) -> None:
+    """Refuse a loaded signer that isn't the store's current lineage key.
+
+    A missing/relocated key file on a *populated* store must never silently
+    mint a fresh identity — receipts minted under it would verify-chain-fail
+    forever. The chain's tip receipt is the last thing the true issuer signed,
+    so its ``public_key`` IS the expected current signer (unconsented
+    rotations are inert and never move it). An empty store has no lineage to
+    honor and mints freely. Recover by restoring the deployment's own key
+    file, or rotate explicitly."""
+    if tip is not None and signer.public_key_b64 != tip.public_key:
+        raise ValueError(
+            "the loaded signing key does not match this store's issuer lineage "
+            f"(tip receipt {tip.id} was signed by a different key) — refusing to "
+            "adopt a fresh identity over signed history. Restore the deployment's "
+            "key file, or run rotate-key to make the change explicit and signed."
+        )
 
 
 def trusted_issuer_keys(issuer_key: str, key_receipts: list[Receipt], *, max_hops: int = 32) -> set[str]:

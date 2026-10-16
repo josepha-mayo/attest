@@ -467,7 +467,7 @@ def _case_with_log(engine, store, tmp_path, site, service, entries):
         tmp_path / "media",
         site,
         [(v, service.bundle(v.id), countersign_status(service.bundle(v.id))) for v in entries],
-        log_fn=lambda rs: log_member(engine, rs),
+        log_fn=lambda rs, pack_members=None: log_member(engine, rs, pack_members=pack_members),
     )
     out = tmp_path / f"case-{len(list(tmp_path.glob('case-*.zip')))}.zip"
     out.write_bytes(data)
@@ -715,7 +715,12 @@ def test_check_log_rejects_foreign_and_dup_size_chain_members(
 
     def run(d):
         raw = json.dumps(d).encode()
-        return check_log_pin(lambda n: raw if n == "log_checkpoint.json" else None, member_ids, trusted)
+        return check_log_pin(
+            lambda n: raw if n == "log_checkpoint.json" else None,
+            member_ids,
+            trusted,
+            check_members=False,
+        )
 
     res, err = run(doc)
     assert err is None and res is not None, err
@@ -744,6 +749,45 @@ def test_check_log_rejects_foreign_and_dup_size_chain_members(
     dup["chain"].append(forged)
     res3, err3 = run(dup)
     assert res3 is None and "two signed heads" in err3, err3
+
+
+def test_pack_members_rejects_undeclared_member(engine, store, household, schedule, t0, tmp_path):
+    """The member list binds both directions: a file riding the zip that the
+    signed export never declared is smuggled — inert or not, it is not what
+    the deployment signed."""
+    service = ReviewService(store, engine.signer, engine.clock)
+    site = store.sites()[0]
+    v1 = _visit(engine, household, t0)
+    pack = _case_with_log(engine, store, tmp_path, site, service, [v1])
+
+    from attest.packdiff import check_log_pin
+
+    with zipfile.ZipFile(pack) as z:
+        doc = json.loads(z.read("log_checkpoint.json"))
+        names = set(z.namelist())
+        member_ids = []
+        for n in names:
+            if n.startswith("attestations/"):
+                att = json.loads(z.read(n))
+                member_ids.append((att["id"], att["payload_hash"], att["public_key"]))
+    trusted = {doc["checkpoint"]["public_key"]}
+    raw = json.dumps(doc).encode()
+
+    def reader(n):
+        if n == "log_checkpoint.json":
+            return raw
+        return b"x" if n in names else None
+
+    res, err = check_log_pin(reader, member_ids, trusted, actual_members=list(names))
+    assert err is None and res is not None, err
+
+    res, err = check_log_pin(
+        reader,
+        member_ids,
+        trusted,
+        actual_members=list(names) + ["attestations/smuggled.json"],
+    )
+    assert res is None and "never declared" in err, err
 
 
 def test_diff_notes_when_only_one_export_carries_a_checkpoint(
@@ -841,7 +885,12 @@ def test_check_log_rejects_nonhex_and_accepts_case_variant_roots(
 
     def run(d):
         raw = json.dumps(d).encode()
-        return check_log_pin(lambda n: raw if n == "log_checkpoint.json" else None, member_ids, trusted)
+        return check_log_pin(
+            lambda n: raw if n == "log_checkpoint.json" else None,
+            member_ids,
+            trusted,
+            check_members=False,
+        )
 
     def signed_member(facts):
         prev = store.latest_receipt()

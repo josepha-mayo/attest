@@ -24,7 +24,7 @@ def _seed(engine, store, site, n=3, tag="seed"):
 
 
 def test_log_head_serves_signed_head_and_boundary(
-    engine, store, household, schedule, t0, settings, ring_client
+    engine, store, household, schedule, t0, settings, ring_client, tmp_path
 ):
     """``/api/log/head`` reports the live tree plus the latest checkpoint —
     and needs no admin token: hash paths and roots are verification
@@ -36,7 +36,13 @@ def test_log_head_serves_signed_head_and_boundary(
 
     _seed(engine, store, household[0])
     cp = engine.issue_log_checkpoint()
-    app = create_app(settings, store=store, ring=ring_client, signer=Signer.ephemeral(), sweep_interval_s=0)
+    app = create_app(
+        settings,
+        store=store,
+        ring=ring_client,
+        signer=Signer.load_or_create(tmp_path / "attest-ed25519.key"),
+        sweep_interval_s=0,
+    )
     with TestClient(app) as client:
         head = client.get("/api/log/head")
         assert head.status_code == 200
@@ -51,7 +57,7 @@ def test_log_head_serves_signed_head_and_boundary(
 
 
 def test_log_proof_serves_a_working_inclusion_path(
-    engine, store, household, schedule, t0, settings, ring_client
+    engine, store, household, schedule, t0, settings, ring_client, tmp_path
 ):
     """``/api/log/proof/{id}`` returns an audit path that independently
     reaches the signed head — verified here with the same RFC 6962 math the
@@ -64,7 +70,13 @@ def test_log_proof_serves_a_working_inclusion_path(
 
     receipts = _seed(engine, store, household[0])
     cp = engine.issue_log_checkpoint()
-    app = create_app(settings, store=store, ring=ring_client, signer=Signer.ephemeral(), sweep_interval_s=0)
+    app = create_app(
+        settings,
+        store=store,
+        ring=ring_client,
+        signer=Signer.load_or_create(tmp_path / "attest-ed25519.key"),
+        sweep_interval_s=0,
+    )
     with TestClient(app) as client:
         assert client.get("/api/log/proof/nope").status_code == 404
         # A checkpoint receipt is not a leaf — it can prove nothing under itself.
@@ -80,7 +92,9 @@ def test_log_proof_serves_a_working_inclusion_path(
         )
 
 
-def test_log_consistency_proves_extension(engine, store, household, schedule, t0, settings, ring_client):
+def test_log_consistency_proves_extension(
+    engine, store, household, schedule, t0, settings, ring_client, tmp_path
+):
     """``/api/log/consistency?first=N`` bridges two heads — the proof that
     nothing committed earlier was rewritten."""
     from fastapi.testclient import TestClient
@@ -95,7 +109,13 @@ def test_log_consistency_proves_extension(engine, store, household, schedule, t0
     first_size = first_cp.payload["tree_size"]
     # Grow the log with a window that can't alias the seeded ones.
     _seed(engine, store, household[0], n=1, tag="grow")
-    app = create_app(settings, store=store, ring=ring_client, signer=Signer.ephemeral(), sweep_interval_s=0)
+    app = create_app(
+        settings,
+        store=store,
+        ring=ring_client,
+        signer=Signer.load_or_create(tmp_path / "attest-ed25519.key"),
+        sweep_interval_s=0,
+    )
     with TestClient(app) as client:
         assert client.get("/api/log/consistency", params={"first": 0}).status_code == 422
         assert client.get("/api/log/consistency", params={"first": 9999}).status_code == 404
@@ -138,7 +158,7 @@ def test_cli_checkpoint_and_prove(tmp_path, monkeypatch, ring_world, ring_client
     disk_engine = VisitEngine(
         disk_store,
         ring_client,
-        Signer.ephemeral(),
+        Signer.load_or_create(tmp_path / "attest-ed25519.key"),
         MediaStore(tmp_path / "media"),
         TemplateSummarizer("UTC"),
         settings,
@@ -332,7 +352,7 @@ def test_anchor_pins_the_merkle_head(tmp_path, monkeypatch, ring_world, ring_cli
     disk_engine = VisitEngine(
         disk_store,
         ring_client,
-        Signer.ephemeral(),
+        Signer.load_or_create(tmp_path / "attest-ed25519.key"),
         MediaStore(tmp_path / "media"),
         TemplateSummarizer("UTC"),
         settings,
@@ -389,7 +409,7 @@ def test_status_reports_the_log_head(tmp_path, monkeypatch, ring_world, ring_cli
     engine = VisitEngine(
         store,
         ring_client,
-        Signer.ephemeral(),
+        Signer.load_or_create(tmp_path / "attest-ed25519.key"),
         MediaStore(tmp_path / "media"),
         TemplateSummarizer("UTC"),
         settings,

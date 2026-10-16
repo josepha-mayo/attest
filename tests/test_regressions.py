@@ -582,7 +582,7 @@ def test_cli_verify_json_emits_a_gatable_verdict(tmp_path, engine, store, househ
         [(visit, bundle, countersign_status(bundle))],
         manifest_signer=lambda m: engine.issue_export_manifest(site, m),
         tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"site:{site.id}", t),
-        log_fn=lambda rs: log_member(engine, rs),
+        log_fn=lambda rs, pack_members=None: log_member(engine, rs, pack_members=pack_members),
     )
     pack = tmp_path / "case.zip"
     pack.write_bytes(data)

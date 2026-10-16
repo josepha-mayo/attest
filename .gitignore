@@ -15,6 +15,13 @@ data-*/
 *.sqlite3-wal
 *.key
 *.pem
+*.kms.json
+*.dpapi
+*.tmp
+attest.lock
+*.ots
+# docs/anchor-demo.json.ots is a deliberately published demo artifact
+!docs/**/*.ots
 *.log
 # Lambda build artifacts — emitted by attest.disputepack.write_verifiers()
 extras/lambda/verifier_case.py

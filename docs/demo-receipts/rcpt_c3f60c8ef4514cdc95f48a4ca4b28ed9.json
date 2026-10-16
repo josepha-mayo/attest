@@ -1,0 +1,39 @@
+{
+  "id": "rcpt_c3f60c8ef4514cdc95f48a4ca4b28ed9",
+  "visit_id": "late:site_a55d249ad6dd:vis_32a86d6fdbe4:late-delivery-demo-2026-10-05T19",
+  "sequence": 405,
+  "prev_hash": "914efb9e266479f4c50c7e6bb71abd0d1f5bfbd6ad8d440b47c574e7d89d6903",
+  "payload": {
+    "record_type": "late_event",
+    "site_id": "site_a55d249ad6dd",
+    "event": {
+      "request_id": "late-delivery-demo-2026-10-05T19",
+      "event_type": "motion_detected",
+      "sub_type": "human",
+      "device_id": "ava1.ring.device.0F9EB1CB06604797A169",
+      "occurred_at": "2026-10-05T19:00:00+00:00"
+    },
+    "delivered_at": "2026-10-08T20:37:03.318922+00:00",
+    "contradicts": {
+      "visit_id": "vis_32a86d6fdbe4",
+      "receipt_id": "rcpt_63a5a0bfb86c453c8110ca37282b4fe8",
+      "claim": "no_observation",
+      "window": [
+        "2026-10-05T18:01:03.318922+00:00",
+        "2026-10-05T20:06:03.318922+00:00"
+      ]
+    },
+    "boundary": "Attests that an event claiming this occurred_at was delivered after the window lapsed and fell inside it — the earlier 'no matching observation' receipt stands unedited; the record admits its claim was later contested. Never proof the event physically happened or that anyone attended.",
+    "journal_head": "158101acafba7538a0e3444efc5396e965366c3bdc1d4874e8f81be432310b99",
+    "schema": "attest.receipt/2",
+    "sequence": 405,
+    "prev_hash": "914efb9e266479f4c50c7e6bb71abd0d1f5bfbd6ad8d440b47c574e7d89d6903",
+    "visit_id": "late:site_a55d249ad6dd:vis_32a86d6fdbe4:late-delivery-demo-2026-10-05T19",
+    "receipt_id": "rcpt_c3f60c8ef4514cdc95f48a4ca4b28ed9",
+    "issued_at": "2026-10-15T13:18:05.232996+00:00"
+  },
+  "payload_hash": "24817a1dcb2b39d66dccd41d8e5f68bf8114d49d730ec3d3494375aa609bddf4",
+  "signature": "k/EAK7FhwO8Y8YVyQbsLszLmU5ZEcpcQs3CiLk7Dx1sm8U2mD5QSS77A7OJ+RTtcitXooYPMRonQPWXsBLOlDw==",
+  "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+  "issued_at": "2026-10-15T13:18:05.232996Z"
+}

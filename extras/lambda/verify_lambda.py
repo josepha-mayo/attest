@@ -102,6 +102,11 @@ def handler(event, context):
     # Bound decompressed size — a small zip can expand past /tmp's 512 MiB.
     if sum(i.file_size for i in zf.infolist()) > 256 * 1024 * 1024:
         return _respond(400, {"ok": False, "error": "pack expands beyond the 256 MB bound"})
+    # Bound member count too — tens of thousands of tiny entries extract
+    # slowly enough to burn the function's wall clock before verification
+    # even starts (packs carry ~50-300 members; 4096 is generous headroom).
+    if len(zf.infolist()) > 4096:
+        return _respond(400, {"ok": False, "error": "pack has too many members"})
     names = set(zf.namelist())
     if "manifest.json" in names:
         script, argv = "verifier_case.py", []

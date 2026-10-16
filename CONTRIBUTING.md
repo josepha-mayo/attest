@@ -24,7 +24,7 @@ deliberate dependency upgrade, don't hand-edit.
 git diff --check
 ```
 
-Fresh checkouts pass 790 of 792 collected tests (2 platform-gated skips).
+Fresh checkouts pass 795 of 797 collected tests (2 platform-gated skips).
 A PR that adds a verification rule without a conformance vector
 (`tests/vectors/<name>/pack.zip` + `expected.json` — build one by
 exporting a pack and doctoring it, then pinning the expected verdict and
@@ -41,6 +41,11 @@ Five implementations of the same checks must stay byte-for-byte equivalent:
 | Browser verifier | `src/attest/verifyjs.py` → `docs/verify.html` |
 | Pack's record browser | `disputepack` `index.html` JS lib (shared slice) |
 | Diff/compare | `src/attest/packdiff.py` |
+
+(Elsewhere the docs say "four verifier paths" — that count is the
+conformance corpus's *run targets*; the pack browser and hosted verifier
+share the pinned JS lib, so it isn't a fifth run. Here "five" counts
+*code surfaces* that must not drift — the browser lib included.)
 
 Canonical JSON, strict-integer rules, `prev_hash` chaining, the ISO-instant
 grammar, Ed25519 strictness gates, and Merkle proof handling all have twins
@@ -68,7 +73,9 @@ code or the demo store's contents, re-sync in this order:
 6. `attest verify docs/sample-pack.zip --badge docs/badge-verified.svg ...`
 7. `attest anchor --out docs/anchor-demo.json --timestamp` (anchor + `.ots`
    together — a stale sidecar pins an old head)
-8. `tools/make_site_manifest.py --key <key>` — **always last**; it pins the
+8. `ATTEST_DATA_DIR=data-pack-demo python tools/make_attacks.py` — the
+   battery page runs the attacks live (exits non-zero on any MISSED)
+9. `tools/make_site_manifest.py --key <key>` — **always last**; it pins the
    sha256 of every shipped artifact.
 9. Sweep hard-coded counts (receipt total, checkpoint size, artifact count)
    across README/JUDGE/DEVPOST/docs — they drift on every export.

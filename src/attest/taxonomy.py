@@ -41,6 +41,13 @@ _FLAG_SUGGESTIONS: dict[str, list[str]] = {
         "weather_or_disaster",
         "no_electronic_confirmation",
     ],
+    "contradicted_no_observation": [
+        "schedule_difference",
+        "participant_unavailable",
+        "mobile_or_network_issue",
+        "service_outside_home",
+        "no_electronic_confirmation",
+    ],
     "departure_unconfirmed": [
         "device_fault",
         "worker_error",

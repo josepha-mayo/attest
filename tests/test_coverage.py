@@ -6,7 +6,7 @@ from attest.coverage import coverage_report
 from attest.models import CoverageEvent, CoverageEventKind, PollObservation, Schedule
 
 
-def _obs(store, device, polled_at, since, ok=True, events=0):
+def _obs(store, device, polled_at, since, ok=True, events=0, new=None, legacy=False):
     o = PollObservation(
         site_id="site",
         device_id=device,
@@ -14,6 +14,9 @@ def _obs(store, device, polled_at, since, ok=True, events=0):
         since=since,
         ok=ok,
         events_returned=events,
+        # rows written by the current poller always carry a post-dedupe count;
+        # legacy=True simulates a pre-upgrade row that predates the field
+        new_events=None if legacy else (events if new is None else new),
         error=None if ok else "HTTP 500",
     )
     store.put_poll_observation(o)
@@ -656,3 +659,20 @@ def test_publish_anchor_uploads_with_sha_metadata(tmp_path, monkeypatch):
     assert calls["Body"] == f.read_bytes()
     assert calls["Metadata"]["sha256"] == hashlib.sha256(f.read_bytes()).hexdigest()
     assert calls["Metadata"]["attest-record-type"] == "anchor"
+
+
+def test_overlapping_polls_count_distinct_events_not_returns(store, t0):
+    """The anchored history window means every poll re-returns prior events —
+    summing raw returns would inflate the signed count with poll frequency."""
+    _obs(store, "cam1", t0 + timedelta(minutes=30), t0 - timedelta(minutes=10), events=2, new=2)
+    # second poll re-returns the same 2 events plus 1 new one
+    _obs(store, "cam1", t0 + timedelta(hours=2), t0 - timedelta(minutes=10), events=3, new=1)
+    report = coverage_report(store, "cam1", t0, t0 + timedelta(hours=1), now=t0 + timedelta(hours=3))
+    assert report["events"] == 3 and report["events_lower_bound"] is False
+    assert report["state"] == "observed_with_events"
+
+
+def test_legacy_rows_mark_events_a_lower_bound(store, t0):
+    _obs(store, "cam1", t0 + timedelta(hours=2), t0, events=4, legacy=True)
+    report = coverage_report(store, "cam1", t0, t0 + timedelta(hours=1), now=t0 + timedelta(hours=3))
+    assert report["events"] == 0 and report["events_lower_bound"] is True

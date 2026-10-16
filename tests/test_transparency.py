@@ -247,7 +247,7 @@ def _visit_pack(engine, store, household, t0, tmp_path, **kw):
         tmp_path / "media",
         bundle,
         tools_receipt_fn=lambda t: engine.issue_verifier_manifest(f"visit:{visit.id}", t),
-        log_fn=lambda rs: log_member(engine, rs),
+        log_fn=lambda rs, pack_members=None: log_member(engine, rs, pack_members=pack_members),
         **kw,
     )
     return data, zipfile.ZipFile(io.BytesIO(data))

@@ -9,7 +9,7 @@
 
 **The signed record for "he said / she said" home-service disputes — what the Ring devices observed, what the worker reported, what the household said, what the coordinator concluded. Each preserved, none merged, all verifiable offline.**
 
-A caregiver says she was there Tuesday. The family says nobody came. Today that dispute is "he said / she said." Attest replaces it with a signed record that keeps the evidence apart from the conclusions: door-camera and contact-sensor observations, how much of the window the pipeline actually watched, the worker's own account, and the coordinator's review — each linkable, each checkable without trusting Attest itself.
+A caregiver says she was there Tuesday. The family says nobody came. Today that dispute is "he said / she said." Attest replaces it with a signed record that keeps the evidence apart from the conclusions: Ring doorbell and contact-sensor observations, how much of the window the pipeline actually watched, the worker's own account, and the coordinator's review — each linkable, each checkable without trusting Attest itself.
 
 Built for the Amazon Developer Hackathon (Ring track; AWS Builder + Open Source mini-challenges). A working prototype with honest boundaries — not an "electronic visit verification" system under 42 U.S.C. §1396b(l)(5)(A), and never a claim of attendance. The proposed customer is a household or service coordinator reviewing a scheduled visit alongside the worker's own account.
 
@@ -24,7 +24,7 @@ And where incumbent EVV tracks *the worker's phone* — GPS at check-in, spoofab
 - **The dispute loop is bilateral** — the worker's words and the household's land in the same signed chain the coordinator concludes on, and appends never rewrite.
 - **It names what it cannot prove** — identity, attendance, completeness of a hidden tail — in the record boundary, the threat model, and a live tamper battery that fails against itself.
 
-**See it in a minute — no install:** [verify a real signed pack green](https://josepha-mayo.github.io/attest/verify.html#sample-pack) in your browser → then [its tampered twin red](https://josepha-mayo.github.io/attest/verify.html#sample-pack-tampered) (someone inflated the contested visit's observed span; the signature names the forged field) → then [commit the forgery yourself](https://josepha-mayo.github.io/attest/verify.html#tamper-lab) in the tamper lab. [The story of the contested visit](https://josepha-mayo.github.io/attest/story.html) retells one dispute entirely from signed bytes — every quote cites the pack that signs it — and [the two-minute tour](https://josepha-mayo.github.io/attest/tour.html) plays it in live iframes. `attest demo` boots emulator + server + an eight-day story with a printed dashboard URL.
+**See it in a minute — no install:** [verify a real signed pack green](https://josepha-mayo.github.io/attest/verify.html#sample-pack) in your browser — its verdict line carries **two witness cosignatures from independent deployments, each anchored in the witness's own log** → then [its tampered twin red](https://josepha-mayo.github.io/attest/verify.html#sample-pack-tampered) (someone inflated the contested visit's observed span; the signature names the forged field) → then [commit the forgery yourself](https://josepha-mayo.github.io/attest/verify.html#tamper-lab) in the tamper lab. [The story of the contested visit](https://josepha-mayo.github.io/attest/story.html) retells one dispute entirely from signed bytes — every quote cites the pack that signs it — and [the two-minute tour](https://josepha-mayo.github.io/attest/tour.html) plays it in live iframes. `attest demo` boots emulator + server + an eight-day story with a printed dashboard URL.
 
 <details><summary><strong>Judging in five minutes?</strong></summary>
 
@@ -36,7 +36,7 @@ And where incumbent EVV tracks *the worker's phone* — GPS at check-in, spoofab
 3. [Deep link to the signed live sweep](https://josepha-mayo.github.io/attest/verify.html#live-sweep-receipt) → the `verify-live --sign` report from the real `api.amazonvision.com` run, auto-verified.
 4. `attest demo` → open the printed dashboard → the contested visit shows the source-divergence callout and a signed review chain that disagrees with itself: the worker's dispute, the household's "nobody came," the same household's "I heard the doorbell," and the signed re-send a day later.
 5. Download `pack.zip`, unzip, open `index.html` — every record self-verifies from `file://`.
-6. `attest attack-demo` — twenty-one real tamper attempts against the store — all twenty-one applicable on the demo store, all caught and rolled back (no skips: it carries signed resolutions and media to attack). `attest status` for the self-audit. *(Both attack commands open a store directly: point `ATTEST_DATA_DIR` at it — `attest demo` prints the exact line — and Ctrl+C the running demo first; it holds the writer lock.)*
+6. `attest attack-demo` — twenty-three real tamper attempts against the store — twenty-two caught and rolled back; the twenty-third is a deliberate EXPECTED MISS naming the unkeyed journal's boundary (only an external anchor bounds it). No skips on the demo store: it carries signed resolutions and media to attack. [The verdict table](https://josepha-mayo.github.io/attest/attacks.html) is generated by a live run against that store — every row a real verdict, not a pasted transcript. `attest status` for the self-audit. *(Both attack commands open a store directly: point `ATTEST_DATA_DIR` at it — `attest demo` prints the exact line — and Ctrl+C the running demo first; it holds the writer lock.)*
 
 </details>
 
@@ -250,7 +250,7 @@ triage never blocks on model access.
 
 Tests include rejected authentication, expired/reused links, concurrent arrivals, rollback after failure, source-switch rejection, late events, observation-versus-attendance semantics, history ordering, receipt/review tampering, setup validation, and fallback provenance. Socket-level tests run the CLI through real local emulator/Attest servers for sensor, camera-only, and no-observation scenarios, then append and verify worker/coordinator reviews.
 
-A fresh published checkout of both repositories passed 790 of 792 collected Attest tests (2 platform-gated skips) and all 93 companion tests in a new Windows Python 3.14 environment. The GitHub Actions workflow runs both suites, lint, format checks, a tracked-runtime-file guard, and wheel builds across Windows/Linux with Python 3.11/3.14. Actions, the companion commit, and `requirements-dev.txt` dependency pins make the run reproducible. CI does not receive live Ring or AWS credentials.
+A fresh published checkout of both repositories passed 795 of 797 collected Attest tests (2 platform-gated skips) and all 93 companion tests in a new Windows Python 3.14 environment. The GitHub Actions workflow runs both suites, lint, format checks, a tracked-runtime-file guard, and wheel builds across Windows/Linux with Python 3.11/3.14. Actions, the companion commit, and `requirements-dev.txt` dependency pins make the run reproducible. CI does not receive live Ring or AWS credentials.
 
 ## Before deployment or submission
 

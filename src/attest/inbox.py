@@ -9,19 +9,33 @@ from pathlib import Path
 
 
 class WebhookInbox:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, *, read_only: bool = False):
         self._lock = threading.RLock()
-        self._db = sqlite3.connect(path, check_same_thread=False, isolation_level=None, timeout=0.25)
+        if read_only:
+            # Listing commands must not materialize a deliveries table or
+            # -wal/-shm files where none existed — no DDL, no mode change.
+            uri = Path(path).absolute().as_uri() + "?mode=ro"
+            try:
+                conn = sqlite3.connect(
+                    uri, uri=True, check_same_thread=False, isolation_level=None, timeout=0.25
+                )
+                conn.execute("SELECT name FROM sqlite_master LIMIT 1").fetchone()
+                self._db = conn
+            except sqlite3.OperationalError:
+                self._db = sqlite3.connect(path, check_same_thread=False, isolation_level=None, timeout=0.25)
+            self._db.execute("PRAGMA query_only=ON")
+        else:
+            self._db = sqlite3.connect(path, check_same_thread=False, isolation_level=None, timeout=0.25)
+            self._db.execute("PRAGMA journal_mode=WAL")
+            self._db.execute("""
+                CREATE TABLE IF NOT EXISTS deliveries (
+                    id TEXT PRIMARY KEY, raw_body BLOB NOT NULL, signature TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
+                    retry_at REAL NOT NULL DEFAULT 0, lease TEXT, lease_until REAL,
+                    error_code TEXT, received_at REAL NOT NULL
+                )
+            """)
         self._db.row_factory = sqlite3.Row
-        self._db.execute("PRAGMA journal_mode=WAL")
-        self._db.execute("""
-            CREATE TABLE IF NOT EXISTS deliveries (
-                id TEXT PRIMARY KEY, raw_body BLOB NOT NULL, signature TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
-                retry_at REAL NOT NULL DEFAULT 0, lease TEXT, lease_until REAL,
-                error_code TEXT, received_at REAL NOT NULL
-            )
-        """)
 
     @contextmanager
     def _transaction(self):

@@ -99,6 +99,12 @@ class PollObservation(BaseModel):
     since: AwareDatetime  # the history lower bound used for this request
     ok: bool
     events_returned: int = 0
+    # events the deployment had never delivered before this poll (deduped by
+    # request_id). ``events_returned`` counts every API return mention — the
+    # anchored history window means overlapping polls repeat events — so
+    # coverage reports ``new_events`` as the honest per-window event count.
+    # None on rows written before this field existed (they under-report as 0).
+    new_events: int | None = None
     error: str | None = Field(default=None, max_length=200)
 
 
@@ -205,7 +211,7 @@ class Schedule(BaseModel):
     window_end: AwareDatetime
     expected_minutes: int = Field(gt=0, le=1440, strict=True)
     service: str = Field(default="", max_length=500)
-    status: Literal["scheduled", "cancelled"] = "scheduled"
+    status: Literal["scheduled", "cancelled", "lapsed"] = "scheduled"
     cancelled_at: datetime | None = None
     created_at: datetime = Field(default_factory=utcnow)
 

@@ -1,0 +1,38 @@
+{
+  "id": "rcpt_9a92c994a3bc44d4b017ce663eb6091a",
+  "visit_id": "log:254:cdb9fa59e2bc34fb",
+  "sequence": 365,
+  "prev_hash": "54372089c6fc8c6284800228e880d29657dba3d2bafd586bacc7dbed799bc057",
+  "payload": {
+    "record_type": "log_checkpoint",
+    "tree_size": 254,
+    "root_sha256": "cdb9fa59e2bc34fbfbe9db5f59980c556722836a75ab0f4b4487e35197bbe052",
+    "leaf_input": "receipt.payload_hash (raw bytes, sequence order)",
+    "boundary": "A signed commitment that exactly these receipts, in this order, formed the log at this size — receipts in an export can prove inclusion, and a later checkpoint can prove it extends this one without rewriting history.",
+    "journal_head": "849a55af987e902c082ff80eb52a5117f4a5600fa9f46076bfcb9e4be15e0a14",
+    "extends": {
+      "first": 252,
+      "first_root_sha256": "87a673161797aa0f35ccddc3400b1bdaf20d7d314e22acf99c02dea73c78d69f",
+      "checkpoint_id": "rcpt_028545b3eb9b4416b7a954d6ec8380a1",
+      "proof": [
+        "00a2d2569c969ecdf981a860bdbc45cbd75bfa2fa54c43eda8c8dd2b0a9f92da",
+        "b20bdedfaa6ea9607d6f1d0cde0e4272781527997fb7249c50cb95ce818fb10f",
+        "367b5eb56291f6d07c34d51d1661697211be7b6904763e84058b89c110931fec",
+        "1d3621664ab4a1b04145227f4ba681b8a9090c95c92c93108e59117cbdcc8f2b",
+        "046feecbab1094f6465ef74939e8d5872c06789c3af821fe243b4b23b27eb815",
+        "d8c0fb66a810a1a2af5faf4bf733ef111fb2d6a7e3001c908e7122a699a13592",
+        "c0cd7f5d7ed43d9d0dc8fa2b492d2656463d5debf13578ec5decf0d4dafc7855"
+      ]
+    },
+    "schema": "attest.receipt/2",
+    "sequence": 365,
+    "prev_hash": "54372089c6fc8c6284800228e880d29657dba3d2bafd586bacc7dbed799bc057",
+    "visit_id": "log:254:cdb9fa59e2bc34fb",
+    "receipt_id": "rcpt_9a92c994a3bc44d4b017ce663eb6091a",
+    "issued_at": "2026-10-14T23:46:05.124467+00:00"
+  },
+  "payload_hash": "512efe7ff06579c9daf3e7c8045d76b4fe337f326d72ee563e1d5c7627e9ad4a",
+  "signature": "+Oz636jjOP6y6Rps8glIcMce/xqNYSZWRW5kYtQp7DACDpk3SFXD66U5YQtUMKtyBLLEKI34V9DFN2ihUyHFAA==",
+  "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+  "issued_at": "2026-10-14T23:46:05.124467Z"
+}

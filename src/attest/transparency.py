@@ -44,6 +44,12 @@ _EMPTY_ROOT = hashlib.sha256(b"").digest()
 # it is malformed on every surface identically.
 MAX_TREE_SIZE = 0x7FFFFFFF
 
+# A real consistency/inclusion path for a 2^31-1-leaf tree needs at most
+# ~62 hashes; 64 bounds it with headroom. Enforced pre-decode so a body
+# carrying a quarter-million hex strings can't spin the verifier on an
+# allocation the Merkle walk would reject at node ~32 anyway.
+MAX_PROOF_NODES = 64
+
 _STRICT_HEX = re.compile(r"[0-9a-fA-F]+")
 
 
@@ -100,7 +106,23 @@ def coerce_int(v) -> int:
             raise ValueError("not a finite number")
         return int(v)
     if isinstance(v, str) and _COERCIBLE_INT.fullmatch(v):
-        return int(v)
+        # Significant digits decide the bound: int()'s ~4300-digit ceiling
+        # counts zero-padding where parseInt does not — "0"*5000 must read 0
+        # here like it does in the browser, not saturate.
+        s = v.strip()
+        neg = s[:1] == "-"
+        digits = s.lstrip("+-").lstrip("0")
+        if not digits:
+            return 0
+        try:
+            return -int(digits) if neg else int(digits)
+        except ValueError:
+            # CPython's int() refuses strings past ~4300 digits while the
+            # JS mirror's parseInt saturates to Infinity — every downstream
+            # gate rejects Infinity as "not an integer". Saturate here the
+            # same way: an absurd-but-parseable size must convict on all
+            # surfaces, not read as unparseable/absent on some.
+            return -(MAX_TREE_SIZE + 1) if neg else MAX_TREE_SIZE + 1
     raise ValueError("not a coercible integer")
 
 
@@ -179,9 +201,18 @@ def verify_inclusion(
     leaf_data: bytes, tree_size: int, leaf_index: int, path: list[bytes], expected_root: bytes
 ) -> bool:
     """RFC 6962 §2.1.1 audit-path verification."""
-    if not isinstance(path, (list, tuple)):
-        # a dict "path" would iterate keys — a non-list shape never proves
+    if not isinstance(path, (list, tuple)) or len(path) > MAX_PROOF_NODES:
+        # a dict "path" would iterate keys — a non-list shape never proves;
+        # over-bound is malformed, not just slow
         return False
+    if (
+        not isinstance(tree_size, int)
+        or isinstance(tree_size, bool)
+        or not isinstance(leaf_index, int)
+        or isinstance(leaf_index, bool)
+    ):
+        return False  # callers gate via json_is_int — a float reaching the
+        # bitwise walk must never silently alias an integer step
     if leaf_index >= tree_size or leaf_index < 0 or tree_size < 1 or tree_size > MAX_TREE_SIZE:
         return False
     if tree_size == 1:
@@ -238,10 +269,19 @@ def verify_consistency(
     """RFC 6962 §2.1.2 consistency-proof verification."""
     if old_size > MAX_TREE_SIZE or new_size > MAX_TREE_SIZE:
         return False
-    if not isinstance(proof, (list, tuple)):
+    if not isinstance(proof, (list, tuple)) or len(proof) > MAX_PROOF_NODES:
         return False
+    if (
+        not isinstance(old_size, int)
+        or isinstance(old_size, bool)
+        or not isinstance(new_size, int)
+        or isinstance(new_size, bool)
+    ):
+        return False  # callers gate via json_is_int; a float/str reaching
+        # here must never alias into a proof step's bitwise arithmetic
     if old_size == new_size:
-        return proof == [] and old_root == new_root
+        # size 0 is not a head — equal sizes still require a live tree
+        return old_size >= 1 and proof == [] and old_root == new_root
     if not 0 < old_size < new_size or not proof:
         return False
     path = list(proof)
@@ -287,6 +327,10 @@ def inclusion_proof(leaves: list[bytes], payload_hash: str, *, size: int | None 
     ``size`` bounds the proof to the tree a signed checkpoint committed
     to — receipts appended after that head have no proof under it."""
     size = len(leaves) if size is None else size
+    if size > len(leaves):
+        # never emit a doc claiming a head the caller doesn't have the
+        # leaves for — the emitted tree_size could never verify
+        return None
     leaves = leaves[:size]
     try:
         index = leaves.index(bytes.fromhex(payload_hash))
@@ -338,7 +382,11 @@ def verify_extends(
     callers fall back to the serving API's consistency endpoint.
     """
     ext = payload.get("extends")
-    if not isinstance(ext, dict) or not isinstance(ext.get("proof"), list):
+    if (
+        not isinstance(ext, dict)
+        or not isinstance(ext.get("proof"), list)
+        or len(ext["proof"]) > MAX_PROOF_NODES
+    ):
         return None
     try:
         ext_first = coerce_int(ext["first"])

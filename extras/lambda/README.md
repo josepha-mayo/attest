@@ -31,6 +31,15 @@ python -c "import attest.disputepack as d; d.write_verifiers('.')"
 Compress-Archive verify_lambda.py, verifier_case.py, verifier_bundle.py verify-lambda.zip
 ```
 
+**Re-emit on every verifier change.** The pinned copies are snapshots of
+`disputepack.py`'s embedded templates taken at build time — new pack features
+(e.g. signed `export_pin`/`pack_members` members) are *rejected* by a stale
+deployed copy, because the whitelist it enforces predates them. After any
+change under `src/attest/disputepack.py` that touches the `_VERIFIER_LIB` /
+`_BUNDLE_MAIN` / `_CASE_MAIN` templates, re-run `write_verifiers` and redeploy
+with `aws lambda update-function-code` — then re-verify a freshly exported
+pack end-to-end before calling the deployment current.
+
 ## Deploy
 
 ```powershell

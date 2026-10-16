@@ -230,3 +230,35 @@ def test_explain_attestation_honors_json(engine, store, household, t0, tmp_path,
     assert out["signature"]["verified"] is True
     assert "never identity" in out["boundary"]
     assert "never identity" in out["boundary"]
+
+
+def test_judge_derives_counts_from_live_artifacts(capsys):
+    """`attest judge` prints corpus sizes to judges — the numbers must come
+    from the shipped artifacts, not literals that drift with every regen."""
+    cli.main(["judge"])
+    out = capsys.readouterr().out
+    docs = Path(cli.__file__).resolve().parents[2] / "docs"
+    mf = json.loads((docs / "site-manifest.json").read_text(encoding="utf-8"))
+    n_artifacts = len(mf["payload"]["artifacts"])
+    n_receipts = len(list((docs / "demo-receipts").glob("*.json")))
+    vm = json.loads((docs / "vectors-manifest.json").read_text(encoding="utf-8"))
+    n_vectors = len(vm if isinstance(vm, list) else vm["vectors"])
+    assert f"{n_artifacts} artifact sha256s" in out
+    assert f"all {n_receipts} signed receipts" in out
+    assert f"{n_vectors} conformance packs" in out
+    # The attack count derives from the battery's own append list — never a
+    # hard-coded number that could claim more attacks than exist.
+    import inspect
+
+    from attest import attackdemo, verifyjs
+
+    n_attacks = inspect.getsource(attackdemo).count("results.append")
+    assert f"{n_attacks} real tamper attempts" in out
+    import re
+
+    seq = re.search(r"const seq=\[(.*?)\];", inspect.getsource(verifyjs), re.S)
+    n_gauntlet = len(re.findall(r'\["[^"\]]+","', seq.group(1)))
+    assert f"all {n_gauntlet} shipped artifacts" in out
+    # With the artifacts present, no fallback wording may leak through.
+    assert "every artifact sha256s" not in out
+    assert "several real tamper attempts" not in out

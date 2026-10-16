@@ -409,3 +409,136 @@ def test_close_degrades_when_prefetch_token_stale(engine, store, household, sche
     visit = store.visit(vid)
     assert visit.receipt_id and visit.summary_source == "template"
     assert store.receipt(visit.receipt_id).payload["ring_history"] is None
+
+
+def test_sweep_rejects_a_future_now(engine, household, t0):
+    """A caller-supplied sweep instant past the engine clock would mass-mint
+    signed no_observation receipts over windows that haven't elapsed and lapse
+    their schedules permanently — a client error, never a signed fact."""
+    from datetime import datetime
+
+    from attest.models import utcnow
+
+    with pytest.raises(ValueError, match="future"):
+        engine.sweep(now=utcnow() + timedelta(hours=2))
+    with pytest.raises(ValueError, match="timezone-aware"):
+        engine.sweep(now=datetime.now().replace(tzinfo=None))
+
+
+def test_event_inside_lapsed_window_binds_to_active_visit(
+    engine, store, household, schedule, t0, ring_control
+):
+    """A newer no_observation visit (a lapsed schedule's window sits in the
+    past but sorts newest by arrival) must not divert an event belonging to the
+    still-open visit into the late-event table."""
+    site, worker, cam, _s = household
+    _inject_history(ring_control, cam.id, "motion_detected", t0, "human")
+    v1 = engine.ingest(ev(cam.id, "motion_detected", t0, "human")).visit
+    assert v1.state == VisitState.OPEN
+
+    from attest.models import Schedule
+
+    s2 = store.put_schedule(
+        Schedule(
+            site_id=site.id,
+            worker_id=worker.id,
+            window_start=t0 + timedelta(minutes=60),
+            window_end=t0 + timedelta(minutes=70),
+            expected_minutes=10,
+            service="Drop-in",
+        )
+    )
+    # sweep after the second window lapses: v2 becomes no_observation, newest
+    # by arrival — while v1 stays active (its last_seen is wall-clock, which is
+    # still ahead of the replay-style sweep instant t0+3h)
+    engine.sweep(now=t0 + timedelta(hours=3))
+    v2 = store.visit_for_schedule(s2.id)
+    assert v2 is not None and v2.state == VisitState.NO_OBSERVATION
+    assert store.active_visit(site.id).id == v1.id
+
+    at = t0 + timedelta(minutes=65)  # inside v2's elapsed window, inside v1's span
+    _inject_history(ring_control, cam.id, "motion_detected", at, "human")
+    out = engine.ingest(ev(cam.id, "motion_detected", at, "human"))
+    assert out.ignored_reason is None
+    assert out.visit.id == v1.id  # bound, not filed as a late event
+
+    # and the contradicted no_observation record says so instead of hiding it
+    v2 = store.visit(v2.id)
+    assert any(f.code == "contradicted_no_observation" for f in v2.flags)
+
+
+def test_late_event_inside_lapsed_window_flags_contradiction(engine, store, household, schedule, t0):
+    """With no active visit, an event inside a no_observation window is a late
+    event for review — AND the lapsed record must admit it was contested."""
+    site, worker, cam, _s = household
+    # close v1 so nothing is active when the late event lands
+    engine.ingest(ev(cam.id, "motion_detected", t0, "human"))
+    engine.ingest(ev(_s.id, "contact_sensor_faulted", t0 + timedelta(minutes=10)))
+    engine.ingest(ev(_s.id, "contact_sensor_cleared", t0 + timedelta(minutes=10, seconds=15)))
+    v1 = store.active_visit(site.id)
+    engine.close_for_review(v1.id)
+
+    from attest.models import Schedule
+
+    s2 = store.put_schedule(
+        Schedule(
+            site_id=site.id,
+            worker_id=worker.id,
+            window_start=t0 + timedelta(minutes=30),
+            window_end=t0 + timedelta(minutes=40),
+            expected_minutes=10,
+            service="Drop-in",
+        )
+    )
+    engine.sweep(now=t0 + timedelta(hours=3))
+    v2 = store.visit_for_schedule(s2.id)
+    assert v2 is not None and v2.state == VisitState.NO_OBSERVATION
+
+    late1 = ev(cam.id, "motion_detected", t0 + timedelta(minutes=35), "human")
+    out = engine.ingest(late1)
+    assert out.ignored_reason == "late event retained for review"
+    v2 = store.visit(v2.id)
+    flag = next(f for f in v2.flags if f.code == "contradicted_no_observation")
+    # the admission is signed, not just a mutable flag — a `late:` receipt names
+    # the contradicted record, and the flag cites it
+    admissions = store.receipts_by_visit_prefix(f"late:{site.id}:{v2.id}:")
+    assert len(admissions) == 1
+    assert admissions[0].payload["record_type"] == "late_event"
+    assert admissions[0].payload["contradicts"]["visit_id"] == v2.id
+    assert admissions[0].payload["contradicts"]["receipt_id"] == v2.receipt_id
+    assert admissions[0].id in flag.message
+    # the same delivery re-ingested: request_id dedupe makes it idempotent
+    assert engine.ingest(late1).ignored_reason == "duplicate request_id"
+    assert len(store.receipts_by_visit_prefix(f"late:{site.id}:{v2.id}:")) == 1
+    # a SECOND late event into the same window mints another admission —
+    # the flag stays once, the evidence accrues
+    engine.ingest(ev(cam.id, "motion_detected", t0 + timedelta(minutes=37), "human"))
+    assert len(store.receipts_by_visit_prefix(f"late:{site.id}:{v2.id}:")) == 2
+
+
+def test_check_in_rejects_naive_and_future_at(engine, store, household, schedule, t0):
+    site, _w, cam, _s = household
+    engine.ingest(ev(cam.id, "motion_detected", t0, "human"))
+    token = engine.issue_checkin(store.active_visit(site.id).id)
+
+    from datetime import datetime
+
+    from attest.models import utcnow
+
+    with pytest.raises(ValueError, match="timezone-aware"):
+        engine.check_in(token, at=datetime.now().replace(tzinfo=None))
+    with pytest.raises(ValueError, match="future"):
+        engine.check_in(token, at=utcnow() + timedelta(minutes=5))
+
+
+def test_period_digest_window_is_half_open(engine, store, household, schedule, t0):
+    """A visit arriving exactly at the digest's end belongs to the NEXT
+    digest — a closed upper bound would count it in both."""
+    site, _w, cam, _s = household
+    boundary = t0 + timedelta(hours=4)
+    engine.ingest(ev(cam.id, "motion_detected", boundary, "human"))
+    day = engine.issue_period_digest(site, t0, boundary)
+    counts = day.payload["counts"]
+    assert sum(v for k, v in counts.items() if k.startswith("visits_")) == 0
+    nxt = engine.issue_period_digest(site, boundary, boundary + timedelta(hours=4))
+    assert sum(v for k, v in nxt.payload["counts"].items() if k.startswith("visits_")) == 1

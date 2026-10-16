@@ -1,0 +1,40 @@
+{
+  "id": "rcpt_199572a6d52e45fab1cbc805af0ae003",
+  "visit_id": "pack-diff:9b449d9598ac3f52",
+  "sequence": 388,
+  "prev_hash": "4ab451a78c4ab8a47777b8a255bddb5182e98b6fc0908621fdd546f72c99c0a1",
+  "payload": {
+    "record_type": "pack_comparison",
+    "pack_a_sha256": "a5ed930717fed2b1bf1469ab85831fd60775b00002aec2d6a968015c22b7433f",
+    "pack_b_sha256": "a912419b349b3aa8a0790add7ca13e73f611446732dca91e2a46f5b7cd46e260",
+    "pack_a_bytes": 362373,
+    "pack_b_bytes": 511691,
+    "log_heads": "unreconciled",
+    "clean": true,
+    "anomalies": 0,
+    "events_sha256": "305e9b3b0cb0590d05c02bdaa3358f3d81f082aafdc29b4637156fb948debf4e",
+    "detail": "log heads: unreconciled — 0 anomaly(ies), clean",
+    "verifier": {
+      "name": "attest-cli",
+      "version": "0.1.0",
+      "checker": "attest.packdiff.diff_report",
+      "verifier_sha256": "4ef3dc4bf88d55c43e352fb596c6ad0338622f7c7bc2e6abbf6b07af5b1439a5"
+    },
+    "context": {
+      "issuer_pin": null,
+      "lifecycle_sha256": null
+    },
+    "boundary": "This receipt attests only that the named differ produced the named comparison on the two byte-string digests above, under the recorded trust context. It does not prove the comparison is right — re-run attest diff on the named bytes to check — and says nothing about physical truth.",
+    "journal_head": "90f1b65233eef8ae80907dc2f7f4b960a8230d568e52d5030f5800a11a27dc3c",
+    "schema": "attest.receipt/2",
+    "sequence": 388,
+    "prev_hash": "4ab451a78c4ab8a47777b8a255bddb5182e98b6fc0908621fdd546f72c99c0a1",
+    "visit_id": "pack-diff:9b449d9598ac3f52",
+    "receipt_id": "rcpt_199572a6d52e45fab1cbc805af0ae003",
+    "issued_at": "2026-10-15T12:23:56.633055+00:00"
+  },
+  "payload_hash": "7ee76d7fede186cd702c7dad7658f2269e98b6af98e7da74e1d7a57121884a53",
+  "signature": "is57lfK5EGeow6caus54O4zHnlLPN8q3jaNTg+u8B/3om7Ovoy0UfhOquy7OC7xqZ/VA1071rKb+ZNRYYy4SCw==",
+  "public_key": "qRNo7hHrwwi2zNlV7tGCIkakVyU+OobK73/cimDdLcU=",
+  "issued_at": "2026-10-15T12:23:56.633055Z"
+}

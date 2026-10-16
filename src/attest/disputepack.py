@@ -501,19 +501,34 @@ def _coerce_int(v):
     if isinstance(v, str):
         t = v.strip(_WS_COERCE)
         if t and re.fullmatch(r"[+-]?[0-9]+", t):
-            return int(t)
+            # Significant digits decide: int()'s ~4300-digit ceiling counts
+            # zero-padding where parseInt doesn't — "0"*5000 reads 0 on the
+            # browser, so it must read 0 here too.
+            neg = t[:1] == "-"
+            digits = t.lstrip("+-").lstrip("0")
+            if not digits:
+                return 0
+            try:
+                return -int(digits) if neg else int(digits)
+            except ValueError:
+                # int() refuses past ~4300 digits; the JS mirror saturates
+                # to Infinity and convicts downstream — same answer here.
+                return -(2147483648) if neg else 2147483648  # ±(MAX+1)
     raise ValueError("not a coercible integer")
 
 
 def _merkle_consistency(old_root, old_size, new_root, new_size, nodes):
     """RFC 6962 sec. 2.1.2 consistency-proof verification — the
     transparency.verify_consistency mirror, stdlib-only."""
-    if not isinstance(nodes, list):
-        return False  # a dict proof would iterate keys — never a proof
+    if not isinstance(nodes, list) or len(nodes) > 64:
+        # a dict proof would iterate keys — never a proof; >64 nodes is
+        # over-bound (a real path needs ~2·log2 n) — transparency parity
+        return False
     if old_size > 2147483647 or new_size > 2147483647:
         return False
     if old_size == new_size:
-        return nodes == [] and old_root == new_root
+        # size 0 is not a head — equal sizes still require a live tree
+        return old_size >= 1 and nodes == [] and old_root == new_root
     if not (0 < old_size < new_size) or not nodes:
         return False
     path = list(nodes)
@@ -549,7 +564,11 @@ def _extends_ok(payload):
     head's own signature still authenticates, so callers treat None as
     absent rather than failed)."""
     ext = payload.get("extends")
-    if not isinstance(ext, dict) or not isinstance(ext.get("proof"), list):
+    if (
+        not isinstance(ext, dict)
+        or not isinstance(ext.get("proof"), list)
+        or len(ext["proof"]) > 64  # over-bound counts as absent — verify_extends parity
+    ):
         return None
     try:
         ext_first = _coerce_int(ext["first"])
@@ -572,8 +591,12 @@ def _merkle_inclusion(leaf_hex, size, index, path_hex, root_hex):
     root_b = _hex32(root_hex)
     if leaf is None or root_b is None:
         return False
-    if not isinstance(path_hex, list):
-        return False  # a dict path would iterate keys — never a proof
+    if path_hex is None:
+        path_hex = []
+    elif not isinstance(path_hex, list):
+        # absent → empty; ANY other non-list ({}, false, 0, "") is malformed —
+        # the strict surfaces' grammar is `path is None or isinstance(list)`.
+        return False
     if not _is_int(size) or not _is_int(index):
         return False
     size, index = int(size), int(index)
@@ -646,6 +669,46 @@ def check_log(pack_dir, trusted, receipts):
         sys.exit(
             "FAIL log_checkpoint.json: extends bridge attests a history it cannot prove"
         )
+    # pack_members — the export's signed member list. The proofs map is
+    # unsigned, so without this a stripped file+proof pair downgrades
+    # silently (export_pin.json gone → 'unpinned' note). A declared member
+    # that is absent fails closed; checkpoints minted before this field
+    # carry no list and keep the note-path.
+    pm = payload.get("pack_members")
+    if pm is not None:
+        if not isinstance(pm, list) or not pm or len(pm) > 4096:
+            sys.exit("FAIL log_checkpoint.json: malformed pack_members")
+        for m in pm:
+            if (
+                not isinstance(m, str)
+                or not m
+                or len(m) > 256
+                or ".." in m.split("/")
+                or m.startswith(("/", "\\\\"))
+                or ":" in m
+                or "\\\\" in m
+            ):
+                sys.exit("FAIL log_checkpoint.json: malformed pack_members entry")
+            if not (pack_dir / m).is_file():
+                sys.exit(
+                    f"FAIL log_checkpoint.json: signed member {m!r} missing "
+                    "from pack — the export declared it; a stripped member "
+                    "cannot hide"
+                )
+        # Reverse direction: every FILE physically present must be signed
+        # into the export. Files are unambiguous here — extractors may
+        # synthesize intermediate directories but never file entries.
+        declared = set(pm)
+        for fp in sorted(Path(pack_dir).rglob("*")):
+            if fp.is_file():
+                rel = fp.relative_to(pack_dir).as_posix()
+                if rel not in declared:
+                    sys.exit(
+                        f"FAIL log_checkpoint.json: member {rel!r} rides the "
+                        "pack but the signed export never declared it — a "
+                        "smuggled member, even inert, is not what the "
+                        "deployment signed"
+                    )
     proven = 0
     verified_ph = set()
     for r in receipts:
@@ -665,7 +728,7 @@ def check_log(pack_dir, trusted, receipts):
                 f"FAIL log_checkpoint.json: receipt {r.get('id') or ph[:16]} has no "
                 "inclusion proof — never committed to the deployment log"
             )
-        if not _merkle_inclusion(ph, size, p.get("leaf_index", -1), p.get("path") or [], root_hex):
+        if not _merkle_inclusion(ph, size, p.get("leaf_index", -1), p.get("path"), root_hex):
             sys.exit(
                 f"FAIL log_checkpoint.json: inclusion proof for receipt "
                 f"{r.get('id') or ph[:16]} does not reach the signed tree head"
@@ -705,7 +768,7 @@ def check_log(pack_dir, trusted, receipts):
                 raw.get("payload_hash"),
                 size,
                 p.get("leaf_index", -1),
-                p.get("path") or [],
+                p.get("path"),
                 root_hex,
             ):
                 sys.exit(
@@ -782,7 +845,7 @@ def check_log(pack_dir, trusted, receipts):
         if ph in verified_ph:
             continue
         if not isinstance(p, dict) or not _merkle_inclusion(
-            ph, size, p.get("leaf_index", -1), p.get("path") or [], root_hex
+            ph, size, p.get("leaf_index", -1), p.get("path"), root_hex
         ):
             sys.exit(
                 f"FAIL log_checkpoint.json: unreferenced inclusion proof for "
@@ -806,11 +869,16 @@ def _cosig_anchors(doc):
         return 0
     cosigs = {}
     cosig_list = doc.get("cosignatures")
+    # The lookup map covers the WHOLE cosignature list — logmonitor and the
+    # browser resolve anchors against every entry; capping here made an
+    # anchor keyed past index 64 FAIL only on this surface.
     for raw in cosig_list if isinstance(cosig_list, list) else []:
         if isinstance(raw, dict) and isinstance(raw.get("id"), str):
             cosigs.setdefault(raw["id"], raw)  # first-wins: the counting path counts the first id
     anchored = 0
-    for cid, anchor in anchors.items():
+    # 64-entry bound matches every other surface — a 65th anchor is neither
+    # counted nor convicted anywhere (logmonitor/verifyjs parity).
+    for cid, anchor in list(anchors.items())[:64]:
         scid = str(cid)[:24]
         cosig = cosigs.get(cid)
         if cosig is None:
@@ -819,6 +887,21 @@ def _cosig_anchors(doc):
         if not isinstance(anchor, dict):
             sys.exit(f"FAIL log_checkpoint.json: cosig_anchors {scid}… "
                      "anchor is not an object")
+        # The anchor commits cosig.payload_hash into the witness's log —
+        # meaningful only when that cosig is itself a valid attestation;
+        # anchoring junk bytes proves nothing (check_cosig_anchors parity).
+        cpl = cosig.get("payload")
+        if not isinstance(cpl, dict) or cpl.get("record_type") != "witness_cosignature":
+            sys.exit(f"FAIL log_checkpoint.json: cosig_anchors {scid}… "
+                     "anchored entry is not a witness_cosignature")
+        if isinstance(cosig.get("public_key"), str):
+            ok_c, why_c = check_receipt(cosig, cosig["public_key"])
+            if not ok_c:
+                sys.exit(f"FAIL log_checkpoint.json: cosig_anchors {scid}… "
+                         f"anchored cosig invalid: {why_c}")
+        else:
+            sys.exit(f"FAIL log_checkpoint.json: cosig_anchors {scid}… "
+                     "anchored cosig carries no signer key")
         acp = anchor.get("checkpoint")
         ap = (acp or {}).get("payload") if isinstance(acp, dict) else None
         if not isinstance(ap, dict) or ap.get("record_type") != "log_checkpoint":
@@ -848,7 +931,7 @@ def _cosig_anchors(doc):
             cosig.get("payload_hash"),
             asize,
             proof["leaf_index"],
-            proof.get("path") or [],
+            proof.get("path"),
             aroot,
         ):
             sys.exit(f"FAIL log_checkpoint.json: cosig_anchors {scid}… "
@@ -869,7 +952,9 @@ def _cosig_count(doc, cp, size, root_hex, issuer_keys=None):
     self_keys = set(issuer_keys or ()) | {cp.get("public_key")}
     seen_ids, seen_keys = set(), set()
     cosig_list = doc.get("cosignatures")
-    for raw in cosig_list if isinstance(cosig_list, list) else []:
+    # 64-entry bound matches logmonitor.check_cosignatures and the browser —
+    # a 65th cosignature is neither counted nor convicted anywhere.
+    for raw in cosig_list[:64] if isinstance(cosig_list, list) else []:
         p = raw.get("payload") if isinstance(raw, dict) else None
         if not isinstance(p, dict) or p.get("record_type") != "witness_cosignature":
             continue
@@ -923,25 +1008,28 @@ def check_media(bundle, media_dir, withheld=None):
         for e in bundle["original"]["payload"].get("evidence", [])
         if e.get("media_sha256")
     }
+    # Hash each present file once — the per-digest rglob made this
+    # O(digests x files x bytes) in a stdlib-only verifier.
+    present = {}
+    if media_dir.exists():
+        for p in media_dir.rglob("*"):
+            if p.is_file():
+                present[hashlib.sha256(p.read_bytes()).hexdigest()] = p
     for e in bundle["original"]["payload"].get("evidence", []):
         digest = e.get("media_sha256")
         if not digest:
             continue
-        for p in media_dir.rglob("*"):
-            if p.is_file() and hashlib.sha256(p.read_bytes()).hexdigest() == digest:
-                checked += 1
-                break
+        if digest in present:
+            checked += 1
+        elif digest in withheld:
+            held += 1
         else:
-            if digest in withheld:
-                held += 1
-                continue
             return checked, held, digest
-    if media_dir.exists():
-        # A media file whose bytes don't hash to a signed digest is smuggled
-        # content riding inside a "VERIFIED" pack — fail it, don't skip it.
-        for p in sorted(media_dir.rglob("*")):
-            if p.is_file() and hashlib.sha256(p.read_bytes()).hexdigest() not in signed:
-                return checked, held, f"smuggled:{p.name}"
+    # A media file whose bytes don't hash to a signed digest is smuggled
+    # content riding inside a "VERIFIED" pack — fail it, don't skip it.
+    for digest in sorted(present):
+        if digest not in signed:
+            return checked, held, f"smuggled:{present[digest].name}"
     return checked, held, None
 
 
@@ -1251,6 +1339,48 @@ def load_issuer_doc(path):
     if len(receipts) > 64:
         sys.exit("FAIL issuer document: key_receipts exceeds the 64-entry bound")
     return doc["issuer_key"], receipts
+
+def check_export_pin(bundle, pack_dir, trusted):
+    """Verify ``export_pin.json`` — the issuer-signed completeness pin a
+    single-visit pack carries: the review chain's count + tip + the signed
+    evidence media digests, attested at export. Without it a bundle whose
+    last statements were trimmed would still verify as a valid prefix.
+    Absent → None (a pre-pin pack or a pack that dropped the member — a
+    completeness downgrade the caller should note, not silently pass).
+    Returns the receipt so the caller can require its log proof too."""
+    pin_path = Path(pack_dir) / "export_pin.json"
+    if not pin_path.is_file():
+        return None
+    try:
+        pin = _loads(pin_path.read_text(encoding="utf-8"))
+    except Exception:
+        sys.exit("FAIL export_pin.json: not readable JSON")
+    ok, why = _member_check(pin, trusted)
+    if not ok:
+        sys.exit(f"FAIL export_pin.json: {why}")
+    payload = pin.get("payload")
+    if not isinstance(payload, dict) or payload.get("record_type") != "export_pin":
+        sys.exit("FAIL export_pin.json: not an export_pin receipt")
+    original = bundle["original"]
+    if payload.get("subject_visit") != original["visit_id"]:
+        sys.exit("FAIL export_pin.json: pins a different visit than the packed bundle")
+    reviews = bundle.get("reviews", [])
+    if payload.get("review_count") != len(reviews):
+        sys.exit(
+            "FAIL export_pin.json: signed review count "
+            f"{payload.get('review_count')} != packed {len(reviews)} — the chain was trimmed"
+        )
+    tip = reviews[-1]["receipt"]["payload_hash"] if reviews else None
+    if payload.get("review_tip") != tip:
+        sys.exit("FAIL export_pin.json: signed review tip differs — the packed chain's tail moved")
+    signed_media = sorted(
+        e.get("media_sha256")
+        for e in original["payload"].get("evidence", [])
+        if isinstance(e, dict) and e.get("media_sha256")
+    )
+    if payload.get("media_sha256") != signed_media:
+        sys.exit("FAIL export_pin.json: signed media digests do not match the bundle")
+    return pin
 '''
 
 # verify_bundle.py — verifies one pack's bundle.json (and media/ next to it).
@@ -1324,13 +1454,15 @@ def main():
         "key_rotations.json",
         "verifier_manifest.json",
         "log_checkpoint.json",
+        "export_pin.json",
     }
     for p in sorted(pack_dir.iterdir()):
         if p.is_file() and p.name not in allowed_top:
             sys.exit(f"FAIL {p.name}: present but not part of the pack format")
-        if p.is_dir() and p.name != "media":
+        if p.is_dir() and p.name != "media" and any(p.iterdir()):
             sys.exit(f"FAIL {p.name}/: directory not part of the pack format")
     pinned_tools = check_tools(pack_dir, trusted, f'visit:{bundle["original"]["visit_id"]}')
+    pin = check_export_pin(bundle, pack_dir, trusted)
     # Transparency checkpoint: the log's leaves are the receipts-table chain
     # — originals, lifecycle, manifests. Review-chain entries anchor to the
     # original's hash (verified above) instead of sitting in the log, so the
@@ -1341,7 +1473,8 @@ def main():
         [bundle["original"]]
         + pack_lifecycle
         + ([_loads((pack_dir / "verifier_manifest.json").read_text(encoding="utf-8"))]
-           if (pack_dir / "verifier_manifest.json").is_file() else []),
+           if (pack_dir / "verifier_manifest.json").is_file() else [])
+        + ([pin] if pin is not None else []),
     )
     redact_note = f", {held} withheld by redaction" if held else ""
     print(f"OK: {n} receipt(s) verified; {checked} media digests matched{redact_note}.")
@@ -1360,6 +1493,12 @@ def main():
     if issuer_receipts:
         print(f"    (pinned via a deployment issuer document — {len(issuer_receipts)} "
               "lifecycle receipt(s); its authenticity rides on how it reached you)")
+    if pin is not None:
+        print("    (review-chain completeness pinned by a signed export_pin — "
+              "count, tip, and media digests attested at export)")
+    else:
+        print("    (no export_pin.json — review-chain completeness unpinned: "
+              "a trimmed statement tail would not be caught)")
     if pinned_tools:
         print(f"    ({pinned_tools} verifier tool(s) pinned by issuer-signed manifest — "
               "the pack's own scripts are proven unmodified)")
@@ -1490,6 +1629,21 @@ def main():
             print(f"FAIL {vid}: manifest hash disagrees with signed original")
             failed += 1
             continue
+        # The manifest's labels are signed too — but only meaningful if they
+        # match the bundle they name. Without this, a truncated review tail or
+        # a mislabeled visit still verifies green.
+        orig = bundle["original"]
+        if orig.get("visit_id") != vid or orig.get("id") != v.get("receipt_id"):
+            print(f"FAIL {vid}: manifest names a different receipt than the bundle carries")
+            failed += 1
+            continue
+        if v.get("reviews") != len(bundle.get("reviews") or []):
+            print(
+                f"FAIL {vid}: manifest signs {v.get('reviews')} review receipt(s), "
+                f"bundle carries {len(bundle.get('reviews') or [])}"
+            )
+            failed += 1
+            continue
         vdir = root / "visits" / vid
         try:
             withheld = redaction_for(bundle, vdir)
@@ -1561,7 +1715,9 @@ def main():
             if p.is_file() and p.name not in listed:
                 print(f"FAIL attestations/{p.name}: present but not in the signed manifest")
                 failed += 1
-            elif p.is_dir():
+            # An empty dir is a container artifact (zip dir entries the zip-level
+            # verifiers skip) — only a directory carrying content can smuggle.
+            elif p.is_dir() and any(p.iterdir()):
                 print(f"FAIL attestations/{p.name}/: directory not in the signed manifest")
                 failed += 1
     vdir = root / "visits"
@@ -1569,7 +1725,7 @@ def main():
         # Plain files directly under visits/ are smuggled members too — only
         # directories named for a listed visit_id are legal.
         for p in sorted(vdir.iterdir()):
-            if p.is_dir() and p.name not in listed_vids:
+            if p.is_dir() and p.name not in listed_vids and any(p.iterdir()):
                 print(f"FAIL visits/{p.name}/: directory not in the signed manifest")
                 failed += 1
             elif p.is_file():
@@ -1592,7 +1748,7 @@ def main():
         if p.is_file() and p.name not in allowed_top:
             print(f"FAIL {p.name}: present but not in the signed manifest")
             failed += 1
-        elif p.is_dir() and p.name not in ("visits", "attestations"):
+        elif p.is_dir() and p.name not in ("visits", "attestations") and any(p.iterdir()):
             print(f"FAIL {p.name}/: directory not in the signed manifest")
             failed += 1
     if vdir.exists():
@@ -1601,7 +1757,7 @@ def main():
                 if p.is_file() and p.name not in ("bundle.json", "redaction.json"):
                     print(f"FAIL {vd.name}/{p.name}: present but not in the signed manifest")
                     failed += 1
-                elif p.is_dir() and p.name != "media":
+                elif p.is_dir() and p.name != "media" and any(p.iterdir()):
                     print(f"FAIL {vd.name}/{p.name}/: directory not in the signed manifest")
                     failed += 1
     mok, mwhy = check_manifest(manifest, trusted)
@@ -1609,9 +1765,11 @@ def main():
     if not mok:
         failed += 1
     _site = manifest.get("site")
-    # A non-dict site (e.g. 5) has no .get — the browser computes "site:"
-    # for the same input, so degrade to "" rather than crash.
-    site_id = (_site.get("id") if isinstance(_site, dict) else None) or ""
+    # A non-dict site (e.g. 5) has no .get, and a non-string id must render
+    # "" — Python would print "site:True" where the browser prints
+    # "site:true"; the strict surfaces all spell non-strings as "".
+    site_id = _site.get("id") if isinstance(_site, dict) else None
+    site_id = site_id if isinstance(site_id, str) else ""
     pinned_tools = check_tools(root, trusted, f"site:{site_id}")
     sr = manifest.get("signature_receipt")
     if isinstance(sr, dict):
@@ -1764,16 +1922,33 @@ def _withheld_digests(bundle: ReviewBundle) -> list[str]:
     )
 
 
-def _redaction_marker(bundle: ReviewBundle) -> str:
+def _missing_media_digests(store: Store, media_root: Path, visit_id: str) -> list[str]:
+    """Signed media digests whose bytes are gone — retention purge or disk
+    loss. ``_media_files`` filters them out, which would make the pack read
+    as tampered; they must export as *withheld* instead."""
+    root = Path(media_root).resolve()
+    missing = []
+    for e in store.evidence_for(visit_id):
+        if not e.media_path or not e.media_sha256:
+            continue
+        p = Path(e.media_path)
+        p = p.resolve() if p.is_absolute() else (root / p).resolve()
+        if not (p.is_relative_to(root) and p.is_file()):
+            missing.append(e.media_sha256)
+    return sorted(set(missing))
+
+
+def _redaction_marker(bundle: ReviewBundle, digests: list[str] | None = None, note: str | None = None) -> str:
     import json
 
     return json.dumps(
         {
             "schema": "attest.redaction/1",
             "media_redacted": True,
-            "withheld_digests": _withheld_digests(bundle),
+            "withheld_digests": sorted(digests) if digests is not None else _withheld_digests(bundle),
             "note": (
-                "Media bytes withheld for privacy. The sha256 digests remain inside "
+                note
+                or "Media bytes withheld for privacy. The sha256 digests remain inside "
                 "the signed payload — a later full pack can be compared against them."
             ),
         },
@@ -1791,14 +1966,31 @@ def build_pack(
     redact_media: bool = False,
     tools_receipt_fn=None,
     log_fn=None,
+    pin_fn=None,
 ) -> bytes:
     """Assemble the zip. Media is matched to evidence digests, not filenames.
     With ``redact_media`` the bytes are withheld and a redaction.json marker is
     written — the signed digests stay verifiable, the footage stays private.
+    ``include_media=False`` alone would ship digests with neither bytes nor a
+    withheld listing — a permanently unverifiable pack — so it requires
+    ``redact_media``.
     ``tools_receipt_fn`` receives the sha256 map of the pack's verifier tooling
     and returns a signed ``verifier_manifest`` receipt — the pin that proves
-    the pack's own scripts are byte-identical to what the issuer shipped."""
+    the pack's own scripts are byte-identical to what the issuer shipped.
+    ``pin_fn(bundle)`` mints the signed export pin (review count + tip +
+    media digests): without it a truncated review tail verifies as a clean
+    prefix, so packs built for publication must pass it."""
     from .verifyjs import VERIFY_HTML, case_index_html
+
+    if not include_media and not redact_media:
+        raise ValueError(
+            "include_media=False without redact_media ships signed digests with "
+            "neither bytes nor a withheld listing — a permanently unverifiable pack"
+        )
+    # One consistent ledger view for the whole build: the verifier_manifest and
+    # checkpoint receipts are minted mid-build, and a rotation landing between
+    # two reads would make key_rotations.json and the log proofs disagree.
+    all_receipts = store.receipts()
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
@@ -1807,14 +1999,15 @@ def build_pack(
         # after a key rotation verifies under the successor, and this member
         # is the signed link that makes that legitimate instead of "different
         # key". Only written when rotations exist.
-        rotations = [r.model_dump(mode="json") for r in store.receipts() if r.visit_id.startswith("key:")]
-        from datetime import UTC, datetime
-
+        rotations = [r.model_dump(mode="json") for r in all_receipts if r.visit_id.startswith("key:")]
         index_html = case_index_html(
             {
                 "schema": "attest.dispute-pack/1",
                 "site": bundle.original.payload.get("site") or {},
-                "generated_at": datetime.now(tz=UTC).isoformat(),
+                # Content-addressed "as of": identical ledger state rebuilds a
+                # byte-identical pack, so the manifest/verifier receipts
+                # dedupe by pseudo-id instead of growing the ledger per GET.
+                "generated_at": all_receipts[-1].issued_at.isoformat(),
                 "issuer_key": bundle.original.public_key,
                 "media_redacted": redact_media,
             },
@@ -1840,11 +2033,61 @@ def build_pack(
             vm_receipt = tools_receipt_fn(tools)
             if vm_receipt is not None:
                 z.writestr("verifier_manifest.json", vm_receipt.model_dump_json(indent=2))
+        pin_receipt = None
+        if pin_fn is not None:
+            # Minted before the checkpoint so the pin is a proven log leaf —
+            # and named in the checkpoint's signed pack_members, so deleting
+            # the member fails instead of reading as 'unpinned'.
+            pin_receipt = pin_fn(bundle)
+            if pin_receipt is not None:
+                z.writestr("export_pin.json", pin_receipt.model_dump_json(indent=2))
+        # Enumerate every remaining member BEFORE the checkpoint mints — its
+        # signed payload carries pack_members, so a stripped file+proof pair
+        # fails closed instead of silently downgrading the pack. The list is
+        # declared here and asserted against what was actually written below.
+        media_files = (
+            []
+            if (redact_media or not include_media)
+            else _media_files(store, media_root, bundle.original.visit_id)
+        )
+        gone = (
+            []
+            if (redact_media or not include_media)
+            else _missing_media_digests(store, media_root, bundle.original.visit_id)
+        )
+        members = [
+            "bundle.json",
+            "README.txt",
+            "verify_bundle.py",
+            "verify.html",
+            "index.html",
+        ]
+        if vm_receipt is not None:
+            members.append("verifier_manifest.json")
+        if pin_receipt is not None:
+            members.append("export_pin.json")
+        if rotations:
+            members.append("key_rotations.json")
+        if redact_media or gone:
+            members.append("redaction.json")
+        members += [f"media/{rel}" for _p, rel in media_files]
         if log_fn is not None:
-            rot_receipts = [r for r in store.receipts() if r.visit_id.startswith("key:")]
-            doc = log_fn([bundle.original] + rot_receipts + ([vm_receipt] if vm_receipt is not None else []))
-            if doc is not None:
-                z.writestr("log_checkpoint.json", json.dumps(doc, indent=2, ensure_ascii=False))
+            members.append("log_checkpoint.json")
+            rot_receipts = [r for r in all_receipts if r.visit_id.startswith("key:")]
+            doc = log_fn(
+                [bundle.original]
+                + rot_receipts
+                + ([vm_receipt] if vm_receipt is not None else [])
+                + ([pin_receipt] if pin_receipt is not None else []),
+                pack_members=members,
+            )
+            if doc is None:
+                raise ValueError(
+                    "log_fn produced no checkpoint but pack_members declared "
+                    "log_checkpoint.json — a pack that signs a member list it "
+                    "does not ship is self-inconsistent"
+                )
+            z.writestr("log_checkpoint.json", json.dumps(doc, indent=2, ensure_ascii=False))
         if rotations:
             z.writestr(
                 "key_rotations.json",
@@ -1857,8 +2100,29 @@ def build_pack(
         if redact_media:
             z.writestr("redaction.json", _redaction_marker(bundle))
         elif include_media:
-            for p, rel in _media_files(store, media_root, bundle.original.visit_id):
+            for p, rel in media_files:
                 z.write(p, f"media/{rel}")
+            if gone:
+                # Retention/disk loss removed bytes the signature still names —
+                # withholding them explicitly keeps "purged" provably distinct
+                # from "tampered with".
+                z.writestr(
+                    "redaction.json",
+                    _redaction_marker(
+                        bundle,
+                        digests=gone,
+                        note=(
+                            "Media bytes absent at export time (retention purge or "
+                            "disk loss) — withheld explicitly so the missing digest "
+                            "is a declared gap, not an apparent tamper."
+                        ),
+                    ),
+                )
+        if log_fn is not None and set(z.namelist()) != set(members):
+            raise ValueError(
+                "pack_members diverged from the written member set — refusing "
+                "to ship a pack whose signed member list lies"
+            )
     return buf.getvalue()
 
 
@@ -1871,11 +2135,11 @@ def _newest_issuer_key(entries, attestations) -> str | None:
     a retired key while successor-signed records ride in the same pack, and
     the whole export then fails verification for honest bytes."""
     newest = None
-    for receipt in (
-        [e[1].original for e in entries]
-        + [r.receipt for e in entries for r in e[1].reviews]
-        + list(attestations)
-    ):
+    # Only receipts-table rows share the global sequence domain — review-entry
+    # ``sequence`` is a per-visit revision (reviews.py mints len(bundle)+1), so
+    # comparing across the two domains could pick a retired key under a long
+    # review chain.
+    for receipt in [e[1].original for e in entries] + list(attestations):
         if newest is None or receipt.sequence > newest.sequence:
             newest = receipt
     return newest.public_key if newest is not None else None
@@ -1903,7 +2167,12 @@ def build_case_pack(
     manifest itself — the export becomes a chain event naming exactly which
     records it carries, so a pack that drops or swaps one fails verification."""
     import json
-    from datetime import UTC, datetime
+
+    if not include_media and not redact_media:
+        raise ValueError(
+            "include_media=False without redact_media ships signed digests with "
+            "neither bytes nor a withheld listing — a permanently unverifiable pack"
+        )
 
     # Site-level chain events — coverage attestations ("was anyone watching?"),
     # period digests, prior exports, source disconnect — travel in the pack so
@@ -1918,19 +2187,30 @@ def build_case_pack(
     # ``pack-verify:*`` receipts are this deployment's signed verification
     # acts (`verify --attest`) — the audit history travels with the evidence,
     # so a pack carries a verifiable record of who checked what.
+    all_receipts = store.receipts()
     attestations = [
         r
-        for r in store.receipts()
+        for r in all_receipts
         if r.visit_id == f"source:{site.id}"
         or r.visit_id.startswith(f"coverage:{site.id}:")
         or r.visit_id.startswith(f"digest:{site.id}:")
         or r.visit_id.startswith(f"export:{site.id}:")
+        or r.visit_id.startswith(f"late:{site.id}:")
         or r.visit_id.startswith("verify:")
         or r.visit_id.startswith("key:")
         or r.visit_id.startswith("monitor:")
         or r.visit_id.startswith("pack-verify:")
         or r.visit_id.startswith("pack-diff:")
     ]
+    # Retention-purged (or disk-lost) media must export as *withheld* — the
+    # manifest's media_withheld list and the per-visit redaction.json name the
+    # same digests so "gone" reads as a declared gap, never as tampering.
+    missing_media = {}
+    if include_media and not redact_media:
+        for visit, _bundle, _cs in entries:
+            gone = _missing_media_digests(store, media_root, visit.id)
+            if gone:
+                missing_media[visit.id] = gone
     manifest = {
         "schema": "attest.case-pack/1",
         "site": {
@@ -1938,7 +2218,9 @@ def build_case_pack(
             "name": site.name,
             "source_disconnected_at": (site.disconnected_at.isoformat() if site.disconnected_at else None),
         },
-        "generated_at": datetime.now(tz=UTC).isoformat(),
+        # Same content-addressed "as of" as build_pack: the covered tip's own
+        # issued_at — re-exports over unchanged state dedupe their receipts.
+        "generated_at": all_receipts[-1].issued_at.isoformat() if all_receipts else None,
         # The issuer is the deployment's CURRENT signing key — verifiers walk
         # ancestors from here through signed key_rotation receipts. Falling
         # back to a visit's original key would strand post-rotation packs:
@@ -1966,7 +2248,9 @@ def build_case_pack(
                 "last_activity_at": (visit.last_activity_at.isoformat() if visit.last_activity_at else None),
                 "countersign": {"state": cs["state"], "detail": cs["detail"]},
                 "reviews": len(bundle.reviews),
-                "media_withheld": _withheld_digests(bundle) if redact_media else [],
+                "media_withheld": (
+                    _withheld_digests(bundle) if redact_media else missing_media.get(visit.id, [])
+                ),
             }
             for visit, bundle, cs in entries
         ],
@@ -1975,6 +2259,20 @@ def build_case_pack(
             "identity, attendance, time worked, or absence."
         ),
     }
+    # Self-check the labels we're about to sign: a mismatched (visit, bundle)
+    # pairing in `entries` would produce a pack whose manifest names one thing
+    # and ships another — every verifier would still bless the hash match.
+    for (visit, bundle, _cs), v in zip(entries, manifest["visits"], strict=True):
+        if (
+            v["visit_id"] != visit.id
+            or bundle.original.visit_id != visit.id
+            or v["receipt_id"] != bundle.original.id
+            or v["reviews"] != len(bundle.reviews)
+        ):
+            raise ValueError(
+                f"manifest/bundle mismatch for {visit.id} — refusing to export "
+                "an internally inconsistent pack"
+            )
     if manifest_signer is not None:
         receipt = manifest_signer(manifest)
         if receipt is not None:
@@ -2011,7 +2309,25 @@ def build_case_pack(
         vm = tools_receipt_fn(tools)
     # The transparency checkpoint is issued LAST among signed members: its
     # tree must already contain the export manifest and the tool pin for
-    # their inclusion proofs to exist.
+    # their inclusion proofs to exist. The member set is enumerated BEFORE
+    # it mints — the checkpoint signs pack_members so a stripped file+proof
+    # pair fails closed instead of downgrading silently.
+    media_plan = {}
+    if include_media and not redact_media:
+        for visit, _b, _cs in entries:
+            media_plan[visit.id] = _media_files(store, media_root, visit.id)
+    members = ["manifest.json", "README.txt", "verify_case.py", "verify.html", "index.html"]
+    if vm is not None:
+        members.append("verifier_manifest.json")
+    if log_fn is not None:
+        members.append("log_checkpoint.json")
+    members += [f"attestations/{r.id}.json" for r in attestations]
+    for visit, _b, _cs in entries:
+        base = f"visits/{visit.id}"
+        members.append(f"{base}/bundle.json")
+        if redact_media or visit.id in missing_media:
+            members.append(f"{base}/redaction.json")
+        members += [f"{base}/media/{rel}" for _p, rel in media_plan.get(visit.id, [])]
     log_doc = None
     if log_fn is not None:
         mrcpt = manifest.get("signature_receipt")
@@ -2019,8 +2335,15 @@ def build_case_pack(
             list(attestations)
             + [b.original for _, b, _ in entries]
             + ([Receipt.model_validate(mrcpt)] if isinstance(mrcpt, dict) else [])
-            + ([vm] if vm is not None else [])
+            + ([vm] if vm is not None else []),
+            pack_members=members,
         )
+        if log_doc is None:
+            raise ValueError(
+                "log_fn produced no checkpoint but pack_members declared "
+                "log_checkpoint.json — a pack that signs a member list it "
+                "does not ship is self-inconsistent"
+            )
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("manifest.json", manifest_text)
@@ -2040,8 +2363,26 @@ def build_case_pack(
             if redact_media:
                 z.writestr(f"{base}/redaction.json", _redaction_marker(bundle))
             elif include_media:
-                for p, rel in _media_files(store, media_root, visit.id):
+                for p, rel in media_plan.get(visit.id, []):
                     z.write(p, f"{base}/media/{rel}")
+                if visit.id in missing_media:
+                    z.writestr(
+                        f"{base}/redaction.json",
+                        _redaction_marker(
+                            bundle,
+                            digests=missing_media[visit.id],
+                            note=(
+                                "Media bytes absent at export time (retention purge "
+                                "or disk loss) — withheld explicitly so the missing "
+                                "digest is a declared gap, not an apparent tamper."
+                            ),
+                        ),
+                    )
+        if log_fn is not None and set(z.namelist()) != set(members):
+            raise ValueError(
+                "pack_members diverged from the written member set — refusing "
+                "to ship a pack whose signed member list lies"
+            )
     return buf.getvalue()
 
 
@@ -2049,8 +2390,11 @@ TAMPER_ATTACKS = ("duration", "missing-record", "smuggled-file", "forged-verifie
 
 
 def tamper_twin(pack: bytes, attack: str = "duration", visit: str | None = None) -> tuple[bytes, str]:
-    """A hostile copy of a pack: byte-identical except one deliberate attack,
-    so the copy must FAIL verification. Each ``attack`` exercises a different
+    """A hostile copy of a pack: identical members — names, metadata, contents —
+    except one deliberate attack, so the copy must FAIL verification.
+    (Container bytes may differ slightly where members re-compress; every
+    member's *content* is untouched except the attacked one.) Each ``attack``
+    exercises a different
     verification layer — ``duration`` doctors a signed payload field,
     ``missing-record`` deletes a record the manifest commits to,
     ``smuggled-file`` injects a member no signed content names, and
@@ -2083,11 +2427,11 @@ def tamper_twin(pack: bytes, attack: str = "duration", visit: str | None = None)
             # signs `observed_span_minutes` (first→last camera observation),
             # so doctor whichever numeric stay-field exists.
             best: tuple[float, str, bytes, bytes, int, int, bytes] | None = None
-            ordered = (
-                [f"visits/{visit}/bundle.json"]
-                if visit and f"visits/{visit}/bundle.json" in bundles
-                else bundles
-            )
+            if visit is not None and f"visits/{visit}/bundle.json" not in bundles:
+                # A typo'd --tamper-visit silently doctoring a DIFFERENT record
+                # makes the demo name the wrong visit — refuse loudly.
+                raise ValueError(f"visit {visit} has no bundle in this pack")
+            ordered = [f"visits/{visit}/bundle.json"] if visit else bundles
             for field in (b'"duration_minutes": ', b'"observed_span_minutes": '):
                 if best is not None:
                     break
@@ -2155,13 +2499,17 @@ def tamper_twin(pack: bytes, attack: str = "duration", visit: str | None = None)
             for n in names:
                 if n in dropped:
                     continue
-                dst.writestr(n, mutated.get(n) or src.read(n))
+                # Preserve the source ZipInfo verbatim (name, timestamp, mode) —
+                # the twin's claim is "identical members except the attack",
+                # and re-stamping every member's metadata would make a diff
+                # show churn everywhere instead of the one doctored member.
+                dst.writestr(src.getinfo(n), mutated.get(n) or src.read(n))
             for n, data in added.items():
                 dst.writestr(n, data)
     return buf.getvalue(), desc
 
 
-def log_member(engine, receipts, cosign_fn=None) -> dict:
+def log_member(engine, receipts, cosign_fn=None, pack_members=None) -> dict:
     """Build ``log_checkpoint.json`` for an export: a signed Merkle Tree Head
     over the deployment's whole receipt log plus an RFC 6962 inclusion path
     for every receipt this pack carries. Issuing the checkpoint must run
@@ -2175,8 +2523,16 @@ def log_member(engine, receipts, cosign_fn=None) -> dict:
     returns ``(cosigs, anchors)`` where anchors maps each cosig's id to the
     witness's self-anchor (its own signed head + the cosig's inclusion
     proof), so the pack proves the attestation was committed to the
-    witness's published log, not just signed and handed over."""
-    cp = engine.issue_log_checkpoint()
+    witness's published log, not just signed and handed over.
+
+    ``pack_members`` is the export's complete member-name list. The proofs
+    map is unsigned — an attacker can always delete a file AND its proof —
+    so the checkpoint signs the declared member list itself: a verifier
+    then fails closed on any member the export claimed but no longer
+    carries (a stripped export_pin.json or verifier_manifest.json can't
+    silently downgrade to 'unpinned')."""
+    extra = {"pack_members": sorted(pack_members)} if pack_members else None
+    cp = engine.issue_log_checkpoint(extra_facts=extra)
     n = cp.payload["tree_size"]
     # One leaf-list build for every proof — per-receipt log_leaves() calls
     # would rescan the whole receipts table O(n²) times on a large export.

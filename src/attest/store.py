@@ -223,12 +223,36 @@ def atomic(method):
 
 
 class Store:
-    def __init__(self, path: Path | str = ":memory:"):
-        self._conn = sqlite3.connect(str(path), check_same_thread=False, isolation_level=None)
-        self._conn.execute("PRAGMA journal_mode=WAL") if path != ":memory:" else None
+    def __init__(self, path: Path | str = ":memory:", *, read_only: bool = False):
+        self._read_only = read_only
+        if read_only:
+            # Inspection commands must not mutate the runtime they look at:
+            # WAL mode writes -wal/-shm files, and the schema DDL turns an
+            # empty file into a store that reads "healthy". mode=ro + query_only
+            # makes any attempted write fail loudly instead of silently
+            # leaving marks.
+            if path == ":memory:":
+                raise ValueError("read_only needs a file path")
+            uri = Path(path).absolute().as_uri() + "?mode=ro"
+            try:
+                conn = sqlite3.connect(uri, uri=True, check_same_thread=False, isolation_level=None)
+                # ro failures on a live WAL store defer to first read (the
+                # shared-memory index can't be created) — probe now so the
+                # fallback engages before any caller query.
+                conn.execute("SELECT name FROM sqlite_master LIMIT 1").fetchone()
+                self._conn = conn
+            except sqlite3.OperationalError:
+                self._conn = sqlite3.connect(str(path), check_same_thread=False, isolation_level=None)
+            self._conn.execute("PRAGMA query_only=ON")
+        else:
+            self._conn = sqlite3.connect(str(path), check_same_thread=False, isolation_level=None)
+            self._conn.execute("PRAGMA journal_mode=WAL") if path != ":memory:" else None
         self._lock = threading.RLock()
+        self._leaves_cache: tuple[str | None, list] | None = None
+        self._head_cache: tuple[str | None, tuple[int, bytes]] | None = None
         with self._lock:
-            self._conn.executescript(_SCHEMA)
+            if not read_only:
+                self._conn.executescript(_SCHEMA)
 
     @contextmanager
     def transaction(self):
@@ -428,10 +452,10 @@ class Store:
                             continue
                     mismatches.append(f"{table}:{row_id} content changed after seq {seq}")
 
-            untracked = 0
+            untracked = []
             for table, key in _JOURNALED_KEYS.items():
                 ids = [r[0] for r in self._conn.execute(f"SELECT {key} FROM {table}")]
-                untracked += sum(1 for rid in ids if (table, rid) not in tracked)
+                untracked += [f"{table}:{rid}" for rid in ids if (table, rid) not in tracked]
 
             # Index columns are outside the body hash — recompute each from the
             # parsed body and compare. A direct UPDATE to token_hash, visit_id,
@@ -477,7 +501,8 @@ class Store:
                 "entries": len(entries),
                 "intact": not mismatches,
                 "mismatches": mismatches[:50],
-                "untracked_rows": untracked,
+                "untracked_rows": len(untracked),
+                "untracked": untracked[:50],
                 "pinned_heads": len(pins),
                 "missing_pins": len(missing_pins),
                 "unpinned_entries": unpinned,
@@ -511,7 +536,9 @@ class Store:
         cols = {"id": obj.id, **cols, "body": obj.model_dump_json()}  # type: ignore[attr-defined]
         names = ",".join(cols)
         marks = ",".join("?" * len(cols))
-        with self._lock:
+        # row + journal entry commit together even for bare callers (poller,
+        # direct puts) — transaction() rejoins an enclosing @atomic harmlessly
+        with self.transaction():
             self._conn.execute(
                 f"INSERT OR REPLACE INTO {table} ({names}) VALUES ({marks})", tuple(cols.values())
             )
@@ -629,7 +656,7 @@ class Store:
         *,
         site_id: str | None = None,
         states: Iterable[VisitState] | None = None,
-        limit: int = 200,
+        limit: int | None = 200,
     ) -> list[Visit]:
         sql, params = "SELECT body FROM visits WHERE 1=1", []
         if site_id:
@@ -639,8 +666,10 @@ class Store:
             states = list(states)
             sql += f" AND state IN ({','.join('?' * len(states))})"
             params.extend(states)
-        sql += " ORDER BY arrived_at DESC LIMIT ?"
-        params.append(limit)
+        sql += " ORDER BY arrived_at DESC"
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(limit)
         return self._rows(Visit, sql, params)
 
     def active_visit(self, site_id: str) -> Visit | None:
@@ -664,12 +693,19 @@ class Store:
         return e
 
     def evidence_for(self, visit_id: str) -> list[Evidence]:
-        return self._rows(Evidence, "SELECT body FROM evidence WHERE visit_id=? ORDER BY at", (visit_id,))
+        # rowid breaks at-ties deterministically (ingest order) — otherwise a
+        # signed payload's evidence order depends on SQLite's unstable
+        # equal-key order.
+        return self._rows(
+            Evidence,
+            "SELECT body FROM evidence WHERE visit_id=? ORDER BY at, rowid",
+            (visit_id,),
+        )
 
     # ----------------------------------------------------------------- receipts
 
     def put_receipt(self, r: Receipt) -> Receipt:
-        with self._lock:
+        with self.transaction():
             body = r.model_dump_json()
             # visit_id is UNIQUE: a second receipt for one visit raises
             # IntegrityError mid-transaction and rolls the whole thing back —
@@ -688,11 +724,75 @@ class Store:
     def receipt_for_visit(self, visit_id: str) -> Receipt | None:
         return self._one(Receipt, "SELECT body FROM receipts WHERE visit_id=?", (visit_id,))
 
+    def site_has_receipt(self, site_id: str) -> bool:
+        """Cheap existence check — 'any signed record for this site' — without
+        walking the visits list (the newest-visit-only probe misses sites whose
+        latest visit is still open but older ones are signed)."""
+        row = self._conn.execute(
+            "SELECT 1 FROM receipts r JOIN visits v ON v.id = r.visit_id WHERE v.site_id = ? LIMIT 1",
+            (site_id,),
+        ).fetchone()
+        return row is not None
+
     def latest_receipt(self) -> Receipt | None:
         return self._one(Receipt, "SELECT body FROM receipts ORDER BY sequence DESC")
 
     def receipts(self) -> list[Receipt]:
         return self._rows(Receipt, "SELECT body FROM receipts ORDER BY sequence")
+
+    def cached_leaf_hashes(self) -> list:
+        """Transparency-log leaf hashes, memoized on the chain tip.
+
+        The public log endpoints would otherwise parse every receipt body
+        per request — a self-imposed DoS amplifier against the single store
+        lock. The key is the newest receipt's content-derived id: any append
+        changes it, and a rolled-back append can only reappear as identical
+        content producing identical leaves, so the cache is rollback-safe.
+        """
+        tip = self.latest_receipt()
+        key = tip.id if tip else None
+        if self._leaves_cache is None or self._leaves_cache[0] != key:
+            from .transparency import leaf_hashes
+
+            self._leaves_cache = (key, leaf_hashes(self.receipts()))
+        return self._leaves_cache[1]
+
+    def cached_log_head(self) -> tuple[int, bytes]:
+        """(tree_size, Merkle Tree Head) memoized on the chain tip.
+
+        ``/api/log/head`` and consistency/proof endpoints would otherwise
+        re-hash the whole tree per unauthenticated request — the root is as
+        deterministic over the tip as the leaf list, so the same
+        content-derived key + rollback argument applies."""
+        tip = self.latest_receipt()
+        key = tip.id if tip else None
+        if self._head_cache is None or self._head_cache[0] != key:
+            from .transparency import root
+
+            leaves = self.cached_leaf_hashes()
+            self._head_cache = (key, (len(leaves), root(leaves)))
+        return self._head_cache[1]
+
+    def latest_checkpoint_receipt(self) -> Receipt | None:
+        """Newest log_checkpoint receipt — keyed lookup by its ``log:``
+        pseudo visit_id, not a full table parse (the public head endpoint
+        must not O(table) per request)."""
+        return self._one(
+            Receipt,
+            "SELECT body FROM receipts WHERE visit_id LIKE 'log:%' ORDER BY sequence DESC",
+        )
+
+    def receipts_by_visit_prefix(self, prefix: str) -> list[Receipt]:
+        """Receipts under one pseudo-visit prefix — a ``LIKE 'prefix%'``
+        range scan on the visit_id index, not a full-table parse. The prefix
+        is escaped: ``_``/``%`` are legal id characters and must not act as
+        wildcards."""
+        escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        return self._rows(
+            Receipt,
+            "SELECT body FROM receipts WHERE visit_id LIKE ? ESCAPE '\\' ORDER BY sequence",
+            (escaped + "%",),
+        )
 
     def reviews_for(self, visit_id: str) -> list[ReviewEntry]:
         return self._rows(
@@ -700,7 +800,7 @@ class Store:
         )
 
     def put_review(self, review: ReviewEntry) -> None:
-        with self._lock:
+        with self.transaction():
             body = review.model_dump_json()
             self._conn.execute(
                 "INSERT INTO reviews (id, visit_id, revision, body) VALUES (?, ?, ?, ?)",
@@ -767,6 +867,7 @@ class Store:
         until: datetime | None = None,
         *,
         limit: int | None = 500,
+        desc: bool = False,
     ) -> list[CoverageEvent]:
         sql = "SELECT body FROM coverage_events WHERE site_id=?"
         params: list[object] = [site_id]
@@ -778,8 +879,10 @@ class Store:
             params.append(_iso(until))
         # None = no cap: signed coverage payloads must see every row — a silent
         # LIMIT would let a later "restored" event fall outside the report and
-        # over-explain gaps. UI callers pass an explicit bound instead.
-        sql += " ORDER BY at" + (f" LIMIT {int(limit)}" if limit is not None else "")
+        # over-explain gaps. UI callers pass an explicit bound instead, and
+        # `desc=True` keeps the NEWEST rows rather than freezing on the first N.
+        sql += " ORDER BY at" + (" DESC" if desc else "")
+        sql += f" LIMIT {int(limit)}" if limit is not None else ""
         return self._rows(CoverageEvent, sql, params)
 
     def coverage_event_rows(self) -> list[CoverageEvent]:
@@ -810,21 +913,26 @@ class Store:
         until: datetime | None = None,
         *,
         limit: int | None = 500,
+        desc: bool = False,
     ) -> list[LiveViewSession]:
         """Sessions overlapping ``[start, until]`` — a session overlaps when it
         opened before the window ends and closed (or is still open) after it
         begins. ``limit=None`` returns all of them (signed payloads must not
-        silently truncate)."""
+        silently truncate). ``desc=True`` returns newest first — pair it with
+        a limit to bound the page at the NEWEST N instead of the oldest."""
         sql = "SELECT body FROM liveview_sessions WHERE site_id=?"
         params: list[object] = [site_id]
         if until is not None:
             sql += " AND opened_at<=?"
             params.append(_iso(until))
-        sql += " ORDER BY opened_at" + (f" LIMIT {int(limit)}" if limit is not None else "")
-        rows = self._rows(LiveViewSession, sql, params)
         if start is not None:
-            rows = [s for s in rows if s.closed_at is None or s.closed_at >= start]
-        return rows
+            # the overlap half must live in SQL — a Python-side filter after
+            # LIMIT silently drops overlapping sessions beyond the cap
+            sql += " AND (closed_at IS NULL OR closed_at>=?)"
+            params.append(_iso(start))
+        sql += " ORDER BY opened_at" + (" DESC" if desc else "")
+        sql += f" LIMIT {int(limit)}" if limit is not None else ""
+        return self._rows(LiveViewSession, sql, params)
 
     def liveview_session_rows(self) -> list[LiveViewSession]:
         return self._rows(LiveViewSession, "SELECT body FROM liveview_sessions ORDER BY opened_at")
@@ -855,21 +963,40 @@ class Store:
 
     def record_late_event(self, event_id: str, site_id: str, body: str) -> None:
         with self.transaction():
-            self._conn.execute(
-                "INSERT INTO late_events (id, site_id, body) VALUES (?, ?, ?)", (event_id, site_id, body)
+            # OR IGNORE: a row can outlive the seen_requests tombstone under
+            # asymmetric retention — an existing row means "already retained",
+            # not a redelivery error that rolls the tombstone back with it
+            cur = self._conn.execute(
+                "INSERT OR IGNORE INTO late_events (id, site_id, body) VALUES (?, ?, ?)",
+                (event_id, site_id, body),
             )
-            self._journal("late_events", event_id, "put", _late_event_hash(site_id, body))
+            if cur.rowcount:
+                self._journal("late_events", event_id, "put", _late_event_hash(site_id, body))
 
     def late_events(self) -> list[dict]:
         with self._lock:
-            return [json.loads(r[0]) for r in self._conn.execute("SELECT body FROM late_events ORDER BY id")]
+            try:
+                return [
+                    json.loads(r[0]) for r in self._conn.execute("SELECT body FROM late_events ORDER BY id")
+                ]
+            except json.JSONDecodeError as exc:
+                raise StoreCorrupt(
+                    "late_events row is not valid JSON — the store is corrupt or "
+                    "tampered; verify_journal names the divergent bodies"
+                ) from exc
 
     def late_event_rows(self) -> list[dict]:
         with self._lock:
-            return [
-                {"id": r[0], "site_id": r[1], "body": json.loads(r[2])}
-                for r in self._conn.execute("SELECT id, site_id, body FROM late_events ORDER BY id")
-            ]
+            try:
+                return [
+                    {"id": r[0], "site_id": r[1], "body": json.loads(r[2])}
+                    for r in self._conn.execute("SELECT id, site_id, body FROM late_events ORDER BY id")
+                ]
+            except json.JSONDecodeError as exc:
+                raise StoreCorrupt(
+                    "late_events row is not valid JSON — the store is corrupt or "
+                    "tampered; verify_journal names the divergent bodies"
+                ) from exc
 
     def mark_seen(self, request_id: str, at: datetime) -> bool:
         """Return True if new, False if this webhook request_id was already processed."""

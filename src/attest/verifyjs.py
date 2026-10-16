@@ -813,9 +813,14 @@ async function _conOk(oldRootHex,oldSize,newRootHex,newSize,pathHex){
   if(!Number.isInteger(oldSize)||!Number.isInteger(newSize)
     ||oldSize>2147483647||newSize>2147483647)return false;
   /* non-array proof: {} reads "empty" under !{}.length — a dict literal would
-     verify here while Python iterates keys and rejects; gate the shape. */
-  if(pathHex!==undefined&&pathHex!==null&&!Array.isArray(pathHex))return false;
-  if(oldSize===newSize)return(!pathHex||!pathHex.length)&&oldRootHex===newRootHex;
+     verify here while Python iterates keys and rejects; gate the shape.
+     MAX_PROOF_NODES=64: a real proof needs ~2·log2(n) nodes — anything
+     longer is malformed, not just slow (transparency.py parity). */
+  if(pathHex!==undefined&&pathHex!==null
+    &&(!Array.isArray(pathHex)||pathHex.length>64))return false;
+  /* size 0 is not a head — the equal-size shortcut still requires a live
+     tree (verify_consistency parity) */
+  if(oldSize===newSize)return oldSize>=1&&(!pathHex||!pathHex.length)&&oldRootHex===newRootHex;
   if(oldSize<1||oldSize>=newSize||!pathHex||!pathHex.length)return false;
   const cat=(...a)=>{const n=a.reduce((t,x)=>t+x.length,0);const o=new Uint8Array(n);let p=0;
     for(const x of a){o.set(x,p);p+=x.length;}return o;};
@@ -870,7 +875,9 @@ async function _extOk(p,firstSize,firstRootHex){
   if(!ext||typeof ext!=="object")return null;
   const ef=_pyInt(ext.first),er=_pyHex(ext.first_root_sha256),
     size=_pyInt(p&&p.tree_size),root=_pyHex(p&&p.root_sha256);
-  if(ef===null||er===null||size===null||root===null||!Array.isArray(ext.proof))return null;
+  if(ef===null||er===null||size===null||root===null||!Array.isArray(ext.proof)
+    ||ext.proof.length>64)return null;  /* over-bound proof: malformed counts
+                                           as absent — verify_extends parity */
   const nodes=ext.proof.map(h=>_pyHex(h));
   if(nodes.some(h=>h===null))return null;
   if(firstSize!=null&&ef!==firstSize)return null;
@@ -1057,6 +1064,38 @@ async function checkLog(byName,trustedSet,refs,bad,ok){
      standalone checkpoint path convicts the same way (verify_extends). */
   if((await _extOk(p))===false){
     bad("log_checkpoint.json: extends bridge attests a history it cannot prove");return;}
+  /* pack_members — the export's signed member list. The proofs map is
+     unsigned, so a stripped file+proof pair would otherwise downgrade
+     silently (a gone export_pin.json reads as merely 'unpinned'). A
+     declared member that is absent fails; checkpoints minted before this
+     field carry no list and keep the note-path. Same rule as
+     packdiff.check_log_pin / the embedded verifier's check_log. */
+  const pm=p.pack_members;
+  if(pm!==undefined&&pm!==null){
+    if(!Array.isArray(pm)||!pm.length||pm.length>4096){
+      bad("log_checkpoint.json: malformed pack_members");return;}
+    for(const m of pm){
+      if(typeof m!=="string"||!m||m.length>256
+        ||m.split("/").includes("..")||m.startsWith("/")||m.startsWith("\\\\")
+        ||m.indexOf(":")>=0||m.indexOf("\\\\")>=0){
+        bad("log_checkpoint.json: malformed pack_members entry");return;}
+      if(!byName[m]){
+        bad(`log_checkpoint.json: signed member ${esc(m)} missing from the `
+          +"pack — the export declared it; a stripped member cannot hide");
+        return;}
+    }
+    /* and the reverse — a member riding the pack that the signed export
+       never declared is smuggled, inert or not. byName covers the whole
+       archive, so both directions are exact here. */
+    const declared=new Set(pm);
+    for(const n of Object.keys(byName)){
+      if(!declared.has(n)){
+        bad(`log_checkpoint.json: member ${esc(n)} rides the pack but the `
+          +"signed export never declared it — a smuggled member, even "
+          +"inert, is not what the deployment signed");
+        return;}
+    }
+  }
   let proven=0;const verifiedPh=new Set();
   for(const ref of refs||[]){
     if(!ref||!ref.payload_hash)continue;
@@ -1140,7 +1179,10 @@ async function checkLog(byName,trustedSet,refs,bad,ok){
          canonical spelling on every surface (a case variant is the same
          head; a 64-char non-hex spelling fails closed). */
       const ms=mp.tree_size,mr=_pyHex(mp.root_sha256);
-      if(!Number.isInteger(ms)||ms<1||ms>=size||mr===null){
+      /* mr.length!==64: _pyHex accepts any even-length hex, but every Python
+         surface requires exactly 32 bytes (hex_bytes(…, length=32)) — admit
+         no shorter/longer spelling here either. */
+      if(!Number.isInteger(ms)||ms<1||ms>=size||mr===null||mr.length!==64){
         bad(`log_checkpoint.json: chain member ${esc(rid)}… carries a malformed or non-prior head`);return;}
       if((await _extOk(mp))===false){
         bad(`log_checkpoint.json: chain member ${esc(rid)}… signs a bridge it cannot prove`);return;}
@@ -1172,11 +1214,17 @@ async function checkLog(byName,trustedSet,refs,bad,ok){
 async function _cosigReport(dn,doc,cpId,size,rootHex,trustedSet,bad){
   let cosigs=0;const seenCosig=new Set(),seenKeys=new Set();
   const cosec=get(dn,"cosignatures"),coNodes=cosec&&cosec.t==="arr"?cosec.v:[];
-  for(let i=0;i<(doc.cosignatures||[]).length;i++){
+  /* 64-entry cap — key_receipts parity: an over-long cosig list is a CPU
+     amplifier (an Ed25519 verify per entry), never a real deployment */
+  for(let i=0;i<Math.min((doc.cosignatures||[]).length,64);i++){
     const raw=doc.cosignatures[i]||{},cp2=raw.payload;
     if(!cp2||cp2.record_type!=="witness_cosignature")continue;
     if(cp2.subject_checkpoint!==cpId||cp2.subject_tree_size!==size
-      ||cp2.subject_root_sha256!==rootHex)continue;
+      /* hex is a spelling, not an identity — Python _roots_equal decodes
+         both sides; a case-variant spelling of one root is the same head
+         (rootHex is checkpoint-validated hex, so a non-hex subject can
+         never alias into equality) */
+      ||String(cp2.subject_root_sha256).toLowerCase()!==String(rootHex).toLowerCase())continue;
     /* the cosig must name THIS issuer — attesting another deployment's
        head never counts here (logmonitor parity) */
     if(trustedSet&&!trustedSet.has(cp2.subject_issuer))continue;
@@ -1191,13 +1239,26 @@ async function _cosigReport(dn,doc,cpId,size,rootHex,trustedSet,bad){
      a present-and-broken anchor entry is a lie and fails closed. */
   const anchorsObj=(doc.cosig_anchors&&typeof doc.cosig_anchors==="object"
     &&!Array.isArray(doc.cosig_anchors))?doc.cosig_anchors:{};
-  for(const cid of Object.keys(anchorsObj)){
+  /* same 64-entry bound as the cosig list — anchor entries cost a sig
+     verify + inclusion walk each */
+  for(const cid of Object.keys(anchorsObj).slice(0,64)){
     const anchor=anchorsObj[cid];
-    const cosig=(Array.isArray(doc.cosignatures)?doc.cosignatures:[])
-      .find(c=>c&&c.id===cid);
+    const cosigIdx=(Array.isArray(doc.cosignatures)?doc.cosignatures:[])
+      .findIndex(c=>c&&c.id===cid);
+    const cosig=cosigIdx>=0?doc.cosignatures[cosigIdx]:null;
     if(!cosig){
       bad(`cosig_anchors ${esc(cid)} anchors a cosignature `
         +"the doc doesn't carry");continue;}
+    /* the anchor commits cosig.payload_hash — meaningful only when that
+       cosig is itself a valid witness_cosignature (anchoring junk bytes
+       proves nothing; check_cosig_anchors parity) */
+    if(!cosig.payload||cosig.payload.record_type!=="witness_cosignature"){
+      bad(`cosig_anchors ${esc(cid)}: anchored entry is not a `
+        +"witness_cosignature");continue;}
+    const crc=coNodes[cosigIdx]?await checkReceipt(coNodes[cosigIdx])
+      :{ok:false,why:"anchored cosig missing from canonical map"};
+    if(!crc.ok){bad(`cosig_anchors ${esc(cid)}: anchored cosig invalid — `
+      +esc(crc.why));continue;}
     const acp=anchor&&anchor.checkpoint,ap=acp&&acp.payload;
     if(!ap||ap.record_type!=="log_checkpoint"){
       bad(`cosig_anchors ${esc(cid)}: anchor is not a `
@@ -1239,6 +1300,7 @@ async function verifyFiles(files){
   /* Null-prototype: visit_id "__proto__" is a legal member name but a
      silently-ignored write on a plain object — it must compare, not poison. */
   let anyBad=false,key=null;const actual=Object.create(null);
+  const bundleInfo=Object.create(null);
   const mText=await text("manifest.json");
   if(issuerDoc&&!issuerDoc.nodes){
     /* Callers that assign the parsed doc directly (tests, tooling) skip the
@@ -1407,7 +1469,7 @@ async function verifyFiles(files){
                  to bytes for the same gate, so both surfaces dedupe on the
                  canonical spelling (case variant = same head; non-hex fails). */
               const ms=cp2.tree_size,mr=_pyHex(cp2.root_sha256);
-              if(!Number.isInteger(ms)||ms<1||ms>=size||mr===null){
+              if(!Number.isInteger(ms)||ms<1||ms>=size||mr===null||mr.length!==64){
                 say("bad",`chain member ${esc(cid)}… carries a malformed or non-prior head`);continue;}
               if((await _extOk(cp2))===false){
                 say("bad",`chain member ${esc(cid)}… signs a bridge it cannot prove`);continue;}
@@ -1648,6 +1710,10 @@ async function verifyFiles(files){
     if(sN){suspectTotal+=sN;
       say("warn",`${esc(vid)}: ${sN} record(s) signed by a revoked issuer inside its suspect window`);}
     actual[vid]=(js.original||{}).payload_hash;
+    /* The manifest's signed labels must name the bundle it ships — otherwise a
+       truncated review tail or mislabeled visit verifies green. */
+    bundleInfo[vid]={visit_id:(js.original||{}).visit_id,id:(js.original||{}).id,
+      reviews:Array.isArray(js.reviews)?js.reviews.length:0};
     /* Stance derives from the verified review chain — a countersign_status
        field in the file is unsigned forgery bait and is never consulted. */
     const st=deriveStance(js);
@@ -1736,6 +1802,18 @@ async function verifyFiles(files){
         anyBad=true;
         say("bad",`${esc(v.visit_id)}: manifest hash disagrees with signed original`);
       }
+      const bi=bundleInfo[v.visit_id];
+      if(bi&&(bi.visit_id!==v.visit_id||bi.id!==v.receipt_id)){
+        anyBad=true;
+        say("bad",`${esc(v.visit_id)}: manifest names a different receipt than the bundle carries`);
+      }
+      /* Parity with verify_case.py: a missing/non-numeric reviews field fails —
+         undefined!==n is the same verdict Python's None!=len() gives. */
+      if(bi&&v.reviews!==bi.reviews){
+        anyBad=true;
+        say("bad",`${esc(v.visit_id)}: manifest signs ${esc(String(v.reviews))} `
+          +`review receipt(s), bundle carries ${bi.reviews}`);
+      }
     }
     /* Site attestations (coverage certs, digests, prior exports, disconnects)
        travel in the pack — each must verify and match the manifest entry. */
@@ -1780,7 +1858,9 @@ async function verifyFiles(files){
       anyBad=true;say("bad",`${esc(name)}: present but not in the signed manifest`);
     }
     await checkTools(byName,trusted||new Set([manifest.issuer_key||""]),
-      `site:${(manifest.site||{}).id||""}`,
+      // non-string ids render "" — Python prints "site:True" where JS would
+      // print "site:true"; the strict grammar spells non-strings as "".
+      `site:${typeof ((manifest.site||{}).id)==="string"?(manifest.site||{}).id:""}`,
       m=>{anyBad=true;say("bad",m);},m=>say("ok",m));
     const sigR=(manifest.signature_receipt||{});
     if(sigR.payload_hash)logRefs.push({id:sigR.id,payload_hash:sigR.payload_hash,public_key:sigR.public_key});
@@ -1795,10 +1875,61 @@ async function verifyFiles(files){
        media/* (digest-checked above). */
     const allowed=new Set([
       "bundle.json","README.txt","verify_bundle.py","verify.html","index.html","redaction.json",
-      "key_rotations.json","verifier_manifest.json","log_checkpoint.json"]);
+      "key_rotations.json","verifier_manifest.json","log_checkpoint.json","export_pin.json"]);
     for(const name of Object.keys(byName)){
       if(name.endsWith("/")||allowed.has(name)||name.startsWith("media/"))continue;
       anyBad=true;say("bad",`${esc(name)}: present but not in the signed manifest`);
+    }
+    /* export_pin.json pins the review chain's completeness — count + tip +
+       media digests signed at export. Absent is a pre-pin pack (or a dropped
+       member): completeness is then unpinned — noted, like an absent
+       checkpoint. checkExportPin mirrors packdiff.check_export_pin. */
+    const pinT=await text("export_pin.json");
+    if(pinT){
+      const pinN=parseKeep(pinT);
+      const pjs=toJS(pinN)||{};
+      const pTr=trusted||new Set([key||""]);
+      if(!pTr.has(pjs.public_key)){
+        anyBad=true;say("bad","export_pin.json: signed outside the trusted issuer chain");
+      }else{
+        const pr=await checkReceipt(pinN);
+        if(!pr.ok){anyBad=true;say("bad",`export_pin.json: ${esc(pr.why)}`);}
+        else{
+          const pp=(typeof pjs.payload==="object"&&pjs.payload!==null)?pjs.payload:{};
+          const ojs=bundles.length?(toJS(bundles[0][1])||{}):{};
+          const orig=(typeof ojs.original==="object"&&ojs.original!==null)?ojs.original:{};
+          const revs=Array.isArray(ojs.reviews)?ojs.reviews:[];
+          const lastR=revs.length?revs[revs.length-1]:null;
+          const tip=lastR&&typeof lastR==="object"&&lastR.receipt&&typeof lastR.receipt==="object"
+            ?(lastR.receipt.payload_hash??null):null;
+          const media=(((typeof orig.payload==="object"&&orig.payload!==null?orig.payload:{}).evidence)||[])
+            .map(e=>e&&typeof e==="object"?e.media_sha256:undefined)
+            .filter(x=>typeof x==="string").sort();
+          const pinMedia=Array.isArray(pp.media_sha256)?pp.media_sha256:null;
+          const mediaSame=pinMedia!==null&&pinMedia.length===media.length
+            &&pinMedia.every((x,i)=>x===media[i]);
+          if(pp.record_type!=="export_pin"){
+            anyBad=true;say("bad","export_pin.json: not an export_pin receipt");
+          }else if(pp.subject_visit!==orig.visit_id){
+            anyBad=true;say("bad","export_pin.json: pins a different visit than the packed bundle");
+          }else if((pp.review_count??null)!==revs.length){
+            anyBad=true;say("bad",`export_pin.json: signed review count ${esc(String(pp.review_count))} `
+              +`!= packed ${revs.length} — the chain was trimmed`);
+          }else if((pp.review_tip??null)!==tip){
+            anyBad=true;say("bad","export_pin.json: signed review tip differs — "
+              +"the packed chain's tail moved");
+          }else if(!mediaSame){
+            anyBad=true;say("bad","export_pin.json: signed media digests do not match the bundle");
+          }else{
+            say("ok","export_pin: review-chain completeness pinned "
+              +"(count + tip + media digests attested at export)");
+            if(pjs.payload_hash)logRefs.push({id:pjs.id,payload_hash:pjs.payload_hash,public_key:pjs.public_key});
+          }
+        }
+      }
+    }else{
+      say("warn","no export_pin.json — review-chain completeness unpinned "
+        +"(a trimmed statement tail would not be caught)");
     }
     await checkTools(byName,trusted||new Set([key||""]),
       `visit:${bundles.length?bundles[0][0]:""}`,
@@ -2254,6 +2385,10 @@ async function readZipEntries(file){
   }
   if(eocd<0)throw new Error("not a zip file (no end-of-central-directory)");
   const n=dv.getUint16(eocd+10,true),cdOff=dv.getUint32(eocd+16,true);
+  /* BoundedZip parity: >4096 members fails the Python surfaces — the browser
+     must not bless a pack they refuse (the count bound is part of the shared
+     envelope, like the name and size checks below). */
+  if(n>4096)throw new Error("zip carries more than 4096 members");
   const dec=new TextDecoder();let p=cdOff;const files=[];
   let totalUncompressed=0,actualTotal=0;const seenNames=new Set();
   for(let e=0;e<n;e++){
@@ -2618,7 +2753,7 @@ if(location.protocol.indexOf("http")===0){
     const _savedIssuer=issuerDoc;issuerDoc=null;
     const seq=[
       ["sample-pack.zip","VERIFIED"],
-      ["sample-pack-earlier.zip","VERIFIED — the pre-chain export, still valid"],
+      ["sample-pack-earlier.zip","VERIFIED — the previous generation's export, still valid"],
       ["sample-pack-tampered.zip","FAILED"],
       ["sample-pack-attack-missing-record.zip","FAILED"],
       ["sample-pack-attack-smuggled-file.zip","FAILED"],
@@ -3066,7 +3201,10 @@ if(location.protocol.indexOf("http")===0){
         if(!arts||typeof arts!=="object"||Array.isArray(arts)){
           say("warn","manifest carries no artifact map — nothing to sweep");return;}
         const names=Object.keys(arts);
-        if(names.length>512){say("bad","manifest lists "+names.length+
+        /* The bound lives on the fetch count, not the byte count (the 256MB
+           cap below handles bulk): the real site pins one file per signed
+           receipt — hundreds of entries is normal growth, not an attack. */
+        if(names.length>4096){say("bad","manifest lists "+names.length+
           " artifacts — beyond the sweep bound");return;}
         /* Sweep 8-at-a-time — a hundred-plus serial fetches is seconds of silence;
            results collect in deterministic order before verdict lines emit. */
@@ -3153,7 +3291,9 @@ _VERIFY_BODY = """<h1>Attest pack verifier</h1>
 uploaded — all hashing and signature checks run locally, offline. Drop the
 <strong>.zip pack itself</strong>, select every extracted file, just bundle.json for a
 single-visit pack, or a signed receipt JSON (e.g. a <code>verify-live --sign</code> report).</p>
-<div class="drop" id="drop">Drop the pack .zip or a signed receipt .json here, or
+<div class="drop" id="drop">Drop the pack .zip or a signed receipt .json here —
+clean evidence stamps green <strong>VERIFIED</strong>, doctored evidence stamps
+red <strong>FAILED</strong> — or
 pick files: <input type="file" id="pick" multiple accept=".zip,.json" aria-label="Choose pack files">
 or the extracted folder: <input type="file" id="pickdir" webkitdirectory
 aria-label="Choose the extracted pack folder"><br>
@@ -3170,7 +3310,8 @@ of one contested visit — told entirely from signed data — explains why the
 record exists, and <a href="index.html">the site</a> shows the rest. New to
 the math? <a href="anatomy.html">
 Anatomy of a signed receipt</a> decomposes one field-by-field, <a
-href="pipeline.svg">the seven gates</a> show which check kills which attack —
+href="pipeline.svg">the seven gates</a> show which check kills which attack,
+<a href="attacks.html">the battery page</a> renders all 23 live verdicts —
 or take the <a href="tour.html">two-minute tour</a> of the headline
 features.</small></p>
 <p id="trysample-wrap" hidden><button id="trysample" type="button">Verify the bundled
@@ -3871,6 +4012,17 @@ function attestationHTML(p){
       +`<strong>issuer key declared suspect</strong> — ${esc(String(p.revoked_key||"").slice(0,12))}…</div>`
       +`<small>suspect for records after ${fmtLocal(p.suspect_after||"")}`
       +`${p.reason?" · "+esc(p.reason):""} — a trust annotation, never an erasure</small>`;
+  }
+  if(t==="late_event"){
+    const c=p.contradicts||{};const e=p.event||{};
+    const w=c.window||[];
+    return `<div class="row warn"><span class="pill">contested</span> `
+      +`<strong>the record admits it was contested</strong> — ${esc(e.event_type||"event")}`
+      +` at ${fmtLocal(e.occurred_at||"")}</div>`
+      +`<small>delivered ${fmtLocal(p.delivered_at||"")} — inside the signed`
+      +` 'no observation' window of ${esc(String(c.visit_id||"").slice(0,16))}…`
+      +` (${fmtRange(w[0]||"",w[1]||"")}). The earlier receipt stands unedited;`
+      +` the ledger admits the claim was contradicted. Never proof of attendance.</small>`;
   }
   if(t==="case_export"){
     const n2=Object.keys(p.receipt_hashes||{}).length;

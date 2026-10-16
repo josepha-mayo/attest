@@ -42,8 +42,14 @@ def seeded(engine, store, household, schedule, t0):
 def test_battery_catches_everything_and_leaves_store_unchanged(store, seeded, engine, tmp_path):
     out = run(store, tmp_path / "media", engine=engine)
     assert out["unchanged"], out
+    # The judge tour + docs pitch "23 real tamper attacks" — pin the count
+    # so a new battery entry can't drift the claim silently.
+    assert len(out["results"]) == 23, [r["attack"] for r in out["results"]]
     for r in out["results"]:
-        # None = no target on this store (skipped), not a missed defense
+        # None = no target on this store (skipped); boundary = the documented
+        # unkeyed-journal case is an EXPECTED miss, not a silent defense gap
+        if r.get("boundary"):
+            continue
         assert r["caught"] is not False, f"{r['attack']} went undetected: {r['detail']}"
 
 
