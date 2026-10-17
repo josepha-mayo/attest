@@ -133,17 +133,19 @@ def main() -> int:
     for r in receipts:
         keep.add(f"{r['id']}.json")
         (out_dir / f"{r['id']}.json").write_text(
-            json.dumps(r, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+            json.dumps(r, indent=2, ensure_ascii=False) + "\n", encoding="utf-8",
+            newline="",
         )
     for stale in out_dir.glob("*.json"):
         if stale.name not in keep:
             stale.unlink()
     (DOCS / "demo-receipts.json").write_text(
-        json.dumps(receipts, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        json.dumps(receipts, indent=2, ensure_ascii=False) + "\n", encoding="utf-8",
+        newline="",
     )
 
     svg = chain_svg(receipts)
-    (DOCS / "chain.svg").write_text('<?xml version="1.0" encoding="UTF-8"?>\n' + svg + "\n", encoding="utf-8")
+    (DOCS / "chain.svg").write_text('<?xml version="1.0" encoding="UTF-8"?>\n' + svg + "\n", encoding="utf-8", newline="")
 
     visits = len({r["visit_id"] for r in receipts if _ctype(r) == "visit_record"})
     type_list = " · ".join(f"{c} {t}" for t, c in counts.most_common())
@@ -232,7 +234,7 @@ fetchable — the bytes are what was signed, not a rendering of them.</p>
 </body>
 </html>
 """
-    (DOCS / "demo-receipts.html").write_text(page, encoding="utf-8")
+    (DOCS / "demo-receipts.html").write_text(page, encoding="utf-8", newline="")
     print(f"demo-receipts: {n} receipts, {visits} visits -> page + {n} files + chain.svg")
     return 0
 

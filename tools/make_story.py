@@ -164,7 +164,7 @@ font-size:1rem}}
 .voice footer{{font-size:.78rem;color:#52525b;font-style:normal}}
 .v-worker{{background:#fffbeb;border-left:4px solid #d97706}}
 .v-house{{background:#f0fdfa;border-left:4px solid #0d9488}}
-.why{{margin-top:.3rem;font-size:.76rem;color:#71717a}}
+.why{{margin-top:.3rem;font-size:.76rem;color:#59595f}}
 .bound{{background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;
 padding:.7rem 1rem;font-size:.9rem}}
 .flags{{background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;
@@ -241,7 +241,9 @@ doesn't merge them, rank them, or pick a winner:</p>
 <p class="small">Read them again: the household's account <em>contradicts
 itself</em> — first "nobody came," then "I heard the doorbell a little after
 six." That contradiction is the evidence. A system that normalized it away
-would be destroying the only thing the family actually has.</p></div>
+would be destroying the only thing the family actually has. And the pack
+carries doubt the same way: records signed inside a revoked key's suspect
+window stay annotated on the green stamp — never hidden, never rewritten.</p></div>
 
 <div class="tamper"><h2>Then somebody changed a number</h2>
 <p>A second copy of this pack exists with exactly one signed field rewritten:
@@ -279,7 +281,7 @@ receipt sequence {o["sequence"]}.</footer>
 </body>
 </html>
 """
-    (DOCS / "story.html").write_text(page, encoding="utf-8")
+    (DOCS / "story.html").write_text(page, encoding="utf-8", newline="")
     print(f"story.html: {ev_counts} events, {len(reviews)} voices, span {span}")
 
 

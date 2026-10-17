@@ -31,8 +31,9 @@ button{border:1px solid #d4d4d8;background:#fff;border-radius:8px;padding:.45rem
 button:hover{border-color:#3b82f6}
 button.primary{background:#2563eb;color:#fff;border-color:#2563eb}
 .dots{display:flex;gap:.3rem;flex-wrap:wrap}
-.dot{width:.55rem;height:.55rem;border-radius:50%;background:#d4d4d8;cursor:pointer}
+.dot{width:.55rem;height:.55rem;border-radius:50%;background:#d4d4d8;cursor:pointer;border:0;padding:0}
 .dot.on{background:#2563eb}
+.dot:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
 .prog{height:3px;background:#e4e4e7;border-radius:2px;overflow:hidden}
 .prog>i{display:block;height:100%;background:#2563eb;width:0;transition:width .2s linear}
 a{color:#2563eb}
@@ -140,7 +141,8 @@ const BEATS=[
   one-click verdict on that single receipt. Twenty-eight of them are the deployment
   auditing <em>itself</em>: <code>attest verify --attest</code> and
   <code>diff --attest</code> signed clean-pack, forged-twin, and growth-verdict
-  receipts into this same log.`,
+  receipts into this same log. Records signed inside a revoked key's suspect
+  window stay annotated on every verdict — the doubt ships with the proof.`,
   w:"A judge can drill to the byte level without trusting the site — even the audit is auditable."},
  {t:"The adversarial corpus",u:"vectors.html",s:10000,
   p:`44 Wycheproof-style conformance vectors ship publicly — each row a deep
@@ -168,10 +170,9 @@ const frame=document.getElementById('frame'),bno=document.getElementById('bno'),
   play=document.getElementById('play');
 let i=0,timer=null,t0=Date.now();
 let playing=!(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches);
-BEATS.forEach((b,k)=>{const d=document.createElement('span');d.className='dot';
-  d.setAttribute('role','button');d.setAttribute('aria-label','go to beat '+(k+1));
-  d.tabIndex=0;d.onclick=()=>{pause();go(k);reset();};
-  d.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();pause();go(k);reset();}};dots.appendChild(d);});
+BEATS.forEach((b,k)=>{const d=document.createElement('button');d.className='dot';d.type='button';
+  d.setAttribute('aria-label','go to beat '+(k+1)+' — '+b.t);
+  d.onclick=()=>{pause();go(k);reset();};dots.appendChild(d);});
 function go(n){
   i=(n+BEATS.length)%BEATS.length;const b=BEATS[i];
   bno.textContent='beat '+(i+1)+' of '+BEATS.length;
@@ -198,7 +199,7 @@ play.onclick=()=>{playing=!playing;play.textContent=playing?'pause':'play';
 document.addEventListener('keydown',e=>{
   if(e.key==='ArrowRight'){pause();go(i+1);reset();}
   if(e.key==='ArrowLeft'){pause();go(i-1);reset();}
-  if(e.key===' '&&!e.defaultPrevented&&!e.target.closest('button,[role=button],a,input,select,textarea')){e.preventDefault();play.onclick();}
+  if(e.key===' '&&!e.defaultPrevented&&!e.target.closest('button,a,input,select,textarea')){e.preventDefault();play.onclick();}
 });
 const m=location.hash.match(/^#(\d{1,2})$/);if(m)i=Math.min(BEATS.length-1,Math.max(0,+m[1]-1));
 play.textContent=playing?'pause':'play';

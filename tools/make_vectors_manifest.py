@@ -54,7 +54,8 @@ def main() -> int:
             shutil.copy2(pack, hosted)
             synced += 1
     MANIFEST.write_text(
-        json.dumps(rows, indent=1, ensure_ascii=False) + "\n", encoding="utf-8"
+        json.dumps(rows, indent=1, ensure_ascii=False) + "\n", encoding="utf-8",
+        newline="",
     )
     print(
         f"vectors-manifest: {len(rows)} hosted rows"

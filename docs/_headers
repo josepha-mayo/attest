@@ -1,0 +1,8 @@
+/* Pack and receipt artifacts are content-hashed by the signed site manifest,
+   so they must never be served stale after a regeneration. HTML pages may
+   be cached normally (their bytes are pinned too, and drift shows as
+   SITE TAMPER rather than silent staleness). */
+/*.zip
+  Cache-Control: public, max-age=0, must-revalidate
+/*.json
+  Cache-Control: public, max-age=0, must-revalidate

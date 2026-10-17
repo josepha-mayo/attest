@@ -185,7 +185,7 @@ above is a live verdict from that run, not a transcript pasted in.</footer>
 </body>
 </html>
 """
-    (DOCS / "attacks.html").write_text(page, encoding="utf-8")
+    (DOCS / "attacks.html").write_text(page, encoding="utf-8", newline="")
     print(f"attacks.html: {verdict}; unchanged={unchanged}")
     if n_missed or n_err or not unchanged:
         sys.exit(1)
