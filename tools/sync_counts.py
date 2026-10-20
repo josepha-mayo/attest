@@ -141,7 +141,7 @@ def main() -> int:
             drift.append(rel)
             continue
         text = path.read_text(encoding="utf-8")
-        new, n = re.subn(pat, lambda _: tpl.format(**d), text)
+        new, n = re.subn(pat, lambda _, t=tpl: t.format(**d), text)
         if n == 0:
             # Not drift if the replacement is already the text — only if the
             # pattern is truly absent (stale anchor) or already applied.

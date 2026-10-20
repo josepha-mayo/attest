@@ -145,7 +145,10 @@ def main() -> int:
     )
 
     svg = chain_svg(receipts)
-    (DOCS / "chain.svg").write_text('<?xml version="1.0" encoding="UTF-8"?>\n' + svg + "\n", encoding="utf-8", newline="")
+    (DOCS / "chain.svg").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n' + svg + "\n",
+        encoding="utf-8", newline="",
+    )
 
     visits = len({r["visit_id"] for r in receipts if _ctype(r) == "visit_record"})
     type_list = " · ".join(f"{c} {t}" for t, c in counts.most_common())
