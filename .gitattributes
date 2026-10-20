@@ -14,6 +14,7 @@ docs/**/*.css text eol=lf
 docs/**/*.js text eol=lf
 docs/**/*.xml text eol=lf
 docs/.nojekyll text eol=lf
+docs/_headers text eol=lf
 docs/**/*.zip -text
 docs/**/*.png -text
 docs/**/*.ots -text
