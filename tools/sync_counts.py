@@ -85,25 +85,8 @@ def build_patches(d: dict[str, int]) -> list[tuple[str, str, str]]:
     """(file, regex, replacement) — replacement may use {key} from derive()."""
     audit_w = _word(d["audit"])
     return [
-        ("index.html", r"the demo runtime's \d+-receipt", "the demo runtime's {receipts}-receipt"),
         ("index.html", r'demo-receipts\.html">\d+ signed receipts',
          'demo-receipts.html">{receipts} signed receipts'),
-        ("index.html", r"all \d+ verify\)", "all {receipts} verify)"),
-        ("index.html", r"all \d+ at once", "all {receipts} at once"),
-        ("index.html", r"(?:Twenty|Thirty|Forty|Fifty|Sixty|Seventy|Eighty|Ninety)"
-                       r"(?:-[a-z]+)? of them are the deployment",
-         f"{audit_w} of them are the deployment"),
-        ("index.html", r"\d+ receipt\(s\) proven inside the deployment transparency "
-                       r"log at checkpoint size \d+",
-         "{proven} receipt(s) proven inside the deployment transparency log "
-         "at checkpoint size {cpsize}"),
-        ("index.html", r"carries \d+ visit records, \d+ receipts proven at "
-                       r"checkpoint size \d+",
-         "carries {visits} visit records, {proven} receipts proven at "
-         "checkpoint size {cpsize}"),
-        ("index.html", r"\d+/\d+ attacks caught", "{caught}/{attacks} attacks caught"),
-        ("index.html", r"\d+ receipts in scope", "{suspect} receipts in scope"),
-        ("index.html", r'badge ok">\d+/\d+</span>', 'badge ok">{gauntlet}/{gauntlet}</span>'),
         ("tour.html", r"All \d+ signed receipts", "All {receipts} signed receipts"),
         ("tour.html", r"(?:Twenty|Thirty|Forty|Fifty|Sixty|Seventy|Eighty|Ninety)"
                       r"(?:-[a-z]+)? of them are the deployment",

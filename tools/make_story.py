@@ -269,7 +269,7 @@ question — which is exactly what a dispute process is for.</div>
 <div class="cta">
 <a class="btn pri" href="verify.html#sample-pack">Verify the whole pack →</a>
 <a class="btn" href="verify.html#tamper-lab">Forge a field yourself →</a>
-<a class="btn" href="demo-visit.html">The live record page →</a>
+<a class="btn" href="demo-visit.html">Explore the record snapshot →</a>
 <a class="btn" href="tour.html">2-minute tour →</a>
 </div>
 

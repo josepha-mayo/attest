@@ -3,681 +3,152 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="Tamper-evident visit records for home services on the Ring Partner API — verify a signed evidence pack in your browser, then watch four different attacks get caught.">
+<meta name="description" content="A shared record for home-service disagreements. Verify the signed evidence and see an altered copy fail in your browser.">
 <meta property="og:title" content="Attest — records, not verdicts">
-<meta property="og:description" content="Verify a signed evidence pack in your browser — then watch the tampered copies fail. Records, not verdicts.">
+<meta property="og:description" content="A clearer record. A fairer conversation. Verify the evidence yourself.">
 <meta property="og:type" content="website">
 <meta property="og:image" content="https://josepha-mayo.github.io/attest/og-image.png">
 <meta name="twitter:card" content="summary_large_image">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1l6 2v5c0 3.5-2.6 6-6 7-3.4-1-6-3.5-6-7V3z' fill='%231c1c1e'/%3E%3Cpath d='M4.6 8.2l2.2 2.2 4.6-4.9' stroke='%23fff' stroke-width='1.5' fill='none'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1l6 2v5c0 3.5-2.6 6-6 7-3.4-1-6-3.5-6-7V3z' fill='%2323453a'/%3E%3Cpath d='M4.6 8.2l2.2 2.2 4.6-4.9' stroke='%23fff' stroke-width='1.5' fill='none'/%3E%3C/svg%3E">
 <title>Attest — records, not verdicts</title>
 <style>
-body{font-family:system-ui,sans-serif;max-width:760px;margin:2rem auto;padding:0 1rem;line-height:1.5;color:#1c1c1e}
-h1{font-size:1.7rem;margin-bottom:.2rem}
-.tag{color:#6b6b70;font-size:1.05rem;margin-top:.2rem}
-.cards{display:flex;gap:.8rem;flex-wrap:wrap;margin:1.4rem 0}
-.card{flex:1;min-width:200px;border:1px solid #d4d4d8;border-radius:10px;padding:.9rem 1rem;text-decoration:none;color:inherit;background:#fff}
-.card:hover{border-color:#3b82f6;box-shadow:0 1px 6px rgba(59,130,246,.25)}
-.card b{display:block;margin-bottom:.3rem}
-.card small{color:#6b6b70}
-.card.minor{opacity:.78;border-style:dashed}
-.card.minor small{font-size:.78rem}
-.badge{display:inline-block;font-size:.7rem;font-weight:700;letter-spacing:.05em;border-radius:4px;padding:.1rem .4rem;vertical-align:middle;margin-left:.4rem}
-.nav60{background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;
-padding:.6rem .9rem;font-size:.92rem;margin:.9rem 0}
-.badge.ok{background:#dcfce7;color:#166534}
-.badge.bad{background:#fee2e2;color:#991b1b}
-.badge.mut{background:#f1f5f9;color:#475569}
-.badge.warn{background:#fef9c3;color:#854d0e}
-h2{font-size:1.1rem;margin-top:1.8rem;border-top:1px solid #e4e4e7;padding-top:1rem}
-.proves{display:flex;gap:.8rem;flex-wrap:wrap}
-.proves>div{flex:1;min-width:240px;border-radius:10px;padding:.9rem 1rem}
-.proves .yes{background:#f0fdf4;border:1px solid #bbf7d0}
-.proves .no{background:#fff7ed;border:1px solid #fed7aa}
-.proves h3{margin:.1rem 0 .5rem;font-size:.95rem}
-.proves ul{margin:0;padding-left:1.1rem}
-.proves li{margin:.3rem 0;font-size:.9rem}
-code{background:#f4f4f5;padding:.1rem .35rem;border-radius:4px;font-size:.9em}
-.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-a{color:#2563eb}
-:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
-.foot{color:#6b6b70;font-size:.85rem;border-top:1px solid #e4e4e7;margin-top:2rem;padding-top:1rem}
-details{margin:.4rem 0}
-summary{cursor:pointer;color:#2563eb}
-.term{background:#0f1115;border:1px solid #262b36;border-radius:10px;margin:.6rem 0 1.2rem;overflow:hidden}
-.term .bar{display:flex;gap:6px;padding:8px 12px;border-bottom:1px solid #262b36}
-.term .bar i{width:10px;height:10px;border-radius:50%;background:#3a4152}
-.term pre{margin:0;padding:12px 14px;font:12.5px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;color:#e7eaf0;white-space:pre-wrap;min-height:19em}
-.term .p{color:#7c9cff}.term .ok{color:#3ddc97}.term .bad{color:#ff5c7a}.term .mut{color:#8b94a7}
-.term .cur{display:inline-block;width:.55em;background:#e7eaf0;animation:blink 1s steps(1) infinite}
-@keyframes blink{50%{opacity:0}}
-@media (prefers-reduced-motion:reduce){.term .cur{animation:none}}
+:root{color-scheme:light;--paper:#f8f7f2;--ink:#253d34;--muted:#58665f;--line:#d7ddd4;--green:#234f3f;--light:#edf1e8;--white:#fffefa}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:2rem}
+body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.65 "Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:var(--green);text-underline-offset:.22em;text-decoration-thickness:1px}
+a:hover{text-decoration-thickness:2px}
+a:focus-visible,summary:focus-visible{outline:3px solid #9a581d;outline-offset:5px;border-radius:2px}
+::selection{background:#d9e5d5;color:#183b2c}
+.wrap{width:min(1160px,calc(100% - 96px));margin-inline:auto}
+.skip{position:absolute;top:-100px;left:24px;z-index:10;padding:12px 18px;background:var(--white)}
+.skip:focus{top:12px}
+.header{display:flex;align-items:center;justify-content:space-between;gap:24px;padding-block:27px;border-bottom:1px solid var(--line)}
+.brand{display:inline-flex;align-items:center;gap:10px;font-size:25px;font-weight:650;letter-spacing:-.04em;text-decoration:none}
+.brand svg{width:27px;height:31px}
+.header nav{display:flex;gap:30px;font-size:14px;font-weight:550}
+.header nav a{text-decoration:none}
+.header nav a:hover{text-decoration:underline}
+.hero{display:grid;grid-template-columns:1.16fr 1fr;align-items:center;gap:76px;padding-block:83px 86px}
+.eyebrow{margin:0 0 21px;font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+h1,h2,h3,p{margin-top:0}
+h1,h2{font-family:Georgia,"Times New Roman",serif;font-weight:400;letter-spacing:-.045em;line-height:1.06}
+h1{font-size:clamp(42px,4.8vw,65px);margin-bottom:27px}
+h1 span{display:block}
+.intro{max-width:470px;color:var(--muted);font-size:18px;line-height:1.65;margin-bottom:29px}
+.primary{display:inline-flex;align-items:center;justify-content:space-between;gap:32px;min-height:55px;padding:13px 22px;background:var(--green);color:white;border:1px solid var(--green);border-radius:5px;text-decoration:none;font-weight:600;font-size:16px}
+.primary:hover{background:#173d2e;text-decoration:none}
+.primary .arrow{font-size:21px;line-height:1}
+.reassurance{font-size:12px;color:var(--muted);margin:13px 0 0}
+.record{position:relative;background:var(--white);border:1px solid #cdd5ca;border-radius:7px;padding:29px 30px 24px;box-shadow:0 16px 45px #274b3010}
+.record::before{content:"";position:absolute;left:20px;right:20px;bottom:-9px;height:8px;background:#e8ece2;border:1px solid #cdd5ca;border-top:0;border-radius:0 0 5px 5px;z-index:-1}
+.record-top{display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:21px}
+.record-top .eyebrow{margin:0;font-size:10px}
+.sample-label{font-size:10px;font-weight:650;border:1px solid var(--line);padding:3px 7px;border-radius:3px;white-space:nowrap}
+.record h2{font-family:inherit;font-weight:600;letter-spacing:-.025em;font-size:23px;margin-bottom:5px}
+.record-sub{font-size:13px;color:var(--muted);margin-bottom:24px}
+.times{display:grid;grid-template-columns:1fr 1fr;margin-bottom:23px;gap:16px}
+.times>div+div{border-left:1px solid var(--line);padding-left:23px}
+.times dt{font-size:12px;color:var(--muted);margin-bottom:4px}
+.times dd{margin:0;font-size:32px;font-family:Georgia,serif;letter-spacing:-.04em}
+.times dd span{font:12px "Segoe UI",system-ui,sans-serif;letter-spacing:0;color:var(--muted)}
+.record-lines{list-style:none;margin:0;padding:0;border-top:1px solid var(--line);font-size:12px}
+.record-lines li{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
+.record-lines span{color:var(--muted);text-align:right}
+.record-link{display:inline-block;font-size:13px;font-weight:600;margin-top:19px}
+.boundary{display:flex;gap:20px;align-items:baseline;padding:23px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);font-size:14px}
+.boundary strong{white-space:nowrap;font-weight:650}
+.boundary p{color:var(--muted);margin:0;max-width:760px}
+.section{padding-block:76px}
+.section-head{display:flex;gap:50px;justify-content:space-between;align-items:end;margin-bottom:36px}
+.section-head .eyebrow{margin-bottom:14px}
+h2{font-size:42px;margin-bottom:0}
+.section-head>p{max-width:360px;font-size:15px;color:var(--muted);margin:0}
+.journey{margin:0;padding:0;list-style:none;display:grid;grid-template-columns:repeat(3,1fr);gap:40px}
+.journey li{border-top:1px solid #abb9aa;padding-top:22px}
+.step-no{font:13px Georgia,serif;color:var(--muted);display:block;margin-bottom:18px}
+.journey h3{font-size:19px;letter-spacing:-.02em;margin-bottom:11px;font-weight:600}
+.journey p{font-size:15px;color:var(--muted);margin-bottom:19px}
+.journey a{font-size:14px;font-weight:600;display:inline-block;padding-block:5px}
+.outcome{font:700 10px/1.2 "Segoe UI",system-ui,sans-serif;letter-spacing:.06em;border-radius:3px;padding:4px 6px;vertical-align:middle;margin-left:7px;white-space:nowrap;background:#deebdc;color:#28513c}
+.outcome.fail{background:#f1e3dc;color:#8e3b28}
+.story{background:var(--light);border-block:1px solid var(--line)}
+.story-layout{display:grid;grid-template-columns:1fr 1.14fr;gap:88px;align-items:start}
+.story h2{margin-bottom:23px}
+.story p{color:var(--muted);font-size:16px}
+.story a{font-size:14px;font-weight:600}
+.voices{margin:0;border-top:1px solid #c9d3c4}
+.voices>div{display:grid;grid-template-columns:110px 1fr;gap:20px;padding-block:18px;border-bottom:1px solid #c9d3c4}
+.voices dt{font-size:13px;font-weight:650}
+.voices dd{margin:0;font-size:14px;color:#4c5f53}
+.story .disclosure{font-size:12px;margin:20px 0 0}
+.library{display:grid;grid-template-columns:1fr 1.5fr;gap:88px}
+.library h2{margin-bottom:24px}
+.library-intro{font-size:15px;color:var(--muted)}
+.evidence-list{border-top:1px solid var(--line)}
+details{border-bottom:1px solid var(--line);scroll-margin-top:24px}
+summary{cursor:pointer;list-style:none;padding:21px 30px 21px 0;font-size:16px;font-weight:600;position:relative}
+summary::-webkit-details-marker{display:none}
+summary::after{content:"+";position:absolute;right:2px;top:19px;font-size:23px;font-weight:400;color:var(--muted)}
+details[open]>summary::after{content:"−"}
+.detail-body{padding-bottom:22px;color:var(--muted);font-size:14px}
+.detail-body p{margin-bottom:12px}
+.detail-body ul{padding-left:20px;margin:10px 0 0}
+.detail-body li{margin-bottom:9px}
+.detail-body a{overflow-wrap:anywhere}
+.detail-body strong{font-weight:600;color:var(--ink)}
+.footer{display:flex;justify-content:space-between;align-items:baseline;gap:24px;border-top:1px solid var(--line);padding-block:28px 35px;font-size:12px;color:var(--muted)}
+.footer p{margin:0}
+.footer nav{display:flex;flex-wrap:wrap;gap:22px}
+@media(max-width:1000px){.wrap{width:calc(100% - 64px)}.hero{gap:38px;padding-block:65px}.record{padding:24px}.story-layout,.library{gap:48px}.journey{gap:27px}.times dd{font-size:29px}}
+@media(max-width:720px){.wrap{width:calc(100% - 40px)}.header{padding-block:20px;gap:16px}.brand{font-size:23px}.header nav{gap:19px;font-size:12px}.header .source-nav{display:none}.hero{grid-template-columns:1fr;gap:37px;padding-block:43px 48px}.eyebrow{font-size:10px;margin-bottom:19px}h1{font-size:47px;margin-bottom:23px;max-width:450px}.intro{font-size:16px;max-width:460px;margin-bottom:24px}.primary{font-size:15px;min-height:53px}.record{max-width:480px;width:100%;padding:24px}.boundary{display:block;padding-block:24px;font-size:13px}.boundary strong{display:block;margin-bottom:7px}.section{padding-block:49px}.section-head{display:block;margin-bottom:30px}.section-head>p{margin-top:20px}h2{font-size:35px}.journey{grid-template-columns:1fr;gap:25px}.journey li{position:relative;padding:20px 0 0 39px}.step-no{position:absolute;left:0;top:23px}.journey h3{font-size:18px}.journey p{margin-bottom:9px}.story-layout,.library{grid-template-columns:1fr;gap:30px}.voices>div{grid-template-columns:87px 1fr;gap:18px}.footer{display:block}.footer nav{margin-top:16px;gap:20px}}
+@media(max-width:360px){h1{font-size:42px}.header nav{gap:14px}.record{padding:20px}.times>div+div{padding-left:16px}.times dd{font-size:27px}.record-lines li{gap:8px}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
 </style>
 </head>
 <body>
-<main>
-<h1>Attest</h1>
-<p class="tag">Attest replaces "he said / she said" home-service disputes with a
-signed, self-verifying evidence record, built on the Ring Partner API — what the
-devices observed, what the worker and the household each reported, what a
-coordinator concluded.</p>
-<p class="tag"><strong>Records, not verdicts</strong> — the evidence gets a
-verdict; nobody's story does. Not attendance tracking, not EVV, not
-surveillance: the record proves it wasn't quietly rewritten — it never claims
-to know who was at the door.</p>
-
-<p>New York's comptroller found <a href="https://www.osc.ny.gov/press/releases/2024/11/dinapoli-state-paid-145-billion-medicaid-home-care-services-lacked-verification"><strong>$14.5B</strong> paid against
-<strong>82M</strong> personal-care visits with no matching record</a>; Ohio's auditor
-found <a href="https://ohioauditor.gov/Auditsearch/Reports/2024/117_Electronic_Visit_Verification_Report_FINAL.pdf"><strong>34%</strong> of electronic-visit-verification entries manually
-adjusted</a> — invisibly. Editable records are the problem; Attest makes them
-tamper-evident — and private home services (cleaners, caregivers, contractors)
-have no EVV mandate and no shared record at all. That's the gap — and Ring's own
-throw-away-the-key move makes independent attestation <em>more</em> valuable,
-not less: when the platform can't see the video either, the signed record is the
-shared truth everyone can hold.</p>
-
-<p style="border-left:3px solid #b45309;background:#fef9ee;padding:.55rem .9rem;border-radius:0 8px 8px 0">
-90 minutes scheduled. The camera observed 65.25. The worker disputes the record:
-<em>"I dispute this record — I arrived before the first observation
-shown."</em> The household first wrote: <em>"My mother was home all morning
-and says the doorbell never rang — nobody came to the door before ten."</em>
-— then the same account contradicted itself: <em>"I was home that afternoon; I heard the
-doorbell a little after six and saw someone at the door. I can't say how
-long she stayed."</em> Every version, verbatim and signed — including a
-garbled re-send — in one record nobody can quietly rewrite.
-<a href="story.html"><strong>Read the story the signed bytes tell</strong></a>
-(every quote in it deep-links to its verification) — or
-<a href="demo-visit.html">open the live record page</a>.</p>
-
-<p>"He said / she said" disputes stop being memory contests:
-every observation, statement, and conclusion is a separate signed receipt on a
-hash-chained ledger — disagreements stay on the record, flagged and verbatim,
-because the record never adjudicates. And the exported pack carries its own
-verifier: the same <code>verify.html</code> bundled inside the zip is the page
-this site hosts — it checks any pack you drop on it, ours or a stranger's
-email attachment. (<a href="#event-history">How is this different from Ring
-Event History?</a> — receipts keep verifying even if Attest disappears.)</p>
-
-<div class="nav60"><strong>Suggested 60 seconds:</strong>
-<a href="verify.html#sample-pack">green VERIFIED on the sample</a> →
-<a href="verify.html#sample-pack-tampered">red FAILED on the tampered twin</a> →
-<a href="verify.html#tamper-lab"><strong>forge it yourself</strong> in the
-tamper lab</a> → <a href="demo-receipts.html">the demo runtime's 447-receipt
-hash chain</a>. No install, no account — every stamp runs in your browser and
-nothing leaves it.</div>
-<p style="margin:.5rem 0"><a href="verify.html#sample-pack"
-style="display:inline-block;border:1px solid #bbf7d0;border-radius:8px;
-padding:.15rem .5rem;text-decoration:none"><img
-src="badge-verified.svg" alt="attest: verified" style="vertical-align:middle"
-title="Generated by `attest verify --badge` — the verdict lives on the page, not in this tooltip.">
-<span style="font-size:.85rem;color:#166534"> re-run live ↗</span></a></p>
-
-<div class="cards">
-<a class="card" href="verify.html#sample-pack">
-<b>Verify the sample pack<span class="badge ok">PASS</span></b>
-<small>Deep link — the verifier fetches <code>sample-pack.zip</code> and runs the
-moment this page opens. Drop any exported pack; nothing leaves your browser.</small>
-</a>
-<a class="card" href="verify.html#sample-pack-tampered">
-<b>Verify the tampered twin<span class="badge bad">FAIL</span></b>
-<small>Same pack, but someone inflated the contested visit's observed span — 65.25 to 135.25 minutes, past its 90-minute schedule.
-Deep link — lands on a red FAILED stamp; then "name what changed" points at
-the forged field itself.</small>
-</a>
-<a class="card" href="verify.html#tamper-lab">
-<b>Forge it yourself<span class="badge bad">FAIL</span></b>
-<small>The tamper lab: pick a signed field, type your own number, download the
-rebuilt zip — the signature refuses <em>your</em> forgery, not ours.</small>
-</a>
-<a class="card" href="tour.html">
-<b>Watch the two-minute tour</b>
-<small>Twelve beats, self-playing — every frame is the real product page, not a
-screenshot. The fastest possible entry if you'd rather look than click.</small>
-</a>
-<a class="card" href="verify.html#gauntlet">
-<b>Run the whole gauntlet<span class="badge ok">9/9</span></b>
-<small>One click, every artifact: clean pack, its older export sibling,
-the four attack twins, the real-API sweep, the signed fork, the
-Bitcoin anchor — each verdict scored
-against the shared oracle, live. The whole demo as a single stream.</small>
-</a>
-<a class="card" href="verify.html#compare-packs">
-<b>Compare two packs<span class="badge warn">DIFF</span></b>
-<small>"The copy the agency produced" vs "the copy I kept" — each verifies on
-its own merits, then their signed membership is diffed: the forged field named,
-and the two log heads proven to reconcile — or caught forking. Two verifying
-packs that aren't the same records is the whole point. Downloads the comparison
-as a self-contained page — the same reading <code>attest diff --html</code>
-writes.</small>
-</a>
-<a class="card" href="verify.html#compare-earlier">
-<b>Compare across time<span class="badge ok">GROWTH</span></b>
-<small>The pack a family kept vs the export an agency produced weeks later —
-the signed heads aren't adjacent, so the reconcile walks the newer pack's
-embedded checkpoint chain hop-by-hop. Append-only growth proven offline;
-<a href="sample-growth-report.html">read the report</a>.</small>
-</a>
-<a class="card" href="verify.html#live-sweep-receipt">
-<b>Verify the real-API sweep<span class="badge ok">PASS</span></b>
-<small>The signed <code>verify-live --sign</code> report from the actual
-<code>api.amazonvision.com</code> run — a lone receipt, auto-verified on load.</small>
-</a>
-<a class="card minor" href="verify.html#sample-pack">
-<b>Verify it on your phone</b>
-<img src="qr-verify.svg" width="112" height="112"
-alt="QR code linking to the verifier's one-click sample-pack check"
-style="display:block;margin:.2rem 0 .4rem">
-<small>Scan — the same one-click check runs entirely in the mobile browser.
-The pack bytes never leave the phone either.</small>
-</a>
-<a class="card minor" href="#aws">
-<b>AWS services<span class="badge ok">3 verified live</span></b>
-<small>Lambda re-verifies packs with our pinned code, KMS wraps the signing
-key, S3 holds checkpoints — Bedrock+Strands wired (5 total) with honest
-fallback.</small>
-</a>
-</div>
-
-<div class="term" role="region" aria-label="Terminal demo of the CLI flow">
-  <div class="bar" aria-hidden="true"><i></i><i></i><i></i></div>
-  <pre id="termbody"><span class="mut">$ attest demo &amp;&amp; attest attack-demo — loading the real transcript…</span></pre>
-  <noscript><pre>$ attest demo … $ attest attack-demo
-  22/23 attacks caught — 1 documented detection boundary — store unchanged
-  (enable JavaScript for the animated replay; the commands are real either way)</pre></noscript>
-</div>
-<p><small>Real output from this repo's demo runtime, lightly trimmed —
-including forging a signed resolution's reason code after the fact and
-swapping media bytes on disk post-signing. Reproduce it yourself:
-<code>attest demo</code>, then <code>attest attack-demo</code> on the same
-runtime.</small></p>
-<script>
-(function(){
-var lines=[
- ["cmd","$ attest demo --port 8000"],
- ["mut","  Day 2: camera drops offline mid-visit \u2014 departure unobserved, gap explained by lifecycle events"],
- ["mut","  Day 3: the Ring plan lapses mid-visit \u2014 observation stops being delivered"],
- ["mut","  Demo is live \u2014 simulated data only, no real Ring account involved \u2192 http://127.0.0.1:8000"],
- ["cmd","$ attest verify sample-pack.zip"],
- ["ok","  OK: case pack verified \u2014 9 visit record(s) intact (export signed: 9 record(s); 4 verifier tool(s) pinned; 175 receipt(s) proven inside the deployment transparency log at checkpoint size 305 \u2014 cosigned by 2 witness(es) (2 anchored in the witness's own published log) \u2026)"],
- ["mut","  Note: a valid pack proves record integrity under the pack's self-declared issuer key \u2014 signatures are not physical truth."],
- ["cmd","$ attest attack-demo"],
- ["ok","  CAUGHT  forge a visit row (state -> attended_verified)"],
- ["ok","  CAUGHT  erase a journal entry mid-chain (hide a past write)"],
- ["ok","  CAUGHT  re-sign a receipt with a different key (key swap)"],
- ["ok","  CAUGHT  forge a key_rotation pivot to an attacker key"],
- ["ok","  CAUGHT  graft a sequence-0 key_revocation ahead of the chain"],
- ["ok","  CAUGHT  graft a genuinely-signed receipt the deployment never logged"],
- ["ok","  CAUGHT  ship a forged always-green verifier inside a genuine pack"],
- ["ok","  CAUGHT  drop the last review statement off a packed bundle"],
- ["mut","  \u2026 fourteen more"],
- ["mut","  BOUNDARY \u2014 EXPECTED MISS  forge a row AND its covering journal entry"],
- ["mut","         (the journal is unkeyed; only an external anchor bounds it)"],
- ["ok","  22/23 attacks caught \u2014 1 documented detection boundary \u2014 store unchanged"]
-];
-var body=document.getElementById("termbody");
-function esc(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;");}
-function html(n){return lines.slice(0,n).map(function(l){
-  return '<span class="'+l[0]+'">'+esc(l[1])+'</span>';}).join("\n");}
-function play(){
-  var reduced=window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches;
-  if(reduced){body.innerHTML=html(lines.length)+'<span class="cur">&nbsp;</span>';return;}
-  var li=0;
-  function next(){
-    if(li>=lines.length)return;
-    if(lines[li][0]!=="cmd"){li++;body.innerHTML=html(li)+'<span class="cur">&nbsp;</span>';setTimeout(next,200);return;}
-    var txt=lines[li][1],i=0;
-    var span=document.createElement("span");span.className="cmd";
-    var cur=document.createElement("span");cur.className="cur";cur.innerHTML="&nbsp;";
-    body.innerHTML=html(li)+(li?"\n":"");
-    body.appendChild(span);body.appendChild(cur);
-    var iv=setInterval(function(){
-      span.textContent=txt.slice(0,++i);
-      if(i>=txt.length){clearInterval(iv);li++;body.innerHTML=html(li)+'<span class="cur">&nbsp;</span>';setTimeout(next,300);}
-    },22);
-  }
-  body.innerHTML='<span class="cur">&nbsp;</span>';
-  setTimeout(next,400);
-}
-var started=false;
-if("IntersectionObserver" in window){
-  new IntersectionObserver(function(e,o){if(e[0].isIntersecting&&!started){started=true;play();o.disconnect();}},{threshold:.4}).observe(body);
-}else{started=true;play();}
-})();
-</script>
-
-<h2>The trust chain — nobody in it is trusted</h2>
-<p style="font-size:1.15rem;font-weight:600;border-left:4px solid #2563eb;
-padding:.2rem 0 .2rem .9rem;margin:.6rem 0">"The record gets a verdict;
-nobody's story does."</p>
-<p>Every observation and statement becomes a signed receipt; receipts chain by
-hash into a publicly checkable Merkle tree; independent witnesses
-cosign the tree head — <strong>the shipped sample pack below carries two real
-counter-signatures from separate deployments</strong>, each anchored in the
-witness's own log. Export a pack and strangers verify it — in a browser,
-in bare Python, in an AWS Lambda — without asking us, Ring, or the issuer
-whether the bytes are still honest.</p>
-
-<div style="overflow-x:auto"><svg viewBox="0 0 760 250" width="100%" style="min-width:620px" role="img"
- aria-label="Trust chain: observations and statements become signed receipts on a hash-chained ledger, committed to a Merkle transparency log whose signed head is cosigned by an independent witness; the exported pack is checked by independent verifiers."
- style="margin:.5rem 0 1rem">
-  <defs><marker id="ar" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L8,4L0,8z" fill="#8a8a8e"/></marker></defs>
-  <!-- sources -->
-  <g font-family="system-ui,sans-serif" font-size="11.5" text-anchor="middle">
-    <rect x="18"  y="8" width="150" height="30" rx="7" fill="#eef4fb" stroke="#b9cfe8"/><text x="93" y="27" fill="#1e3a5f">Ring observations</text>
-    <rect x="183" y="8" width="150" height="30" rx="7" fill="#eef4fb" stroke="#b9cfe8"/><text x="258" y="27" fill="#1e3a5f">worker + household</text>
-    <rect x="348" y="8" width="150" height="30" rx="7" fill="#eef4fb" stroke="#b9cfe8"/><text x="423" y="27" fill="#1e3a5f">coordinator</text>
-    <rect x="513" y="8" width="150" height="30" rx="7" fill="#eef4fb" stroke="#b9cfe8"/><text x="588" y="27" fill="#1e3a5f">poll coverage</text>
-    <line x1="93"  y1="38" x2="93"  y2="62" stroke="#8a8a8e" marker-end="url(#ar)"/>
-    <line x1="258" y1="38" x2="258" y2="62" stroke="#8a8a8e" marker-end="url(#ar)"/>
-    <line x1="423" y1="38" x2="423" y2="62" stroke="#8a8a8e" marker-end="url(#ar)"/>
-    <line x1="588" y1="38" x2="588" y2="62" stroke="#8a8a8e" marker-end="url(#ar)"/>
-    <!-- ledger -->
-    <rect x="18" y="62" width="740" height="34" rx="7" fill="#1c1c1e"/>
-    <text x="388" y="83" fill="#fff">Ed25519-signed receipts — each links the previous by hash<title>an Ed25519 signature proves the bytes haven't changed since the issuer signed — it never proves what a camera saw</title></text>
-    <line x1="388" y1="96" x2="388" y2="118" stroke="#8a8a8e" marker-end="url(#ar)"/>
-    <!-- transparency log -->
-    <rect x="18" y="118" width="500" height="34" rx="7" fill="#2d5d3f"/>
-    <text x="268" y="139" fill="#fff">Merkle transparency log — receipts commit into a checkable tree<title>each receipt's hash becomes a leaf of a hash tree — anyone can prove a receipt was committed, and prove the tree only ever grew</title></text>
-    <rect x="528" y="118" width="230" height="34" rx="7" fill="#f9edd4" stroke="#d9a83c"/>
-    <text x="643" y="139" fill="#6b4d0f">signed tree head + witness cosign<title>the deployment periodically signs the tree root; an independent witness counter-signs only a head it watched extend — a secret fork would need both parties lying</title></text>
-    <line x1="518" y1="135" x2="528" y2="135" stroke="#8a8a8e" marker-end="url(#ar)"/>
-    <line x1="388" y1="152" x2="388" y2="174" stroke="#8a8a8e" marker-end="url(#ar)"/>
-    <!-- pack -->
-    <rect x="18" y="174" width="500" height="34" rx="7" fill="#eef4fb" stroke="#b9cfe8"/>
-    <text x="268" y="195" fill="#1e3a5f">export pack — receipts + proofs + checkpoint + its own verifier</text>
-    <rect x="528" y="174" width="230" height="34" rx="7" fill="#f0fdf4" stroke="#7cc79a"/>
-    <text x="643" y="195" fill="#146c2e">independent verifiers → verdict<title>the pack checks in bare Python, in this browser, or in an AWS Lambda — no Attest service in the loop</title></text>
-    <line x1="518" y1="191" x2="528" y2="191" stroke="#8a8a8e" marker-end="url(#ar)"/>
-    <text x="388" y="238" fill="#8a5a00" font-size="11">not present: anyone trusted. Every layer is checkable without us.</text>
-  </g>
-</svg></div>
-
-<h2 id="event-history">"Isn't this just Ring's event history?"</h2>
-<table style="border-collapse:collapse;font-size:.92rem;margin:.6rem 0">
-<tr><th scope="col" style="text-align:left;padding:.3rem .8rem .3rem 0;border-bottom:1px solid #d4d4d8"><span class="sr-only">aspect</span></th>
-    <th scope="col" style="text-align:left;padding:.3rem .8rem;border-bottom:1px solid #d4d4d8">Ring Event History</th>
-    <th scope="col" style="text-align:left;padding:.3rem .8rem;border-bottom:1px solid #d4d4d8">Attest</th></tr>
-<tr><th scope="row" style="text-align:left;font-weight:400;padding:.3rem .8rem .3rem 0;color:#6b6b70">Who vouches</th>
-    <td style="padding:.3rem .8rem">Ring says so</td>
-    <td style="padding:.3rem .8rem">the math — anyone re-checks, offline</td></tr>
-<tr><th scope="row" style="text-align:left;font-weight:400;padding:.3rem .8rem .3rem 0;color:#6b6b70">Voices</th>
-    <td style="padding:.3rem .8rem">device events only</td>
-    <td style="padding:.3rem .8rem">worker + household + coordinator, kept separate</td></tr>
-<tr><th scope="row" style="text-align:left;font-weight:400;padding:.3rem .8rem .3rem 0;color:#6b6b70">Edits</th>
-    <td style="padding:.3rem .8rem">platform-controlled</td>
-    <td style="padding:.3rem .8rem">append-only; tampering breaks the math</td></tr>
-<tr><th scope="row" style="text-align:left;font-weight:400;padding:.3rem .8rem .3rem 0;color:#6b6b70">After export</th>
-    <td style="padding:.3rem .8rem">a screenshot</td>
-    <td style="padding:.3rem .8rem">a self-verifying evidence pack</td></tr>
-</table>
-<p>Ring's event history is <em>Ring's word</em>. An Attest receipt verifies
-without Ring — and without us. Incumbent tracking puts a GPS ankle monitor on
-the worker's phone, spoofable and resented; Attest anchors observation to the
-household's own premises, with the household's own cameras. And the trend cuts
-our way: as Ring moves traffic toward throw-away-the-key encryption (TAKE —
-Throw Away the Key Encryption, the new default where Ring deletes the content
-keys within ~24h, so Ring can't produce the footage unilaterally afterward —
-re-provisioning needs the customer's device), the platform
-holds less and less producible content — which makes a
-<em>signed</em>, independently checkable evidence trail more valuable, not
-less. Encryption decides who can see the bytes; attestation decides whether
-anyone can quietly change them.</p>
-
-<h2>The product behind the proofs</h2>
-<p><code>attest demo</code> boots a local Ring emulator and plays an eight-day story
-(9 visits over 8 days) —
-a disputed visit, a camera blackout mid-window, a lapsed subscription, a coordinator
-live view — then serves the whole product on a printed localhost URL (<code>--port 8000</code> pins it).
-Or peek at a snapshot first, no install:
-<a href="demo-dashboard.html">the coordinator dashboard</a> ·
-<a href="demo-site.html">the site page</a> (day-by-day coverage strips,
-the live-view band) ·
-<a href="demo-visit.html">the contested visit</a> (source-divergence callout, signed
-dispute) · <a href="demo-household.html">the household
-view</a> (<a href="demo-household-es.html">en español</a>) ·
-<a href="demo-family.html">the scoped family link</a>
-(<a href="demo-family-es.html">en español</a>) — what the
-household actually gets texted ·
-<a href="demo-worker.html">the worker's review link</a>
-(<a href="demo-worker-es.html">en español</a>) — what the
-scoped <code>/review/</code> token sees ·
-<a href="demo-visit-brief.html">the printable brief</a> ·
-<a href="demo-integrity.html">the self-audit page</a> (revoked-key suspect
-windows, annotated — 9 receipts in scope) ·
-<a href="demo-integrity.json">its machine-readable JSON</a> — and the raw layer
-underneath all of it: <a href="demo-receipts.html">447 signed receipts</a>
-(the demo store's full log) —
-drawn as the literal hash chain (every edge a <code>prev_hash</code> link —
-all 447 verify), each one-click verifiable in the same browser page —
-or <a href="verify.html#demo-receipts">all 447 at once</a>
-(<a href="demo-receipts.json">raw JSON</a>). Twenty-eight of them are the deployment
-auditing <em>itself</em> — <code>attest verify --attest</code> signed the
-verdicts on the clean pack and the forged twin across regenerations, and
-<code>attest diff --attest</code> signed the reconciliations, into the same
-log — and each diff report names the receipt that signed its comparison —
-the audit trail of the audit is checkable too. New to the math?
-<a href="anatomy.html"><strong>Anatomy of a signed receipt</strong></a>
-decomposes one field-by-field — what the signature covers, what the
-<code>prev_hash</code> edge means, and what a valid signature can never
-prove.</p>
-<p>And because "trust our log" isn't a stopping point either: the demo
-deployment anchors its journal head to <strong>Bitcoin</strong> —
-<a href="verify.html#anchor-demo">the signed anchor, one-click verified</a>
-(journal head + transparency-log root pinned inside it) sits under a real
-<a href="anchor-demo.json.ots">OpenTimestamps submission</a> (<em>pending</em> —
-public calendars commit to a block on their own schedule;
-<code>attest stamp --upgrade</code> completes it). "This record existed before
-that block" — verifiable without trusting us.</p>
-<ul>
-  <li><code>/</code> — coordinator dashboard: KPI cards, coverage gaps labeled
-      <em>"no observation — not absence"</em>, and a per-worker check-in-timing
-      table (median + worst camera-vs-self-report lag — <em>"a pattern, not
-      proof"</em>)</li>
-  <li><a href="demo-site.html"><code>/sites/…</code></a> — the site page: per-day
-      coverage strips for the whole window, interruptions marked <em>why</em>
-      (offline/online lifecycle), the live-view session band, coverage
-      certificates — the clearest picture of what gets recorded</li>
-  <li><code>/integrity</code> — the deployment auditing itself: receipt chain, mutation
-      journal, transparency head, key custody, webhook posture — each section signed
-      (<code>/integrity.json</code> serves the same audit machine-readable)</li>
-  <li>any visit — timeline, source-by-source corroboration, signed anchors,
-      worker + household + coordinator voices kept separate, suspect-window warnings</li>
-  <li><code>?lang=es</code> — household, worker, and public surfaces localize
-      (Accept-Language respected too) — accessibility is a Ring priority
-      category; <a href="verificar.html"><strong>verificar.html</strong></a>
-      is the verification guide in Spanish — what the stamp means, what it
-      never proves, how to re-check without trusting this page</li>
-</ul>
-
-<h2>The attack gallery — pick one, watch it get caught</h2>
-<p>One doctored number is the easy case. Each attack below dies to a different
-check in the same verifier — the links land directly on the red FAILED
-stamp:</p>
-<ul>
-<li><strong><a href="verify.html#sample-pack-tampered">Doctored field</a></strong> —
-  the contested visit's observed span inflated 65.25 → 135.25 minutes:
-  the signed <code>payload_hash</code> no longer matches → <em>payload hash mismatch</em>.
-  <a href="sample-pack-tampered.zip" download>zip</a></li>
-<li><strong><a href="verify.html#sample-pack-attack-missing-record">Deleted record</a></strong> —
-  a visit bundle removed from the zip, but the
-  signed manifest still names its receipt → <em>missing or invalid bundle</em>.
-  <a href="sample-pack-attack-missing-record.zip" download>zip</a></li>
-<li><strong><a href="verify.html#sample-pack-attack-smuggled-file">Smuggled file</a></strong> —
-  <code>extra-evidence.json</code> injected after
-  signing → <em>present but not in the signed manifest</em>.
-  <a href="sample-pack-attack-smuggled-file.zip" download>zip</a></li>
-<li><strong><a href="verify.html#sample-pack-attack-forged-verifier">Forged verifier</a></strong> —
-  the embedded <code>verify_case.py</code> swapped
-  for an always-green stub → <em>bytes differ from the issuer-signed pin</em>.
-  The pack defends its own checker.
-  <a href="sample-pack-attack-forged-verifier.zip" download>zip</a></li>
-</ul>
-<p>Nineteen more attacks die <em>inside the store</em> — forged rows, erased
-journal entries, grafted keys, swapped media —
-<a href="attacks.html"><strong>the battery's live verdict table</strong></a>
-renders all 23 verdicts from a real <code>attest attack-demo</code> run
-against the demo store (22 caught, rolled back — the 23rd is a named
-detection boundary, marked EXPECTED MISS on purpose).</p>
-<figure style="margin:1rem 0;overflow-x:auto"><figcaption style="font-size:.85rem;color:#6b6b70"><strong>The seven gates.</strong> Every verification runs all of them in order — each attack dies at a different one. Labels deep-link to the check or its public corpus; <span style="color:#6b6b70">→</span> marks an annotation, not a failure. <a href="pipeline.svg">open the SVG alone</a>.</figcaption>
-<svg viewBox="0 0 672 512" xmlns="http://www.w3.org/2000/svg" style="min-width:560px" role="group" aria-label="The seven verification gates and which attacks die at each">
-<style>text{font-family:system-ui,sans-serif}.g{font-size:13px;font-weight:700;fill:#1c1c1e}.d{font-size:11.5px;fill:#6b6b70}.a{font-size:10.5px;fill:#b3261e;font-weight:600}.n{font-size:13px;font-weight:800;fill:#fff}</style>
-<text class="g" x="20" y="24" font-size="14">Every verify runs every gate — the attack determines which one kills it</text>
-<rect x="20" y="44" width="632" height="54" rx="9" fill="#fff" stroke="#d4d4d8"/>
-<circle cx="42" cy="71" r="13" fill="#2563eb"/><text class="n" x="42" y="75.5" text-anchor="middle">1</text>
-<text class="g" x="64" y="66">parse &amp; unpack</text>
-<text class="d" x="64" y="83">zip members parse · names bounded · no path tricks</text>
-<a href="vectors.html"><text class="a" x="640" y="58" text-anchor="end" text-decoration="underline">malformed-grammar vectors ✗</text></a>
-<line x1="346" y1="98" x2="346" y2="106" stroke="#94a3b8" stroke-width="1.5"/>
-<rect x="20" y="106" width="632" height="54" rx="9" fill="#fff" stroke="#d4d4d8"/>
-<circle cx="42" cy="133" r="13" fill="#2563eb"/><text class="n" x="42" y="137.5" text-anchor="middle">2</text>
-<text class="g" x="64" y="128">signed manifest</text>
-<text class="d" x="64" y="145">manifest.json verifies · every member committed to · nothing extra</text>
-<a href="verify.html#sample-pack-attack-smuggled-file"><text class="a" x="640" y="120" text-anchor="end" text-decoration="underline">smuggled file ✗</text></a>
-<a href="verify.html#sample-pack-attack-missing-record"><text class="a" x="640" y="133" text-anchor="end" text-decoration="underline">deleted record ✗</text></a>
-<line x1="346" y1="160" x2="346" y2="168" stroke="#94a3b8" stroke-width="1.5"/>
-<rect x="20" y="168" width="632" height="54" rx="9" fill="#fff" stroke="#d4d4d8"/>
-<circle cx="42" cy="195" r="13" fill="#2563eb"/><text class="n" x="42" y="199.5" text-anchor="middle">3</text>
-<text class="g" x="64" y="190">receipt math</text>
-<text class="d" x="64" y="207">Ed25519 over sha256(canonical payload) · envelope agrees with payload</text>
-<a href="verify.html#sample-pack-tampered"><text class="a" x="640" y="182" text-anchor="end" text-decoration="underline">doctored field ✗</text></a>
-<a href="vectors.html"><text class="a" x="640" y="195" text-anchor="end" text-decoration="underline">re-sign under another key ✗</text></a>
-<line x1="346" y1="222" x2="346" y2="230" stroke="#94a3b8" stroke-width="1.5"/>
-<rect x="20" y="230" width="632" height="54" rx="9" fill="#fff" stroke="#d4d4d8"/>
-<circle cx="42" cy="257" r="13" fill="#2563eb"/><text class="n" x="42" y="261.5" text-anchor="middle">4</text>
-<text class="g" x="64" y="252">hash chain</text>
-<text class="d" x="64" y="269">each prev_hash is the previous receipt's payload hash — order is proof</text>
-<a href="vectors.html"><text class="a" x="640" y="244" text-anchor="end" text-decoration="underline">reorder / insert / delete ✗</text></a>
-<line x1="346" y1="284" x2="346" y2="292" stroke="#94a3b8" stroke-width="1.5"/>
-<rect x="20" y="292" width="632" height="54" rx="9" fill="#fff" stroke="#d4d4d8"/>
-<circle cx="42" cy="319" r="13" fill="#2563eb"/><text class="n" x="42" y="323.5" text-anchor="middle">5</text>
-<text class="g" x="64" y="314">transparency log</text>
-<text class="d" x="64" y="331">RFC 6962 inclusion proofs under a cosigned tree head</text>
-<a href="vectors.html"><text class="a" x="640" y="306" text-anchor="end" text-decoration="underline">grafted receipt ✗</text></a>
-<a href="verify.html#vectors/fail-missing-log-proof"><text class="a" x="640" y="319" text-anchor="end" text-decoration="underline">missing proof ✗</text></a>
-<a href="verify.html#vectors/fail-oversize-tree-size"><text class="a" x="640" y="332" text-anchor="end" text-decoration="underline">2⁴⁰ tree_size ✗</text></a>
-<line x1="346" y1="346" x2="346" y2="354" stroke="#94a3b8" stroke-width="1.5"/>
-<rect x="20" y="354" width="632" height="54" rx="9" fill="#fff" stroke="#d4d4d8"/>
-<circle cx="42" cy="381" r="13" fill="#2563eb"/><text class="n" x="42" y="385.5" text-anchor="middle">6</text>
-<text class="g" x="64" y="376">key lifecycle</text>
-<text class="d" x="64" y="393">rotation pivots consented · revoked-key windows annotated, not erased</text>
-<a href="verify.html#vectors/fail-orphan-rotation"><text class="a" x="640" y="368" text-anchor="end" text-decoration="underline">orphan pivot ✗</text></a>
-<a href="demo-integrity.html"><text x="640" y="381" text-anchor="end" text-decoration="underline" font-size="10.5" fill="#6b6b70" font-weight="600">suspect window →</text></a>
-<line x1="346" y1="408" x2="346" y2="416" stroke="#94a3b8" stroke-width="1.5"/>
-<rect x="20" y="416" width="632" height="54" rx="9" fill="#fff" stroke="#d4d4d8"/>
-<circle cx="42" cy="443" r="13" fill="#2563eb"/><text class="n" x="42" y="447.5" text-anchor="middle">7</text>
-<text class="g" x="64" y="438">tooling &amp; media</text>
-<text class="d" x="64" y="455">verifier_manifest pins the checker's own bytes · media digests match or withheld</text>
-<a href="verify.html#sample-pack-attack-forged-verifier"><text class="a" x="640" y="430" text-anchor="end" text-decoration="underline">forged verifier ✗</text></a>
-<a href="verify.html#vectors/fail-missing-pinned-tool"><text class="a" x="640" y="443" text-anchor="end" text-decoration="underline">missing tool ✗</text></a>
-<text class="d" x="20" y="498">…then the verdict — <tspan fill="#146c2e" font-weight="700">VERIFIED</tspan> only when every gate passed. 22 of 23 demo-store attacks die at one of these gates — the twenty-third is the named detection boundary.</text>
-</svg>
-</figure>
-<p><small>Mint your own: <code>attest export --tamper-twin twin.zip --attack
-missing-record</code> — the exporter self-verifies the twin and refuses to ship
-it if the doctored copy still passes.</small></p>
-
-<p>Or skip the shipped attacks entirely: <a
-href="verify.html#tamper-lab"><strong>the tamper lab</strong></a> lets you
-commit the forgery yourself — pick a signed field in the sample pack, type
-your own number, and the verifier rebuilds a real zip around your edit,
-downloads it for you, and refuses it. Nothing is staged: the doctored pack
-is a real artifact, and the same signature catches <em>your</em> number,
-not just ours.</p>
-
-<p>And the harder corpus, public: <a href="vectors.html"><strong>44
-conformance vectors</strong></a> — the Wycheproof-style packs every verifier
-surface must judge identically. The interesting attacks aren't obvious tampers;
-they're grammar traps — <code>leaf_index: true</code>, <code>"5"</code> as a
-string, <code>5.5</code> fractional, space-padded hex, a tree_size of
-2<sup>40</sup> that breaks JS bitwise ops. Each row is a one-click
-<code>verify.html</code> deep link landing on the verdict the oracle predicts.
-Two verifiers silently diverging is exactly how a pack gets ruled valid in one
-room and invalid in another — this corpus exists so ours can't.</p>
-
-<h2>The fork nobody can hide</h2>
-<p>The transparency log's whole point: even <em>we</em> can't rewrite history. One
-issuer key, two histories — a witness pins one tree head, a monitor pins the
-other. Neither side can tell alone; together they prove the fork, and the catch
-itself is signed as a <code>monitor_observation</code> receipt committed inside a
-signed tree head. <a href="verify.html#divergence-checkpoint">Verify the caught
-fork in your browser</a> — the evidence doc's checkpoint signature, inclusion
-proofs, and embedded observation all check out. Reproduce it:
-<code>attest split-demo</code> fabricates the whole scenario in scratch space and
-emits the same evidence document.</p>
-
-<p style="font-size:.85rem;color:#6b6b70;margin:.4rem 0"><strong>Ring surfaces
-called at runtime:</strong> signed webhooks · Event History · media &amp;
-snapshots (regional redirect handled) · devices/capabilities ·
-app-integrations · subscriptions · WHEP live view. <strong>Track fit:</strong>
-business systems + caretaking + accessibility + access control + IoT home
-automation — caretaking carried through the household view and the
-<a href="demo-family.html">scoped-link QR the family scans at the door</a>;
-access control through the hashed, expiring, revocable grant links those
-scoped pages run on; IoT telemetry through the device-lifecycle coverage
-journal (why observation stopped, signed).</p>
-
-<h2 id="aws">Five AWS touchpoints — three verified live</h2>
-<ul>
-<li><b>Lambda</b> <span class="badge ok">verified live</span> — <code>attest-verify-pack</code>
-re-verifies a posted pack in AWS using the project's pinned verifier, never the
-pack's embedded script — data and code come from different parties:</li>
-</ul>
-<div class="term" role="region" aria-label="Lambda invoke transcript">
-  <div class="bar" aria-hidden="true"><i></i><i></i><i></i></div>
-  <pre style="min-height:0"><span class="p">$ aws lambda invoke --function-name attest-verify-pack \
-    --payload fileb://pack.json out.json</span>
-<span class="ok">  {"ok": true} — 2 visit records, 43 receipts proven inside the log</span>
-<span class="mut">  (transcript of the 2026-09-18 run — the current pack carries 9 visit records, 175 receipts proven at checkpoint size 305)</span>
-<span class="p">$ # doctor one byte in a signed payload, invoke again</span>
-<span class="bad">  {"ok": false} — payload hash mismatch (payload was altered)</span>
-<span class="mut">  the function catches exactly what the local verifiers catch</span></pre>
-</div>
-<ul>
-<li><b>KMS</b> <span class="badge ok">verified live</span> — the Ed25519 signing key
-is envelope-encrypted under a KMS data key (AES-256-GCM + encryption context); every
-unwrap is a CloudTrail-audited <code>Decrypt</code>, verified end-to-end on a real CMK.</li>
-<li><b>S3</b> <span class="badge ok">verified live</span> — <code>attest anchor
---publish</code> uploads signed checkpoints to a versioned, public-access-blocked
-bucket with the file sha256 stamped into object metadata — a checkpoint outside
-the deployment's control.</li>
-<li><b>Bedrock Converse</b> <span class="badge mut">labeled fallback</span> —
-<em>multimodal</em>: each camera snapshot's bytes are re-verified against their
-signed SHA-256 at summarization time and only digest-verified frames go to
-Nova Lite as image blocks — the prompt treats text-in-the-image as untrusted
-and forbids identity inference. The account's on-demand quota is zero, so every
-model call authenticates then throttles — and the record labels the
-deterministic fallback as its true source instead of pretending.</li>
-<li><b>Strands agent</b> <span class="badge mut">labeled fallback</span> — the weekly
-triage brief reads the ledger through real read-only tools; same quota wall, same
-honest labeling (<code>strands-agent</code> vs <code>deterministic</code> + reason).
-<details style="margin-top:.4rem"><summary style="cursor:pointer">what the agent actually does — tools + a real brief</summary>
-<pre class="mut" style="font-size:.82rem;white-space:pre-wrap;margin:.4rem 0">tools granted (read-only, bound to the store):
-  list_sites · site_records · record_detail · integrity
-$ attest triage
-  agent triage unavailable (LoginRefreshRequired); deterministic brief
-  6 record(s) need attention:
-  - vis_70e42116a4cf (closed): worker disputes this record
-  - vis_5b7958271e00 (closed): observation matched no schedule
-  …
-  [source: deterministic triage — agent unavailable: LoginRefreshRequired]</pre>
-</details></li>
-</ul>
-<p><small>The fallback path is itself verified against real AWS failure modes —
-expired <code>aws login</code> creds surface as <code>LoginRefreshRequired</code>,
-quota as <code>ThrottlingException</code> — which is the designed behavior, not a
-mock. An honest FAIL on the label beats a fake PASS.</small></p>
-
-<h2>Also entered: ring-sandbox — the Open Source mini-challenge</h2>
-<p>Ring ships no SDK and no simulator, so we built both:
-<a href="https://github.com/josepha-mayo/ring-sandbox">ring-sandbox</a> is a typed
-Python client + FastAPI emulator of the documented surface (webhooks, Event
-History, media, subscriptions, WHEP), a YAML scenario DSL, chaos injection, and a
-pytest plugin — MIT-licensed, on PyPI, CI-tested on Windows/Linux × Python
-3.11/3.14, shipping real Playground recordings as fixtures. Attest's whole demo
-runs on it — and every team after us gets Ring integration without a doorbell.</p>
-<p><code>pip install ring-sandbox</code> — then point the emulator at a scenario
-YAML and your client talks to a full Ring surface on localhost.
-<a href="https://pypi.org/project/ring-sandbox/"><img src="https://img.shields.io/pypi/v/ring-sandbox" alt="ring-sandbox on PyPI" style="vertical-align:middle"></a></p>
-<p><small>Developer-experience feedback for the bonus: 17 documented friction-log
-entries (task → expected vs actual → severity → workaround → suggestion) in
-<a href="https://github.com/josepha-mayo/attest/blob/main/FRICTIONLOG.md">FRICTIONLOG.md</a>.</small></p>
-
-<h2>What verification proves — and what it doesn't</h2>
-<div class="proves">
-<div class="yes"><h3>A green verdict means</h3>
-<ul>
-<li>Every signature is valid under the pinned issuer key.</li>
-<li>No record was added, dropped, or altered since signing.</li>
-<li>The receipts are committed in the signed transparency-log head the pack carries.</li>
-<li>Redacted media was withheld <em>by policy</em> — its signed digests still match the manifest.</li>
-</ul></div>
-<div class="no"><h3>It does not mean</h3>
-<ul>
-<li>That the worker physically attended — camera activity is an observation, not attendance.</li>
-<li>That absence of events means absence — silence isn't absence.</li>
-<li>That the issuer is honest — a signature proves integrity under a key, not truth.
-That's why witness cosigning and the live-log cross-check exist.</li>
-</ul></div>
-</div>
-
-<h2>What's inside the sample pack</h2>
-<p>The bundled <a href="sample-pack.zip"><code>sample-pack.zip</code></a> is a real export from the
-simulated <em>Alvarez residence</em> deployment — media withheld by redaction policy,
-signed SHA-256 digests preserved. It exercises the hard parts, not just the happy path:</p>
-<ul>
-<li>a <strong>signing-key rotation mid-history</strong>: the pack names both issuer keys —
-  the rotated-away key, its signed adoption, and the revocation receipt that retires it;</li>
-<li>receipts on <strong>both sides of the pivot</strong>, verified under different keys;</li>
-<li>a <strong>suspect-window annotation</strong> — the window signed while the old key was
-  compromised inherits doubt, explicitly;</li>
-<li><code>verifier_manifest.json</code> pinning the verifier tooling's own hashes —
-  the pack defends against a hostile verifier shipped inside itself;</li>
-<li><code>log_checkpoint.json</code>: a signed RFC 6962-style Merkle tree head with
-  inclusion proofs — the receipts are committed in a transparency log, and the verifier's
-  cross-check can prove the deployment still serves the same head to everyone;</li>
-<li>a <strong>witness cosignature</strong> anchored in the witness's own
-  independent published log — the attestation is publicly committed the moment
-  it's served;</li>
-<li>and outside the zip, one click over: <a href="verify.html#divergence-checkpoint"><code>divergence-checkpoint.json</code></a>
-  — signed monitor evidence of a caught log fork (the <code>split-demo</code>
-  scenario), verified by the same page.</li>
-</ul>
-<p>The embedded <code>index.html</code> is a record browser, not a file listing:
-worker, household, and coordinator voices rendered separately from the signed
-payload (conflicting household accounts are <em>flagged, never merged</em> —
-and the household's typo-correction appends as a new signed statement, so the
-chain keeps the garbled original <em>and</em> the fix),
-per-visit signed anchors and deep links, a plain-language tab that prints clean,
-viewer-local times with the signed UTC literal on hover, and a six-element
-Cures Act crosswalk — the federal EVV (electronic visit verification)
-statute mapped to evidence fields,
-labeled as corroboration, never as submission.</p>
-
-<p><strong>Pin the issuer out-of-band.</strong> The pack's self-declared key
-says who signed it; a judge who doesn't trust the site shouldn't take its word
-for the key either. Three ways to pin:</p>
-<ul>
-<li>Fetch the signed issuer document over an independent transport —
-  <a href=".well-known/attest-issuer.json"><code>attest-issuer.json</code></a>
-  (the same document a live deployment serves at its origin well-known) — then
-  <code>attest verify pack.zip --issuer-url attest-issuer.json</code>. The pack
-  and its trust anchor arrive by different surfaces; that's the point.</li>
-<li>One click: <a href="verify.html#sample-pack-pinned">verify the sample pack
-  pinned to the issuer document this site serves</a> — the browser fetches both
-  and checks the pin itself.</li>
-<li>And the checker defends itself: every pack's signed
-  <code>verifier_manifest.json</code> byte-pins <code>verify.html</code> —
-  <a href="verify.html#verify-self">the page hashes its own bytes</a> →
-  <strong>PINNED</strong>/<strong>PIN MISMATCH</strong>; and
-  <a href="verify.html#verify-site"><code>site-manifest.json</code> pins every
-  artifact this site ships</a> → <strong>SITE VERIFIED</strong>/<strong>SITE
-  TAMPER</strong>, drifted files named.</li>
-</ul>
-
-<h2>Proof it talks to the real API</h2>
-<p><a href="live-sweep-receipt.json"><code>live-sweep-receipt.json</code></a> is the signed
-<code>verify-live --sign</code> report from a real sweep against
-<code>api.amazonvision.com</code> (2026-09-30): five probes pass — users/me, devices, device
-status, Event History, and media download through the regional redirect — and three
-fail honestly on documented Playground limits (app-integrations 403, subscriptions 422,
-WHEP 500: no streaming hardware on the account). Every probe signed, so the
-claim verifies offline the same way a pack does.
-<a href="verify.html#live-sweep-receipt">Verify it in your browser, one click →</a></p>
-
-<!-- Deployment housekeeping: if Pages serves a stale copy, bump this file or
-commit with --allow-empty. This page and verify.html must ship together —
-the pack's embedded verifier is byte-identical to verify.html. -->
-
-<p class="foot">Attest is a hackathon prototype — evidence-preserving records for visit
-disputes, not an attendance-verification or EVV product. Source:
-<a href="https://github.com/josepha-mayo/attest">github.com/josepha-mayo/attest</a> ·
-emulator: <a href="https://github.com/josepha-mayo/ring-sandbox">ring-sandbox</a> ·
-judging: <a href="https://github.com/josepha-mayo/attest/blob/main/JUDGE.md">JUDGE.md</a>
-(the ten-minute path + scoring map) ·
-<a href="https://github.com/josepha-mayo/attest/blob/main/THREATMODEL.md">threat model</a> ·
-<a href="https://github.com/josepha-mayo/attest/blob/main/extras/ci/verify-pack.yml">the CI evidence gate</a>
-(every pack must pass ∧ its doctored twin must fail) ·
-<a href="https://github.com/josepha-mayo/attest/blob/main/extras/appstore/LISTING.md">a drafted Ring Appstore listing</a>.</p>
+<a class="skip" href="#main">Skip to content</a>
+<header class="header wrap">
+<a class="brand" href="index.html" aria-label="Attest home"><svg viewBox="0 0 28 32" aria-hidden="true"><path d="M14 2 25 6v10c0 6-4.5 10.5-11 14C7.5 26.5 3 22 3 16V6Z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="m8.5 15.5 4 4 7-8" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>Attest</a>
+<nav aria-label="Main navigation"><a href="#how-it-works">The demo</a><a href="#evidence">Explore</a><a class="source-nav" href="https://github.com/josepha-mayo/attest">Source ↗</a></nav>
+</header>
+<main id="main">
+<section class="hero wrap" aria-labelledby="hero-title">
+<div><p class="eyebrow">Home services · Shared evidence</p>
+<h1 id="hero-title"><span>A clearer record.</span><span>A fairer conversation.</span></h1>
+<p class="intro">When a visit is disputed, everyone deserves a record they can check. Attest keeps device observations, people's accounts, and review decisions together — with changes anyone can detect.</p>
+<a class="primary" href="verify.html#sample-pack">Try the evidence demo <span class="arrow" aria-hidden="true">↗</span></a>
+<p class="reassurance">About 60 seconds · No account · Verified in your browser</p></div>
+<aside class="record" aria-labelledby="sample-title">
+<div class="record-top"><p class="eyebrow">Inside a visit record</p><span class="sample-label">Simulated example</span></div>
+<h2 id="sample-title">One visit. Different accounts.</h2>
+<p class="record-sub">Each source stays separate. Every version stays visible.</p>
+<dl class="times"><div><dt>Scheduled visit</dt><dd>90 <span>minutes</span></dd></div><div><dt>Device observation span</dt><dd>65.25 <span>minutes</span></dd></div></dl>
+<ul class="record-lines"><li><strong>Device</strong><span>Recorded observations</span></li><li><strong>Worker</strong><span>Disputes the record</span></li><li><strong>Household</strong><span>Statements preserved</span></li></ul>
+<a class="record-link" href="story.html">Read the story behind this record <span aria-hidden="true">↗</span></a>
+</aside></section>
+<div class="boundary wrap" id="claim-boundary"><strong>Records, not verdicts.</strong><p>A valid signature shows that signed evidence is unchanged. It does not prove who was at the door, how long they stayed, or whose account is true.</p></div>
+<section class="section wrap" id="how-it-works" aria-labelledby="demo-title">
+<div class="section-head"><div><p class="eyebrow">See it for yourself</p><h2 id="demo-title">Trust the check.<br>Then challenge it.</h2></div><p>Same visit. Two copies. One altered field.<br>The verifier shows you the difference; you decide what the record means.</p></div>
+<ol class="journey">
+<li><span class="step-no" aria-hidden="true">01</span><h3>Start with the original <span class="outcome">VERIFIED</span></h3><p>Open the signed sample pack. Check the signatures, file hashes, and receipt history yourself.</p><a href="verify.html#sample-pack">Verify the original <span aria-hidden="true">↗</span></a></li>
+<li><span class="step-no" aria-hidden="true">02</span><h3>Meet the altered copy <span class="outcome fail">FAILED</span></h3><p>The same pack, with an observation changed. The original signature cannot cover the new claim.</p><a href="verify.html#sample-pack-tampered">Test the tampered copy <span aria-hidden="true">↗</span></a></li>
+<li><span class="step-no" aria-hidden="true">03</span><h3>See exactly what changed</h3><p>Compare the signed field with the altered value. Or make your own edit in the tamper lab.</p><a href="verify.html#compare-packs">Compare the two copies <span aria-hidden="true">↗</span></a><br><a href="verify.html#tamper-lab">Try your own edit <span aria-hidden="true">↗</span></a></li>
+</ol></section>
+<section class="story" aria-labelledby="voices-title"><div class="section wrap story-layout">
+<div><p class="eyebrow">Built for a difficult conversation</p><h2 id="voices-title">Room for every<br>side of the story.</h2><p>An observation is not an attendance verdict. Attest keeps the worker's response and the household's account alongside device evidence, without silently replacing earlier statements.</p><a href="demo-visit.html">Explore the record snapshot <span aria-hidden="true">↗</span></a><p class="disclosure">Demo pages are static snapshots of simulated data. Forms and live actions are disabled.</p></div>
+<dl class="voices"><div><dt>Device</dt><dd>Records an observation window from Ring events. It does not identify a person.</dd></div><div><dt>Worker</dt><dd>Can report what happened and dispute the record. Their statement remains their own.</dd></div><div><dt>Household</dt><dd>Has its own account. Contradictions and later versions stay visible.</dd></div><div><dt>Reviewer</dt><dd>Records a separate conclusion. A signature protects that conclusion from edits; it does not make it true.</dd></div></dl>
+</div></section>
+<section class="section wrap library" id="evidence" aria-labelledby="evidence-title">
+<div><p class="eyebrow">Go a little deeper</p><h2 id="evidence-title">The evidence<br>is yours to inspect.</h2><p class="library-intro">Start with the demo, then follow the thread that matters to you. The exported pack includes an offline verifier, so its checks can outlive this website.</p><a href="sample-pack.zip" download>Download the sample pack ↓</a></div>
+<div class="evidence-list">
+<details><summary>Explore the product and people's views</summary><div class="detail-body"><p>Read-only snapshots show how one record is presented to different people.</p><ul><li><a href="demo-dashboard.html">Coordinator dashboard</a> · <a href="demo-site.html">Site history</a> · <a href="demo-visit.html">Visit record</a></li><li><a href="demo-household.html">Household view</a> · <a href="demo-household-es.html" lang="es">Español</a></li><li><a href="demo-family.html">Scoped family view</a> · <a href="demo-family-es.html" lang="es">Español</a></li><li><a href="demo-worker.html">Worker response view</a> · <a href="demo-worker-es.html" lang="es">Español</a></li><li><a href="demo-visit-brief.html">Printable visit brief</a> · <a href="demo-integrity.html">Integrity review</a></li></ul></div></details>
+<details><summary>Challenge the evidence, field by field</summary><div class="detail-body"><p>The clean and tampered samples are only the beginning. Check missing records, altered files, log growth, and an attacker-supplied verifier.</p><ul><li><a href="verify.html#gauntlet">Run the browser gauntlet</a> · <a href="attacks.html">Attack gallery</a> · <a href="vectors.html">Conformance vectors</a></li><li><a href="verify.html#compare-earlier">Compare an earlier pack</a> · <a href="sample-growth-report.html">Growth report</a></li><li><a href="verify.html#sample-pack-attack-missing-record">Missing record</a> · <a href="verify.html#sample-pack-attack-smuggled-file">Smuggled file</a> · <a href="verify.html#sample-pack-attack-forged-verifier">Forged verifier</a></li><li><a href="verify.html#sample-pack-pinned">Pin the expected issuer</a> · <a href="verify.html#anchor-demo">Independent anchor</a> · <a href="verify.html#divergence-checkpoint">Fork detection</a></li></ul></div></details>
+<details><summary>Inspect the receipts and verification boundary</summary><div class="detail-body"><p>Every observation, statement, and review decision is a separate signed receipt. Verification checks the bytes and their inclusion in the supplied log.</p><ul><li><a href="demo-receipts.html">447 signed receipts</a> · <a href="verify.html#demo-receipts">Verify all receipt signatures</a></li><li><a href="anatomy.html">Anatomy of a receipt</a> · <a href="pipeline.svg">Evidence pipeline</a></li><li><a href="verify.html#verify-self">Check the bundled verifier</a> · <a href="verify.html#verify-site">Check the site's signed manifest</a></li><li><a href="https://github.com/josepha-mayo/attest/blob/main/THREATMODEL.md">Threat model and limits</a></li></ul><p><strong>The limit:</strong> valid signatures do not establish physical presence, service delivery, a person's identity, or the truth of a statement. This is a prototype, not an EVV system.</p></div></details>
+<details id="event-history"><summary>How is this different from Ring Event History?</summary><div class="detail-body"><p>Ring provides device events. Attest connects observations to a scheduled visit, keeps people's statements separate, and exports a signed record with its own verifier.</p><p>The recipient can check the exported evidence without trusting Attest's server to describe it accurately. That proves integrity within the stated trust boundary, not that an observation happened in the physical world.</p><p><a href="verify.html#live-sweep-receipt">Verify the recorded Ring API sweep receipt</a> · <a href="live-sweep-receipt.json">Inspect the receipt JSON</a></p></div></details>
+<details id="aws"><summary>Ring, AWS, and what this demo actually runs</summary><div class="detail-body"><p><strong>This page and verifier run in your browser.</strong> Product pages are static snapshots; they do not call a live Attest backend. The sample visit is simulated with <a href="https://github.com/josepha-mayo/ring-sandbox">ring-sandbox</a>, an independent client and emulator of the documented Ring API.</p><p>The project's recorded AWS checks cover Lambda pack verification, KMS envelope encryption, and S3 checkpoint publishing. They are prior integration evidence, not services invoked by this page.</p><p>Bedrock Converse and the Strands agent have labeled deterministic fallbacks because the demo account's on-demand model quota is zero. A fallback is not a successful model inference.</p><p><a href="https://github.com/josepha-mayo/attest/blob/main/JUDGE.md">Integration evidence and reproduction guide</a> · <a href="https://github.com/josepha-mayo/attest/blob/main/FRICTIONLOG.md">Developer friction log</a></p></div></details>
+</div></section>
 </main>
+<footer class="footer wrap"><p>Attest · Records, not verdicts.</p><nav aria-label="Footer"><a href="https://github.com/josepha-mayo/attest">Source code</a><a href="https://github.com/josepha-mayo/attest/blob/main/JUDGE.md">Judge guide</a><a href="verificar.html" lang="es">Verificar en español</a></nav></footer>
 </body>
 </html>

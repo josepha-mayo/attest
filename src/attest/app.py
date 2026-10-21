@@ -2199,7 +2199,7 @@ def create_app(
         except ValueError:
             ctx = await _worker_ctx(token, lang)
             if ctx is None:
-                return _dead_link(request, "review")
+                return _dead_link(request, "review", status_code=410)
             resp = render(
                 request,
                 "worker_review.html",
@@ -2564,11 +2564,14 @@ def _check_pack_bundle(
             return False, f"{name}: media member not named by the signed evidence"
     present = {sha for _, sha in media_members}
     matched = len(digests & present)
-    covered = matched + len(withheld & digests)
+    # A digest present in both sets still covers only itself. Summing the
+    # counts lets a redundant redaction marker conceal another missing file.
+    missing = digests - (present | withheld)
+    held = len(withheld - present)
     detail = f"{why}; {matched}/{len(digests)} signed media digests found in pack" + (
-        f", {len(withheld & digests)} withheld by redaction" if withheld else ""
+        f", {held} withheld by redaction" if held else ""
     )
-    return (covered == len(digests), detail)
+    return (not missing, detail)
 
 
 def _verify_tools_pin(z, trusted: set, scope: str) -> tuple[bool, str]:

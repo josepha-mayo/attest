@@ -103,7 +103,7 @@ SIBLING = [
     ('href="/verify"', 'href="verify.html#demo-receipts"'),
     ('href="/integrity.json"', 'href="demo-integrity.json"'),
     ('href="/integrity"', 'href="demo-integrity.html"'),
-    ('href="/about"', 'href="index.html"'),
+    ('href="/about"', 'href="index.html#claim-boundary"'),
     ('href="/"', 'href="demo-dashboard.html"'),
 ]
 
@@ -138,9 +138,25 @@ def _dead_anchor(match: re.Match[str], inert: str) -> str:
 SNAP_CSS = (
     "<style>"
     "a[data-dead]{opacity:.55;cursor:not-allowed;text-decoration:line-through}"
+    ".card a.btn:not(.secondary){color:#0b0d11}"
     "[disabled]{cursor:not-allowed}"
     ".snap-note{font-size:12px;color:var(--muted,#5c6b7a);margin:4px 0 8px}"
     "@media print{.snap-banner{display:none}}"
+    "</style>"
+)
+
+# Whole navigation labels wrap as individual targets, not broken inline text.
+# Only coordinator snapshots have this navigation; scoped pages keep their own layout.
+SNAP_NAV_CSS = (
+    "<style>"
+    ".table-wrap{position:relative}main .card:has(>table){overflow-x:auto;position:relative}"
+    "main code{overflow-wrap:anywhere}"
+    "main .row>div{min-width:0;max-width:100%}"
+    "header{flex-wrap:wrap}"
+    "header nav{display:flex;flex:1 1 640px;flex-wrap:wrap;gap:4px 16px;min-width:0}"
+    "header nav a{display:inline-flex;align-items:center;min-height:44px;margin:0;white-space:nowrap}"
+    "header nav a[aria-current=page]{color:var(--fg);text-decoration:underline;text-underline-offset:4px}"
+    "@media(max-width:720px){header{gap:8px}header nav{flex-basis:100%;gap:2px 16px}}"
     "</style>"
 )
 
@@ -174,6 +190,13 @@ def snapshot(
     # The -es pages get Spanish disclosure chrome — an English "why is this
     # dead" tooltip on a Spanish page fails WCAG's language-of-parts rule.
     es = page.endswith("-es.html")
+    # A saved audit is historical evidence, not a live status check.
+    if page == "demo-integrity.html":
+        html = html.replace(
+            'offline, rendered live (<a href="/integrity.json">raw JSON</a>',
+            'offline, captured when this snapshot was generated '
+            '(<a href="/integrity.json">snapshot JSON</a>',
+        )
     inert = INERT_ES if es else INERT
     form_note = FORM_NOTE_ES if es else FORM_NOTE
     print_tip = PRINT_TIP_ES if es else PRINT_TIP
@@ -188,6 +211,13 @@ def snapshot(
     html = re.sub(r'src="/family/[^"/]+/media/([^"/]+)"', r'src="demo-media/\1"', html)
     html = re.sub(r'src="/media/([^"/]+)"', r'src="demo-media/\1"', html)
     html = re.sub(r"demo-media/([A-Za-z_]+)\.[0-9a-f]{8,}\.png", r"demo-media/\1.png", html)
+    # Static images have no runtime integrity gate: onerror only reports a
+    # load failure, not a cryptographic verdict. Keep the expected digest.
+    if page == "demo-visit.html":
+        html = html.replace(
+            "Media bytes failed the signed integrity check — withheld, not shown.",
+            "Snapshot unavailable; this image could not be loaded.",
+        )
     # Language toggle between the page's own two snapshots — each scoped
     # surface pairs with its sibling, not the coordinator's household pages.
     lang_pair = {
@@ -202,6 +232,11 @@ def snapshot(
     html = html.replace('href="?lang=en"', f'href="{en_pair}"')
     for old, new in SIBLING:
         html = html.replace(old, new)
+    # The static receipt-history link runs in the browser, not on a server.
+    html = html.replace(
+        'href="verify.html#demo-receipts">Verify (server)</a>',
+        'href="verify.html#demo-receipts">Verify receipts</a>',
+    )
     # Per-receipt downloads resolve to the shipped corpus, not a dead route.
     html = re.sub(r'href="/receipts/([A-Za-z0-9_]+)\.json"', r'href="demo-receipts/\1.json"', html)
     # onclick row navigation to the contested visit lands on the snapshot;
@@ -345,7 +380,10 @@ def snapshot(
     html = html[: m.end()] + (BANNER_ES if es else BANNER) + html[m.end() :]
     h = re.search(r"</head\s*>", html)
     assert h, "snapshot page has no </head> tag — dead-link styling was not injected"
-    html = html[: h.start()] + SNAP_CSS + html[h.start() :]
+    nav_css = SNAP_NAV_CSS if page in {
+        "demo-dashboard.html", "demo-integrity.html", "demo-site.html", "demo-visit.html"
+    } else ""
+    html = html[: h.start()] + SNAP_CSS + nav_css + html[h.start() :]
     return html
 
 

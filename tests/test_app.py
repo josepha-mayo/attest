@@ -28,6 +28,9 @@ def _client(app):
 
     class T(httpx.BaseTransport):
         def handle_request(self, request):
+            # Multipart uploads are streaming bodies until explicitly read.
+            content = request.read()
+
             async def go():
                 async with httpx.AsyncClient(
                     transport=httpx.ASGITransport(app=app), base_url="http://t"
@@ -36,7 +39,7 @@ def _client(app):
                         request.method,
                         request.url,
                         headers=request.headers,
-                        content=request.content,
+                        content=content,
                     )
                     await r.aread()
                     return httpx.Response(
@@ -2019,3 +2022,131 @@ def test_witness_endpoint_over_http(api, household, t0):
         assert anon.get("/api/witness/heads").status_code == 200
     finally:
         anon.close()
+
+
+@pytest.mark.parametrize("pack_scope", ["visit", "site"])
+def test_reviewed_record_export_upload_journey(api, store, household, t0, ring_world, pack_scope):
+    """In-process API integration, not browser/live-provider verification.
+
+    Produce a new record through signed intake, append three distinct voices,
+    download the real export, and upload those exact bytes for verification.
+    Editing evidence or silently truncating a review chain must fail closed.
+    All state and keys belong to the existing isolated synthetic fixtures.
+    """
+    import io
+    import json
+    import zipfile
+
+    site, _, cam, _ = household
+    ring_world.record_event(cam.id, "motion_detected", at_ms=int(t0.timestamp() * 1000))
+    assert _post_hook(api, cam.id, "motion_detected", t0, "human").status_code == 202
+    vid = store.active_visit(site.id).id
+    claim = api.post(f"/api/visits/{vid}/checkin-link").json()["path"]
+    assert api.post(claim, auth=None).status_code == 200
+    assert api.post(claim, auth=None).status_code == 410
+    assert api.post(f"/api/visits/{vid}/close").status_code == 200
+    original = api.get(f"/visits/{vid}/bundle.json").json()["original"]
+
+    worker_words = "I stayed inside; the camera cannot measure my work."
+    household_words = "I saw someone, but cannot identify them."
+    coordinator_words = "The accounts remain inconclusive, not verified attendance."
+    review = api.post(f"/api/visits/{vid}/review-link").json()["path"]
+    worker_response = api.post(review, auth=None, data={"decision": "dispute", "statement": worker_words})
+    assert worker_response.status_code == 200
+    assert api.post(review, auth=None, data={"decision": "confirm"}).status_code == 410
+    family = api.post(f"/api/visits/{vid}/family-link").json()["path"]
+    household_response = api.post(
+        family + "/statement",
+        auth=None,
+        data={"perception": "saw_someone", "statement": household_words},
+    )
+    assert household_response.status_code == 303
+    assert api.get(household_response.headers["location"], auth=None).status_code == 200
+    resolution = api.post(
+        f"/api/visits/{vid}/resolve",
+        json={"outcome": "inconclusive", "statement": coordinator_words},
+    )
+    assert resolution.status_code == 200
+
+    bundle_response = api.get(f"/visits/{vid}/bundle.json")
+    assert bundle_response.status_code == 200
+    bundle = bundle_response.json()
+    assert bundle["original"] == original
+    payloads = [entry["receipt"]["payload"] for entry in bundle["reviews"]]
+    assert [p["actor"]["role"] for p in payloads] == ["worker", "household", "coordinator"]
+    assert [p["review"]["statement"] for p in payloads] == [worker_words, household_words, coordinator_words]
+    assert all(p["independently_verified_attendance"] is False for p in payloads)
+
+    path = f"/visits/{vid}/pack.zip" if pack_scope == "visit" else f"/sites/{site.id}/pack.zip"
+    assert api.get(path, auth=None).status_code == 401
+    exported = api.get(path)
+    assert exported.status_code == 200, exported.text
+    assert exported.headers["content-type"].startswith("application/zip")
+    member = "bundle.json" if pack_scope == "visit" else f"visits/{vid}/bundle.json"
+    with zipfile.ZipFile(io.BytesIO(exported.content)) as archive:
+        assert json.loads(archive.read(member)) == bundle
+        members = {name: archive.read(name) for name in archive.namelist()}
+
+    def upload(data):
+        response = api.post("/verify", files={"file": ("record.zip", data, "application/zip")})
+        assert response.status_code == 200
+        return response.text
+
+    clean = upload(exported.content)
+    assert '<span class="ok">' in clean
+    assert '<span class="bad">' not in clean
+    receipts_before = api.get("/receipts.json").json()
+
+    # Change signed evidence while leaving signatures, pins and all other bytes alone.
+    edited = json.loads(members[member])
+    edited["original"]["payload"]["observed_span_minutes"] = 9999
+    # A valid signed prefix is not a complete review chain for this export.
+    truncated = json.loads(members[member])
+    truncated["reviews"].pop()
+    for tampered, expected_reason in [(edited, "hash mismatch"), (truncated, "review")]:
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+            for name, data in members.items():
+                archive.writestr(name, json.dumps(tampered).encode() if name == member else data)
+        rejected = upload(output.getvalue())
+        assert '<span class="bad">' in rejected
+        assert expected_reason in rejected.lower()
+        assert '<span class="ok">' not in rejected
+
+    # Verification is read-only, and rejected uploads cannot poison later checks.
+    assert upload(exported.content) == clean
+    assert api.get("/receipts.json").json() == receipts_before
+    assert api.get(f"/visits/{vid}/bundle.json").json() == bundle
+    assert store.verify_journal()["intact"]
+
+
+@pytest.mark.parametrize("data", [{}, {"decision": "confirm", "statement": "A valid form"}])
+@pytest.mark.parametrize("state", ["unknown", "used", "expired"])
+def test_dead_review_link_is_gone_on_post_regardless_of_form(
+    api, store, household, t0, monkeypatch, data, state
+):
+    """POST uses the same dead-link status for malformed and valid forms;
+    GET remains not-found, without revealing whether a grant ever existed.
+    """
+    path = "/review/unknown-synthetic-token"
+    if state != "unknown":
+        from attest import reviews
+
+        assert _post_hook(api, household[2].id, "button_press", t0).status_code == 202
+        vid = store.active_visit(household[0].id).id
+        assert api.post(f"/api/visits/{vid}/close").status_code == 200
+        path = api.post(f"/api/visits/{vid}/review-link").json()["path"]
+        if state == "used":
+            assert (
+                api.post(
+                    path, auth=None, data={"decision": "confirm", "statement": "First account"}
+                ).status_code
+                == 200
+            )
+        else:
+            after_expiry = reviews.utcnow() + timedelta(hours=25)
+            monkeypatch.setattr(reviews, "utcnow", lambda: after_expiry)
+    assert api.get(path, auth=None).status_code == 404
+    response = api.post(path, auth=None, data=data)
+    assert response.status_code == 410
+    assert '<html lang="en">' in response.text and "review link" in response.text
