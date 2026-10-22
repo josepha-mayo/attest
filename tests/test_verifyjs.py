@@ -1766,11 +1766,21 @@ def test_js_issuer_doc_pins_across_rotation(engine, store, household, schedule, 
     (tmp_path / "verify.js").write_text(_script(), encoding="utf-8")
     (tmp_path / "doc.json").write_text(json.dumps(doc), encoding="utf-8")
     (tmp_path / "b.json").write_text(bundle_text, encoding="utf-8")
+    # The bundle signs a snapshot digest, so a complete input must carry its
+    # bytes too. An issuer pin does not excuse missing signed evidence.
+    media_files = [
+        {"name": f"media/{p.relative_to(engine.media.root).as_posix()}", "hex": p.read_bytes().hex()}
+        for p in sorted(engine.media.root.rglob("*"))
+        if p.is_file()
+    ]
+    (tmp_path / "media.json").write_text(json.dumps(media_files), encoding="utf-8")
     driver = """
 const fs=require('fs');
 let src=fs.readFileSync(process.argv[2],'utf8').replace(/const dz=[\\s\\S]*$/,'');
 const doc=fs.readFileSync(process.argv[3],'utf8');
 const b=fs.readFileSync(process.argv[4],'utf8');
+const media=JSON.parse(fs.readFileSync(process.argv[5],'utf8')).map(m=>({
+  name:m.name,arrayBuffer:()=>Promise.resolve(Uint8Array.from(Buffer.from(m.hex,'hex')).buffer)}));
 eval(src + `
 const fileOf=t=>({name:'bundle.json',text:()=>Promise.resolve(t),
   arrayBuffer:()=>Promise.resolve(new TextEncoder().encode(t).buffer)});
@@ -1778,17 +1788,19 @@ const arm=dt=>{const dn=parseKeep(dt),d=toJS(dn)||{},kn=get(dn,'key_receipts');
   return{issuer_key:d.issuer_key,nodes:kn&&kn.t==='arr'?kn.v:[]};};
 (async()=>{
   issuerDoc=arm(doc);
-  const html=await verifyFiles([fileOf(b)]);
+  const html=await verifyFiles([fileOf(b),...media]);
   console.log('pinned:',/VERIFIED/.test(html),/pinned to the issuer document/.test(html));
+  const missing=await verifyFiles([fileOf(b)]);
+  console.log('missingmedia:',/FAILED/.test(missing),missing.includes('missing (not listed as withheld)'));
   issuerDoc={issuer_key:'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',nodes:[]};
-  const bad=await verifyFiles([fileOf(b)]);
+  const bad=await verifyFiles([fileOf(b),...media]);
   console.log('wrongdoc:',/FAILED/.test(bad),/no signed link/.test(bad));
   issuerDoc=null;
 })();`);
 """
     (tmp_path / "drive.js").write_text(driver, encoding="utf-8")
     proc = subprocess.run(
-        [NODE, "drive.js", "verify.js", "doc.json", "b.json"],
+        [NODE, "drive.js", "verify.js", "doc.json", "b.json", "media.json"],
         cwd=tmp_path,
         capture_output=True,
         text=True,
@@ -1796,6 +1808,7 @@ const arm=dt=>{const dn=parseKeep(dt),d=toJS(dn)||{},kn=get(dn,'key_receipts');
     )
     assert proc.returncode == 0, proc.stderr
     assert "pinned: true true" in proc.stdout, proc.stdout
+    assert "missingmedia: true true" in proc.stdout, proc.stdout
     assert "wrongdoc: true true" in proc.stdout, proc.stdout
 
 

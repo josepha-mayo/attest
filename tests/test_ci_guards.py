@@ -74,4 +74,4 @@ def test_private_key_guard_still_scans_the_workflow(guarded_repo: Path):
     subprocess.run(["git", "add", str(WORKFLOW)], cwd=guarded_repo, check=True)
     result = run_private_key_guard(guarded_repo)
     assert result.returncode != 0
-    assert str(WORKFLOW) in result.stderr
+    assert WORKFLOW.as_posix() in result.stderr
