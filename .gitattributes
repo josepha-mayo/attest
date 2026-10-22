@@ -19,3 +19,6 @@ docs/**/*.png -text
 docs/**/*.ots -text
 # Conformance vectors are fixed bytes — CRLF conversion would corrupt them.
 tests/vectors/** -text
+
+# Preserve the exact legacy story bytes pinned by the current signed manifest.
+docs/story.html -text -eol
